@@ -183,7 +183,7 @@ def test_last_successful_that_is_not_exhausted_clears_the_fact() -> None:
 
 
 def test_the_host_valid_nested_last_successful_is_judged_with_its_own_fetch_time() -> None:
-    """Paseo (0.12.0 to 0.15.4) carries ``{fetchedAt, report}``; a flattened report is not the host's shape."""
+    """Paseo (0.12.0 to 0.16.2) carries ``{fetchedAt, report}``; a flattened report is not the host's shape."""
 
     fetched = NOW - timedelta(minutes=5)
     carried = {

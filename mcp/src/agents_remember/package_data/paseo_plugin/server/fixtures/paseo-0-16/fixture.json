@@ -1,0 +1,119 @@
+{
+  "schema": "ar-paseo-fixture/v1",
+  "description": "Copied source of the installed @getpaseo distribution: the files the ACP discovery reads.",
+  "source": {
+    "distribution": "@getpaseo",
+    "version": "0.16.2",
+    "installedAt": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/10_the-products-host-is-paseo-0-16-2-ar/scratch/worker/a54c5416-4b48-4d0c-9e3f-b29aba46d431/host-src/node_modules/@getpaseo",
+    "canonicalPrefix": "/home/firefox/.local/share/agents-remember/paseo/prefix/node_modules/@getpaseo",
+    "versions": {
+      "@getpaseo/server": "0.16.2",
+      "@getpaseo/protocol": "0.16.2",
+      "@getpaseo/plugin": "0.16.2",
+      "@getpaseo/cli": "0.16.2"
+    }
+  },
+  "renewal": "node server/fixtures/renew-paseo-fixture.mjs [<installed @getpaseo dir>]; verify with --check",
+  "owner": "host-contract route (package_data/paseo_host/contract.json)",
+  "test": "server/acp_providers.test.ts",
+  "consumers": [
+    "server/acp_providers.test.ts"
+  ],
+  "files": [
+    {
+      "path": "@getpaseo/server/package.json",
+      "sha256": "6c8bc0ccebb9f3405c7c0aedd3e710ef641fdfd88c7618085614f8073625a927",
+      "bytes": 9544
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/plugins/plugin-process.js",
+      "sha256": "42fdc609d3081911f67ed43f68fbd9b4800dc893edc2519a94cde0f26463c70e",
+      "bytes": 24169
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/create-agent-mode.js",
+      "sha256": "77194b19969babb7541fba0d515f7c54dcac7e290e139dd776b1ca29fb4af42b",
+      "bytes": 2607
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/provider-registry.js",
+      "sha256": "ad59128fb361a3471a7ced0c432703cb4e3c2f1c78dc2f7881ffda1d64d03e8d",
+      "bytes": 29987
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/providers/acp-agent.js",
+      "sha256": "f600f3dc3fdb0db729aa3883a1ebac293a1f492a32a0eecce36cee9422e22c95",
+      "bytes": 133516
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/providers/generic-acp-agent.js",
+      "sha256": "cb45a9626e844011293d1dc36055f6f1c746e0e5e67d69d8a89803ac1b410452",
+      "bytes": 5363
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/providers/copilot-acp-agent.js",
+      "sha256": "fce2218b8ad3d323802079a6422c6e7d1423037c6429ac7e2287e2302110705d",
+      "bytes": 7569
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/providers/cursor-acp-agent.js",
+      "sha256": "243efdd1cd2b6b4884ca4b3d601e6736917ca407943e5286719be2759febfb1e",
+      "bytes": 3089
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/providers/kimi-acp-agent.js",
+      "sha256": "a518a217b00ddcc23e3e06114ab1a79df75d582472634f260cfeb869b63d2752",
+      "bytes": 2672
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/providers/kiro-acp-agent.js",
+      "sha256": "2c74b54b8024c01b2025cef792986aac98d66c3c97bffca1d85b05c8225e3d55",
+      "bytes": 3578
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/providers/trae-acp-agent.js",
+      "sha256": "8caaf5155b399741f0b259bbf9897a6f3823cfc2b9373cf3bcf718439b6ebfa4",
+      "bytes": 696
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/providers/codex-app-server-agent.js",
+      "sha256": "3c78e6837cb81d79f2bc80b0463e5db8d4d40bfea3ad2605b79374cbc44c2c3e",
+      "bytes": 267560
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/providers/mock-load-test-agent.js",
+      "sha256": "fda67a8292dfdcda3ebc17df5af8945fdb0f5e04f8fa47cb30a30219b93199ea",
+      "bytes": 52956
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/providers/mock-slow-provider.js",
+      "sha256": "9f84bdb93c43bd476e5a3c7a416a84a9ded73193d49d3ed6c06a62f5529114b0",
+      "bytes": 1483
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/providers/claude/agent.js",
+      "sha256": "db8fae662a6d61a4641e6def1a69917c5d017557874979aaa5b56909dfd1228b",
+      "bytes": 245224
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/providers/opencode/runtime-client.js",
+      "sha256": "1186a4c9a47bfff8e0538b02966cf285e53a929c8615af3ef2334368814ee29f",
+      "bytes": 7453
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/providers/pi/agent.js",
+      "sha256": "4f0b8fdf231e7f1a572ac626229f45526c7fc9613c2b4ff2b39f5ece32dcb813",
+      "bytes": 91633
+    },
+    {
+      "path": "@getpaseo/server/dist/server/server/agent/providers/omp/agent.js",
+      "sha256": "6fc975136e520aca74191537b043faaf177b2fd94e40bb8aa7e83a957b6c92e8",
+      "bytes": 87108
+    },
+    {
+      "path": "@getpaseo/protocol/dist/provider-manifest.js",
+      "sha256": "0af826339f7ab4a587ac893e47160f5a273d850e74586f8999c66c0561ee3921",
+      "bytes": 8357
+    }
+  ]
+}

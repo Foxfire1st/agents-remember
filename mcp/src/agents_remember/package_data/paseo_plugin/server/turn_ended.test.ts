@@ -552,7 +552,7 @@ test("contributed parent-wake handlers keep permission and turn gates and send w
   const note = async (kind: string, id: string, parentAgentId: string | null = null) => {
     const handler = handlers.get(kind);
     assert.ok(handler, kind);
-    handler({ agent: { id, parentAgentId }, timeline: [] }, context);
+    handler({ agent: { id, parentAgentId } }, context);
     await new Promise<void>(resolve => setImmediate(resolve));
   };
   try {
@@ -1619,7 +1619,7 @@ test("contributed handlers keep a completed silent end quiet until the seat can 
     ]);
     const deliver = (kind: string, id: string, parent: string | null, extra: Record<string, unknown> = {}) => {
       handlers.get(kind)?.(
-        { agent: { id, parentAgentId: parent }, timeline: [], outcome: { kind: "completed" }, turnId: "t1", ...extra },
+        { agent: { id, parentAgentId: parent }, outcome: { kind: "completed" }, turnId: "t1", ...extra },
         context,
       );
     };
@@ -2165,7 +2165,7 @@ test("L181-C1-F06: the host read stops at its page cap instead of walking the fl
   try {
     registerParentWakeEvents(server, { home });
     handlers.get("agent.turn.after")?.(
-      { agent: { id: "seat", parentAgentId: "parent" }, timeline: [], outcome: { kind: "completed" }, turnId: null },
+      { agent: { id: "seat", parentAgentId: "parent" }, outcome: { kind: "completed" }, turnId: null },
       context,
     );
     await new Promise<void>((resolve) => setImmediate(resolve));

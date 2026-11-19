@@ -220,7 +220,9 @@ class LateRestartFake(FakePaseo):
 def test_install_defers_replacement_without_a_write(tmp_path):
     settings = runtime_settings(tmp_path)
     fake = FakePaseo(settings)
-    fake.install(settings.install_prefix, "0.10.2")
+    # The running host is at the version before the pin: any other version takes this path
+    # (0.15.4 here, because that is the one the product ran before this change).
+    fake.install(settings.install_prefix, "0.15.4")
     fake.write_settings(daemon_settings(settings))
     fake.start()
     before = file_states(settings.home, settings.install_prefix)

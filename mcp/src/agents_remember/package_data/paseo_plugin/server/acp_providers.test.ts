@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,10 +14,11 @@ import {
 } from "./acp_providers.ts";
 
 /**
- * The synthetic Paseo 0.15.4 tree the ACP discovery reads: a stand-in for the shapes of the
- * installed `@getpaseo` packages, written for these tests, not copied source.
+ * The Paseo 0.16.2 tree the ACP discovery reads: a copy of the installed `@getpaseo`
+ * distribution's files, written only by `fixtures/renew-paseo-fixture.mjs` and recorded in
+ * `fixtures/paseo-0-16/fixture.json` (source, SHA-256, size).
  */
-const FIXTURE = fileURLToPath(new URL("./fixtures/paseo-0-15", import.meta.url));
+const FIXTURE = fileURLToPath(new URL("./fixtures/paseo-0-16", import.meta.url));
 /** The plugin's own process path: `argv1` inside the fixture installation. */
 const FIXTURE_ARGV1 = join(
   FIXTURE,
@@ -70,6 +72,30 @@ function acpProviders(home: string, argv1: string | null = FIXTURE_ARGV1, unread
 function published(home: string): AcpProvidersDocument {
   return JSON.parse(readFileSync(join(home, "agents-remember", ACP_PROVIDERS_FILE), "utf8")) as AcpProvidersDocument;
 }
+
+test("the fixture is the recorded copy of the pinned distribution, not a hand-written stand-in", () => {
+  const record = JSON.parse(readFileSync(join(FIXTURE, "fixture.json"), "utf8")) as {
+    schema: string;
+    source: { version: string };
+    files: { path: string; sha256: string; bytes: number }[];
+  };
+  assert.equal(record.schema, "ar-paseo-fixture/v1");
+  assert.equal(record.source.version, PINNED, "the fixture records the version this build pins");
+  assert.ok(record.files.length > 0);
+  for (const file of record.files) {
+    const path = join(FIXTURE, file.path);
+    assert.ok(existsSync(path), `${file.path} is in the tree the record describes`);
+    const body = readFileSync(path);
+    assert.equal(body.length, file.bytes, `${file.path} is the recorded size`);
+    assert.equal(createHash("sha256").update(body).digest("hex"), file.sha256, `${file.path} is unchanged from its source`);
+  }
+  const tree = readdirSync(FIXTURE, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name).slice(FIXTURE.length + 1).replaceAll("\\", "/"))
+    .filter((path) => path !== "README.md" && path !== "fixture.json")
+    .sort();
+  assert.deepEqual(tree, record.files.map(({ path }) => path).sort(), "nothing in the tree is outside the record");
+});
 
 test("a configured provider that extends acp is ACP, and so is a built-in built on ACPAgentClient", () => {
   // MIK-R216 rule 1: `hermes` is the host's own entry and extends `acp`; `copilot`
@@ -181,7 +207,7 @@ test("the written file holds the schema, the Paseo version, the files read and e
 
     assert.deepEqual(document, JSON.parse(JSON.stringify(acp.document)));
     assert.equal(document.schema, ACP_PROVIDERS_SCHEMA);
-    assert.equal(document.paseoVersion, "0.15.4");
+    assert.equal(document.paseoVersion, "0.16.2");
     assert.equal(document.readAt, READ_AT.toISOString());
     const agent = join(FIXTURE, "@getpaseo", "server", "dist", "server", "server", "agent");
     for (const file of [

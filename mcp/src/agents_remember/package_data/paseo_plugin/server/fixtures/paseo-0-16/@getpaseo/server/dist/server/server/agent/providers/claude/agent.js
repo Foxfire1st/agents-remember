@@ -1,0 +1,5877 @@
+import { setImmediate } from "node:timers/promises";
+import { ClaudeRuntimeSafety } from "./runtime-safety.js";
+import { applyProviderOptionsPatch } from "../../option-controls.js";
+import { assertChangesAreLive, validateProviderOptions } from "../../provider-options.js";
+import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import { promises } from "node:fs";
+import path from "node:path";
+import { LRUCache } from "lru-cache";
+import stripAnsi from "strip-ansi";
+import { createImportDescriptorScheduler } from "./import-descriptor-scheduler.js";
+import { bypassApprovesAsk } from "./bypass-approval.js";
+import { mapClaudeCanceledToolCall, mapClaudeCompletedToolCall, mapClaudeFailedToolCall, mapClaudeRunningToolCall, } from "./tool-call-mapper.js";
+import { mapTaskNotificationSystemRecordToToolCall, mapTaskNotificationUserContentToToolCall, readTaskNotificationToolUseIdFromHistoryRecord, readTaskNotificationFromHistoryRecord, } from "./task-notification-tool-call.js";
+import { isClaudeInterruptPlaceholderText } from "./interrupt-placeholder.js";
+import { getClaudeContextWindowMaxTokens, getClaudeModelsWithSettings, normalizeClaudeRuntimeModelId, resolveConfiguredClaudeModel, } from "./models.js";
+import { CLAUDE_DISABLED_THINKING_OPTION_ID, CLAUDE_ULTRACODE_THINKING_OPTION_ID, parseClaudeCodeVersion, resolveClaudeDisabledThinkingForModel, } from "./model-manifest.js";
+import { expandTilde } from "../../../../utils/path.js";
+import { parsePartialJsonObject } from "./partial-json.js";
+import { withClaudeReplayHistory } from "./transcript-history.js";
+import { ClaudeSidechainTracker } from "./sidechain-tracker.js";
+import { readClaudeSubagentHandback } from "./subagent-handback.js";
+import { ClaudeTaskState } from "./task-state.js";
+import { ClaudeTaskProtocolSource, } from "./subagents/live-source.js";
+import { observeReplaySubagents } from "./subagents/replay-source.js";
+import { mapTaskStatus } from "./subagents/task-status.js";
+import { foldSubagentObservations } from "./subagents/observation.js";
+import { observeReplayWorkflows } from "./subagents/workflow-replay-source.js";
+import { limitAgentTimelineItemContent } from "../../agent-timeline-content.js";
+import { readClaudeWorkflowResultFile } from "./subagents/workflow-output.js";
+import { buildClaudeControls, claudeModelSupportsFastMode } from "./feature-definitions.js";
+import { buildBinaryDiagnosticRows, buildCommandResolutionDiagnosticRows, formatProviderDiagnostic, formatProviderDiagnosticError, } from "../diagnostic-utils.js";
+import { appendOrReplaceGrowingAssistantMessage, runProviderTurn } from "../provider-runner.js";
+import { applyClaudeToolPolicy, ClaudeProviderOptionsSchema, } from "./options.js";
+import { renderPromptAttachmentAsText } from "../../prompt-attachments.js";
+import { discoverClaudeModels, killExitingClaudeModelDiscoveries } from "./model-discovery.js";
+import { claudeQuery } from "./query.js";
+import { findSteeredMessageParent, realClaudeRewindSdk, revertClaudeConversation, revertClaudeFiles, } from "./rewind.js";
+import { normalizeProviderReplayTimestamp } from "../../provider-history-timestamps.js";
+import { claudeConfigDir, claudeProjectDirSync, claudeTranscriptPath } from "./project-dir.js";
+import { THINKING_APPLIES_NEXT_TURN_NOTICE } from "../../provider-notices.js";
+import { isProviderImageMarkdown, materializeProviderImage, renderProviderImageOutputAsAssistantMarkdown, } from "../provider-image-output.js";
+import { getAgentStreamEventTurnId, } from "../../agent-sdk-types.js";
+import { importSessionFromPersistence } from "../../provider-session-import.js";
+import { runProviderRefreshActivity } from "../../provider-refresh-deadline.js";
+import { checkProviderLaunchAvailable, createProviderEnv, createProviderEnvSpec, resolveProviderLaunch, } from "../../provider-launch-config.js";
+import { withTimeout } from "../../../../utils/promise-timeout.js";
+import { terminateWithTreeKill } from "../../../../utils/tree-kill.js";
+import { execCommand } from "../../../../utils/spawn.js";
+import { composeSystemPromptParts } from "../../system-prompt.js";
+const fsPromises = promises;
+const CLAUDE_SETTING_SOURCES = [
+    "user",
+    "project",
+    "local",
+];
+function readNonEmptyString(value) {
+    return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+export function normalizeClaudeAskUserQuestionRequestInput(toolName, input) {
+    if (toolName !== "AskUserQuestion" || !Array.isArray(input.questions)) {
+        return input;
+    }
+    // Claude Code's AskUserQuestion schema says "Other" is host-provided, not a
+    // model-supplied option. Paseo's shared question UI uses allowOther for that
+    // freeform answer path.
+    return {
+        ...input,
+        questions: input.questions.map((item) => {
+            if (!isMetadata(item)) {
+                return item;
+            }
+            return {
+                ...item,
+                allowOther: true,
+            };
+        }),
+    };
+}
+function stripClaudeAskUserQuestionUiMetadata(input) {
+    if (!Array.isArray(input.questions)) {
+        return input;
+    }
+    return {
+        ...input,
+        questions: input.questions.map((item) => {
+            if (!isMetadata(item) || !("allowOther" in item)) {
+                return item;
+            }
+            const itemForClaude = { ...item };
+            delete itemForClaude.allowOther;
+            return itemForClaude;
+        }),
+    };
+}
+/**
+ * The answers this response will actually deliver, keyed by full question text,
+ * or null when there is no question list and answers map to work from.
+ *
+ * Shared by the normalizer and by the check that rejects an undeliverable
+ * answer, so the two can never disagree about what "deliverable" means.
+ */
+function resolveClaudeAskUserQuestionAnswers(updatedInput, fallbackInput) {
+    const fallback = isMetadata(fallbackInput) ? fallbackInput : {};
+    const base = isMetadata(updatedInput) ? updatedInput : {};
+    const questions = (Array.isArray(base.questions) ? base.questions : null) ??
+        (Array.isArray(fallback.questions) ? fallback.questions : null);
+    const answers = isMetadata(base.answers) ? base.answers : null;
+    if (!questions || !answers) {
+        return null;
+    }
+    const normalizedAnswers = {};
+    for (const item of questions) {
+        const question = isMetadata(item) ? item : null;
+        if (!question) {
+            continue;
+        }
+        const questionText = readNonEmptyString(question.question);
+        if (!questionText) {
+            continue;
+        }
+        const header = readNonEmptyString(question.header);
+        const answer = readNonEmptyString(answers[questionText]) ??
+            (header ? readNonEmptyString(answers[header]) : null);
+        if (answer) {
+            normalizedAnswers[questionText] = answer;
+        }
+    }
+    return normalizedAnswers;
+}
+export function normalizeClaudeAskUserQuestionUpdatedInput(updatedInput, fallbackInput) {
+    const fallback = isMetadata(fallbackInput) ? fallbackInput : {};
+    const base = isMetadata(updatedInput) ? updatedInput : {};
+    // Paseo's shared question UI serializes answers by question header, but Claude's
+    // AskUserQuestion tool expects answer keys to match the full question text. Merge
+    // the original request payload back in so provider callbacks that only return
+    // `{ answers }` still satisfy Claude's full tool input schema.
+    const merged = stripClaudeAskUserQuestionUiMetadata({ ...fallback, ...base });
+    const normalizedAnswers = resolveClaudeAskUserQuestionAnswers(updatedInput, fallbackInput);
+    if (!normalizedAnswers || Object.keys(normalizedAnswers).length === 0) {
+        return merged;
+    }
+    return {
+        ...merged,
+        answers: normalizedAnswers,
+    };
+}
+class ClaudeQuestionAnswerRequiredError extends Error {
+    constructor(requestId) {
+        super(`Permission request '${requestId}' requires updatedInput.answers keyed by a ` +
+            `question's full text or header, with a non-empty string value. ` +
+            `The request is still pending; retry with that shape.`);
+        this.requestId = requestId;
+        this.code = "question_answer_required";
+        this.name = "ClaudeQuestionAnswerRequiredError";
+    }
+}
+function assertClaudeQuestionAnswerDeliverable(request, response) {
+    if (request.kind !== "question" || response.behavior !== "allow") {
+        return;
+    }
+    const answers = resolveClaudeAskUserQuestionAnswers(response.updatedInput, request.input);
+    if (!answers || Object.keys(answers).length === 0) {
+        throw new ClaudeQuestionAnswerRequiredError(request.id);
+    }
+}
+function isObjectRecord(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function toObjectRecord(value) {
+    return isObjectRecord(value) ? value : undefined;
+}
+function isUnknownArray(value) {
+    return Array.isArray(value);
+}
+function isImageMimeType(value) {
+    return (value === "image/jpeg" ||
+        value === "image/png" ||
+        value === "image/gif" ||
+        value === "image/webp");
+}
+const CLAUDE_CAPABILITIES = {
+    supportsStreaming: true,
+    supportsSessionPersistence: true,
+    supportsSessionListing: true,
+    supportsDynamicModes: true,
+    supportsMcpServers: true,
+    supportsReasoningStream: true,
+    supportsToolInvocations: true,
+    supportsRewindConversation: true,
+    supportsRewindFiles: true,
+    supportsRewindBoth: true,
+};
+const DEFAULT_MODES = [
+    {
+        id: "plan",
+        label: "Plan Mode",
+        description: "Analyze the codebase without executing tools or edits",
+    },
+    {
+        id: "default",
+        label: "Always Ask",
+        description: "Prompts for permission the first time a tool is used",
+    },
+    {
+        id: "acceptEdits",
+        label: "Accept File Edits",
+        description: "Automatically approves edit-focused tools without prompting",
+    },
+    {
+        id: "auto",
+        label: "Auto mode",
+        description: "Uses a model classifier to review permission prompts automatically",
+    },
+    {
+        id: "bypassPermissions",
+        label: "Bypass",
+        description: "Skip all permission prompts (use with caution)",
+    },
+];
+const VALID_CLAUDE_MODES = new Set(DEFAULT_MODES.map((mode) => mode.id));
+const REWIND_COMMAND_NAME = "rewind";
+const REWIND_COMMAND = {
+    name: REWIND_COMMAND_NAME,
+    description: "Rewind tracked files to a previous user message",
+    argumentHint: "[user_message_uuid]",
+};
+const CLAUDE_ROOT_ONLY_COMMANDS = new Set([
+    "clear",
+    "compact",
+    "context",
+    "debug",
+    "extra-usage",
+    "heapdump",
+    "init",
+    "loop",
+    "schedule",
+    "usage",
+]);
+const INTERRUPT_TOOL_USE_PLACEHOLDER = "[Request interrupted by user for tool use]";
+const NO_RESPONSE_REQUESTED_PLACEHOLDER = "No response requested.";
+const STEER_SUPERSEDED_PERMISSION_MESSAGE = "The user answered with a message instead of approving. Their message follows.";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Claude Code reserves `__`-prefixed commands for its own server-launched sessions
+// (for example `/__remote-workflow`); a user cannot run them from a Paseo agent.
+function isClaudeInternalSlashCommand(commandName) {
+    return commandName.startsWith("__");
+}
+function classifyClaudeSlashCommand(commandName) {
+    // Claude exposes commands and skills as one flat SDK list, without structured source
+    // metadata. Keep obvious root-only/session controls out of inline autocomplete and
+    // treat the rest as skills; the worst failure mode is an inert inline suggestion.
+    return CLAUDE_ROOT_ONLY_COMMANDS.has(commandName) ? "command" : "skill";
+}
+function resolvePathEnvKey() {
+    if (process.env["Path"] !== undefined)
+        return "Path";
+    if (process.env["PATH"] !== undefined)
+        return "PATH";
+    return null;
+}
+function errorToMessageString(error) {
+    if (typeof error === "string")
+        return error;
+    if (error instanceof Error)
+        return error.message;
+    return "";
+}
+/**
+ * Claude opens every main-session turn with system/init and closes it with exactly one result:
+ * a prompt, a wake-up after background work, a slash command, an API error. Background subagents
+ * never emit either on the main stream.
+ */
+function isClaudeTurnInit(message) {
+    return message.type === "system" && message.subtype === "init";
+}
+function firstStringField(input, primaryKey, secondaryKey) {
+    const primary = input[primaryKey];
+    if (typeof primary === "string")
+        return primary;
+    const secondary = input[secondaryKey];
+    if (typeof secondary === "string")
+        return secondary;
+    return undefined;
+}
+function extractSessionIdRaw(msg) {
+    if (typeof msg.session_id === "string")
+        return msg.session_id;
+    if (typeof msg.sessionId === "string")
+        return msg.sessionId;
+    if (typeof msg.session?.id === "string")
+        return msg.session.id;
+    return "";
+}
+function isClaudeThinkingEffort(value) {
+    return (value === "low" ||
+        value === "medium" ||
+        value === "high" ||
+        value === "xhigh" ||
+        value === "max");
+}
+function isClaudeThinkingOption(value) {
+    return (value === CLAUDE_DISABLED_THINKING_OPTION_ID ||
+        value === CLAUDE_ULTRACODE_THINKING_OPTION_ID ||
+        isClaudeThinkingEffort(value));
+}
+function assertClaudeThinkingOptionSupported(modelId, thinkingOptionId) {
+    if (thinkingOptionId !== CLAUDE_DISABLED_THINKING_OPTION_ID ||
+        resolveClaudeDisabledThinkingForModel(modelId).supported) {
+        return;
+    }
+    throw new Error(`Thinking option '${thinkingOptionId}' is not available for model '${modelId ?? "default"}'`);
+}
+const MAX_RECENT_STDERR_CHARS = 4000;
+const STDERR_FLUSH_WAIT_MS = 150;
+const STDERR_FLUSH_POLL_INTERVAL_MS = 10;
+function summarizeClaudeOptionsForLog(options) {
+    const systemPromptRaw = options.systemPrompt;
+    const systemPromptSummary = (() => {
+        if (!systemPromptRaw) {
+            return { mode: "none", preset: null };
+        }
+        if (typeof systemPromptRaw === "string") {
+            return { mode: "string", preset: null };
+        }
+        const prompt = toObjectRecord(systemPromptRaw);
+        const promptType = typeof prompt?.type === "string" ? prompt.type : "custom";
+        return {
+            mode: promptType === "preset" ? "preset" : "custom",
+            preset: typeof prompt?.preset === "string" && prompt.preset.length > 0 ? prompt.preset : null,
+        };
+    })();
+    const mcpServerNames = options.mcpServers ? Object.keys(options.mcpServers).sort() : [];
+    return {
+        cwd: typeof options.cwd === "string" ? options.cwd : null,
+        permissionMode: typeof options.permissionMode === "string" ? options.permissionMode : null,
+        model: typeof options.model === "string" ? options.model : null,
+        includePartialMessages: options.includePartialMessages === true,
+        settingSources: Array.isArray(options.settingSources) ? options.settingSources : [],
+        enableFileCheckpointing: options.enableFileCheckpointing === true,
+        hasResume: typeof options.resume === "string" && options.resume.length > 0,
+        maxThinkingTokens: typeof options.maxThinkingTokens === "number" ? options.maxThinkingTokens : null,
+        hasEnv: !!options.env,
+        envKeyCount: Object.keys(options.env ?? {}).length,
+        hasMcpServers: mcpServerNames.length > 0,
+        mcpServerNames,
+        systemPromptMode: systemPromptSummary.mode,
+        systemPromptPreset: systemPromptSummary.preset,
+        hasCanUseTool: typeof options.canUseTool === "function",
+        hasSpawnOverride: typeof options.spawnClaudeCodeProcess === "function",
+        hasStderrHandler: typeof options.stderr === "function",
+        pathToClaudeCodeExecutable: typeof options.pathToClaudeCodeExecutable === "string"
+            ? options.pathToClaudeCodeExecutable
+            : null,
+        persistSession: typeof options.persistSession === "boolean" ? options.persistSession : null,
+        fastMode: readClaudeFastModeSetting(options.settings),
+    };
+}
+function readClaudeFastModeSetting(settings) {
+    if (!settings || typeof settings === "string") {
+        return null;
+    }
+    return typeof settings.fastMode === "boolean" ? settings.fastMode : null;
+}
+// Mirrors `claude --settings`: the value is inline JSON or a path to a JSON file,
+// resolved against the session cwd like the Claude process would.
+async function readClaudeCliSettings(value, cwd) {
+    const trimmed = value.trim();
+    const isInlineJson = trimmed.startsWith("{");
+    const source = isInlineJson ? "--settings JSON" : path.resolve(cwd, expandTilde(trimmed));
+    let raw = trimmed;
+    if (!isInlineJson) {
+        try {
+            raw = await fsPromises.readFile(source, "utf8");
+        }
+        catch (error) {
+            throw new Error(`Failed to read Claude settings file ${source}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+        }
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch (error) {
+        throw new Error(`Claude ${source} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error(`Claude ${source} must contain a JSON object`);
+    }
+    return parsed;
+}
+function mergeClaudeSettings(settings, updates) {
+    if (!settings || typeof settings === "string") {
+        return settings ?? updates;
+    }
+    return { ...settings, ...updates };
+}
+function isToolResultTextBlock(value) {
+    return (!!value &&
+        typeof value === "object" &&
+        value.type === "text" &&
+        typeof value.text === "string");
+}
+function normalizeForDeterministicString(value, seen) {
+    if (value === null ||
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean") {
+        return value;
+    }
+    if (typeof value === "bigint") {
+        return value.toString();
+    }
+    if (typeof value === "function") {
+        return "[function]";
+    }
+    if (typeof value === "symbol") {
+        return value.toString();
+    }
+    if (typeof value === "undefined") {
+        return "[undefined]";
+    }
+    if (Array.isArray(value)) {
+        return value.map((entry) => normalizeForDeterministicString(entry, seen));
+    }
+    if (typeof value === "object") {
+        const objectValue = value;
+        if (seen.has(objectValue)) {
+            return "[circular]";
+        }
+        seen.add(objectValue);
+        const record = toObjectRecord(value);
+        if (!record) {
+            seen.delete(objectValue);
+            return "[invalid]";
+        }
+        const normalized = {};
+        for (const key of Object.keys(record).sort()) {
+            normalized[key] = normalizeForDeterministicString(record[key], seen);
+        }
+        seen.delete(objectValue);
+        return normalized;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+        return String(value);
+    }
+    return "[unsupported]";
+}
+function deterministicStringify(value) {
+    if (typeof value === "undefined") {
+        return "";
+    }
+    try {
+        const normalized = normalizeForDeterministicString(value, new WeakSet());
+        if (typeof normalized === "string") {
+            return normalized;
+        }
+        return JSON.stringify(normalized);
+    }
+    catch {
+        if (typeof value === "string") {
+            return value;
+        }
+        if (typeof value === "number" || typeof value === "boolean") {
+            return String(value);
+        }
+        return "[unserializable]";
+    }
+}
+function coerceToolResultContentToString(content) {
+    if (typeof content === "string") {
+        return content;
+    }
+    if (Array.isArray(content) && content.every((block) => isToolResultTextBlock(block))) {
+        return content.map((block) => block.text).join("");
+    }
+    return deterministicStringify(content);
+}
+function toBase64ImageOutput(block) {
+    const record = toObjectRecord(block);
+    if (!record || record.type !== "image") {
+        return null;
+    }
+    const source = toObjectRecord(record.source);
+    if (!source || source.type !== "base64" || typeof source.data !== "string") {
+        return null;
+    }
+    return {
+        data: source.data,
+        mimeType: typeof source.media_type === "string" ? source.media_type : null,
+    };
+}
+// Claude returns images inside tool_result content as base64 Anthropic blocks. Left in place they
+// reach coerceToolResultContentToString, which JSON.stringifies the whole array — dumping base64
+// into the tool output. We pull those blocks out to render them as image markdown and leave a
+// "[image]" placeholder so image-only results still produce non-empty output.
+function splitClaudeToolResultImages(content) {
+    if (!Array.isArray(content)) {
+        return { images: [], text: content };
+    }
+    const images = [];
+    const text = content.map((block) => {
+        const image = toBase64ImageOutput(block);
+        if (image) {
+            images.push(image);
+            return { type: "text", text: "[image]" };
+        }
+        return block;
+    });
+    return { images, text };
+}
+function normalizeClaudeTranscriptText(value) {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+}
+function isClaudeNoResponsePlaceholderText(value) {
+    return normalizeClaudeTranscriptText(value) === NO_RESPONSE_REQUESTED_PLACEHOLDER;
+}
+const LOCAL_COMMAND_STDOUT_PATTERN = /^\s*<local-command-stdout>[\s\S]*<\/local-command-stdout>\s*$/;
+const CLAUDE_COMMAND_MESSAGE_PATTERN = /<command-message>([\s\S]*?)<\/command-message>/;
+const CLAUDE_COMMAND_ARGS_PATTERN = /<command-args>([\s\S]*?)<\/command-args>/;
+const CLAUDE_COMMAND_NAME_PATTERN = /<command-name>([\s\S]*?)<\/command-name>/;
+function isClaudeLocalCommandStdout(value) {
+    const normalized = normalizeClaudeTranscriptText(value);
+    return normalized !== null && LOCAL_COMMAND_STDOUT_PATTERN.test(normalized);
+}
+function isClaudeTranscriptNoiseText(value) {
+    return (isClaudeInterruptPlaceholderText(value) ||
+        isClaudeNoResponsePlaceholderText(value) ||
+        isClaudeLocalCommandStdout(value));
+}
+function collectClaudeTextContentParts(content) {
+    if (typeof content === "string") {
+        const normalized = normalizeClaudeTranscriptText(content);
+        return normalized ? [normalized] : [];
+    }
+    if (!isUnknownArray(content)) {
+        return [];
+    }
+    const parts = [];
+    for (const block of content) {
+        const blockRecord = toObjectRecord(block);
+        if (!blockRecord) {
+            continue;
+        }
+        const text = normalizeClaudeTranscriptText(blockRecord.text);
+        if (text) {
+            parts.push(text);
+            continue;
+        }
+        const input = normalizeClaudeTranscriptText(blockRecord.input);
+        if (input) {
+            parts.push(input);
+        }
+    }
+    return parts;
+}
+function isClaudeTranscriptNoiseContent(content) {
+    const parts = collectClaudeTextContentParts(content);
+    return parts.length > 0 && parts.every((part) => isClaudeTranscriptNoiseText(part));
+}
+export function extractUserMessageText(content) {
+    if (typeof content === "string") {
+        const normalized = content.trim();
+        if (!normalized || isClaudeTranscriptNoiseText(normalized)) {
+            return null;
+        }
+        return normalizeClaudeUserPromptText(normalized);
+    }
+    if (!Array.isArray(content)) {
+        return null;
+    }
+    const parts = [];
+    for (const block of content) {
+        if (!block || typeof block !== "object") {
+            continue;
+        }
+        const text = typeof block.text === "string" ? block.text : undefined;
+        if (text && text.trim()) {
+            const trimmed = text.trim();
+            if (!isClaudeTranscriptNoiseText(trimmed)) {
+                const normalized = normalizeClaudeUserPromptText(trimmed);
+                if (normalized) {
+                    parts.push(normalized);
+                }
+            }
+            continue;
+        }
+        const input = typeof block.input === "string" ? block.input : undefined;
+        if (input && input.trim()) {
+            const trimmed = input.trim();
+            if (!isClaudeTranscriptNoiseText(trimmed)) {
+                const normalized = normalizeClaudeUserPromptText(trimmed);
+                if (normalized) {
+                    parts.push(normalized);
+                }
+            }
+        }
+    }
+    if (parts.length === 0) {
+        return null;
+    }
+    const combined = parts.join("\n\n").trim();
+    return combined.length > 0 ? combined : null;
+}
+function isMetadata(value) {
+    return typeof value === "object" && value !== null;
+}
+function createDefaultToolUseCacheEntry(id, block) {
+    const nameFromBlock = typeof block.name === "string" && block.name.length > 0 ? block.name : "tool";
+    let server;
+    if (typeof block.server === "string" && block.server.length > 0) {
+        server = block.server;
+    }
+    else if (typeof block.name === "string" && block.name.length > 0) {
+        server = block.name;
+    }
+    else {
+        server = "tool";
+    }
+    return {
+        id,
+        name: nameFromBlock,
+        server,
+        classification: "generic",
+        started: false,
+    };
+}
+function readTrimmedString(value) {
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+}
+function isMcpServerConfig(value) {
+    if (!isMetadata(value)) {
+        return false;
+    }
+    const type = value.type;
+    if (type === "stdio") {
+        return typeof value.command === "string";
+    }
+    if (type === "http" || type === "sse") {
+        return typeof value.url === "string";
+    }
+    return false;
+}
+function isMcpServersRecord(value) {
+    if (!isMetadata(value)) {
+        return false;
+    }
+    for (const config of Object.values(value)) {
+        if (!isMcpServerConfig(config)) {
+            return false;
+        }
+    }
+    return true;
+}
+function isPermissionMode(value) {
+    return typeof value === "string" && VALID_CLAUDE_MODES.has(value);
+}
+function isTruthyEnvValue(value) {
+    const normalized = value?.trim().toLowerCase();
+    return (normalized !== undefined &&
+        normalized.length > 0 &&
+        normalized !== "0" &&
+        normalized !== "false" &&
+        normalized !== "no" &&
+        normalized !== "off");
+}
+function claudeAutoModeUnavailableOn(env) {
+    if (isTruthyEnvValue(env.CLAUDE_CODE_USE_BEDROCK)) {
+        return "Bedrock";
+    }
+    if (isTruthyEnvValue(env.CLAUDE_CODE_USE_VERTEX)) {
+        return "Vertex";
+    }
+    return null;
+}
+function assertClaudeModeCanRun(mode, env) {
+    if (mode !== "auto") {
+        return;
+    }
+    const transport = claudeAutoModeUnavailableOn(env);
+    if (transport === null) {
+        return;
+    }
+    throw new Error(`Claude Auto mode requires the Anthropic API and is not supported when Claude Code uses ${transport}. Select another permission mode or unset the ${transport === "Bedrock" ? "CLAUDE_CODE_USE_BEDROCK" : "CLAUDE_CODE_USE_VERTEX"} environment variable.`);
+}
+function claudeModeCatalog(env) {
+    if (claudeAutoModeUnavailableOn(env)) {
+        return { modes: DEFAULT_MODES.filter((mode) => mode.id !== "auto"), defaultModeId: "default" };
+    }
+    return { modes: DEFAULT_MODES, defaultModeId: "auto" };
+}
+function coerceSessionMetadata(metadata) {
+    if (!isMetadata(metadata)) {
+        return {};
+    }
+    const result = {};
+    if (metadata.provider === "claude" || metadata.provider === "codex") {
+        result.provider = metadata.provider;
+    }
+    if (typeof metadata.cwd === "string") {
+        result.cwd = metadata.cwd;
+    }
+    if (typeof metadata.modeId === "string") {
+        result.modeId = metadata.modeId;
+    }
+    if (typeof metadata.model === "string") {
+        result.model = metadata.model;
+    }
+    if (typeof metadata.title === "string" || metadata.title === null) {
+        result.title = metadata.title;
+    }
+    const providerOptions = ClaudeProviderOptionsSchema.safeParse(metadata.providerOptions);
+    if (providerOptions.success) {
+        result.providerOptions = providerOptions.data;
+    }
+    if (typeof metadata.systemPrompt === "string") {
+        result.systemPrompt = metadata.systemPrompt;
+    }
+    if (isMcpServersRecord(metadata.mcpServers)) {
+        result.mcpServers = metadata.mcpServers;
+    }
+    return result;
+}
+export function toClaudeSdkMcpConfig(config) {
+    const eagerTools = config.alwaysLoad === true ? { alwaysLoad: true } : {};
+    switch (config.type) {
+        case "stdio":
+            return {
+                type: "stdio",
+                command: config.command,
+                args: config.args,
+                env: config.env,
+                ...eagerTools,
+            };
+        case "http":
+            return {
+                type: "http",
+                url: config.url,
+                headers: config.headers,
+                ...eagerTools,
+            };
+        case "sse":
+            return {
+                type: "sse",
+                url: config.url,
+                headers: config.headers,
+                ...eagerTools,
+            };
+    }
+    throw new Error("Unhandled MCP server config type");
+}
+function isClaudeContentChunk(value) {
+    return isMetadata(value) && typeof value.type === "string";
+}
+function isPermissionUpdate(value) {
+    if (!isMetadata(value)) {
+        return false;
+    }
+    const type = value.type;
+    if (type !== "addRules" && type !== "replaceRules" && type !== "removeRules") {
+        return false;
+    }
+    const rules = value.rules;
+    const behavior = value.behavior;
+    const destination = value.destination;
+    return Array.isArray(rules) && typeof behavior === "string" && typeof destination === "string";
+}
+function resolvePermissionKind(toolName, input) {
+    if (toolName === "ExitPlanMode")
+        return "plan";
+    if (toolName === "AskUserQuestion" && Array.isArray(input.questions)) {
+        return "question";
+    }
+    return "tool";
+}
+// Notification previews fall back to serializing the raw request input when a
+// permission request carries no title. For AskUserQuestion that fallback is the
+// whole question object, so the notification reads as JSON. Summarize the first
+// question the same way the OMP and Pi providers do for their ask_user
+// permissions.
+function buildClaudeQuestionPermissionSummary(toolName, input) {
+    if (toolName !== "AskUserQuestion" || !Array.isArray(input.questions)) {
+        return {};
+    }
+    const question = input.questions.find(isMetadata);
+    const title = typeof question?.question === "string" ? question.question.trim() : "";
+    if (!title) {
+        return {};
+    }
+    const labels = Array.isArray(question?.options)
+        ? question.options
+            .map((option) => {
+            if (typeof option === "string")
+                return option.trim();
+            return isMetadata(option) && typeof option.label === "string" ? option.label.trim() : "";
+        })
+            .filter((label) => label.length > 0)
+        : [];
+    return labels.length > 0 ? { title, description: labels.join(" / ") } : { title };
+}
+function getClaudeModeLabel(modeId) {
+    return DEFAULT_MODES.find((mode) => mode.id === modeId)?.label ?? modeId;
+}
+function buildClaudePlanPermissionActions(resumeMode) {
+    const actions = [
+        {
+            id: "reject",
+            label: "Reject",
+            behavior: "deny",
+            variant: "danger",
+            intent: "dismiss",
+        },
+        {
+            id: "implement",
+            label: "Implement",
+            behavior: "allow",
+            variant: "primary",
+            intent: "implement",
+        },
+    ];
+    if (resumeMode === "bypassPermissions" || resumeMode === "auto") {
+        actions.push({
+            id: "implement_resume",
+            label: `Implement with ${getClaudeModeLabel(resumeMode)}`,
+            behavior: "allow",
+            variant: "secondary",
+            intent: "implement_resume",
+        });
+    }
+    return actions;
+}
+class TimelineAssembler {
+    constructor() {
+        this.messages = new Map();
+        this.finalizedMessageIds = new Set();
+        this.activeMessageByRun = new Map();
+        this.syntheticMessageCounter = 0;
+    }
+    consume(input) {
+        if (input.message.type === "assistant") {
+            return this.consumeAssistantMessage(input.message, input.runId, input.messageIdHint ?? null);
+        }
+        if (input.message.type === "stream_event") {
+            return this.consumeStreamEvent(input.message, input.runId, input.messageIdHint ?? null);
+        }
+        return [];
+    }
+    consumeAssistantMessage(message, runId, messageIdHint) {
+        const messageId = this.readMessageIdFromAssistantMessage(message) ??
+            messageIdHint ??
+            this.resolveMessageId({ runId, createIfMissing: true, messageId: null });
+        if (!messageId) {
+            return [];
+        }
+        if (this.finalizedMessageIds.has(messageId)) {
+            return [];
+        }
+        const state = this.ensureMessageState(messageId, runId);
+        const fragments = this.extractFragments(message.message?.content);
+        return this.applyAbsoluteFragments(state, fragments);
+    }
+    consumeStreamEvent(message, runId, messageIdHint) {
+        const event = toObjectRecord(message.event) ?? {};
+        const eventType = readTrimmedString(event.type);
+        const streamEventMessageId = this.readMessageIdFromStreamEvent(event) ?? messageIdHint;
+        if (eventType === "message_start") {
+            const messageId = this.resolveMessageId({
+                runId,
+                createIfMissing: true,
+                messageId: streamEventMessageId,
+            });
+            if (!messageId) {
+                return [];
+            }
+            this.ensureMessageState(messageId, runId);
+            return [];
+        }
+        if (eventType === "message_stop") {
+            const messageId = this.resolveMessageId({
+                runId,
+                createIfMissing: false,
+                messageId: streamEventMessageId,
+            });
+            if (!messageId) {
+                return [];
+            }
+            return this.finalizeMessage(messageId, runId);
+        }
+        if (eventType === "content_block_start") {
+            return this.consumeDeltaContent(event.content_block, runId, streamEventMessageId);
+        }
+        if (eventType === "content_block_delta") {
+            return this.consumeDeltaContent(event.delta, runId, streamEventMessageId);
+        }
+        return [];
+    }
+    consumeDeltaContent(content, runId, messageIdHint) {
+        const fragments = this.extractFragments(content);
+        if (fragments.length === 0) {
+            return [];
+        }
+        const messageId = this.resolveMessageId({
+            runId,
+            createIfMissing: true,
+            messageId: messageIdHint,
+        });
+        if (!messageId) {
+            return [];
+        }
+        const state = this.ensureMessageState(messageId, runId);
+        return this.appendFragments(state, fragments);
+    }
+    appendFragments(state, fragments) {
+        for (const fragment of fragments) {
+            if (fragment.kind === "assistant") {
+                state.assistantText += fragment.text;
+            }
+            else {
+                state.reasoningText += fragment.text;
+            }
+        }
+        return this.emitNewContent(state);
+    }
+    applyAbsoluteFragments(state, fragments) {
+        const assistantText = fragments
+            .filter((fragment) => fragment.kind === "assistant")
+            .map((fragment) => fragment.text)
+            .join("");
+        const reasoningText = fragments
+            .filter((fragment) => fragment.kind === "reasoning")
+            .map((fragment) => fragment.text)
+            .join("");
+        if (assistantText.length > 0) {
+            if (!assistantText.startsWith(state.assistantText)) {
+                state.emittedAssistantLength = 0;
+            }
+            state.assistantText = assistantText;
+        }
+        if (reasoningText.length > 0) {
+            if (!reasoningText.startsWith(state.reasoningText)) {
+                state.emittedReasoningLength = 0;
+            }
+            state.reasoningText = reasoningText;
+        }
+        return this.emitNewContent(state);
+    }
+    finalizeMessage(messageId, runId) {
+        const state = this.messages.get(messageId);
+        if (!state) {
+            return [];
+        }
+        state.stopped = true;
+        const items = this.emitNewContent(state);
+        if (runId && this.activeMessageByRun.get(runId) === messageId) {
+            this.activeMessageByRun.delete(runId);
+        }
+        this.finalizedMessageIds.add(messageId);
+        this.messages.delete(messageId);
+        return items;
+    }
+    emitNewContent(state) {
+        const items = [];
+        const nextAssistantText = state.assistantText.slice(state.emittedAssistantLength);
+        if (nextAssistantText.length > 0 &&
+            nextAssistantText !== INTERRUPT_TOOL_USE_PLACEHOLDER &&
+            !isClaudeTranscriptNoiseText(nextAssistantText)) {
+            state.emittedAssistantLength = state.assistantText.length;
+            items.push({ type: "assistant_message", text: nextAssistantText, messageId: state.id });
+        }
+        const nextReasoningText = state.reasoningText.slice(state.emittedReasoningLength);
+        if (nextReasoningText.length > 0) {
+            state.emittedReasoningLength = state.reasoningText.length;
+            items.push({ type: "reasoning", text: nextReasoningText });
+        }
+        return items;
+    }
+    ensureMessageState(messageId, runId) {
+        const existing = this.messages.get(messageId);
+        if (existing) {
+            existing.stopped = false;
+            if (runId) {
+                this.activeMessageByRun.set(runId, messageId);
+            }
+            return existing;
+        }
+        const created = {
+            id: messageId,
+            assistantText: "",
+            reasoningText: "",
+            emittedAssistantLength: 0,
+            emittedReasoningLength: 0,
+            stopped: false,
+        };
+        this.messages.set(messageId, created);
+        if (runId) {
+            this.activeMessageByRun.set(runId, messageId);
+        }
+        return created;
+    }
+    resolveMessageId(input) {
+        if (input.messageId) {
+            return input.messageId;
+        }
+        if (input.runId) {
+            const active = this.activeMessageByRun.get(input.runId);
+            if (active) {
+                return active;
+            }
+        }
+        if (!input.createIfMissing) {
+            return null;
+        }
+        const synthetic = `synthetic-message-${++this.syntheticMessageCounter}`;
+        if (input.runId) {
+            this.activeMessageByRun.set(input.runId, synthetic);
+        }
+        return synthetic;
+    }
+    extractFragments(content) {
+        if (typeof content === "string") {
+            if (content.length === 0) {
+                return [];
+            }
+            return [{ kind: "assistant", text: content }];
+        }
+        const blocks = Array.isArray(content) ? content : [content];
+        const fragments = [];
+        for (const rawBlock of blocks) {
+            if (!isClaudeContentChunk(rawBlock)) {
+                continue;
+            }
+            if ((rawBlock.type === "text" || rawBlock.type === "text_delta") &&
+                typeof rawBlock.text === "string" &&
+                rawBlock.text.length > 0) {
+                fragments.push({ kind: "assistant", text: rawBlock.text });
+            }
+            if ((rawBlock.type === "thinking" || rawBlock.type === "thinking_delta") &&
+                typeof rawBlock.thinking === "string" &&
+                rawBlock.thinking.length > 0) {
+                fragments.push({ kind: "reasoning", text: rawBlock.thinking });
+            }
+        }
+        return fragments;
+    }
+    readMessageIdFromAssistantMessage(message) {
+        const candidate = toObjectRecord(message);
+        const messageContainer = toObjectRecord(candidate?.message);
+        return (readTrimmedString(candidate?.message_id) ?? readTrimmedString(messageContainer?.id) ?? null);
+    }
+    readMessageIdFromStreamEvent(event) {
+        const messageContainer = toObjectRecord(event.message);
+        return readTrimmedString(event.message_id) ?? readTrimmedString(messageContainer?.id) ?? null;
+    }
+}
+function isSyntheticUserEntry(entry) {
+    const candidate = toObjectRecord(entry);
+    if (!candidate) {
+        return false;
+    }
+    return (candidate.isSynthetic === true || candidate.isMeta === true || Boolean(candidate.toolUseResult));
+}
+function isToolResultUserEntry(entry) {
+    const candidate = toObjectRecord(entry);
+    if (!candidate) {
+        return false;
+    }
+    const message = toObjectRecord(candidate.message);
+    const content = message?.content;
+    return (Array.isArray(content) && content.some((block) => toObjectRecord(block)?.type === "tool_result"));
+}
+function isSyntheticHistoryUserEntry(entry) {
+    return isSyntheticUserEntry(entry) && !isToolResultUserEntry(entry);
+}
+function firstTrimmedString(sources) {
+    for (const source of sources) {
+        const value = readTrimmedString(source);
+        if (value) {
+            return value;
+        }
+    }
+    return null;
+}
+function readTranscriptUuid(message) {
+    const root = toObjectRecord(message) ?? {};
+    const messageType = readTrimmedString(root.type);
+    if (messageType !== "user" && messageType !== "assistant") {
+        return null;
+    }
+    return firstTrimmedString([root.uuid]);
+}
+export function readEventIdentifiers(message) {
+    const root = toObjectRecord(message) ?? {};
+    const messageType = readTrimmedString(root.type);
+    const streamEvent = toObjectRecord(root.event);
+    const streamEventMessage = toObjectRecord(streamEvent?.message);
+    const messageContainer = toObjectRecord(root.message);
+    const messageIdFromUuid = messageType === "user" || messageType === "assistant" || messageType === "system"
+        ? root.uuid
+        : undefined;
+    return {
+        taskId: firstTrimmedString([
+            root.task_id,
+            streamEvent?.task_id,
+            streamEventMessage?.task_id,
+            messageContainer?.task_id,
+        ]),
+        parentMessageId: firstTrimmedString([
+            root.parent_message_id,
+            streamEvent?.parent_message_id,
+            streamEventMessage?.parent_message_id,
+            messageContainer?.parent_message_id,
+        ]),
+        messageId: firstTrimmedString([
+            root.message_id,
+            streamEvent?.message_id,
+            streamEventMessage?.id,
+            streamEventMessage?.message_id,
+            messageContainer?.id,
+            messageContainer?.message_id,
+            messageIdFromUuid,
+        ]),
+    };
+}
+export class ClaudeAgentClient {
+    constructor(options) {
+        this.provider = "claude";
+        this.capabilities = CLAUDE_CAPABILITIES;
+        this.scheduleImportDescriptors = createImportDescriptorScheduler((candidate, signal) => this.readImportDescriptor(candidate, signal));
+        this.importDescriptorCache = new LRUCache({
+            max: 500,
+            maxSize: 8 * 1024 * 1024,
+            sizeCalculation: (descriptor, key) => 128 + 2 * (JSON.stringify(descriptor).length + key.length),
+        });
+        this.discoverModels = options.discoverModels ?? discoverClaudeModels;
+        this.defaults = options.defaults;
+        this.logger = options.logger.child({ module: "agent", provider: "claude" });
+        this.runtimeSettings = options.runtimeSettings;
+        this.queryFactory = options.queryFactory;
+        this.resolveBinary = options.resolveBinary ?? (() => resolveClaudeBinary(this.runtimeSettings));
+        this.resolveVersion =
+            options.resolveVersion ??
+                ((signal) => resolveClaudeCodeVersion(this.runtimeSettings, signal));
+        this.rewindSdk = options.rewindSdk ?? realClaudeRewindSdk;
+    }
+    resolveConfiguredModel(model) {
+        return resolveConfiguredClaudeModel(model);
+    }
+    async createSession(config, launchContext, options) {
+        const claudeConfig = this.assertConfig(config);
+        return new ClaudeAgentSession(claudeConfig, {
+            defaults: this.defaults,
+            runtimeSettings: this.runtimeSettings,
+            agentId: launchContext?.agentId,
+            launchEnv: launchContext?.env,
+            persistSession: options?.persistSession,
+            logger: this.logger,
+            queryFactory: this.queryFactory,
+            resolveBinary: this.resolveBinary,
+            rewindSdk: this.rewindSdk,
+        });
+    }
+    async resumeSession(handle, overrides, launchContext) {
+        const metadata = coerceSessionMetadata(handle.metadata);
+        const merged = { ...metadata, ...overrides };
+        if (!merged.cwd) {
+            throw new Error("Claude resume requires the original working directory in metadata");
+        }
+        const mergedConfig = {
+            ...merged,
+            provider: "claude",
+            cwd: merged.cwd,
+        };
+        const claudeConfig = this.assertConfig(mergedConfig);
+        const session = new ClaudeAgentSession(claudeConfig, {
+            defaults: this.defaults,
+            runtimeSettings: this.runtimeSettings,
+            handle,
+            agentId: launchContext?.agentId,
+            launchEnv: launchContext?.env,
+            logger: this.logger,
+            queryFactory: this.queryFactory,
+            resolveBinary: this.resolveBinary,
+            rewindSdk: this.rewindSdk,
+        });
+        await session.ensureHistoryReady();
+        return session;
+    }
+    async getCatalogCacheKey(_options) {
+        // This client discovers through host configuration, independent of project cwd.
+        return "host";
+    }
+    async fetchCatalog(_options, context) {
+        // Claude exposes a global catalog here; cwd/force are intentionally irrelevant.
+        let claudeCodeVersion;
+        try {
+            claudeCodeVersion = await runProviderRefreshActivity(context, "version", () => this.resolveVersion(context?.signal));
+        }
+        catch (error) {
+            this.logger.warn({ err: error }, "Failed to resolve Claude Code version for model catalog");
+        }
+        const env = this.buildProviderEnv();
+        let discoveredModelIds = new Set();
+        try {
+            const advertisedModels = await runProviderRefreshActivity(context, "models", () => this.discoverModels({
+                resolveBinary: this.resolveBinary,
+                runtimeSettings: this.runtimeSettings,
+                env,
+                signal: context?.signal,
+            }));
+            discoveredModelIds = new Set(advertisedModels
+                .map((model) => normalizeClaudeRuntimeModelId(model.resolvedModel ?? model.value))
+                .filter((id) => id !== null));
+        }
+        catch (error) {
+            context?.signal.throwIfAborted();
+            this.logger.warn({ err: error }, "Claude model discovery failed; omitting discovery-required models");
+        }
+        const models = await runProviderRefreshActivity(context, "settings", () => getClaudeModelsWithSettings(this.logger, claudeConfigDir(env), claudeCodeVersion, discoveredModelIds));
+        const modeCatalog = claudeModeCatalog(env);
+        return {
+            models,
+            ...modeCatalog,
+        };
+    }
+    async shutdown() {
+        await killExitingClaudeModelDiscoveries();
+    }
+    async resolveDefaultModeId({ env: launchEnv }) {
+        return claudeModeCatalog(this.buildProviderEnv(launchEnv)).defaultModeId;
+    }
+    buildProviderEnv(launchEnv) {
+        return createProviderEnv({
+            baseEnv: process.env,
+            runtimeSettings: this.runtimeSettings,
+            overlays: [launchEnv],
+        });
+    }
+    async listControls(config) {
+        return {
+            controls: buildClaudeControls(this.assertConfig(config).model),
+            options: config.providerOptions ?? {},
+        };
+    }
+    async listImportableSessions(options) {
+        // Leave time to deliver the provider error before the client RPC expires at 60 seconds.
+        const deadline = AbortSignal.timeout(45000);
+        const signal = options?.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+        signal.throwIfAborted();
+        const configDir = claudeConfigDir(this.buildProviderEnv());
+        const sessionsRoot = options?.cwd
+            ? claudeProjectDirSync(options.cwd, { configDir })
+            : path.join(configDir, "projects");
+        const rootExists = await pathExists(sessionsRoot);
+        signal.throwIfAborted();
+        if (!rootExists)
+            return [];
+        const limit = options?.limit ?? 20;
+        const scanLimit = Math.min(options?.scanLimit ?? limit * 3, 500);
+        const candidates = await collectRecentClaudeSessions(sessionsRoot, scanLimit, {
+            rootIsProjectDir: Boolean(options?.cwd),
+            logger: this.logger,
+        });
+        const results = await this.scheduleImportDescriptors(candidates, signal);
+        const failures = results.filter((result) => result.type === "unreadable");
+        if (failures.length > 0 && failures.length === results.length) {
+            const errors = failures.map((result) => result.error);
+            throw new AggregateError(errors, `Cannot list Claude sessions: all ${failures.length} candidate transcripts have unreadable import metadata. ${errors[0].message}`);
+        }
+        const parsed = results.filter((result) => result.type === "parsed");
+        return parsed
+            .map((result) => result.descriptor)
+            .filter((session) => session !== null)
+            .slice(0, limit)
+            .map((session) => structuredClone(session));
+    }
+    async readImportDescriptor(candidate, signal) {
+        signal.throwIfAborted();
+        const cached = this.importDescriptorCache.get(candidate.cacheKey);
+        if (cached)
+            return { type: "parsed", descriptor: structuredClone(cached) };
+        let descriptor;
+        try {
+            descriptor = await parseClaudeSessionDescriptor(candidate.path, candidate.mtime, signal);
+        }
+        catch (error) {
+            signal.throwIfAborted();
+            if (!(error instanceof Error) || !isExpectedClaudeImportFileError(error))
+                throw error;
+            this.logger.warn({ err: error, path: candidate.path }, "Skipping Claude transcript with unreadable import metadata");
+            return { type: "unreadable", error };
+        }
+        if (descriptor) {
+            const current = await fsPromises.stat(candidate.path).catch((error) => {
+                if (!isExpectedClaudeImportFileError(error))
+                    throw error;
+                return null;
+            });
+            signal.throwIfAborted();
+            if (current && claudeSessionCacheKey(candidate.path, current) === candidate.cacheKey) {
+                this.importDescriptorCache.set(candidate.cacheKey, structuredClone(descriptor));
+            }
+        }
+        return { type: "parsed", descriptor: descriptor ? structuredClone(descriptor) : null };
+    }
+    async importSession(input, context) {
+        // Carry a `/rename` onto the imported agent so the name chosen in the CLI
+        // survives the import. Only an explicit rename counts: agents are named
+        // after their first prompt line since #1563, so adopting the generated
+        // `ai-title` here would put that LLM summary back.
+        const renamedTitle = await readClaudeRenamedSessionTitle({
+            cwd: input.cwd,
+            sessionId: input.providerHandleId,
+            configDir: claudeConfigDir(this.buildProviderEnv(context.launchContext?.env)),
+        });
+        return importSessionFromPersistence({
+            provider: "claude",
+            request: input,
+            context,
+            resumeSession: this.resumeSession.bind(this),
+            ...(renamedTitle ? { config: { title: renamedTitle } } : {}),
+        });
+    }
+    async isAvailable() {
+        const launch = await resolveProviderLaunch({
+            commandConfig: this.runtimeSettings?.command,
+            defaultBinary: "claude",
+        });
+        const availability = await checkProviderLaunchAvailable(launch);
+        return availability.available;
+    }
+    async getDiagnostic() {
+        try {
+            const launch = await resolveProviderLaunch({
+                commandConfig: this.runtimeSettings?.command,
+                defaultBinary: "claude",
+            });
+            const availability = await checkProviderLaunchAvailable(launch);
+            const auth = availability.available
+                ? await resolveClaudeAuth(launch, availability, this.runtimeSettings)
+                : null;
+            return {
+                diagnostic: formatProviderDiagnostic("Claude Code", [
+                    ...(await buildCommandResolutionDiagnosticRows(launch, {
+                        knownBinaryNames: ["claude"],
+                    })),
+                    ...(await buildBinaryDiagnosticRows(launch, availability)),
+                    ...(auth ? [{ label: "Auth", value: auth }] : []),
+                ]),
+            };
+        }
+        catch (error) {
+            return {
+                diagnostic: formatProviderDiagnosticError("Claude Code", error),
+            };
+        }
+    }
+    assertConfig(config) {
+        if (config.provider !== "claude") {
+            throw new Error(`ClaudeAgentClient received config for provider '${config.provider}'`);
+        }
+        const model = config.model?.trim();
+        const providerOptions = validateProviderOptions("claude", ClaudeProviderOptionsSchema, config.providerOptions) ?? {};
+        return {
+            ...config,
+            provider: "claude",
+            model: model || undefined,
+            providerOptions,
+        };
+    }
+}
+async function resolveClaudeBinary(runtimeSettings) {
+    const launch = await resolveProviderLaunch({
+        commandConfig: runtimeSettings?.command,
+        defaultBinary: "claude",
+    });
+    const availability = await checkProviderLaunchAvailable(launch);
+    if (availability.available) {
+        return availability.resolvedPath ?? launch.command;
+    }
+    throw new Error("Claude binary not found. Install Claude Code (https://github.com/anthropics/claude-code) and ensure it is available in your shell PATH.");
+}
+export async function resolveClaudeCodeVersion(runtimeSettings, signal) {
+    const launch = await resolveProviderLaunch({
+        commandConfig: runtimeSettings?.command,
+        defaultBinary: "claude",
+    });
+    const availability = await checkProviderLaunchAvailable(launch);
+    if (!availability.available) {
+        throw new Error("Claude binary not found while resolving Claude Code version");
+    }
+    const executable = availability.resolvedPath ?? launch.command;
+    const { stdout, stderr } = await execCommand(executable, [...launch.args, "--version"], {
+        ...createProviderEnvSpec({ runtimeSettings }),
+        timeout: 5000,
+        signal,
+    });
+    // A wrapper command (the `command` provider setting) prints its own version here
+    // instead of Claude Code's. Only trust output that identifies itself as Claude Code,
+    // so a wrapper's version can't mis-gate models behind a minimumClaudeCodeVersion.
+    const rawVersionOutput = `${stdout}\n${stderr}`;
+    const version = /\d+\.\d+\.\d+\s+\(Claude Code\)/i.test(rawVersionOutput)
+        ? parseClaudeCodeVersion(rawVersionOutput)
+        : null;
+    if (!version) {
+        throw new Error("Unable to parse Claude Code version from --version output");
+    }
+    return version.join(".");
+}
+async function resolveClaudeAuth(launch, availability, runtimeSettings) {
+    const run = async (executable, args) => {
+        try {
+            return await execCommand(executable, args, {
+                ...createProviderEnvSpec({ runtimeSettings }),
+                timeout: 5000,
+            });
+        }
+        catch (error) {
+            const err = toObjectRecord(error);
+            const stdout = typeof err?.stdout === "string" ? err.stdout : "";
+            const stderr = typeof err?.stderr === "string" ? err.stderr : "";
+            const fallbackMessage = typeof err?.message === "string" ? err.message : "";
+            return { stdout, stderr: stderr || fallbackMessage };
+        }
+    };
+    try {
+        const executable = availability.resolvedPath ?? launch.command;
+        const result = await run(executable, [...launch.args, "auth", "status"]);
+        const combined = [result.stdout, result.stderr]
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
+            .join("\n");
+        return combined || null;
+    }
+    catch {
+        return null;
+    }
+}
+function extractContextWindowSize(modelUsage, modelId) {
+    const usageRecord = toObjectRecord(modelUsage);
+    if (!usageRecord) {
+        return undefined;
+    }
+    // modelUsage accumulates every model used in the session, including earlier turns
+    // and subagents. Only the active model describes this turn's context capacity.
+    const modelUsageEntry = modelId ? usageRecord[modelId] : undefined;
+    const contextWindow = toObjectRecord(modelUsageEntry)?.contextWindow;
+    return typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
+        ? contextWindow
+        : undefined;
+}
+function readUsageCount(usage, key) {
+    const value = usage[key];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+        return undefined;
+    }
+    return value;
+}
+function readStreamRequestInputUsage(event) {
+    const usage = toObjectRecord(toObjectRecord(event.message)?.usage);
+    if (!usage) {
+        return undefined;
+    }
+    const inputTokens = readUsageCount(usage, "input_tokens");
+    if (inputTokens === undefined) {
+        return undefined;
+    }
+    return {
+        inputTokens,
+        cacheCreationInputTokens: readUsageCount(usage, "cache_creation_input_tokens") ?? 0,
+        cacheReadInputTokens: readUsageCount(usage, "cache_read_input_tokens") ?? 0,
+    };
+}
+/**
+ * The input counters on `message_delta.usage` are cumulative whole-request totals and are
+ * optional. Mirror the Anthropic SDK's MessageStream: a counter present on the delta replaces
+ * the `message_start` value, a missing counter keeps it. Translating gateways report
+ * `input_tokens: 0` on `message_start` and only know the real count by `message_delta`.
+ */
+function mergeStreamDeltaInputUsage(current, event) {
+    const usage = toObjectRecord(event.usage);
+    if (!usage) {
+        return current;
+    }
+    return {
+        inputTokens: readUsageCount(usage, "input_tokens") ?? current.inputTokens,
+        cacheCreationInputTokens: readUsageCount(usage, "cache_creation_input_tokens") ?? current.cacheCreationInputTokens,
+        cacheReadInputTokens: readUsageCount(usage, "cache_read_input_tokens") ?? current.cacheReadInputTokens,
+    };
+}
+function readStreamRequestOutputTokens(event) {
+    const outputTokens = toObjectRecord(event.usage)?.output_tokens;
+    if (typeof outputTokens !== "number" || !Number.isFinite(outputTokens) || outputTokens < 0) {
+        return undefined;
+    }
+    return outputTokens;
+}
+function readLastUsageIteration(usage) {
+    const iterations = toObjectRecord(usage)?.iterations;
+    if (!Array.isArray(iterations)) {
+        return undefined;
+    }
+    for (let index = iterations.length - 1; index >= 0; index -= 1) {
+        const candidate = toObjectRecord(iterations[index]);
+        if (candidate) {
+            return candidate;
+        }
+    }
+    return undefined;
+}
+function readUsageTokenTotal(usage) {
+    const usageWithCacheCreation = usage;
+    const inputTokens = typeof usage.input_tokens === "number" && Number.isFinite(usage.input_tokens)
+        ? usage.input_tokens
+        : 0;
+    const cacheCreationInputTokens = typeof usageWithCacheCreation.cache_creation_input_tokens === "number" &&
+        Number.isFinite(usageWithCacheCreation.cache_creation_input_tokens)
+        ? usageWithCacheCreation.cache_creation_input_tokens
+        : 0;
+    const cacheReadInputTokens = typeof usage.cache_read_input_tokens === "number" &&
+        Number.isFinite(usage.cache_read_input_tokens)
+        ? usage.cache_read_input_tokens
+        : 0;
+    const outputTokens = typeof usage.output_tokens === "number" && Number.isFinite(usage.output_tokens)
+        ? usage.output_tokens
+        : 0;
+    const total = inputTokens + cacheCreationInputTokens + cacheReadInputTokens + outputTokens;
+    return total > 0 ? total : undefined;
+}
+function readActiveUsageTokens(usage) {
+    const activeUsage = readLastUsageIteration(usage);
+    return activeUsage ? readUsageTokenTotal(activeUsage) : undefined;
+}
+function readLegacyResultUsageTokens(usage) {
+    const usageRecord = toObjectRecord(usage);
+    return usageRecord ? readUsageTokenTotal(usageRecord) : undefined;
+}
+function isClaudeSubagentToolName(name) {
+    return name === "Task" || name === "Agent" || name === "Workflow";
+}
+function readClaudeParentToolUseId(message) {
+    if (!("parent_tool_use_id" in message)) {
+        return null;
+    }
+    // Claude Code's liveness tick for a tool still running after 30 s names that tool as its
+    // parent, so a long main-thread call would otherwise read as a subagent.
+    if (message.type === "tool_progress" && message.heartbeat === true) {
+        return null;
+    }
+    const parentToolUseId = message.parent_tool_use_id;
+    return typeof parentToolUseId === "string" && parentToolUseId.length > 0 ? parentToolUseId : null;
+}
+class ClaudeContextUsageState {
+    constructor(initialContextWindowMaxTokens) {
+        this.completedResultTurns = 0;
+        this.contextWindowMaxTokens = initialContextWindowMaxTokens;
+    }
+    beginTurn() {
+        this.streamRequestInputUsage = undefined;
+        this.streamRequestOutputTokens = undefined;
+        this.compactedContextWindowUsedTokens = undefined;
+    }
+    setInitialContextWindowMaxTokens(contextWindowMaxTokens) {
+        this.contextWindowMaxTokens = contextWindowMaxTokens;
+    }
+    recordModelUsage(modelUsage, modelId) {
+        const contextWindowMaxTokens = extractContextWindowSize(modelUsage, modelId);
+        if (contextWindowMaxTokens !== undefined) {
+            this.contextWindowMaxTokens = contextWindowMaxTokens;
+        }
+        return this.contextWindowMaxTokens;
+    }
+    buildStreamUsageEvent(event) {
+        const streamEvent = toObjectRecord(event);
+        if (!streamEvent) {
+            return null;
+        }
+        const eventType = readTrimmedString(streamEvent.type);
+        if (eventType === "message_start") {
+            const inputUsage = readStreamRequestInputUsage(streamEvent);
+            if (!inputUsage) {
+                return null;
+            }
+            this.streamRequestInputUsage = inputUsage;
+            this.streamRequestOutputTokens = 0;
+        }
+        else if (eventType === "message_delta") {
+            const outputTokens = readStreamRequestOutputTokens(streamEvent);
+            if (typeof outputTokens !== "number") {
+                return null;
+            }
+            this.streamRequestOutputTokens = outputTokens;
+            if (this.streamRequestInputUsage) {
+                this.streamRequestInputUsage = mergeStreamDeltaInputUsage(this.streamRequestInputUsage, streamEvent);
+            }
+        }
+        else {
+            return null;
+        }
+        const usedTokens = this.streamUsedTokens();
+        if (usedTokens === undefined) {
+            return null;
+        }
+        return this.createUsageUpdatedEvent(usedTokens);
+    }
+    buildResultUsage(message, modelId) {
+        try {
+            if (!message.usage) {
+                return undefined;
+            }
+            const usage = {
+                inputTokens: message.usage.input_tokens,
+                cachedInputTokens: message.usage.cache_read_input_tokens,
+                outputTokens: message.usage.output_tokens,
+                totalCostUsd: message.total_cost_usd,
+            };
+            const modelContextWindowMaxTokens = this.recordModelUsage(message.modelUsage, modelId);
+            if (this.contextWindowMaxTokens !== undefined) {
+                usage.contextWindowMaxTokens = this.contextWindowMaxTokens;
+            }
+            else if (modelContextWindowMaxTokens !== undefined) {
+                usage.contextWindowMaxTokens = modelContextWindowMaxTokens;
+            }
+            const activeResultUsageTokens = readActiveUsageTokens(message.usage) ??
+                (this.completedResultTurns === 0 ? readLegacyResultUsageTokens(message.usage) : undefined);
+            const usedTokens = this.streamUsedTokens() ?? activeResultUsageTokens ?? this.compactedContextWindowUsedTokens;
+            if (usedTokens !== undefined) {
+                usage.contextWindowUsedTokens = usedTokens;
+            }
+            return usage;
+        }
+        finally {
+            this.compactedContextWindowUsedTokens = undefined;
+            this.completedResultTurns += 1;
+        }
+    }
+    streamUsedTokens() {
+        const inputUsage = this.streamRequestInputUsage;
+        if (!inputUsage || typeof this.streamRequestOutputTokens !== "number") {
+            return undefined;
+        }
+        const usedTokens = inputUsage.inputTokens +
+            inputUsage.cacheCreationInputTokens +
+            inputUsage.cacheReadInputTokens +
+            this.streamRequestOutputTokens;
+        return usedTokens > 0 ? usedTokens : undefined;
+    }
+    createUsageUpdatedEvent(contextWindowUsedTokens) {
+        const usage = {
+            contextWindowUsedTokens,
+        };
+        if (this.contextWindowMaxTokens !== undefined) {
+            usage.contextWindowMaxTokens = this.contextWindowMaxTokens;
+        }
+        return {
+            type: "usage_updated",
+            provider: "claude",
+            usage,
+        };
+    }
+    buildCompactionUsageEvent(postTokens) {
+        this.streamRequestInputUsage = undefined;
+        this.streamRequestOutputTokens = undefined;
+        this.compactedContextWindowUsedTokens = postTokens;
+        const usage = {};
+        if (this.contextWindowMaxTokens !== undefined) {
+            usage.contextWindowMaxTokens = this.contextWindowMaxTokens;
+        }
+        if (postTokens !== undefined) {
+            usage.contextWindowUsedTokens = postTokens;
+        }
+        return {
+            type: "usage_updated",
+            provider: "claude",
+            usage,
+        };
+    }
+}
+class ClaudeAgentSession {
+    constructor(config, options) {
+        this.provider = "claude";
+        this.capabilities = CLAUDE_CAPABILITIES;
+        this.query = null;
+        this.runtimeSafety = new ClaudeRuntimeSafety();
+        this.backgroundStops = new Map();
+        this.processingSdkMessages = 0;
+        this.usageSessionKey = randomUUID();
+        this.childProcess = null;
+        this.input = null;
+        /** The exact SDK query/input pair that owns the current foreground turn. */
+        this.activeForegroundQuery = null;
+        this.activeForegroundInput = null;
+        /**
+         * Messages pushed into the live SDK input (steers, and a foreground turn's own prompt) whose
+         * command_lifecycle has not reached "started". Interrupting has to withdraw them, or the SDK
+         * dequeues one and resumes the turn we just stopped. SDK user UUIDs are provider-private; never
+         * let them escape the adapter boundary.
+         */
+        this.unstartedMessageUuids = new Set();
+        /** Human steers whose text has not reached Claude yet and therefore supersede blocking cards. */
+        this.permissionClearingSteerUuids = new Set();
+        this.planResumeMode = null;
+        this.availableModes = DEFAULT_MODES;
+        this.toolUseCache = new Map();
+        this.toolUseIndexToId = new Map();
+        this.toolUseInputBuffers = new Map();
+        this.subagentHandbackIds = new Set();
+        this.pendingPermissions = new Map();
+        this.activeForegroundTurnId = null;
+        this.autonomousTurn = null;
+        /**
+         * The turn the last background task notification started. A notification that arrives while no
+         * turn runs starts a turn, and Claude's next run belongs to it unless Claude announces another
+         * start first: a later notification starts the next turn, and a queued command (the user's
+         * message, a scheduled wake-up) starts its own. When Claude does not respond, the notification is
+         * a turn in itself. See observeNotificationTurn.
+         */
+        this.notificationTurnId = null;
+        this.subscribers = new Set();
+        this.timelineAssembler = new TimelineAssembler();
+        this.taskState = new ClaudeTaskState();
+        this.taskProtocolSource = new ClaudeTaskProtocolSource({
+            getToolInput: (toolUseId) => this.toolUseCache.get(toolUseId)?.input ?? null,
+            readWorkflowResult: readClaudeWorkflowResultFile,
+        });
+        /**
+         * Subagent tool calls Claude has already answered while the child still runs, with the input
+         * they were launched with and the turn that answered them. A background child is answered at
+         * launch and streams its frames afterwards.
+         */
+        this.settledSubagentToolCalls = new Map();
+        this.sidechainTracker = new ClaudeSidechainTracker({
+            getToolInput: (toolUseId) => this.toolUseCache.get(toolUseId)?.input ??
+                this.settledSubagentToolCalls.get(toolUseId)?.input ??
+                null,
+            // Releases that predate the task protocol announce nothing, so the tracker keeps deriving
+            // identity and status from frames for them. Detecting the capability beats comparing version
+            // strings: it reacts to what this session actually does.
+            isDescriptorOwnedElsewhere: () => this.taskProtocolSource.isActive,
+            // A background child streams its frames after Claude has already answered the call, so its
+            // card is rebuilt from the settled call: a running one would replace the settled, labeled card.
+            // Late card updates retain the turn that answered the call.
+            needsSyntheticParentToolCard: (toolUseId) => (this.toolUseCache.has(toolUseId) || this.settledSubagentToolCalls.has(toolUseId)) &&
+                this.taskProtocolSource.needsSyntheticParentToolCard(toolUseId),
+            getSettledParentToolCall: (toolUseId) => this.settledSubagentToolCalls.get(toolUseId)?.item,
+        });
+        this.persistedHistory = [];
+        this.persistedProviderSubagentEvents = [];
+        this.historyPending = false;
+        // Readiness never rejects; history/rebind failures are logged at their owning boundary.
+        this.historyReady = null;
+        this.historySessionId = null;
+        this.replayingHistory = false;
+        this.turnState = "idle";
+        this.turnNamespace = randomUUID();
+        this.nextTurnOrdinal = 1;
+        this.cancelCurrentTurn = null;
+        this.cachedRuntimeInfo = null;
+        this.lastOptionsModel = null;
+        this.lastRuntimeModel = null;
+        this.compacting = false;
+        this.compactionMarkerOpen = false;
+        this.queryPumpPromise = null;
+        this.queryRestartNeeded = false;
+        /** True from the moment a query's launch options are copied until the query exists. */
+        this.queryStarting = false;
+        this.pendingInterruptAbort = false;
+        /**
+         * Whether Claude's main session is inside one of its own turns: set by system/init and by a
+         * pushed message's command_lifecycle "started" (/compact works for seconds before its init),
+         * cleared by the turn's result or an idle session state. See observeMainTurnBracket.
+         */
+        this.mainTurnInFlight = false;
+        this.foregroundHasVisibleActivity = false;
+        this.activeTurnHasAssistantText = false;
+        /**
+         * The reply Claude Code writes when a turn stops on an API error ("You've hit your session
+         * limit", "API Error: 529 ..."), held back until the result says whether the turn failed: a
+         * failed turn shows the same text as its error, so showing both would repeat it.
+         */
+        this.withheldErrorReply = [];
+        this.userMessageIds = [];
+        this.emittedUserMessageIds = new Set();
+        this.rewindTurnAnchors = [];
+        this.pendingFreshSessionId = null;
+        this.recentStderr = "";
+        this.closed = false;
+        this.openOptionsPatch = {};
+        this.handlePermissionRequest = async (toolName, input, options) => {
+            // Decide before publishing anything: bypassed asks never enter the permission UI.
+            if (this.currentMode === "bypassPermissions" && bypassApprovesAsk(toolName, options)) {
+                return { behavior: "allow", updatedInput: input, toolUseID: options.toolUseID };
+            }
+            const requestId = `permission-${randomUUID()}`;
+            const kind = resolvePermissionKind(toolName, input);
+            const requestInput = normalizeClaudeAskUserQuestionRequestInput(toolName, input);
+            const metadata = {};
+            if (options.toolUseID) {
+                metadata.toolUseId = options.toolUseID;
+            }
+            if (toolName === "ExitPlanMode" && typeof input.plan === "string") {
+                metadata.planText = input.plan;
+            }
+            const toolDetail = kind === "tool"
+                ? mapClaudeRunningToolCall({
+                    name: toolName,
+                    callId: options.toolUseID ?? requestId,
+                    input,
+                    output: null,
+                })?.detail
+                : undefined;
+            const request = {
+                id: requestId,
+                provider: "claude",
+                name: toolName,
+                kind,
+                description: readNonEmptyString(stripAnsi(options.decisionReason ?? ""))?.trim(),
+                ...buildClaudeQuestionPermissionSummary(toolName, input),
+                input: requestInput,
+                detail: toolDetail,
+                suggestions: options.suggestions?.map((suggestion) => ({
+                    ...suggestion,
+                })),
+                actions: kind === "plan" ? buildClaudePlanPermissionActions(this.planResumeMode) : undefined,
+                metadata: Object.keys(metadata).length ? metadata : undefined,
+            };
+            this.pushEvent({
+                type: "permission_requested",
+                provider: "claude",
+                request,
+            });
+            if (this.permissionClearingSteerUuids.size > 0) {
+                return this.resolveDeniedPermission(request, {
+                    behavior: "deny",
+                    message: STEER_SUPERSEDED_PERMISSION_MESSAGE,
+                });
+            }
+            return await new Promise((resolve, reject) => {
+                const cleanupFns = [];
+                const cleanup = () => {
+                    while (cleanupFns.length) {
+                        const fn = cleanupFns.pop();
+                        try {
+                            fn?.();
+                        }
+                        catch {
+                            // ignore cleanup errors
+                        }
+                    }
+                };
+                const abortHandler = () => {
+                    this.pendingPermissions.delete(requestId);
+                    cleanup();
+                    this.pushEvent({
+                        type: "permission_resolved",
+                        provider: "claude",
+                        requestId,
+                        resolution: { behavior: "deny", message: "Permission request canceled" },
+                    });
+                    reject(new Error("Permission request aborted"));
+                };
+                if (options?.signal) {
+                    if (options.signal.aborted) {
+                        abortHandler();
+                        return;
+                    }
+                    options.signal.addEventListener("abort", abortHandler, { once: true });
+                    cleanupFns.push(() => options.signal?.removeEventListener("abort", abortHandler));
+                }
+                this.pendingPermissions.set(requestId, {
+                    request,
+                    resolve,
+                    reject,
+                    cleanup,
+                });
+            });
+        };
+        // Observation-only, like the effort hooks: it never alters turn control.
+        this.observeStopHook = async (input) => {
+            if (input.hook_event_name === "Stop")
+                this.runtimeSafety.observeStop(input.session_crons);
+            return {};
+        };
+        this.config = config;
+        assertClaudeThinkingOptionSupported(config.model, config.thinkingOptionId);
+        this.launchEnv = options.launchEnv;
+        this.agentId = options.agentId;
+        this.defaults = options.defaults;
+        this.runtimeSettings = options.runtimeSettings;
+        this.harnessEnvironment = this.buildSdkEnv();
+        this.persistSession = options.persistSession;
+        this.logger = options.logger.child({ agentId: this.agentId });
+        this.queryFactory = options.queryFactory;
+        this.resolveBinary = options.resolveBinary;
+        this.rewindSdk = options.rewindSdk ?? realClaudeRewindSdk;
+        this.contextUsage = new ClaudeContextUsageState(getClaudeContextWindowMaxTokens(this.config.model));
+        const handle = options.handle;
+        if (handle) {
+            if (!handle.sessionId) {
+                throw new Error("Cannot resume: persistence handle has no sessionId");
+            }
+            this.claudeSessionId = handle.sessionId;
+            this.persistence = handle;
+            this.historySessionId = handle.sessionId;
+        }
+        else {
+            this.claudeSessionId = null;
+            this.persistence = null;
+        }
+        // Validate mode if provided
+        if (config.modeId && !VALID_CLAUDE_MODES.has(config.modeId)) {
+            const validModesList = Array.from(VALID_CLAUDE_MODES).join(", ");
+            throw new Error(`Invalid mode '${config.modeId}' for Claude provider. Valid modes: ${validModesList}`);
+        }
+        this.currentMode = isPermissionMode(config.modeId) ? config.modeId : "default";
+        if (this.currentMode !== "plan") {
+            this.planResumeMode = this.currentMode;
+        }
+        // Fast cannot run on this model, so the session opens with it off. Off rather than removed
+        // keeps a `config.json` default of `fast_mode: true` from filling it back in.
+        if (config.providerOptions.fast_mode === true && !claudeModelSupportsFastMode(config.model)) {
+            this.config.providerOptions = { ...config.providerOptions, fast_mode: false };
+            this.openOptionsPatch = { fast_mode: false };
+        }
+    }
+    get id() {
+        return this.claudeSessionId;
+    }
+    get controls() {
+        return buildClaudeControls(this.config.model);
+    }
+    async getRuntimeInfo() {
+        if (this.cachedRuntimeInfo) {
+            return { ...this.cachedRuntimeInfo };
+        }
+        const info = {
+            provider: "claude",
+            sessionId: this.claudeSessionId,
+            model: this.lastOptionsModel ?? this.config.model ?? null,
+            modeId: this.currentMode ?? null,
+            ...(this.lastRuntimeModel
+                ? {
+                    extra: {
+                        runtimeModel: this.lastRuntimeModel,
+                    },
+                }
+                : {}),
+        };
+        this.cachedRuntimeInfo = info;
+        return { ...info };
+    }
+    async run(prompt, options) {
+        const result = await runProviderTurn({
+            prompt,
+            runOptions: options,
+            startTurn: (p, o) => this.startTurn(p, o),
+            subscribe: (callback) => this.subscribe(callback),
+            getSessionId: () => this.claudeSessionId ?? "",
+            reduceFinalText: appendOrReplaceGrowingAssistantMessage,
+        });
+        this.cachedRuntimeInfo = {
+            provider: "claude",
+            sessionId: this.claudeSessionId,
+            model: this.lastOptionsModel,
+            modeId: this.currentMode ?? null,
+        };
+        if (!this.claudeSessionId) {
+            throw new Error("Session ID not set after run completed");
+        }
+        return result;
+    }
+    async startTurn(prompt, options) {
+        await this.ensureHistoryReady();
+        if (this.closed) {
+            throw new Error("Claude session is closed");
+        }
+        if (this.activeForegroundTurnId) {
+            throw new Error("A foreground turn is already active");
+        }
+        const slashCommand = this.resolveSlashCommandInvocation(prompt);
+        if (slashCommand?.commandName === REWIND_COMMAND_NAME) {
+            const turnId = this.createTurnId("foreground");
+            this.activeForegroundTurnId = turnId;
+            this.transitionTurnState("foreground", "rewind command");
+            void this.executeRewindTurn(turnId, slashCommand);
+            return { turnId };
+        }
+        if (this.autonomousTurn) {
+            this.completeAutonomousTurn();
+        }
+        const sdkMessage = this.toSdkUserMessage(prompt);
+        const sdkUserMessageId = typeof sdkMessage.uuid === "string" && sdkMessage.uuid.length > 0 ? sdkMessage.uuid : null;
+        this.rememberRewindUserAnchor(sdkUserMessageId);
+        const turnId = this.createTurnId("foreground");
+        this.activeForegroundTurnId = turnId;
+        this.notificationTurnId = null;
+        this.foregroundHasVisibleActivity = false;
+        this.activeTurnHasAssistantText = false;
+        this.withheldErrorReply = [];
+        this.contextUsage.beginTurn();
+        this.transitionTurnState("foreground", "foreground turn started");
+        this.clearRecentStderr();
+        if (sdkUserMessageId)
+            this.unstartedMessageUuids.add(sdkUserMessageId);
+        let cancelIssued = false;
+        const requestCancel = () => {
+            if (cancelIssued) {
+                return;
+            }
+            cancelIssued = true;
+            if (this.cancelCurrentTurn === requestCancel) {
+                this.cancelCurrentTurn = null;
+            }
+            // Whether Claude has this message in hand. A late idle from the previous turn can clear
+            // mainTurnInFlight after Claude started it, so the message's own lifecycle counts too.
+            const claudeStartedTurn = this.mainTurnInFlight ||
+                (sdkUserMessageId !== null && !this.unstartedMessageUuids.has(sdkUserMessageId));
+            this.rejectAllPendingPermissions(new Error("Permission request canceled"));
+            this.finishForegroundTurn({
+                type: "turn_canceled",
+                provider: "claude",
+                reason: "Interrupted",
+            });
+            void this.interruptActiveTurn(claudeStartedTurn).catch((error) => {
+                this.logger.warn({ err: error }, "Failed to interrupt during cancel");
+            });
+        };
+        this.cancelCurrentTurn = requestCancel;
+        this.notifySubscribers({ type: "turn_started", provider: "claude" });
+        try {
+            await this.ensureQuery();
+            if (cancelIssued) {
+                // Stopped while Claude was still starting up: withdrawn by never sending it.
+                if (sdkUserMessageId)
+                    this.unstartedMessageUuids.delete(sdkUserMessageId);
+                return { turnId };
+            }
+            if (!this.input) {
+                throw new Error("Claude session input stream not initialized");
+            }
+            this.activeForegroundQuery = this.query;
+            this.activeForegroundInput = this.input;
+            this.startQueryPump();
+            this.runtimeSafety.notePromptSent();
+            this.input.push(sdkMessage);
+            setTimeout(() => {
+                if (this.activeForegroundTurnId === turnId) {
+                    void this.emitSubmittedUserMessage(sdkMessage, turnId, options?.clientMessageId).catch((error) => {
+                        this.logger.warn({ err: error }, "Failed to emit submitted Claude message");
+                    });
+                }
+            }, 0);
+        }
+        catch (error) {
+            if (sdkUserMessageId)
+                this.unstartedMessageUuids.delete(sdkUserMessageId);
+            this.finishForegroundTurn(this.buildTurnFailedEvent(error instanceof Error ? error.message : "Claude stream failed"));
+        }
+        return { turnId };
+    }
+    async steerActiveTurn(prompt, options) {
+        if (this.resolveSlashCommandInvocation(prompt)) {
+            return { status: "unavailable" };
+        }
+        const activeTurnId = this.activeForegroundTurnId ?? this.autonomousTurn?.id;
+        // A compacting turn still takes a steer: Claude Code holds a `next` message until the
+        // compaction finishes. Refusing it makes the manager replace the turn, and that interrupt
+        // cancels the compaction.
+        if (activeTurnId !== options.expectedTurnId) {
+            return { status: "unavailable" };
+        }
+        // Capture both ends of the live SDK stream before creating or delivering the message. There
+        // is deliberately no await below: a finished A cannot make this input point at a later B.
+        const query = this.activeForegroundQuery;
+        const input = this.activeForegroundInput;
+        if (!query || !input || this.query !== query || this.input !== input) {
+            return { status: "unavailable" };
+        }
+        const message = this.toSdkUserMessage(prompt);
+        message.priority = "next";
+        if ((this.activeForegroundTurnId ?? this.autonomousTurn?.id) !== options.expectedTurnId ||
+            this.activeForegroundQuery !== query ||
+            this.activeForegroundInput !== input ||
+            this.query !== query ||
+            this.input !== input) {
+            return { status: "unavailable" };
+        }
+        this.enqueueSteer(input, message, options.clearPendingPermissions === true);
+        return { status: "accepted", ...(message.uuid ? { providerMessageId: message.uuid } : {}) };
+    }
+    enqueueSteer(input, message, clearPendingPermissions) {
+        const uuid = message.uuid;
+        if (uuid)
+            this.unstartedMessageUuids.add(uuid);
+        if (uuid && clearPendingPermissions) {
+            this.permissionClearingSteerUuids.add(uuid);
+        }
+        try {
+            input.push(message);
+            if (clearPendingPermissions) {
+                this.denyPendingPermissionsSupersededBySteer();
+            }
+        }
+        catch (error) {
+            if (uuid) {
+                this.unstartedMessageUuids.delete(uuid);
+                this.permissionClearingSteerUuids.delete(uuid);
+            }
+            throw error;
+        }
+    }
+    subscribe(callback) {
+        this.subscribers.add(callback);
+        return () => {
+            this.subscribers.delete(callback);
+        };
+    }
+    async stopBackgroundWork(id) {
+        const query = this.query;
+        if (!query || !this.runtimeSafety.canStop(id))
+            throw new Error("Background work is no longer available");
+        if (this.backgroundStops.has(id))
+            throw new Error("Stop is already pending");
+        let timer;
+        let finish;
+        const outcome = new Promise((resolve) => {
+            finish = resolve;
+            this.backgroundStops.set(id, resolve);
+        });
+        try {
+            const result = await Promise.race([
+                Promise.all([query.stopTask(id), outcome]).then(([, value]) => value),
+                outcome.then((value) => (value === "stopped" ? new Promise(() => { }) : value)),
+                new Promise((resolve) => {
+                    timer = setTimeout(() => resolve("timeout"), 15000);
+                }),
+            ]);
+            if (result !== "stopped")
+                throw new Error(`Background work stop: ${result}`);
+            if (this.query !== query)
+                throw new Error("Background work connection changed");
+        }
+        finally {
+            clearTimeout(timer);
+            if (this.backgroundStops.get(id) === finish)
+                this.backgroundStops.delete(id);
+        }
+    }
+    async interrupt() {
+        if (this.cancelCurrentTurn) {
+            this.cancelCurrentTurn();
+            return;
+        }
+        if (this.autonomousTurn) {
+            this.flushPendingToolCalls();
+            this.completeAutonomousTurn();
+        }
+        await this.interruptActiveTurn();
+    }
+    async *streamHistory() {
+        await this.ensureHistoryReady();
+        if (!this.historyPending ||
+            (this.persistedHistory.length === 0 && this.persistedProviderSubagentEvents.length === 0)) {
+            return;
+        }
+        const history = this.persistedHistory;
+        const providerSubagentEvents = this.persistedProviderSubagentEvents;
+        this.persistedHistory = [];
+        this.persistedProviderSubagentEvents = [];
+        this.historyPending = false;
+        let replayed = 0;
+        for (const entry of history) {
+            if (++replayed % 32 === 0)
+                await setImmediate();
+            yield {
+                type: "timeline",
+                item: entry.item,
+                provider: "claude",
+                timestamp: entry.timestamp,
+            };
+        }
+        yield* providerSubagentEvents;
+    }
+    async getAvailableModes() {
+        return this.availableModes;
+    }
+    async getCurrentMode() {
+        return this.currentMode ?? null;
+    }
+    async setMode(modeId) {
+        // Validate mode
+        if (!VALID_CLAUDE_MODES.has(modeId)) {
+            const validModesList = Array.from(VALID_CLAUDE_MODES).join(", ");
+            throw new Error(`Invalid mode '${modeId}' for Claude provider. Valid modes: ${validModesList}`);
+        }
+        const normalized = isPermissionMode(modeId) ? modeId : "default";
+        assertClaudeModeCanRun(normalized, this.harnessEnvironment);
+        const previousMode = this.currentMode;
+        const previousQuery = this.query;
+        const activeQuery = await this.ensureQuery(normalized);
+        try {
+            await activeQuery.setPermissionMode(normalized);
+        }
+        catch (error) {
+            // The query was launched in the rejected mode; relaunch in the current mode next time.
+            if (activeQuery !== previousQuery)
+                this.queryRestartNeeded = true;
+            throw error;
+        }
+        if (normalized === "plan") {
+            if (previousMode !== "plan") {
+                this.planResumeMode = previousMode;
+            }
+        }
+        else {
+            this.planResumeMode = normalized;
+        }
+        this.currentMode = normalized;
+    }
+    async setModel(modelId) {
+        const normalizedModelId = typeof modelId === "string" && modelId.trim().length > 0 ? modelId.trim() : null;
+        const activeQuery = await this.ensureQuery();
+        await activeQuery.setModel(normalizedModelId ?? undefined);
+        this.config.model = normalizedModelId ?? undefined;
+        this.reconcileThinkingOptionForModel(normalizedModelId);
+        if (this.config.providerOptions.fast_mode) {
+            const supported = claudeModelSupportsFastMode(this.config.model);
+            await activeQuery.applyFlagSettings({ fastMode: supported });
+            if (!supported) {
+                // Fast cannot run on this model. Reporting it off rather than removed keeps a
+                // `config.json` default of `fast_mode: true` from filling it back in.
+                this.config.providerOptions = { ...this.config.providerOptions, fast_mode: false };
+                this.pushEvent({
+                    type: "options_changed",
+                    provider: "claude",
+                    patch: { fast_mode: false },
+                });
+            }
+            this.cachedRuntimeInfo = null;
+        }
+        this.contextUsage.setInitialContextWindowMaxTokens(getClaudeContextWindowMaxTokens(this.config.model));
+        this.lastOptionsModel = normalizedModelId ?? this.lastOptionsModel;
+        this.lastRuntimeModel = null;
+        this.cachedRuntimeInfo = null;
+        // Model change affects persistence metadata, so invalidate cached handle.
+        this.persistence = null;
+        return { model: this.lastOptionsModel ?? this.config.model ?? null };
+    }
+    reconcileThinkingOptionForModel(modelId) {
+        const thinkingOptionId = this.config.thinkingOptionId;
+        if (thinkingOptionId !== CLAUDE_DISABLED_THINKING_OPTION_ID) {
+            return;
+        }
+        const resolution = resolveClaudeDisabledThinkingForModel(modelId);
+        if (resolution.supported) {
+            return;
+        }
+        this.config.thinkingOptionId = resolution.fallbackThinkingOptionId;
+        this.queryRestartNeeded = true;
+        this.pushEvent({
+            type: "thinking_option_changed",
+            provider: "claude",
+            thinkingOptionId: this.config.thinkingOptionId ?? null,
+        });
+    }
+    async setThinkingOption(thinkingOptionId) {
+        const normalizedThinkingOptionId = typeof thinkingOptionId === "string" && thinkingOptionId.trim().length > 0
+            ? thinkingOptionId
+            : null;
+        if (!normalizedThinkingOptionId || normalizedThinkingOptionId === "default") {
+            this.config.thinkingOptionId = undefined;
+        }
+        else if (isClaudeThinkingOption(normalizedThinkingOptionId)) {
+            assertClaudeThinkingOptionSupported(this.config.model, normalizedThinkingOptionId);
+            this.config.thinkingOptionId = normalizedThinkingOptionId;
+        }
+        else {
+            throw new Error(`Unknown thinking option: ${normalizedThinkingOptionId}`);
+        }
+        this.queryRestartNeeded = true;
+        if (this.activeForegroundTurnId || this.autonomousTurn) {
+            return THINKING_APPLIES_NEXT_TURN_NOTICE;
+        }
+    }
+    async applyOptions(options) {
+        // Every option but Fast is read when the query is built, and replacing a started query would
+        // end its background work, so once it exists only Fast can change.
+        if (this.query || this.queryStarting) {
+            assertChangesAreLive({
+                provider: "claude",
+                patch: options,
+                current: this.config.providerOptions,
+                live: ["fast_mode"],
+            });
+        }
+        const providerOptions = validateProviderOptions("claude", ClaudeProviderOptionsSchema, applyProviderOptionsPatch({ options: this.config.providerOptions, patch: options })) ?? {};
+        if (providerOptions.fast_mode === true && !claudeModelSupportsFastMode(this.config.model)) {
+            throw new Error(`Claude fast mode is not available for model '${this.config.model ?? "default"}'`);
+        }
+        const fastModeChanged = (providerOptions.fast_mode === true) !== (this.config.providerOptions.fast_mode === true);
+        if (fastModeChanged) {
+            await this.query?.applyFlagSettings({ fastMode: providerOptions.fast_mode === true });
+            this.cachedRuntimeInfo = null;
+        }
+        // Held until the runtime accepts, so a rejected change is retried instead of skipped.
+        this.config.providerOptions = providerOptions;
+    }
+    getPendingPermissions() {
+        return Array.from(this.pendingPermissions.values()).map((entry) => entry.request);
+    }
+    /**
+     * Settle the original call immediately, before waiting for the SDK tool result.
+     * Plan resolution must use the native call ID so it cannot move past a follow-up.
+     */
+    recordDeniedPermissionTimeline(request, response) {
+        if (request.kind === "tool") {
+            this.pushToolCall(mapClaudeFailedToolCall({
+                name: request.name,
+                callId: (typeof request.metadata?.toolUseId === "string" ? request.metadata.toolUseId : null) ??
+                    request.id,
+                input: request.input ?? null,
+                output: null,
+                error: { message: response.message ?? "Permission denied" },
+            }));
+            return;
+        }
+        if (request.kind === "plan") {
+            this.pushToolCall(mapClaudeFailedToolCall({
+                name: "ExitPlanMode",
+                callId: this.planToolCallId(request),
+                input: request.input,
+                error: response.message ?? "Permission denied",
+                metadata: { actionId: response.selectedActionId ?? "reject" },
+            }));
+        }
+    }
+    planToolCallId(request) {
+        return typeof request.metadata?.toolUseId === "string"
+            ? request.metadata.toolUseId
+            : request.id;
+    }
+    resolveDeniedPermission(request, response) {
+        this.recordDeniedPermissionTimeline(request, response);
+        this.pushEvent({
+            type: "permission_resolved",
+            provider: "claude",
+            requestId: request.id,
+            resolution: response,
+        });
+        return {
+            behavior: "deny",
+            message: response.message ?? "Permission request denied",
+            interrupt: response.interrupt,
+        };
+    }
+    denyPendingPermissionsSupersededBySteer() {
+        for (const [requestId, pending] of this.pendingPermissions) {
+            this.pendingPermissions.delete(requestId);
+            pending.cleanup?.();
+            pending.resolve(this.resolveDeniedPermission(pending.request, {
+                behavior: "deny",
+                message: STEER_SUPERSEDED_PERMISSION_MESSAGE,
+            }));
+        }
+    }
+    async respondToPermission(requestId, response) {
+        const pending = this.pendingPermissions.get(requestId);
+        if (!pending) {
+            throw new Error(`No pending permission request with id '${requestId}'`);
+        }
+        // Before the delete below, so a rejected answer leaves the request pending
+        // and answerable rather than consuming it for nothing. AgentManager only
+        // drops its own copy once this resolves, so both maps survive the throw.
+        assertClaudeQuestionAnswerDeliverable(pending.request, response);
+        this.pendingPermissions.delete(requestId);
+        pending.cleanup?.();
+        if (response.behavior === "allow") {
+            if (pending.request.kind === "plan") {
+                const selectedActionId = response.selectedActionId;
+                const resumeMode = this.planResumeMode;
+                const shouldResumePriorMode = selectedActionId === "implement_resume" &&
+                    (resumeMode === "bypassPermissions" || resumeMode === "auto");
+                const targetMode = shouldResumePriorMode ? resumeMode : "acceptEdits";
+                await this.setMode(targetMode);
+                this.pushToolCall(mapClaudeCompletedToolCall({
+                    name: "ExitPlanMode",
+                    callId: this.planToolCallId(pending.request),
+                    input: pending.request.input ?? null,
+                    output: {
+                        approved: true,
+                        actionId: selectedActionId ?? "implement",
+                    },
+                }));
+            }
+            const updatedInput = pending.request.kind === "question"
+                ? normalizeClaudeAskUserQuestionUpdatedInput(response.updatedInput, pending.request.input ?? undefined)
+                : (response.updatedInput ?? pending.request.input ?? {});
+            const result = {
+                behavior: "allow",
+                updatedInput,
+                updatedPermissions: this.normalizePermissionUpdates(response.updatedPermissions),
+            };
+            pending.resolve(result);
+        }
+        else {
+            pending.resolve(this.resolveDeniedPermission(pending.request, response));
+            return;
+        }
+        this.pushEvent({
+            type: "permission_resolved",
+            provider: "claude",
+            requestId,
+            resolution: response,
+        });
+    }
+    describePersistence() {
+        if (this.persistence) {
+            return this.persistence;
+        }
+        if (!this.claudeSessionId) {
+            return null;
+        }
+        const { providerOptions: _providerOptions, ...persistedConfig } = this.config;
+        this.persistence = {
+            provider: "claude",
+            sessionId: this.claudeSessionId,
+            nativeHandle: this.claudeSessionId,
+            metadata: { ...persistedConfig },
+        };
+        return this.persistence;
+    }
+    async canStopRuntime() {
+        return (!this.activeForegroundTurnId &&
+            !this.autonomousTurn &&
+            !this.mainTurnInFlight &&
+            this.unstartedMessageUuids.size === 0 &&
+            this.pendingPermissions.size === 0 &&
+            this.processingSdkMessages === 0 &&
+            this.runtimeSafety.canStopRuntime());
+    }
+    async close() {
+        this.logger.trace({
+            agentId: this.agentId,
+            provider: "claude",
+            sessionId: this.claudeSessionId,
+            turnId: this.activeForegroundTurnId ?? this.autonomousTurn?.id ?? undefined,
+            turnState: this.turnState,
+            hasQuery: Boolean(this.query),
+            hasInput: Boolean(this.input),
+            hasActiveForegroundTurnId: Boolean(this.activeForegroundTurnId),
+        }, "provider.claude.session_close.start");
+        this.closed = true;
+        await this.ensureHistoryReady();
+        this.rejectAllPendingPermissions(new Error("Claude session closed"));
+        // AgentManager settles the run after runtime release. Preserve cleanup records
+        // without reporting this closure as an explicit turn cancellation.
+        this.flushPendingToolCalls();
+        this.subscribers.clear();
+        this.activeForegroundTurnId = null;
+        this.activeForegroundQuery = null;
+        this.activeForegroundInput = null;
+        this.autonomousTurn = null;
+        this.notificationTurnId = null;
+        this.cancelCurrentTurn = null;
+        this.turnState = "idle";
+        this.sidechainTracker.clear();
+        this.settledSubagentToolCalls.clear();
+        this.taskProtocolSource.reset();
+        this.input?.end();
+        this.query?.close?.();
+        // close() already terminates the SDK query. Its control plane is no longer
+        // available; waiting for interrupt/return here delays our process-tree cleanup
+        // beyond the daemon's close deadline when the provider stops answering.
+        this.query = null;
+        this.input = null;
+        // Terminate the entire process tree (claude + MCP children) to prevent
+        // orphan accumulation. The SDK's internal cleanup may only kill the
+        // direct child process.
+        if (this.childProcess) {
+            const result = await terminateWithTreeKill(this.childProcess, {
+                gracefulTimeoutMs: 2000,
+                forceTimeoutMs: 2000,
+            });
+            if (result === "kill-timeout") {
+                this.logger.warn({ pid: this.childProcess.pid, agentId: this.agentId }, "Claude process tree did not report exit after SIGKILL");
+            }
+            this.childProcess = null;
+        }
+        if (this.persistSession === false && this.claudeSessionId) {
+            // Claude Code currently ignores --no-session-persistence outside --print mode
+            // (see `claude --help`), so the SDK's persistSession=false is silently dropped
+            // in stream-json mode. Sweep the transcript ourselves so ephemeral runs
+            // (metadata generator, branch-name generator) don't show up as resumable.
+            const historyPath = await this.resolveHistoryPath(this.claudeSessionId);
+            if (historyPath) {
+                try {
+                    await promises.rm(historyPath, { force: true });
+                }
+                catch (error) {
+                    this.logger.warn({ err: error, historyPath, claudeSessionId: this.claudeSessionId }, "Failed to delete ephemeral Claude session transcript");
+                }
+            }
+        }
+        this.logger.trace({
+            agentId: this.agentId,
+            provider: "claude",
+            sessionId: this.claudeSessionId,
+            turnState: this.turnState,
+        }, "provider.claude.session_close.complete");
+    }
+    async listCommands() {
+        const q = await this.ensureQuery();
+        const commands = await q.supportedCommands();
+        const commandMap = new Map();
+        for (const cmd of commands) {
+            if (isClaudeInternalSlashCommand(cmd.name))
+                continue;
+            if (!commandMap.has(cmd.name)) {
+                commandMap.set(cmd.name, {
+                    name: cmd.name,
+                    description: cmd.description,
+                    argumentHint: cmd.argumentHint,
+                    kind: classifyClaudeSlashCommand(cmd.name),
+                });
+            }
+        }
+        if (!commandMap.has(REWIND_COMMAND_NAME)) {
+            commandMap.set(REWIND_COMMAND_NAME, REWIND_COMMAND);
+        }
+        return Array.from(commandMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+    }
+    async revertConversation(input) {
+        await this.ensureHistoryReady();
+        const target = await this.resolveConversationRewindTarget(input.messageId);
+        if (target.kind === "fresh-session") {
+            this.startFreshConversationSession();
+            return;
+        }
+        const currentSessionId = this.claudeSessionId;
+        await revertClaudeConversation({
+            sdk: this.rewindSdk,
+            sessionId: currentSessionId,
+            transcriptPath: currentSessionId ? await this.resolveHistoryPath(currentSessionId) : null,
+            messageId: target.messageId,
+            resolveMessageId: (messageId) => this.resolveClaudeMessageId(messageId),
+            setSessionId: (sessionId) => this.rebindConversationSession(sessionId),
+        });
+    }
+    async revertFiles(input) {
+        await this.ensureHistoryReady();
+        const messageId = await this.resolveClaudeMessageId(input.messageId);
+        await revertClaudeFiles({
+            query: await this.ensureQuery(),
+            messageId,
+        });
+    }
+    async revertBoth(input) {
+        await this.revertFiles(input);
+        await this.revertConversation(input);
+    }
+    resolveSlashCommandInvocation(prompt) {
+        if (typeof prompt !== "string") {
+            return null;
+        }
+        const parsed = this.parseSlashCommandInput(prompt);
+        if (!parsed) {
+            return null;
+        }
+        return parsed.commandName === REWIND_COMMAND_NAME ||
+            CLAUDE_ROOT_ONLY_COMMANDS.has(parsed.commandName)
+            ? parsed
+            : null;
+    }
+    parseSlashCommandInput(text) {
+        const trimmed = text.trim();
+        if (!trimmed.startsWith("/") || trimmed.length <= 1) {
+            return null;
+        }
+        const withoutPrefix = trimmed.slice(1);
+        const firstWhitespaceIdx = withoutPrefix.search(/\s/);
+        const commandName = firstWhitespaceIdx === -1 ? withoutPrefix : withoutPrefix.slice(0, firstWhitespaceIdx);
+        if (!commandName || commandName.includes("/")) {
+            return null;
+        }
+        const rawArgs = firstWhitespaceIdx === -1 ? "" : withoutPrefix.slice(firstWhitespaceIdx + 1).trim();
+        return rawArgs.length > 0
+            ? { commandName, args: rawArgs, rawInput: trimmed }
+            : { commandName, rawInput: trimmed };
+    }
+    buildRewindSuccessMessage(targetUserMessageId, rewindResult) {
+        const fileCount = Array.isArray(rewindResult.filesChanged)
+            ? rewindResult.filesChanged.length
+            : undefined;
+        const stats = [];
+        if (typeof fileCount === "number") {
+            stats.push(`${fileCount} file${fileCount === 1 ? "" : "s"}`);
+        }
+        if (typeof rewindResult.insertions === "number") {
+            stats.push(`${rewindResult.insertions} insertions`);
+        }
+        if (typeof rewindResult.deletions === "number") {
+            stats.push(`${rewindResult.deletions} deletions`);
+        }
+        if (stats.length > 0) {
+            return `Rewound tracked files to message ${targetUserMessageId} (${stats.join(", ")}).`;
+        }
+        return `Rewound tracked files to message ${targetUserMessageId}.`;
+    }
+    async attemptRewind(args) {
+        if (typeof args === "string" && args.trim().length > 0) {
+            const candidate = args.trim().split(/\s+/)[0] ?? "";
+            if (!UUID_PATTERN.test(candidate)) {
+                return {
+                    messageId: null,
+                    error: "Invalid message UUID. Usage: /rewind <user_message_uuid> or /rewind",
+                };
+            }
+            const rewindResult = await this.rewindFilesOnce(candidate);
+            if (rewindResult.canRewind) {
+                return { messageId: candidate, result: rewindResult };
+            }
+            return {
+                messageId: null,
+                error: rewindResult.error ?? `No file checkpoint found for message ${candidate}.`,
+            };
+        }
+        const candidates = this.getRewindCandidateUserMessageIds();
+        if (candidates.length === 0) {
+            return {
+                messageId: null,
+                error: "No prior user message available to rewind. Use /rewind <user_message_uuid>.",
+            };
+        }
+        let lastError;
+        for (const candidate of candidates) {
+            try {
+                const rewindResult = await this.rewindFilesOnce(candidate);
+                if (rewindResult.canRewind) {
+                    return { messageId: candidate, result: rewindResult };
+                }
+                if (rewindResult.error) {
+                    lastError = rewindResult.error;
+                }
+            }
+            catch (error) {
+                lastError = error instanceof Error ? error.message : "Failed to rewind tracked files.";
+            }
+        }
+        return {
+            messageId: null,
+            error: lastError ?? "No rewind checkpoints are currently available for this session.",
+        };
+    }
+    async rewindFilesOnce(messageId) {
+        try {
+            const activeQuery = await this.ensureFreshQuery();
+            return await activeQuery.rewindFiles(messageId, { dryRun: false });
+        }
+        catch (error) {
+            // The Claude SDK transport can close after a rewind call.
+            // If that happens, mark the query stale so a follow-up attempt uses a fresh query.
+            this.queryRestartNeeded = true;
+            throw error;
+        }
+    }
+    async ensureFreshQuery() {
+        if (this.query) {
+            this.queryRestartNeeded = true;
+        }
+        return this.ensureQuery();
+    }
+    getRewindCandidateUserMessageIds() {
+        const candidates = [];
+        const pushUnique = (value) => {
+            if (typeof value === "string" && value.length > 0 && !candidates.includes(value)) {
+                candidates.push(value);
+            }
+        };
+        for (let idx = this.persistedHistory.length - 1; idx >= 0; idx -= 1) {
+            const entry = this.persistedHistory[idx];
+            if (entry?.item.type === "user_message") {
+                pushUnique(entry.item.messageId);
+            }
+        }
+        for (let idx = this.userMessageIds.length - 1; idx >= 0; idx -= 1) {
+            pushUnique(this.userMessageIds[idx]);
+        }
+        return candidates;
+    }
+    rebindConversationSession(sessionId) {
+        const previousReady = this.ensureHistoryReady();
+        const rebind = (async () => {
+            await previousReady;
+            await this.retireQuery();
+            if (this.closed)
+                return;
+            const oldSessionId = this.claudeSessionId;
+            this.claudeSessionId = sessionId;
+            this.pendingFreshSessionId = null;
+            this.persistence = null;
+            this.cachedRuntimeInfo = null;
+            this.queryRestartNeeded = true;
+            this.persistedHistory = [];
+            this.persistedProviderSubagentEvents = [];
+            this.historyPending = false;
+            this.userMessageIds = [];
+            this.emittedUserMessageIds.clear();
+            this.rewindTurnAnchors.length = 0;
+            this.taskState.reset();
+            this.historySessionId = sessionId;
+            await this.loadPersistedHistory(sessionId);
+            if (this.closed)
+                return;
+            if (oldSessionId && oldSessionId !== sessionId) {
+                this.dispatchEvents([
+                    {
+                        type: "timeline",
+                        provider: "claude",
+                        item: this.createClaudeSessionChangedNotice(oldSessionId, sessionId),
+                    },
+                    {
+                        type: "thread_started",
+                        provider: "claude",
+                        sessionId,
+                    },
+                ]);
+            }
+        })();
+        this.historyReady = rebind.catch((error) => {
+            this.logger.warn({ err: error, sessionId }, "Failed to rebind Claude session");
+        });
+        return rebind;
+    }
+    startFreshConversationSession() {
+        this.historySessionId = null;
+        this.historyReady = Promise.resolve();
+        const sessionId = randomUUID();
+        this.claudeSessionId = sessionId;
+        this.pendingFreshSessionId = sessionId;
+        this.persistence = null;
+        this.cachedRuntimeInfo = null;
+        this.queryRestartNeeded = true;
+        this.persistedHistory = [];
+        this.persistedProviderSubagentEvents = [];
+        this.historyPending = false;
+        this.userMessageIds = [];
+        this.emittedUserMessageIds.clear();
+        this.rewindTurnAnchors.length = 0;
+        this.taskState.reset();
+    }
+    rememberUserMessageId(messageId) {
+        if (typeof messageId !== "string" || messageId.length === 0) {
+            return;
+        }
+        const last = this.userMessageIds[this.userMessageIds.length - 1];
+        if (last === messageId) {
+            return;
+        }
+        this.userMessageIds.push(messageId);
+    }
+    rememberEmittedUserMessageId(messageId) {
+        if (typeof messageId !== "string" || messageId.length === 0) {
+            return;
+        }
+        this.emittedUserMessageIds.add(messageId);
+    }
+    rememberRewindUserAnchor(userMessageId) {
+        if (typeof userMessageId !== "string" || userMessageId.length === 0) {
+            return;
+        }
+        if (this.rewindTurnAnchors.some((anchor) => anchor.userMessageId === userMessageId)) {
+            return;
+        }
+        this.rewindTurnAnchors.push({
+            userMessageId,
+            assistantMessageId: null,
+        });
+    }
+    rememberRewindAssistantAnchor(assistantMessageId) {
+        if (typeof assistantMessageId !== "string" || assistantMessageId.length === 0) {
+            return;
+        }
+        for (let index = this.rewindTurnAnchors.length - 1; index >= 0; index -= 1) {
+            const anchor = this.rewindTurnAnchors[index];
+            if (!anchor) {
+                continue;
+            }
+            anchor.assistantMessageId = assistantMessageId;
+            return;
+        }
+    }
+    rememberTranscriptProgress(message, messageId) {
+        if (!messageId) {
+            return;
+        }
+        // Subagent frames ride the same stream as the conversation, but their uuids live on the
+        // subagent's sidechain, so forkSession cannot resolve one. Anchoring a turn on one leaves
+        // rewind throwing "Message <uuid> not found in session". The persisted history path already
+        // skips sidechain entries; the live stream has to skip them too.
+        if (readClaudeParentToolUseId(message)) {
+            return;
+        }
+        if (message.type === "user" &&
+            !isSyntheticUserEntry(message) &&
+            !isToolResultUserEntry(message)) {
+            this.rememberRewindUserAnchor(messageId);
+            return;
+        }
+        if (message.type === "assistant") {
+            this.rememberRewindAssistantAnchor(messageId);
+            return;
+        }
+        if (message.type === "stream_event") {
+            const event = toObjectRecord(message.event) ?? {};
+            const eventType = readTrimmedString(event.type);
+            if (eventType === "message_start") {
+                this.rememberRewindAssistantAnchor(messageId);
+            }
+            return;
+        }
+    }
+    resolveClaudeMessageId(messageId) {
+        return messageId;
+    }
+    async resolveConversationRewindTarget(messageId) {
+        const targetUserMessageId = this.resolveClaudeMessageId(messageId);
+        const index = this.rewindTurnAnchors.findIndex((anchor) => anchor.userMessageId === targetUserMessageId);
+        if (index < 0) {
+            // A message steered into a running turn opens no turn of its own.
+            const transcriptPath = this.claudeSessionId
+                ? await this.resolveHistoryPath(this.claudeSessionId)
+                : null;
+            const steerParent = transcriptPath
+                ? await findSteeredMessageParent(transcriptPath, targetUserMessageId)
+                : null;
+            if (steerParent) {
+                return { kind: "fork", messageId: steerParent };
+            }
+            throw new Error(`Claude rewind target ${messageId} is not in the tracked conversation`);
+        }
+        // A turn the model never answered — an instant gateway error, or an abort before the first
+        // token — leaves its anchor without an assistant id, and carries no conversation state worth
+        // preserving. Fork at the most recent turn before the target that did answer. Reading only
+        // the immediately preceding anchor let one such turn fail every later rewind in the
+        // conversation.
+        for (let previous = index - 1; previous >= 0; previous -= 1) {
+            const assistantMessageId = this.rewindTurnAnchors[previous]?.assistantMessageId;
+            if (assistantMessageId) {
+                return { kind: "fork", messageId: assistantMessageId };
+            }
+        }
+        return { kind: "fresh-session" };
+    }
+    async retireQuery() {
+        const oldQuery = this.query;
+        if (!oldQuery)
+            return;
+        const oldInput = this.input;
+        for (const finish of this.backgroundStops.values())
+            finish("connection lost");
+        // Null out query/input BEFORE awaiting the old iterator's return so the
+        // old pump sees this.query !== activeQuery and skips failActiveTurns.
+        this.query = null;
+        this.input = null;
+        this.queryPumpPromise = null;
+        this.queryRestartNeeded = false;
+        // Ending the input retires the process on purpose. Detach first so its
+        // exit is not reported as a crash.
+        const retiredChild = this.childProcess;
+        this.childProcess = null;
+        if (retiredChild)
+            this.failRunningRuntimeTasks();
+        oldInput?.end();
+        oldQuery.close?.();
+        try {
+            await oldQuery.return?.();
+        }
+        catch {
+            /* ignore */
+        }
+        // Tree-kill the old process tree now that the SDK has cleaned up.
+        // If we skip this, MCP children of the previous claude process can
+        // survive as orphans when the session spawns a replacement query.
+        if (retiredChild) {
+            await terminateWithTreeKill(retiredChild, {
+                gracefulTimeoutMs: 2000,
+                forceTimeoutMs: 2000,
+            }).catch(() => {
+                /* process may already be dead */
+            });
+        }
+    }
+    async ensureQuery(launchMode = this.currentMode) {
+        await this.ensureHistoryReady();
+        // Controls use the running turn's query. Pending launch settings take effect
+        // after that turn finishes, when its active query handle has been cleared.
+        if (this.query && (!this.queryRestartNeeded || this.activeForegroundQuery === this.query)) {
+            return this.query;
+        }
+        if (this.queryRestartNeeded && this.query) {
+            await this.retireQuery();
+        }
+        // Preserve claudeSessionId across query recreation so buildOptions() passes
+        // resume: sessionId and the new query continues the existing conversation.
+        this.persistence = null;
+        const input = createAsyncMessageInput();
+        // buildOptions copies the launch options before it waits, so from here they are fixed.
+        this.queryStarting = true;
+        let options;
+        try {
+            options = await this.buildOptions(launchMode);
+            // Closure can finish while launch options are being prepared.
+            if (this.closed)
+                throw new Error("Claude session is closed");
+        }
+        catch (error) {
+            this.queryStarting = false;
+            throw error;
+        }
+        this.logger.debug({ options: summarizeClaudeOptionsForLog(options) }, "claude query");
+        this.input = input;
+        this.runtimeSafety.reset();
+        this.dispatchEvents([{ type: "background_work", provider: "claude", items: null }]);
+        // A fresh Claude process has no turn of its own in flight.
+        this.mainTurnInFlight = false;
+        this.query = claudeQuery({ prompt: input.iterable, options }, {
+            runtimeSettings: this.runtimeSettings,
+            launchEnv: this.launchEnv,
+            queryFactory: this.queryFactory,
+            onChildProcess: (child) => {
+                this.childProcess = child;
+                child.once("exit", (code, signal) => this.handleRuntimeExit(child, code, signal));
+            },
+        });
+        this.queryStarting = false;
+        const fastMode = this.resolveFastModeSetting();
+        if (fastMode !== null) {
+            await this.query.applyFlagSettings({ fastMode });
+        }
+        // Do not kick off background control-plane queries here. Methods like
+        // supportedCommands()/setPermissionMode() may execute immediately after
+        // ensureQuery() (for listCommands()/setMode()), and sharing the same query
+        // control plane can cause those calls to wait behind supportedModels().
+        return this.query;
+    }
+    async awaitWithTimeout(promise, label) {
+        if (!promise) {
+            this.logger.trace({
+                agentId: this.agentId,
+                provider: "claude",
+                sessionId: this.claudeSessionId,
+                turnId: this.activeForegroundTurnId ?? this.autonomousTurn?.id ?? undefined,
+                label,
+            }, "provider.claude.query_operation.skip");
+            return;
+        }
+        const startedAt = Date.now();
+        this.logger.trace({
+            agentId: this.agentId,
+            provider: "claude",
+            sessionId: this.claudeSessionId,
+            turnId: this.activeForegroundTurnId ?? this.autonomousTurn?.id ?? undefined,
+            label,
+        }, "provider.claude.query_operation.start");
+        try {
+            await withTimeout(promise, 3000, "timeout");
+            this.logger.trace({
+                agentId: this.agentId,
+                provider: "claude",
+                sessionId: this.claudeSessionId,
+                turnId: this.activeForegroundTurnId ?? this.autonomousTurn?.id ?? undefined,
+                label,
+                durationMs: Date.now() - startedAt,
+            }, "provider.claude.query_operation.settled");
+        }
+        catch (error) {
+            this.logger.warn({ err: error, label }, "Claude query operation did not settle cleanly");
+        }
+    }
+    resolveThinkingConfig() {
+        const thinkingOptionId = this.config.thinkingOptionId && this.config.thinkingOptionId !== "default"
+            ? this.config.thinkingOptionId
+            : undefined;
+        assertClaudeThinkingOptionSupported(this.config.model, thinkingOptionId);
+        if (thinkingOptionId === CLAUDE_DISABLED_THINKING_OPTION_ID) {
+            return { thinking: { type: "disabled" }, effort: undefined, ultracode: false };
+        }
+        if (thinkingOptionId === CLAUDE_ULTRACODE_THINKING_OPTION_ID) {
+            return {
+                thinking: { type: "adaptive", display: "summarized" },
+                effort: "xhigh",
+                ultracode: true,
+            };
+        }
+        if (thinkingOptionId && isClaudeThinkingEffort(thinkingOptionId)) {
+            return {
+                thinking: { type: "adaptive", display: "summarized" },
+                effort: thinkingOptionId,
+                ultracode: false,
+            };
+        }
+        return { thinking: undefined, effort: undefined, ultracode: false };
+    }
+    buildAppendedSystemPrompt() {
+        return (composeSystemPromptParts(this.config.systemPrompt, this.config.daemonAppendSystemPrompt) ?? "");
+    }
+    usageSession() {
+        if (this.closed)
+            return null;
+        return {
+            provider: "claude",
+            model: this.config.model,
+            env: this.harnessEnvironment,
+            sessionKey: this.usageSessionKey,
+        };
+    }
+    buildSdkEnv() {
+        return createProviderEnv({
+            baseEnv: process.env,
+            runtimeSettings: this.runtimeSettings,
+            overlays: [
+                this.launchEnv,
+                // Makes the CLI announce session_state_changed, whose "idle" is the safety net that closes
+                // an autonomous turn (see consumeSessionStateChange).
+                { CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1" },
+            ],
+        });
+    }
+    async buildOptions(permissionMode) {
+        const { thinking, effort, ultracode } = this.resolveThinkingConfig();
+        const appendedSystemPrompt = this.buildAppendedSystemPrompt();
+        // `fast_mode` is a composer control the provider applies through flag settings.
+        const { fast_mode: _fastMode, ...sdkProviderOptions } = this.config.providerOptions;
+        const providerOptions = applyClaudeToolPolicy(sdkProviderOptions, this.config.toolPolicy);
+        const settingsOptions = await this.buildSettingsOptions(providerOptions, { ultracode });
+        const sdkEnv = this.harnessEnvironment;
+        assertClaudeModeCanRun(permissionMode, sdkEnv);
+        const claudeBinary = await this.resolveBinary();
+        this.logger.debug({
+            claudeBinary,
+            pathEnvKey: resolvePathEnvKey(),
+            pathIncludesClaudeLocalBin: (process.env["Path"] ?? process.env["PATH"] ?? "")
+                .toLowerCase()
+                .includes("\\.local\\bin"),
+        }, "Resolved Claude executable");
+        const sessionBinding = {};
+        if (this.pendingFreshSessionId) {
+            sessionBinding.sessionId = this.pendingFreshSessionId;
+        }
+        else if (this.claudeSessionId) {
+            sessionBinding.resume = this.claudeSessionId;
+        }
+        const base = {
+            cwd: this.config.cwd,
+            includePartialMessages: true,
+            permissionMode,
+            // Dynamic mode switching can recreate the underlying Claude query. Keep the
+            // bypass launch capability available so later setPermissionMode("bypassPermissions")
+            // calls do not fail after a model/thinking/rewind-driven restart.
+            allowDangerouslySkipPermissions: true,
+            agents: this.defaults?.agents,
+            canUseTool: this.handlePermissionRequest,
+            pathToClaudeCodeExecutable: claudeBinary,
+            // Use Claude Code preset system prompt and load CLAUDE.md files
+            // Append provider-agnostic system prompts for agents.
+            systemPrompt: {
+                type: "preset",
+                preset: "claude_code",
+                append: appendedSystemPrompt,
+            },
+            settingSources: CLAUDE_SETTING_SOURCES,
+            stderr: (data) => {
+                this.captureStderr(data);
+                this.logger.error({ stderr: data.trim() }, "Claude Agent SDK stderr");
+            },
+            // Required for provider-level /rewind support.
+            enableFileCheckpointing: true,
+            // If we have a session ID from a previous query (e.g., after interrupt),
+            // resume that session to continue the conversation history.
+            ...sessionBinding,
+            ...(thinking ? { thinking } : {}),
+            ...(effort ? { effort } : {}),
+            ...providerOptions,
+            ...settingsOptions,
+            // Provider subagent panes render the child's nested transcript.
+            forwardSubagentText: true,
+            // Stop and replace abort only the main turn, like Esc in Claude Code, and background
+            // subagents keep running. Without this declaration an interrupt kills every one of them.
+            // Claude stops a helper itself with its TaskStop tool.
+            perTaskStopAffordance: true,
+            hooks: { ...this.buildSubagentEffortHooks(), Stop: [{ hooks: [this.observeStopHook] }] },
+            ...(this.persistSession === undefined ? {} : { persistSession: this.persistSession }),
+            env: sdkEnv,
+        };
+        if (this.config.mcpServers) {
+            base.mcpServers = this.normalizeMcpServers(this.config.mcpServers);
+        }
+        if (this.config.model) {
+            base.model = this.config.model;
+        }
+        this.lastOptionsModel = base.model ?? null;
+        if (this.claudeSessionId && !this.pendingFreshSessionId) {
+            base.resume = this.claudeSessionId;
+        }
+        if (this.runtimeSettings?.disallowedTools?.length) {
+            base.disallowedTools = [
+                ...(base.disallowedTools ?? []),
+                ...this.runtimeSettings.disallowedTools,
+            ];
+        }
+        return base;
+    }
+    async buildSettingsOptions(providerOptions, input) {
+        const fastMode = this.resolveFastModeSetting();
+        // Internal agents do daemon work such as naming a branch, so the user's and
+        // project's hooks must not run for them.
+        const disableAllHooks = this.config.internal === true;
+        if (fastMode === null && !input.ultracode && !disableAllHooks) {
+            return {};
+        }
+        const updates = {
+            ...(fastMode === null ? {} : { fastMode }),
+            ...(input.ultracode ? { ultracode: true } : {}),
+            ...(disableAllHooks ? { disableAllHooks: true } : {}),
+        };
+        // The SDK replaces extraArgs.settings with Options.settings, so a user's
+        // `--settings` would be dropped whenever Paseo sets flag settings. Fold it in.
+        const { settings: extraArgsSettings, ...extraArgs } = providerOptions.extraArgs ?? {};
+        if (typeof extraArgsSettings !== "string") {
+            return { settings: mergeClaudeSettings(providerOptions.settings, updates) };
+        }
+        const cliSettings = await readClaudeCliSettings(extraArgsSettings, this.config.cwd);
+        return {
+            extraArgs,
+            settings: { ...cliSettings, ...providerOptions.settings, ...updates },
+        };
+    }
+    resolveFastModeSetting() {
+        if (!claudeModelSupportsFastMode(this.config.model)) {
+            return null;
+        }
+        return this.config.providerOptions.fast_mode === true;
+    }
+    normalizeMcpServers(servers) {
+        const result = {};
+        for (const [name, config] of Object.entries(servers)) {
+            result[name] = toClaudeSdkMcpConfig(config);
+        }
+        return result;
+    }
+    toSdkUserMessage(prompt) {
+        const content = [];
+        // Claude Code expands a slash command only when it is the last content block of the user
+        // message. buildAgentPrompt places the typed text ahead of images and rendered attachments,
+        // so a "/command" sent with a pasted link or a screenshot would otherwise reach the model as
+        // literal text instead of the command it names.
+        let typedSlashCommandIndex = -1;
+        if (Array.isArray(prompt)) {
+            for (const chunk of prompt) {
+                if (chunk.type === "text") {
+                    // Attachments rendered as text always carry a mimeType; the composer's typed text does
+                    // not. Only the typed block can be a slash command the user meant to invoke.
+                    if (!("mimeType" in chunk) && this.parseSlashCommandInput(chunk.text)) {
+                        typedSlashCommandIndex = content.length;
+                    }
+                    content.push({ type: "text", text: chunk.text });
+                }
+                else if (chunk.type === "image") {
+                    if (isImageMimeType(chunk.mimeType)) {
+                        content.push({
+                            type: "image",
+                            source: {
+                                type: "base64",
+                                media_type: chunk.mimeType,
+                                data: chunk.data,
+                            },
+                        });
+                    }
+                }
+                else {
+                    content.push({ type: "text", text: renderPromptAttachmentAsText(chunk) });
+                }
+            }
+        }
+        else {
+            content.push({ type: "text", text: prompt });
+        }
+        if (typedSlashCommandIndex >= 0 && typedSlashCommandIndex < content.length - 1) {
+            const [slashCommand] = content.splice(typedSlashCommandIndex, 1);
+            content.push(slashCommand);
+        }
+        const messageId = randomUUID();
+        this.rememberUserMessageId(messageId);
+        return {
+            type: "user",
+            message: {
+                role: "user",
+                content,
+            },
+            parent_tool_use_id: null,
+            uuid: messageId,
+            session_id: this.claudeSessionId ?? "",
+        };
+    }
+    transitionTurnState(next, reason) {
+        if (this.turnState === next) {
+            return;
+        }
+        this.logger.debug({ from: this.turnState, to: next, reason }, "Claude turn state transition");
+        this.turnState = next;
+    }
+    syncTurnState(reason) {
+        if (this.activeForegroundTurnId) {
+            this.transitionTurnState("foreground", reason);
+            return;
+        }
+        if (this.autonomousTurn) {
+            this.transitionTurnState("autonomous", reason);
+            return;
+        }
+        this.transitionTurnState("idle", reason);
+    }
+    isAbortError(message) {
+        const errors = "errors" in message && Array.isArray(message.errors) ? message.errors : [];
+        return errors.some((e) => /\baborted\b/i.test(e));
+    }
+    buildTurnFailedEvent(errorMessage) {
+        const normalized = errorMessage.trim() || "Claude run failed";
+        const exitCodeMatch = normalized.match(/\bcode\s+(\d+)\b/i);
+        const code = exitCodeMatch ? exitCodeMatch[1] : undefined;
+        const diagnostic = this.getRecentStderrDiagnostic();
+        return {
+            type: "turn_failed",
+            provider: "claude",
+            error: normalized,
+            ...(code ? { code } : {}),
+            ...(diagnostic ? { diagnostic } : {}),
+        };
+    }
+    captureStderr(data) {
+        const text = data.trim();
+        if (!text) {
+            return;
+        }
+        const combined = this.recentStderr ? `${this.recentStderr}\n${text}` : text;
+        this.recentStderr = combined.slice(-MAX_RECENT_STDERR_CHARS);
+    }
+    clearRecentStderr() {
+        this.recentStderr = "";
+    }
+    getRecentStderrDiagnostic() {
+        return this.recentStderr.trim() || undefined;
+    }
+    async awaitRecentStderrAfterProcessExit(error) {
+        if (this.getRecentStderrDiagnostic()) {
+            return;
+        }
+        const message = errorToMessageString(error);
+        if (!/\bprocess exited with code\b/i.test(message) &&
+            !/\bterminated by signal\b/i.test(message)) {
+            return;
+        }
+        const startedAt = Date.now();
+        while (!this.closed && !this.getRecentStderrDiagnostic()) {
+            if (Date.now() - startedAt >= STDERR_FLUSH_WAIT_MS) {
+                return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, STDERR_FLUSH_POLL_INTERVAL_MS));
+        }
+    }
+    createTurnId(owner) {
+        return `${owner}-turn-${this.turnNamespace}-${this.nextTurnOrdinal++}`;
+    }
+    isTerminalTurnEvent(event) {
+        return (event.type === "turn_completed" ||
+            event.type === "turn_failed" ||
+            event.type === "turn_canceled");
+    }
+    async executeRewindTurn(_turnId, invocation) {
+        this.notifySubscribers({ type: "turn_started", provider: "claude" });
+        try {
+            const rewindAttempt = await this.attemptRewind(invocation.args);
+            if (!rewindAttempt.messageId || !rewindAttempt.result) {
+                this.finishForegroundTurn({
+                    type: "turn_failed",
+                    provider: "claude",
+                    error: rewindAttempt.error ??
+                        "No prior user message available to rewind. Use /rewind <user_message_uuid>.",
+                });
+                return;
+            }
+            this.notifySubscribers({
+                type: "timeline",
+                provider: "claude",
+                item: {
+                    type: "assistant_message",
+                    text: this.buildRewindSuccessMessage(rewindAttempt.messageId, rewindAttempt.result),
+                },
+            });
+            this.finishForegroundTurn({ type: "turn_completed", provider: "claude" });
+        }
+        catch (error) {
+            this.finishForegroundTurn({
+                type: "turn_failed",
+                provider: "claude",
+                error: error instanceof Error ? error.message : "Failed to rewind tracked files",
+            });
+        }
+    }
+    shouldRecoverInterruptedQueryAbort(error, consecutiveRecoveries) {
+        if (consecutiveRecoveries >= 3) {
+            return false;
+        }
+        let message;
+        if (typeof error === "string") {
+            message = error;
+        }
+        else if (error instanceof Error) {
+            message = `${error.message}\n${error.stack ?? ""}`;
+        }
+        else {
+            message = JSON.stringify(error);
+        }
+        return message.toLowerCase().includes("request was aborted");
+    }
+    finishForegroundTurn(event) {
+        if (event.type === "turn_failed" || event.type === "turn_canceled") {
+            this.flushPendingToolCalls();
+        }
+        this.notifySubscribers(event);
+        this.activeForegroundTurnId = null;
+        this.activeForegroundQuery = null;
+        this.activeForegroundInput = null;
+        this.cancelCurrentTurn = null;
+        this.activeTurnHasAssistantText = false;
+        this.compactionMarkerOpen = false;
+        this.syncTurnState("foreground turn terminal");
+    }
+    dispatchEvents(events) {
+        let terminalSeen = false;
+        for (const event of events) {
+            this.notifySubscribers(event);
+            terminalSeen || (terminalSeen = this.isTerminalTurnEvent(event));
+        }
+        if (terminalSeen) {
+            this.compactionMarkerOpen = false;
+            if (this.activeForegroundTurnId) {
+                this.activeForegroundTurnId = null;
+                this.activeForegroundQuery = null;
+                this.activeForegroundInput = null;
+                this.cancelCurrentTurn = null;
+                this.activeTurnHasAssistantText = false;
+                this.syncTurnState("foreground turn terminal");
+            }
+            else if (this.autonomousTurn) {
+                this.autonomousTurn = null;
+                this.activeForegroundQuery = null;
+                this.activeForegroundInput = null;
+                this.activeTurnHasAssistantText = false;
+                this.syncTurnState("autonomous turn terminal");
+            }
+        }
+    }
+    startAutonomousTurn() {
+        if (this.autonomousTurn) {
+            return;
+        }
+        this.autonomousTurn = {
+            id: this.notificationTurnId ?? this.createTurnId("autonomous"),
+        };
+        this.notificationTurnId = null;
+        this.activeForegroundQuery = this.query;
+        this.activeForegroundInput = this.input;
+        this.activeTurnHasAssistantText = false;
+        this.contextUsage.beginTurn();
+        this.notifySubscribers({ type: "turn_started", provider: "claude" });
+        this.syncTurnState("autonomous turn started");
+    }
+    completeAutonomousTurn() {
+        if (!this.autonomousTurn) {
+            return;
+        }
+        this.notifySubscribers({ type: "turn_completed", provider: "claude" });
+        this.autonomousTurn = null;
+        this.activeForegroundQuery = null;
+        this.activeForegroundInput = null;
+        this.activeTurnHasAssistantText = false;
+        this.compactionMarkerOpen = false;
+        this.syncTurnState("autonomous turn completed");
+    }
+    failActiveTurns(errorMessage) {
+        const failure = this.buildTurnFailedEvent(errorMessage);
+        this.flushPendingToolCalls();
+        if (this.activeForegroundTurnId) {
+            this.finishForegroundTurn(failure);
+            return;
+        }
+        if (this.autonomousTurn) {
+            this.dispatchEvents([failure]);
+        }
+    }
+    // Background Bash shells, Monitor watches and workflows live inside the Claude
+    // Code process, so they die with it. When the process exits mid-turn the query
+    // pump reports it, but when it exits between turns nothing observes the death:
+    // the agent stays "idle" and the wake-back that would have continued the work
+    // never arrives.
+    handleRuntimeExit(child, code, signal) {
+        if (this.closed || this.childProcess !== child) {
+            return;
+        }
+        this.childProcess = null;
+        this.logger.warn({ agentId: this.agentId, pid: child.pid, code, signal }, "Claude runtime exited unexpectedly");
+        this.failRunningRuntimeTasks();
+        if (this.activeForegroundTurnId || this.autonomousTurn) {
+            // The pump is about to throw. It waits for stderr to flush and reports the
+            // real cause; reporting here first would replace that with a bare exit code
+            // and detach this.query, which is how the pump recognizes its own stream.
+            return;
+        }
+        // Drop the dead handles so the next write spawns a fresh process instead of
+        // failing against a dead transport forever.
+        this.query = null;
+        this.input = null;
+        this.dispatchEvents([
+            this.buildTurnFailedEvent(`Claude stopped unexpectedly (${signal ? `signal ${signal}` : `exit code ${code ?? "unknown"}`}). Any background shells, monitors or other work it had running were terminated with it.`),
+        ]);
+    }
+    failRunningRuntimeTasks() {
+        for (const finish of this.backgroundStops.values())
+            finish("connection lost");
+        this.runtimeSafety.retire();
+        this.dispatchEvents([
+            ...foldSubagentObservations(this.taskProtocolSource.failRunningTasks()).map((event) => ({ type: "provider_subagent", provider: "claude", event })),
+            // The SDK resets its background task set when the CLI process (re)starts.
+            { type: "background_work", provider: "claude", items: null },
+        ]);
+    }
+    startQueryPump() {
+        if (this.closed || this.queryPumpPromise) {
+            return;
+        }
+        const pump = this.runQueryPump().catch((error) => {
+            this.logger.trace({
+                agentId: this.agentId,
+                provider: "claude",
+                sessionId: this.claudeSessionId,
+                turnId: this.activeForegroundTurnId ?? this.autonomousTurn?.id ?? undefined,
+                err: error,
+            }, "provider.claude.query_pump.exit_unexpected");
+        });
+        this.queryPumpPromise = pump;
+        void pump.finally(() => {
+            if (this.queryPumpPromise === pump) {
+                this.queryPumpPromise = null;
+            }
+        });
+    }
+    async runQueryPump() {
+        let activeQuery;
+        try {
+            activeQuery = await this.ensureQuery();
+        }
+        catch (error) {
+            this.logger.trace({
+                agentId: this.agentId,
+                provider: "claude",
+                sessionId: this.claudeSessionId,
+                turnId: this.activeForegroundTurnId ?? this.autonomousTurn?.id ?? undefined,
+                err: error,
+            }, "provider.claude.query_pump.init_failed");
+            this.failActiveTurns(error instanceof Error ? error.message : "Claude stream failed");
+            return;
+        }
+        let consecutiveInterruptAbortRecoveries = 0;
+        const logRawMessage = (message) => {
+            this.logger.trace({
+                agentId: this.agentId,
+                provider: "claude",
+                sessionId: this.claudeSessionId,
+                turnId: this.activeForegroundTurnId ?? this.autonomousTurn?.id ?? undefined,
+                messageType: message.type,
+                messageSubtype: "subtype" in message ? message.subtype : undefined,
+                messageUuid: "uuid" in message ? message.uuid : undefined,
+                rawEvent: message,
+            }, "provider.claude.raw_event");
+        };
+        const handlePumpedMessage = async (message) => {
+            if (!this.ownsQuery(activeQuery))
+                return true;
+            this.processingSdkMessages++;
+            try {
+                const backgroundWork = this.runtimeSafety.observe(message);
+                if (message.type === "system" && message.subtype === "task_notification")
+                    this.backgroundStops.get(message.task_id)?.(message.status);
+                logRawMessage(message);
+                consecutiveInterruptAbortRecoveries = 0;
+                if (await this.handleMissingResumedConversation(message, activeQuery))
+                    return true;
+                if (!this.ownsQuery(activeQuery))
+                    return true;
+                await this.routeSdkMessageFromPump(message);
+                if (!this.ownsQuery(activeQuery))
+                    return true;
+                if (backgroundWork && this.runtimeSafety.isCurrentInventory(backgroundWork))
+                    this.dispatchEvents([
+                        { type: "background_work", provider: "claude", items: backgroundWork },
+                    ]);
+                return false;
+            }
+            finally {
+                this.processingSdkMessages--;
+            }
+        };
+        const drainActiveQuery = async () => {
+            for await (const message of activeQuery) {
+                if (await handlePumpedMessage(message)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        try {
+            while (!this.closed && this.query === activeQuery) {
+                try {
+                    if (await drainActiveQuery()) {
+                        return;
+                    }
+                    if (!this.closed && this.query === activeQuery) {
+                        this.failActiveTurns("Claude stream ended before terminal result");
+                    }
+                    return;
+                }
+                catch (error) {
+                    if (!this.closed &&
+                        this.query === activeQuery &&
+                        this.shouldRecoverInterruptedQueryAbort(error, consecutiveInterruptAbortRecoveries)) {
+                        consecutiveInterruptAbortRecoveries += 1;
+                        this.logger.debug({ recoveries: consecutiveInterruptAbortRecoveries }, "Recovering Claude query pump after interrupt abort");
+                        continue;
+                    }
+                    if (!this.closed && this.query === activeQuery) {
+                        await this.awaitRecentStderrAfterProcessExit(error);
+                        this.failActiveTurns(error instanceof Error ? error.message : "Claude stream failed");
+                    }
+                    return;
+                }
+            }
+        }
+        finally {
+            if (this.query === activeQuery) {
+                this.query = null;
+                this.input = null;
+            }
+        }
+    }
+    shouldSuppressStaleResult(message) {
+        // Suppress stale results from interrupted requests. The cancel path already
+        // emitted the terminal event; this result is leftover from the killed API
+        // request. Consume the flag on ANY result so it doesn't linger.
+        if (message.type === "result" && this.pendingInterruptAbort) {
+            this.pendingInterruptAbort = false;
+            if (message.subtype !== "success") {
+                this.logger.debug("Suppressing stale non-success result from interrupted request");
+                return true;
+            }
+        }
+        if (message.type === "result" && message.subtype !== "success" && this.isAbortError(message)) {
+            this.logger.debug("Suppressing abort result by content");
+            return true;
+        }
+        return false;
+    }
+    /**
+     * Claude's account of whether anything in the session is working, which is not the same as the
+     * main session working: Claude Code 2.1.280 stays "running" for as long as any background
+     * subagent is alive. So "running" never opens a turn.
+     *
+     * "idle" means nothing at all is running, so it closes an autonomous turn whatever opened it.
+     * It never closes a foreground turn: an idle can trail the previous turn and land just after a
+     * new send, and it must not end that send.
+     *
+     * Returns true when the frame was a state change, which is bookkeeping and never reaches the
+     * timeline.
+     */
+    consumeSessionStateChange(message) {
+        if (message.type !== "system" || message.subtype !== "session_state_changed") {
+            return false;
+        }
+        if (message.state === "idle") {
+            this.mainTurnInFlight = false;
+            this.completeAutonomousTurn();
+        }
+        return true;
+    }
+    /** Tracks mainTurnInFlight from Claude's own turn brackets (isClaudeTurnInit). */
+    observeMainTurnBracket(message) {
+        if (message.type === "result") {
+            this.mainTurnInFlight = false;
+            return;
+        }
+        if (isClaudeTurnInit(message)) {
+            this.mainTurnInFlight = true;
+            // A new turn has begun, so the interrupted one is over. An interrupt that landed after its
+            // turn had already ended gets no result, and the leftover flag would swallow this turn's.
+            this.pendingInterruptAbort = false;
+            return;
+        }
+        if (readClaudeCommandLifecycle(message)?.state === "started") {
+            this.mainTurnInFlight = true;
+        }
+    }
+    /**
+     * Tracks notificationTurnId from the starts Claude announces between turns. A task a subagent
+     * started reports to that subagent, so its notification starts no main-session turn.
+     */
+    observeNotificationTurn(message) {
+        if (this.activeForegroundTurnId || this.autonomousTurn)
+            return;
+        if (message.type === "system" && message.subtype === "task_notification") {
+            if (this.taskProtocolSource.resolveTaskOwner(message.task_id, message.tool_use_id))
+                return;
+            this.notificationTurnId = this.createTurnId("autonomous");
+        }
+        else if (readClaudeCommandLifecycle(message)?.state === "started") {
+            this.notificationTurnId = null;
+        }
+    }
+    /**
+     * Only the main session's own turn start opens an autonomous turn. Everything a background
+     * subagent emits (its task frames, its own background jobs' notifications, rate limit events)
+     * arrives outside one, and no result would ever close a turn it opened.
+     */
+    opensAutonomousTurn(message) {
+        return isClaudeTurnInit(message) && !this.activeForegroundTurnId;
+    }
+    ownsQuery(query) {
+        return !this.closed && this.query === query;
+    }
+    async routeSdkMessageFromPump(message) {
+        if (this.consumeSessionStateChange(message)) {
+            return;
+        }
+        this.observeMainTurnBracket(message);
+        this.observeNotificationTurn(message);
+        if (this.shouldSuppressStaleResult(message)) {
+            return;
+        }
+        const isForeground = Boolean(this.activeForegroundTurnId);
+        if (this.opensAutonomousTurn(message)) {
+            this.startAutonomousTurn();
+        }
+        if (!isForeground && !this.autonomousTurn && message.type === "result") {
+            return;
+        }
+        const turnId = this.activeForegroundTurnId ?? this.autonomousTurn?.id ?? null;
+        const identifiers = readEventIdentifiers(message);
+        this.rememberTranscriptProgress(message, readTranscriptUuid(message));
+        this.logger.trace({
+            agentId: this.agentId,
+            provider: "claude",
+            sessionId: this.claudeSessionId,
+            turnId: turnId ?? undefined,
+            messageType: message.type,
+            identifiers,
+            rawEvent: message,
+        }, "provider.claude.parsed_event");
+        const events = await this.buildPumpedMessageEvents(message, identifiers.messageId, turnId);
+        if (events.length === 0) {
+            return;
+        }
+        if (this.pendingInterruptAbort &&
+            message.type === "result" &&
+            events.some((event) => event.type === "turn_completed" || event.type === "turn_failed") &&
+            (!this.activeForegroundTurnId || !this.foregroundHasVisibleActivity)) {
+            this.pendingInterruptAbort = false;
+            this.logger.debug("Suppressing stale Claude interrupt terminal result");
+            return;
+        }
+        if (events.some((event) => event.type === "timeline" && event.item.type === "assistant_message")) {
+            this.activeTurnHasAssistantText = true;
+        }
+        if (this.activeForegroundTurnId &&
+            events.some((event) => event.type === "timeline" ||
+                event.type === "permission_requested" ||
+                event.type === "permission_resolved")) {
+            this.foregroundHasVisibleActivity = true;
+        }
+        this.dispatchEvents(events);
+    }
+    async buildPumpedMessageEvents(message, messageIdHint, turnId) {
+        const query = this.query;
+        const messageEvents = await this.translateMessageToEvents(message, {
+            suppressAssistantText: true,
+            suppressReasoning: true,
+        });
+        if (this.closed ||
+            this.query !== query ||
+            (this.activeForegroundTurnId ?? this.autonomousTurn?.id ?? null) !== turnId)
+            return [];
+        const assistantTimelineEvents = readClaudeParentToolUseId(message)
+            ? []
+            : this.timelineAssembler
+                .consume({
+                message,
+                runId: turnId,
+                messageIdHint,
+            })
+                .map((item) => ({
+                type: "timeline",
+                item,
+                provider: "claude",
+            }));
+        if (!readClaudeParentToolUseId(message)) {
+            if (message.type === "assistant" && message.error) {
+                this.withheldErrorReply.push(...assistantTimelineEvents.map((event) => event.item));
+                return messageEvents;
+            }
+            if (message.type === "assistant" ||
+                message.type === "user" ||
+                message.type === "stream_event") {
+                const released = [];
+                this.releaseWithheldErrorReply(released);
+                return [...released, ...messageEvents, ...assistantTimelineEvents];
+            }
+        }
+        return [...messageEvents, ...assistantTimelineEvents];
+    }
+    async handleMissingResumedConversation(message, activeQuery) {
+        const staleResumeError = this.readMissingResumedConversationError(message);
+        if (!staleResumeError) {
+            return false;
+        }
+        this.logger.warn({
+            error: staleResumeError,
+        }, "Claude resumed session no longer exists; invalidating persisted session");
+        this.failActiveTurns(staleResumeError);
+        // Ending the input retires the process on purpose. Detach first so its exit
+        // is not reported as a crash.
+        const retiredChild = this.childProcess;
+        this.childProcess = null;
+        this.input?.end();
+        await this.awaitWithTimeout(activeQuery.return?.(), "query pump return on missing resumed conversation");
+        // Tree-kill for the same reason the restart path does: MCP children of the
+        // retired claude process outlive it otherwise.
+        if (retiredChild) {
+            await terminateWithTreeKill(retiredChild, {
+                gracefulTimeoutMs: 2000,
+                forceTimeoutMs: 2000,
+            }).catch(() => {
+                /* process may already be dead */
+            });
+        }
+        if (this.query === activeQuery) {
+            this.query = null;
+            this.input = null;
+        }
+        this.persistence = null;
+        this.persistedHistory = [];
+        this.persistedProviderSubagentEvents = [];
+        this.historyPending = false;
+        this.cachedRuntimeInfo = null;
+        this.queryRestartNeeded = false;
+        this.autonomousTurn = null;
+        this.activeForegroundTurnId = null;
+        this.activeForegroundQuery = null;
+        this.activeForegroundInput = null;
+        this.syncTurnState("missing resumed conversation");
+        return true;
+    }
+    /**
+     * Interrupts Claude only when a turn of its main session is running. With nothing running there
+     * is nothing to stop but our own queued messages, so those are withdrawn instead: an interrupt
+     * would reach only background helpers (and kill them on a CLI that ignores
+     * perTaskStopAffordance), and no result would follow to consume pendingInterruptAbort.
+     */
+    async interruptActiveTurn(claudeStartedTurn = this.mainTurnInFlight) {
+        const queryToInterrupt = this.query;
+        if (!queryToInterrupt || typeof queryToInterrupt.interrupt !== "function") {
+            this.logger.trace({
+                agentId: this.agentId,
+                provider: "claude",
+                sessionId: this.claudeSessionId,
+                turnId: this.activeForegroundTurnId ?? this.autonomousTurn?.id ?? undefined,
+            }, "provider.claude.interrupt.no_query");
+            return;
+        }
+        if (claudeStartedTurn) {
+            this.pendingInterruptAbort = true;
+            await this.withdrawUnstartedMessages(queryToInterrupt);
+        }
+        else {
+            // Claude can dequeue a message for its next turn before announcing it started; withdrawing
+            // it is then a no-op, and only an interrupt stops it. Withdraw once: a prompt sent while
+            // this withdrawal was in flight belongs to the next turn.
+            if (await this.withdrawUnstartedMessages(queryToInterrupt))
+                return;
+            this.pendingInterruptAbort = true;
+        }
+        try {
+            await this.awaitWithTimeout(queryToInterrupt.interrupt(), "interruptActiveTurn query.interrupt()");
+        }
+        catch (error) {
+            this.logger.warn({ err: error }, "Failed to interrupt active turn");
+        }
+    }
+    /**
+     * Interrupt means interrupt: a message Claude never started dies with the turn instead of
+     * resuming it. One already dequeued cannot be recalled, and does not need to be, since the
+     * interrupt kills it. Returns whether Claude confirmed every message withdrawn.
+     */
+    async withdrawUnstartedMessages(query) {
+        const uuids = [...this.unstartedMessageUuids];
+        this.unstartedMessageUuids.clear();
+        this.permissionClearingSteerUuids.clear();
+        if (uuids.length === 0)
+            return true;
+        // The SDK runtime supports this, but its public Query type has not caught up. Keep the
+        // compatibility escape hatch inside the Claude adapter.
+        const cancelAsyncMessage = query.cancelAsyncMessage;
+        if (!cancelAsyncMessage)
+            return false;
+        let withdrewAll = true;
+        for (const uuid of uuids) {
+            try {
+                if (!(await cancelAsyncMessage.call(query, uuid)))
+                    withdrewAll = false;
+            }
+            catch (error) {
+                withdrewAll = false;
+                this.logger.warn({ err: error }, "Failed to withdraw a queued Claude message");
+            }
+        }
+        return withdrewAll;
+    }
+    async translateMessageToEvents(message, options) {
+        const parentToolUseId = readClaudeParentToolUseId(message);
+        if (parentToolUseId) {
+            return this.translateSidechainFrameToEvents(message, parentToolUseId);
+        }
+        const events = [];
+        this.appendTaskStateEvent(message, events);
+        // Subagent identity and lifecycle are announced by Claude Code's task protocol, so they are
+        // read rather than inferred from sidechain frames. `task_started` precedes the child's first
+        // frame, so the descriptor exists before any timeline item lands on it.
+        const subagentObservations = this.taskProtocolSource.observe(message);
+        for (const event of foldSubagentObservations(subagentObservations)) {
+            events.push({ type: "provider_subagent", provider: "claude", event });
+        }
+        this.releaseFinishedSubagentToolCalls(subagentObservations);
+        for (const observation of subagentObservations) {
+            if (observation.kind !== "declared")
+                continue;
+            if (!this.taskProtocolSource.needsSyntheticParentToolCard(observation.id))
+                continue;
+            const card = this.buildSubagentToolCallCard(observation);
+            if (card)
+                events.push(card);
+        }
+        if (message.type !== "system") {
+            const sessionCapture = this.captureSessionIdFromMessage(message);
+            if (sessionCapture.notice) {
+                events.push({
+                    type: "timeline",
+                    provider: "claude",
+                    item: sessionCapture.notice,
+                });
+            }
+            if (sessionCapture.threadStartedSessionId) {
+                events.push({
+                    type: "thread_started",
+                    provider: "claude",
+                    sessionId: sessionCapture.threadStartedSessionId,
+                });
+            }
+        }
+        this.forgetStartedMessage(message);
+        switch (message.type) {
+            case "system":
+                this.appendSystemMessageEvents(message, events);
+                break;
+            case "user":
+                await this.appendUserMessageEvents(message, events);
+                this.appendSidechainResultEvents(message, events);
+                break;
+            case "assistant": {
+                const timelineItems = await this.mapBlocksToTimeline(message.message.content, {
+                    suppressAssistantText: options?.suppressAssistantText ?? false,
+                    suppressReasoning: options?.suppressReasoning ?? false,
+                });
+                for (const item of timelineItems) {
+                    events.push({ type: "timeline", item, provider: "claude" });
+                }
+                this.appendSidechainResultEvents(message, events);
+                break;
+            }
+            case "stream_event":
+                await this.appendStreamEventEvents(message, events, options);
+                break;
+            case "result":
+                this.appendResultEvents(message, events);
+                break;
+            default:
+                break;
+        }
+        return events;
+    }
+    /**
+     * Once Claude has started a message, or cancelled it, there is nothing left to withdraw on
+     * interrupt.
+     */
+    forgetStartedMessage(message) {
+        const lifecycle = readClaudeCommandLifecycle(message);
+        if (!lifecycle || lifecycle.state === "queued")
+            return;
+        this.unstartedMessageUuids.delete(lifecycle.commandUuid);
+        this.permissionClearingSteerUuids.delete(lifecycle.commandUuid);
+    }
+    appendTaskStateEvent(message, events) {
+        const item = this.taskState.observe(message);
+        if (item)
+            events.push({ type: "timeline", provider: "claude", item });
+    }
+    /**
+     * A frame from inside a subagent, routed to that child rather than the parent's transcript.
+     */
+    translateSidechainFrameToEvents(message, parentToolUseId) {
+        const canonicalSubagentId = this.taskProtocolSource.resolveSubagentId(parentToolUseId);
+        // Once a CLI announces its tasks it announces all of them, so a frame for one that was never
+        // declared is work the filter already rejected — a workflow child, ambient housekeeping, a
+        // grandchild announced in someone else's session. Attributing it anyway materializes exactly
+        // what the filter prevents: a nameless descriptor stuck running, plus a timeline no surface
+        // can open, both held for the session's lifetime.
+        if (this.taskProtocolSource.announcesTasks && !canonicalSubagentId) {
+            return [];
+        }
+        // The child's own frames are the only place its model appears; the task protocol does not
+        // announce it. Read per frame rather than snapshotting, since a provider can swap models
+        // mid-flight on overload or refusal fallback.
+        const runtimeEvents = foldSubagentObservations(this.taskProtocolSource.observeSidechainFrame(message, canonicalSubagentId ?? parentToolUseId)).map((event) => ({ type: "provider_subagent", provider: "claude", event }));
+        const routedId = canonicalSubagentId ?? parentToolUseId;
+        const settled = this.settledSubagentToolCalls.get(routedId);
+        const sidechainEvents = this.sidechainTracker.handleMessage(message, routedId).map((event) => {
+            if (event.type === "timeline" && settled?.turnId)
+                event.turnId = settled.turnId;
+            return event;
+        });
+        return [...runtimeEvents, ...sidechainEvents];
+    }
+    /**
+     * The Task card in the parent transcript, built from the declaration.
+     *
+     * The sidechain tracker also emits this card when it first sees the child, and the two
+     * collapse on the shared tool-call id. Emitting it at declaration matters because a
+     * backgrounded subagent produces no sidechain frames at all — verified on the wire — so the
+     * tracker never runs for one and its card would otherwise stay an unlabeled "Task".
+     */
+    buildSubagentToolCallCard(declaration) {
+        // The launching sidechain already owns and renders this tool call. Mirroring it into the
+        // managed parent's transcript would flatten both the card and the child relationship.
+        if (declaration.parentSubagentId)
+            return null;
+        const toolCall = mapClaudeRunningToolCall({
+            name: "Task",
+            callId: declaration.id,
+            input: null,
+            output: null,
+        });
+        if (!toolCall)
+            return null;
+        return {
+            type: "timeline",
+            provider: "claude",
+            item: { ...toolCall, detail: buildClaudeSubagentCardDetail(declaration) },
+        };
+    }
+    appendSidechainResultEvents(message, events) {
+        const content = toObjectRecord(toObjectRecord(message)?.message)?.content;
+        if (!Array.isArray(content))
+            return;
+        for (const block of content) {
+            const chunk = toObjectRecord(block);
+            if (chunk?.type !== "tool_result" || typeof chunk.tool_use_id !== "string")
+                continue;
+            events.push(...this.sidechainTracker.finish(chunk.tool_use_id, chunk.is_error ? "failed" : "completed"));
+        }
+    }
+    async emitSubmittedUserMessage(message, turnId, clientMessageId) {
+        const events = [];
+        await this.appendUserMessageEvents(message, events);
+        if (this.activeForegroundTurnId !== turnId)
+            return;
+        if (events.length === 0) {
+            return;
+        }
+        this.foregroundHasVisibleActivity = true;
+        for (const event of events) {
+            if (event.type === "timeline") {
+                const item = event.item.type === "user_message" && clientMessageId
+                    ? { ...event.item, clientMessageId }
+                    : event.item;
+                this.notifySubscribers({ ...event, item, turnId });
+            }
+            else {
+                this.notifySubscribers(event);
+            }
+        }
+    }
+    appendSystemMessageEvents(message, events) {
+        if (message.subtype === "init") {
+            const sessionUpdate = this.handleSystemMessage(message);
+            if (sessionUpdate.notice) {
+                events.push({
+                    type: "timeline",
+                    provider: "claude",
+                    item: sessionUpdate.notice,
+                });
+            }
+            if (sessionUpdate.threadStartedSessionId) {
+                events.push({
+                    type: "thread_started",
+                    provider: "claude",
+                    sessionId: sessionUpdate.threadStartedSessionId,
+                });
+            }
+            return;
+        }
+        if (message.subtype === "status") {
+            // Claude Code reports a mode it switched to on its own, such as entering
+            // plan mode with the EnterPlanMode tool, through the status message.
+            if (isPermissionMode(message.permissionMode) &&
+                this.observePermissionMode(message.permissionMode)) {
+                events.push({
+                    type: "mode_changed",
+                    provider: "claude",
+                    currentModeId: this.currentMode,
+                    availableModes: this.availableModes,
+                });
+            }
+            const status = toObjectRecord(message)?.status;
+            if (status === "compacting") {
+                this.compacting = true;
+                // Claude Code repeats this status every 30 seconds until the compaction
+                // finishes. Each repeat used to open its own marker, and the app only ever
+                // resolves one of them, so the rest stayed on "Compacting..." forever.
+                if (!this.compactionMarkerOpen) {
+                    this.compactionMarkerOpen = true;
+                    events.push({
+                        type: "timeline",
+                        item: { type: "compaction", status: "loading" },
+                        provider: "claude",
+                    });
+                }
+            }
+            return;
+        }
+        if (message.subtype === "compact_boundary") {
+            this.compactionMarkerOpen = false;
+            const compactMetadata = readCompactionMetadata(message);
+            events.push({
+                type: "timeline",
+                item: {
+                    type: "compaction",
+                    status: "completed",
+                    trigger: compactMetadata?.trigger === "manual" ? "manual" : "auto",
+                    preTokens: compactMetadata?.preTokens,
+                },
+                provider: "claude",
+            });
+            events.push(this.contextUsage.buildCompactionUsageEvent(compactMetadata?.postTokens));
+            return;
+        }
+        if (message.subtype === "task_notification") {
+            this.appendTaskNotificationEvents(message, events);
+            return;
+        }
+        if (message.subtype === "background_tasks_changed") {
+            this.logger.debug({ tasks: message.tasks.map(({ task_id, task_type }) => ({ task_id, task_type })) }, "claude.background_tasks_changed");
+            return;
+        }
+        if (message.subtype === "task_progress") {
+            return;
+        }
+    }
+    appendTaskNotificationEvents(message, events) {
+        const taskUseId = message.tool_use_id;
+        const cachedTool = taskUseId ? this.toolUseCache.get(taskUseId) : undefined;
+        // The task protocol owns provider-subagent identity. Workflow launch results arrive before
+        // their terminal notification and clear toolUseCache, so the cache is only a fallback for
+        // older Claude streams which do not announce tasks.
+        if (this.taskProtocolSource.isDeclaredTask(message.task_id) ||
+            isClaudeSubagentToolName(cachedTool?.name)) {
+            return;
+        }
+        const taskNotificationItem = mapTaskNotificationSystemRecordToToolCall(message);
+        const ownerSubagentId = this.taskProtocolSource.resolveTaskOwner(message.task_id, taskUseId);
+        if (taskNotificationItem && ownerSubagentId) {
+            events.push({
+                type: "provider_subagent",
+                provider: "claude",
+                event: { type: "timeline", id: ownerSubagentId, item: taskNotificationItem },
+            });
+            return;
+        }
+        if (taskNotificationItem) {
+            events.push({
+                type: "timeline",
+                item: taskNotificationItem,
+                provider: "claude",
+                ...(this.notificationTurnId ? { turnId: this.notificationTurnId } : {}),
+            });
+        }
+    }
+    async appendUserMessageEvents(message, events) {
+        if (isSyntheticUserEntry(message)) {
+            return;
+        }
+        if (this.compacting) {
+            this.compacting = false;
+            return;
+        }
+        const messageId = typeof message.uuid === "string" && message.uuid.length > 0 ? message.uuid : undefined;
+        if (messageId && this.emittedUserMessageIds.has(messageId)) {
+            return;
+        }
+        this.rememberUserMessageId(messageId);
+        this.rememberEmittedUserMessageId(messageId);
+        const content = message.message?.content;
+        const taskNotificationItem = mapTaskNotificationUserContentToToolCall({
+            content,
+            messageId,
+        });
+        if (taskNotificationItem) {
+            this.appendUserTaskNotificationEvent(taskNotificationItem, events);
+            return;
+        }
+        if (typeof content === "string" && content.length > 0) {
+            if (!isClaudeTranscriptNoiseText(content)) {
+                events.push({
+                    type: "timeline",
+                    item: {
+                        type: "user_message",
+                        text: content,
+                        ...(messageId ? { messageId } : {}),
+                    },
+                    provider: "claude",
+                });
+            }
+            return;
+        }
+        if (Array.isArray(content)) {
+            await this.appendUserContentArrayEvents(content, messageId, events);
+        }
+    }
+    appendUserTaskNotificationEvent(item, events) {
+        const taskId = typeof item.metadata?.taskId === "string" ? item.metadata.taskId : undefined;
+        const toolUseId = typeof item.metadata?.toolUseId === "string" ? item.metadata.toolUseId : undefined;
+        if (taskId && this.taskProtocolSource.isDeclaredTask(taskId))
+            return;
+        const ownerSubagentId = taskId
+            ? this.taskProtocolSource.resolveTaskOwner(taskId, toolUseId)
+            : undefined;
+        if (ownerSubagentId) {
+            events.push({
+                type: "provider_subagent",
+                provider: "claude",
+                event: { type: "timeline", id: ownerSubagentId, item },
+            });
+            return;
+        }
+        events.push({ type: "timeline", item, provider: "claude" });
+    }
+    async appendUserContentArrayEvents(content, messageId, events) {
+        const timelineItems = await this.mapBlocksToTimeline(content, {
+            textMessageType: "user_message",
+        });
+        for (const item of timelineItems) {
+            if (item.type === "user_message" && messageId && !item.messageId) {
+                events.push({
+                    type: "timeline",
+                    item: { ...item, messageId },
+                    provider: "claude",
+                });
+                continue;
+            }
+            events.push({ type: "timeline", item, provider: "claude" });
+        }
+    }
+    async appendStreamEventEvents(message, events, options) {
+        const usageUpdatedEvent = this.contextUsage.buildStreamUsageEvent(message.event);
+        if (usageUpdatedEvent) {
+            events.push(usageUpdatedEvent);
+        }
+        const timelineItems = await this.mapPartialEvent(message.event, {
+            suppressAssistantText: options?.suppressAssistantText ?? false,
+            suppressReasoning: options?.suppressReasoning ?? false,
+        });
+        for (const item of timelineItems) {
+            events.push({ type: "timeline", item, provider: "claude" });
+        }
+    }
+    appendResultEvents(message, events) {
+        const usage = this.convertUsage(message);
+        // Claude Code reports a turn that stopped on an API error (a usage limit, an overloaded or
+        // rejected request) as `success` with `is_error`, carrying the error text in `result`.
+        if (message.subtype === "success" && message.is_error) {
+            const withheld = this.withheldErrorReply;
+            this.withheldErrorReply = [];
+            const resultText = typeof message.result === "string" ? message.result.trim() : "";
+            const withheldText = withheld
+                .map((item) => (item.type === "assistant_message" ? item.text : ""))
+                .join("\n")
+                .trim();
+            if (usage)
+                events.push({ type: "usage_updated", provider: "claude", usage });
+            events.push(...this.sidechainTracker.finishAll("failed"));
+            events.push(this.buildTurnFailedEvent(resultText || withheldText || "Claude run failed"));
+            return;
+        }
+        const releasedErrorReply = this.withheldErrorReply.length > 0;
+        this.releaseWithheldErrorReply(events);
+        if (message.subtype === "success") {
+            events.push(...this.sidechainTracker.finishAll("completed"));
+            // Built-in slash commands (e.g. /voice, /usage, "Unknown command: …")
+            // run client-side in the Claude CLI with no model turn — output_tokens
+            // is 0 and the user-visible text is carried in `result`. Surface it only
+            // when the turn has not already emitted assistant text so zero-token
+            // accounting from provider gateways does not duplicate streamed output.
+            const resultText = typeof message.result === "string" ? message.result.trim() : "";
+            const outputTokens = message.usage?.output_tokens;
+            if (resultText.length > 0 &&
+                outputTokens === 0 &&
+                !this.activeTurnHasAssistantText &&
+                !releasedErrorReply) {
+                events.push({
+                    type: "timeline",
+                    provider: "claude",
+                    item: {
+                        type: "assistant_message",
+                        text: resultText,
+                        messageId: message.uuid,
+                    },
+                });
+            }
+            events.push({ type: "turn_completed", provider: "claude", usage });
+            return;
+        }
+        const errorMessage = "errors" in message && Array.isArray(message.errors) && message.errors.length > 0
+            ? message.errors.join("\n")
+            : "Claude run failed";
+        if (usage)
+            events.push({ type: "usage_updated", provider: "claude", usage });
+        events.push(...this.sidechainTracker.finishAll("failed"));
+        events.push(this.buildTurnFailedEvent(errorMessage));
+    }
+    releaseWithheldErrorReply(events) {
+        if (this.withheldErrorReply.length === 0)
+            return;
+        for (const item of this.withheldErrorReply) {
+            events.push({ type: "timeline", item, provider: "claude" });
+        }
+        this.withheldErrorReply = [];
+    }
+    createClaudeSessionChangedNotice(oldSessionId, newSessionId) {
+        return {
+            type: "assistant_message",
+            text: `Claude switched to a new session: ${oldSessionId} -> ${newSessionId}`,
+        };
+    }
+    captureSessionIdFromMessage(message) {
+        const msgRecord = toObjectRecord(message) ?? {};
+        const sessionId = extractSessionIdRaw({
+            session_id: msgRecord.session_id,
+            sessionId: msgRecord.sessionId,
+            session: isObjectRecord(msgRecord.session) ? { id: msgRecord.session.id } : null,
+        }).trim();
+        if (!sessionId) {
+            return { threadStartedSessionId: null, notice: null };
+        }
+        if (this.claudeSessionId === null) {
+            this.claudeSessionId = sessionId;
+            this.pendingFreshSessionId = null;
+            this.persistence = null;
+            return { threadStartedSessionId: sessionId, notice: null };
+        }
+        if (this.claudeSessionId === sessionId) {
+            this.pendingFreshSessionId = null;
+            return { threadStartedSessionId: null, notice: null };
+        }
+        const oldSessionId = this.claudeSessionId;
+        // Session ID changed mid-stream (e.g. a hook caused Claude to restart
+        // with a new session). Accept the new ID and continue — the turn should
+        // not be failed just because the underlying subprocess cycled.
+        this.logger.warn({ existingSessionId: this.claudeSessionId, newSessionId: sessionId }, "Claude session ID changed in message; accepting new session");
+        this.claudeSessionId = sessionId;
+        this.pendingFreshSessionId = null;
+        this.persistence = null;
+        return {
+            threadStartedSessionId: sessionId,
+            notice: this.createClaudeSessionChangedNotice(oldSessionId, sessionId),
+        };
+    }
+    handleSystemMessage(message) {
+        if (message.subtype !== "init") {
+            return { threadStartedSessionId: null, notice: null };
+        }
+        const msgRecord = toObjectRecord(message) ?? {};
+        const newSessionId = extractSessionIdRaw({
+            session_id: msgRecord.session_id,
+            sessionId: msgRecord.sessionId,
+            session: isObjectRecord(msgRecord.session) ? { id: msgRecord.session.id } : null,
+        }).trim();
+        if (!newSessionId) {
+            return { threadStartedSessionId: null, notice: null };
+        }
+        const existingSessionId = this.claudeSessionId;
+        let threadStartedSessionId = null;
+        let notice = null;
+        if (existingSessionId === null) {
+            this.claudeSessionId = newSessionId;
+            this.pendingFreshSessionId = null;
+            threadStartedSessionId = newSessionId;
+            this.logger.debug({ sessionId: newSessionId }, "Claude session ID set for the first time");
+        }
+        else if (existingSessionId === newSessionId) {
+            this.pendingFreshSessionId = null;
+            this.logger.debug({ sessionId: newSessionId }, "Claude session ID unchanged (same value)");
+        }
+        else {
+            // Session ID changed in an init message (e.g. a hook restarted Claude
+            // with a new session mid-turn). Accept the new ID and continue.
+            this.logger.warn({ existingSessionId, newSessionId }, "Claude session ID changed in init message; accepting new session");
+            this.claudeSessionId = newSessionId;
+            this.pendingFreshSessionId = null;
+            threadStartedSessionId = newSessionId;
+            notice = this.createClaudeSessionChangedNotice(existingSessionId, newSessionId);
+        }
+        this.availableModes = DEFAULT_MODES;
+        this.observePermissionMode(message.permissionMode);
+        this.persistence = null;
+        if (message.model) {
+            const runtimeContextWindowMaxTokens = getClaudeContextWindowMaxTokens(message.model);
+            // Seed usage before the first result, including settings-resolved aliases.
+            // A repeated init for the same model must retain the SDK's reported limit.
+            if (message.model !== this.lastRuntimeModel && runtimeContextWindowMaxTokens !== undefined) {
+                this.contextUsage.setInitialContextWindowMaxTokens(runtimeContextWindowMaxTokens);
+            }
+            const normalizedRuntimeModel = normalizeClaudeRuntimeModelId(message.model);
+            this.logger.debug({ runtimeModel: message.model, normalizedRuntimeModel }, "Captured runtime model from SDK init");
+            if (normalizedRuntimeModel) {
+                this.lastOptionsModel = normalizedRuntimeModel;
+            }
+            else if (!this.lastOptionsModel) {
+                this.lastOptionsModel = this.config.model ?? null;
+            }
+            this.lastRuntimeModel = message.model;
+            this.cachedRuntimeInfo = null;
+        }
+        return { threadStartedSessionId, notice };
+    }
+    /** Records a mode Claude Code reports, returning whether it differs from the current one. */
+    observePermissionMode(mode) {
+        const changed = this.currentMode !== mode;
+        this.currentMode = mode;
+        if (mode !== "plan") {
+            this.planResumeMode = mode;
+        }
+        return changed;
+    }
+    readMissingResumedConversationError(message) {
+        if (message.type !== "result" || message.subtype !== "error_during_execution") {
+            return null;
+        }
+        if (!this.claudeSessionId) {
+            return null;
+        }
+        const errors = "errors" in message && Array.isArray(message.errors) ? message.errors : [];
+        for (const entry of errors) {
+            if (typeof entry !== "string") {
+                continue;
+            }
+            const match = entry.match(/^No conversation found with session ID:\s*(.+)$/);
+            if (!match) {
+                continue;
+            }
+            if (match[1]?.trim() === this.claudeSessionId) {
+                return entry.trim();
+            }
+        }
+        return null;
+    }
+    convertUsage(message) {
+        return this.contextUsage.buildResultUsage(message, this.lastRuntimeModel ?? this.config.model);
+    }
+    enqueueTimeline(item) {
+        this.pushEvent({ type: "timeline", item, provider: "claude" });
+    }
+    flushPendingToolCalls() {
+        for (const [id, entry] of this.toolUseCache) {
+            if (entry.started) {
+                this.pushToolCall(mapClaudeCanceledToolCall({
+                    name: entry.name,
+                    callId: id,
+                    input: entry.input ?? null,
+                    output: null,
+                }));
+            }
+        }
+        this.toolUseCache.clear();
+        this.sidechainTracker.clear();
+        // The task protocol's routing table is session-scoped, so it is deliberately NOT reset here:
+        // the turn ended, the session did not. Wiping it would strand every task id the session still
+        // holds — a backgrounded child that settles after the interrupt would find no descriptor to
+        // land on, and ownership would flip back to the legacy tracker mid-session.
+        for (const event of foldSubagentObservations(this.taskProtocolSource.cancelRunningForegroundTasks())) {
+            this.pushEvent({ type: "provider_subagent", provider: "claude", event });
+        }
+    }
+    pushToolCall(item, target) {
+        if (!item) {
+            return;
+        }
+        if (target) {
+            target.push(item);
+            return;
+        }
+        this.enqueueTimeline(item);
+    }
+    pushEvent(event) {
+        this.notifySubscribers(event);
+    }
+    /**
+     * Effort is reachable only through hooks.
+     *
+     * It appears nowhere on the message stream — verified by scanning every message type at depth
+     * — and the level Paseo requests is not necessarily the level that runs, because a model that
+     * does not support it is silently downgraded. A hook firing inside a subagent reports the
+     * active post-downgrade level alongside the subagent's `agent_id`.
+     *
+     * These are observation-only: they record what they see and always return an empty result, so
+     * they can never alter tool execution or turn control.
+     */
+    buildSubagentEffortHooks() {
+        const observe = async (input) => {
+            try {
+                for (const event of foldSubagentObservations(this.taskProtocolSource.observeHook(input))) {
+                    this.notifySubscribers({ type: "provider_subagent", provider: "claude", event });
+                }
+            }
+            catch (error) {
+                this.logger.debug({ err: error }, "Failed to read subagent effort from hook");
+            }
+            return {};
+        };
+        // SubagentStart carries no effort (documented as absent for lifecycle hooks), so the value
+        // lands on the child's first tool use. SubagentStop covers a child that used no tools.
+        return {
+            PreToolUse: [{ hooks: [observe] }],
+            PostToolUse: [{ hooks: [observe] }],
+            SubagentStop: [{ hooks: [observe] }],
+        };
+    }
+    notifySubscribers(event) {
+        const turnId = getAgentStreamEventTurnId(event) ?? this.activeForegroundTurnId ?? this.autonomousTurn?.id;
+        const tagged = turnId ? { ...event, turnId } : event;
+        this.logger.trace({
+            agentId: this.agentId,
+            provider: "claude",
+            sessionId: this.claudeSessionId,
+            turnId: getAgentStreamEventTurnId(tagged),
+            event: tagged,
+        }, "provider.claude.event_emit");
+        for (const callback of this.subscribers) {
+            try {
+                callback(tagged);
+            }
+            catch (error) {
+                this.logger.warn({ err: error }, "Subscriber callback threw");
+            }
+        }
+    }
+    normalizePermissionUpdates(updates) {
+        if (!updates || updates.length === 0) {
+            return undefined;
+        }
+        const normalized = updates.filter(isPermissionUpdate);
+        return normalized.length > 0 ? normalized : undefined;
+    }
+    rejectAllPendingPermissions(error) {
+        for (const [id, pending] of this.pendingPermissions) {
+            pending.cleanup?.();
+            pending.reject(error);
+            this.pendingPermissions.delete(id);
+            this.pushEvent({
+                type: "permission_resolved",
+                provider: "claude",
+                requestId: id,
+                resolution: { behavior: "deny", message: error.message },
+            });
+        }
+    }
+    ensureHistoryReady() {
+        if (!this.historyReady) {
+            this.historyReady = this.historySessionId
+                ? this.loadPersistedHistory(this.historySessionId)
+                : Promise.resolve();
+        }
+        return this.historyReady;
+    }
+    async loadPersistedHistory(sessionId) {
+        let historyPath = null;
+        this.replayingHistory = true;
+        try {
+            this.taskState.reset();
+            historyPath = await this.resolveHistoryPath(sessionId);
+            if (!historyPath || !(await transcriptExists(historyPath))) {
+                this.logger.info({ sessionId, cwd: this.config.cwd, historyPath }, "No Claude transcript to load history from");
+                return;
+            }
+            await withClaudeReplayHistory(historyPath, async (history) => {
+                const replay = await this.ingestPersistedSidechains(history);
+                await this.ingestPersistedHistory(history.parentEntries, replay);
+            });
+        }
+        catch (error) {
+            this.logger.warn({ err: error, sessionId, historyPath }, "Failed to load Claude history from transcript");
+        }
+        finally {
+            this.replayingHistory = false;
+        }
+    }
+    async ingestPersistedHistory(entries, replay) {
+        const timeline = [];
+        for await (const entry of entries) {
+            await this.ingestPersistedHistoryEntry(entry, timeline, replay);
+        }
+        if (timeline.length > 0) {
+            this.persistedHistory = [...this.persistedHistory, ...timeline];
+            this.historyPending = true;
+        }
+    }
+    async ingestPersistedSidechains(history) {
+        const parentFacts = await readClaudeReplayParentFacts(history.parentEntries);
+        // Replay produces the same observations the live task protocol produces, then folds them
+        // with the same function, so identity and status are derived once for both paths.
+        const subagents = [];
+        for (const subagent of history.subagents) {
+            subagents.push({
+                ...subagent,
+                parentFacts: await readClaudeReplayParentFacts(subagent.entries),
+            });
+        }
+        const subagentReplay = await observeReplaySubagents({
+            subagents,
+            parent: parentFacts,
+            convertEntry: (entry) => this.convertHistoryEntry(entry),
+        });
+        const observations = [
+            ...subagentReplay.observations,
+            ...(await observeReplayWorkflows({
+                workflows: history.workflows,
+                parentEntries: history.parentEntries,
+                entriesByRunId: history.workflowEntriesByRunId,
+                convertEntry: (entry) => this.convertHistoryEntry(entry),
+            })),
+        ];
+        this.taskProtocolSource.restore(subagentReplay.restored);
+        const restoredProviderSubagentIds = new Set(observations
+            .filter((observation) => observation.kind === "declared")
+            .map((observation) => observation.id));
+        const replay = {
+            restoredIds: restoredProviderSubagentIds,
+            toolOwners: subagentReplay.toolOwners,
+            subagentToolCalls: parentFacts.toolCalls,
+        };
+        if (observations.length === 0)
+            return replay;
+        for (const event of foldSubagentObservations(observations)) {
+            this.persistedProviderSubagentEvents.push({
+                type: "provider_subagent",
+                provider: "claude",
+                event,
+            });
+        }
+        this.historyPending = true;
+        return replay;
+    }
+    async ingestPersistedHistoryEntry(entry, timeline, replay) {
+        if (entry.isSidechain) {
+            return;
+        }
+        const notificationToolUseId = readTaskNotificationToolUseIdFromHistoryRecord(entry);
+        if (notificationToolUseId && replay.restoredIds.has(notificationToolUseId)) {
+            return;
+        }
+        const historyTimestamp = normalizeProviderReplayTimestamp(entry.timestamp);
+        const notificationOwner = notificationToolUseId
+            ? replay.toolOwners.get(notificationToolUseId)
+            : undefined;
+        if (notificationOwner) {
+            for (const item of await this.convertHistoryEntry(entry)) {
+                this.persistedProviderSubagentEvents.push({
+                    type: "provider_subagent",
+                    provider: "claude",
+                    event: {
+                        type: "timeline",
+                        id: notificationOwner,
+                        item,
+                        timestamp: historyTimestamp ?? undefined,
+                    },
+                });
+            }
+            return;
+        }
+        const taskSnapshot = this.taskState.observe(entry);
+        const items = [
+            ...(taskSnapshot ? [taskSnapshot] : []),
+            ...(await this.convertHistoryEntry(entry)).map((item) => labelReplayedSubagentCard(item, replay.subagentToolCalls)),
+        ];
+        const isVisibleUserEntry = entry.type === "user" &&
+            typeof entry.uuid === "string" &&
+            !isSyntheticHistoryUserEntry(entry) &&
+            !isToolResultUserEntry(entry);
+        if (isVisibleUserEntry && typeof entry.uuid === "string") {
+            this.rememberUserMessageId(entry.uuid);
+            this.rememberRewindUserAnchor(entry.uuid);
+        }
+        if (entry.type === "assistant" && typeof entry.uuid === "string") {
+            this.rememberRewindAssistantAnchor(entry.uuid);
+        }
+        if (items.length > 0) {
+            for (const item of items) {
+                timeline.push({
+                    item,
+                    timestamp: historyTimestamp ?? undefined,
+                });
+            }
+        }
+    }
+    async resolveHistoryPath(sessionId) {
+        const cwd = this.config.cwd;
+        if (!cwd)
+            return null;
+        return claudeTranscriptPath({
+            cwd,
+            sessionId,
+            configDir: claudeConfigDir(this.harnessEnvironment),
+        });
+    }
+    async convertHistoryEntry(entry) {
+        return (await convertClaudeHistoryEntry(entry, (content) => this.mapBlocksToTimeline(content))).map(limitAgentTimelineItemContent);
+    }
+    // Maps Claude content blocks into AgentTimelineItems.
+    //
+    // textMessageType controls what type text blocks emit:
+    //   - "assistant_message" (default): one item per text block (streaming granularity)
+    //   - "user_message": coalesces all text blocks into a single user_message
+    //     (matches extractUserMessageText semantics: trim each block, join with "\n\n")
+    //
+    // suppressAssistantText only applies when textMessageType is "assistant_message" — user text
+    // must never be suppressed since the TimelineAssembler only handles assistant text.
+    //
+    // NOTE: convertClaudeHistoryEntry uses extractUserMessageText directly instead of this function
+    // for user entries. Both paths must produce equivalent user_message items.
+    async mapBlocksToTimeline(content, options) {
+        const textMessageType = options?.textMessageType ?? "assistant_message";
+        const suppressText = textMessageType === "assistant_message" && (options?.suppressAssistantText ?? false);
+        const suppressReasoning = options?.suppressReasoning ?? false;
+        if (typeof content === "string") {
+            if (!content ||
+                content === INTERRUPT_TOOL_USE_PLACEHOLDER ||
+                isClaudeTranscriptNoiseText(content)) {
+                return [];
+            }
+            if (suppressText) {
+                return [];
+            }
+            return [{ type: textMessageType, text: content }];
+        }
+        const items = [];
+        // User SDK entries can arrive as multiple text blocks, but Paseo treats them as one message.
+        const userTextParts = [];
+        for (const block of content) {
+            if (!isClaudeContentChunk(block) || this.mapSubagentHandbackBlock(block, items)) {
+                continue;
+            }
+            await this.mapBlockToTimeline(block, {
+                items,
+                userTextParts,
+                textMessageType,
+                suppressText,
+                suppressReasoning,
+            });
+        }
+        if (textMessageType === "user_message" && userTextParts.length > 0) {
+            items.unshift({
+                type: "user_message",
+                text: userTextParts.join("\n\n"),
+            });
+        }
+        return items;
+    }
+    appendTextBlockToTimeline(block, context) {
+        const { items, userTextParts, textMessageType, suppressText } = context;
+        const text = typeof block.text === "string" ? block.text : "";
+        if (!text || text === INTERRUPT_TOOL_USE_PLACEHOLDER || isClaudeTranscriptNoiseText(text)) {
+            return;
+        }
+        if (textMessageType === "user_message") {
+            const trimmed = text.trim();
+            if (trimmed) {
+                userTextParts.push(trimmed);
+            }
+            return;
+        }
+        if (!suppressText) {
+            items.push({ type: "assistant_message", text });
+        }
+    }
+    async mapBlockToTimeline(block, context) {
+        switch (block.type) {
+            case "text":
+            case "text_delta":
+                this.appendTextBlockToTimeline(block, context);
+                break;
+            case "thinking":
+            case "thinking_delta":
+                if (typeof block.thinking === "string" && block.thinking && !context.suppressReasoning) {
+                    context.items.push({ type: "reasoning", text: block.thinking });
+                }
+                break;
+            case "tool_use":
+            case "server_tool_use":
+            case "mcp_tool_use":
+                this.handleToolUseStart(block, context.items);
+                break;
+            case "tool_result":
+            case "mcp_tool_result":
+            case "web_fetch_tool_result":
+            case "web_search_tool_result":
+            case "code_execution_tool_result":
+            case "bash_code_execution_tool_result":
+            case "text_editor_code_execution_tool_result":
+                await this.handleToolResult(block, context.items);
+                break;
+            default:
+                break;
+        }
+    }
+    // A subagent's handback call is its final message, and the call's result is only an
+    // acknowledgement, so neither becomes a tool call.
+    mapSubagentHandbackBlock(block, items) {
+        if (typeof block.tool_use_id === "string" && this.subagentHandbackIds.has(block.tool_use_id)) {
+            this.subagentHandbackIds.delete(block.tool_use_id);
+            return true;
+        }
+        const handback = readClaudeSubagentHandback(block);
+        if (!handback) {
+            return false;
+        }
+        this.subagentHandbackIds.add(handback.callId);
+        if (handback.report) {
+            items.push({ type: "assistant_message", text: handback.report });
+        }
+        return true;
+    }
+    handleToolUseStart(block, items) {
+        const entry = this.upsertToolUseEntry(block);
+        if (!entry) {
+            return;
+        }
+        if (entry.started) {
+            return;
+        }
+        entry.started = true;
+        this.toolUseCache.set(entry.id, entry);
+        this.pushToolCall(mapClaudeRunningToolCall({
+            name: entry.name,
+            callId: entry.id,
+            input: entry.input ?? this.normalizeToolInput(block.input) ?? null,
+            output: null,
+        }), items);
+    }
+    async handleToolResult(block, items) {
+        const entry = typeof block.tool_use_id === "string" ? this.toolUseCache.get(block.tool_use_id) : undefined;
+        const blockToolName = typeof block.tool_name === "string" ? block.tool_name : undefined;
+        const toolName = entry?.name ?? blockToolName ?? "tool";
+        const callId = typeof block.tool_use_id === "string" && block.tool_use_id.length > 0
+            ? block.tool_use_id
+            : (entry?.id ?? null);
+        // Pull image blocks out of the result so base64 never reaches the tool output, and render each
+        // one as an assistant_message markdown image after the tool_call (matching how Codex emits).
+        const { images, text } = splitClaudeToolResultImages(block.content);
+        const output = this.buildToolOutput(text, block, entry);
+        const settledToolCall = block.is_error
+            ? mapClaudeFailedToolCall({
+                name: toolName,
+                callId,
+                input: entry?.input ?? null,
+                output: output ?? null,
+                error: { ...block, content: text },
+            })
+            : mapClaudeCompletedToolCall({
+                name: toolName,
+                callId,
+                input: entry?.input ?? null,
+                output: output ?? null,
+            });
+        this.pushToolCall(settledToolCall, items);
+        this.rememberSettledSubagentToolCall(settledToolCall, entry);
+        for (const image of images) {
+            const imageItem = await renderProviderImageOutputAsAssistantMarkdown(image, {
+                materialize: materializeProviderImage,
+            });
+            if (imageItem) {
+                items.push(imageItem);
+            }
+        }
+        if (typeof block.tool_use_id === "string") {
+            this.toolUseCache.delete(block.tool_use_id);
+        }
+    }
+    rememberSettledSubagentToolCall(item, entry) {
+        const subagentId = item ? this.taskProtocolSource.resolveSubagentId(item.callId) : undefined;
+        if (!item || !subagentId)
+            return;
+        this.settledSubagentToolCalls.set(subagentId, {
+            item,
+            input: entry?.input ?? null,
+            turnId: this.activeForegroundTurnId ?? this.autonomousTurn?.id ?? null,
+        });
+    }
+    /** A finished child streams no more frames, so its settled call has nothing left to update. */
+    releaseFinishedSubagentToolCalls(observations) {
+        for (const observation of observations) {
+            if (observation.kind === "status" && observation.status !== "running") {
+                this.settledSubagentToolCalls.delete(observation.id);
+                this.sidechainTracker.delete(observation.id);
+            }
+        }
+    }
+    buildToolOutput(content, block, entry) {
+        if (block.is_error) {
+            return undefined;
+        }
+        const blockServer = typeof block.server === "string" ? block.server : undefined;
+        const blockToolName = typeof block.tool_name === "string" ? block.tool_name : undefined;
+        const server = entry?.server ?? blockServer ?? "tool";
+        const tool = entry?.name ?? blockToolName ?? "tool";
+        const coercedContent = coerceToolResultContentToString(content);
+        const input = entry?.input;
+        // Build structured result based on tool type
+        const structured = this.buildStructuredToolResult(server, tool, coercedContent, input);
+        if (structured) {
+            return structured;
+        }
+        // Fallback format - try to parse JSON first
+        const result = {};
+        if (coercedContent.length > 0) {
+            try {
+                // If content is a JSON string, parse it
+                result.output = JSON.parse(coercedContent);
+            }
+            catch {
+                // If not JSON, return unchanged (no extra wrapping)
+                result.output = coercedContent;
+            }
+        }
+        // Preserve file changes tracked during tool execution
+        if (entry?.files?.length) {
+            result.files = entry.files;
+        }
+        return Object.keys(result).length > 0 ? result : undefined;
+    }
+    isCommandExecutionTool(normalizedServer, normalizedTool, input) {
+        if (normalizedServer.includes("bash") ||
+            normalizedServer.includes("shell") ||
+            normalizedServer.includes("command")) {
+            return true;
+        }
+        if (normalizedTool.includes("bash") ||
+            normalizedTool.includes("shell") ||
+            normalizedTool.includes("command")) {
+            return true;
+        }
+        return Boolean(input && (typeof input.command === "string" || Array.isArray(input.command)));
+    }
+    static isFileWriteTool(normalizedTool) {
+        return (normalizedTool.includes("write") ||
+            normalizedTool === "write_file" ||
+            normalizedTool === "create_file");
+    }
+    static isFileEditTool(normalizedTool) {
+        return (normalizedTool.includes("edit") ||
+            normalizedTool.includes("patch") ||
+            normalizedTool === "apply_patch" ||
+            normalizedTool === "apply_diff");
+    }
+    static isFileReadTool(normalizedTool) {
+        return (normalizedTool.includes("read") ||
+            normalizedTool === "read_file" ||
+            normalizedTool === "view_file");
+    }
+    buildStructuredToolResult(server, tool, output, input) {
+        const normalizedServer = server.toLowerCase();
+        const normalizedTool = tool.toLowerCase();
+        if (this.isCommandExecutionTool(normalizedServer, normalizedTool, input)) {
+            const command = this.extractCommandText(input ?? {}) ?? "command";
+            return {
+                type: "command",
+                command,
+                output,
+                cwd: typeof input?.cwd === "string" ? input.cwd : undefined,
+            };
+        }
+        if (ClaudeAgentSession.isFileWriteTool(normalizedTool) &&
+            input &&
+            typeof input.file_path === "string") {
+            return {
+                type: "file_write",
+                filePath: input.file_path,
+                oldContent: "",
+                newContent: typeof input.content === "string" ? input.content : output,
+            };
+        }
+        if (ClaudeAgentSession.isFileEditTool(normalizedTool) &&
+            input &&
+            typeof input.file_path === "string") {
+            // Support both old_str/new_str and old_string/new_string parameter names
+            const oldContent = firstStringField(input, "old_str", "old_string");
+            const newContent = firstStringField(input, "new_str", "new_string");
+            const diff = firstStringField(input, "patch", "diff");
+            return {
+                type: "file_edit",
+                filePath: input.file_path,
+                diff,
+                oldContent,
+                newContent,
+            };
+        }
+        if (ClaudeAgentSession.isFileReadTool(normalizedTool) &&
+            input &&
+            typeof input.file_path === "string") {
+            return {
+                type: "file_read",
+                filePath: input.file_path,
+                content: output,
+            };
+        }
+        return undefined;
+    }
+    updatePartialEventToolState(event) {
+        if (event.type === "content_block_start") {
+            const block = isClaudeContentChunk(event.content_block) ? event.content_block : null;
+            if (block?.type === "tool_use" &&
+                typeof event.index === "number" &&
+                typeof block.id === "string") {
+                this.toolUseIndexToId.set(event.index, block.id);
+                this.toolUseInputBuffers.delete(block.id);
+            }
+            return false;
+        }
+        if (event.type === "content_block_delta") {
+            const delta = isClaudeContentChunk(event.delta) ? event.delta : null;
+            if (delta?.type === "input_json_delta") {
+                const partialJson = typeof delta.partial_json === "string" ? delta.partial_json : undefined;
+                this.handleToolInputDelta(event.index, partialJson);
+                return true;
+            }
+            return false;
+        }
+        if (event.type === "content_block_stop" && typeof event.index === "number") {
+            const toolId = this.toolUseIndexToId.get(event.index);
+            if (toolId) {
+                this.toolUseIndexToId.delete(event.index);
+                this.toolUseInputBuffers.delete(toolId);
+            }
+        }
+        return false;
+    }
+    async mapPartialEvent(event, options) {
+        if (this.updatePartialEventToolState(event)) {
+            return [];
+        }
+        switch (event.type) {
+            case "content_block_start":
+                return isClaudeContentChunk(event.content_block)
+                    ? await this.mapBlocksToTimeline([event.content_block], {
+                        suppressAssistantText: options?.suppressAssistantText,
+                        suppressReasoning: options?.suppressReasoning,
+                    })
+                    : [];
+            case "content_block_delta":
+                return isClaudeContentChunk(event.delta)
+                    ? await this.mapBlocksToTimeline([event.delta], {
+                        suppressAssistantText: options?.suppressAssistantText,
+                        suppressReasoning: options?.suppressReasoning,
+                    })
+                    : [];
+            default:
+                return [];
+        }
+    }
+    upsertToolUseEntry(block) {
+        const id = typeof block.id === "string" ? block.id : undefined;
+        if (!id) {
+            return null;
+        }
+        const existing = this.toolUseCache.get(id) ?? createDefaultToolUseCacheEntry(id, block);
+        if (typeof block.name === "string" && block.name.length > 0) {
+            existing.name = block.name;
+        }
+        if (typeof block.server === "string" && block.server.length > 0) {
+            existing.server = block.server;
+        }
+        else if (!existing.server) {
+            existing.server = existing.name;
+        }
+        if (block.type === "tool_use" ||
+            block.type === "mcp_tool_use" ||
+            block.type === "server_tool_use") {
+            const input = this.normalizeToolInput(block.input);
+            if (input) {
+                this.applyToolInput(existing, input);
+            }
+        }
+        this.toolUseCache.set(id, existing);
+        return existing;
+    }
+    handleToolInputDelta(index, partialJson) {
+        if (typeof index !== "number" || typeof partialJson !== "string") {
+            return;
+        }
+        const toolId = this.toolUseIndexToId.get(index);
+        if (!toolId) {
+            return;
+        }
+        const buffer = (this.toolUseInputBuffers.get(toolId) ?? "") + partialJson;
+        this.toolUseInputBuffers.set(toolId, buffer);
+        const entry = this.toolUseCache.get(toolId);
+        const parsed = parsePartialJsonObject(buffer);
+        if (!entry || !parsed) {
+            return;
+        }
+        const normalized = this.normalizeToolInput(parsed.value);
+        if (!normalized) {
+            return;
+        }
+        if (!parsed.complete && Object.keys(normalized).length === 0) {
+            return;
+        }
+        if (this.areToolInputsEqual(entry.input ?? undefined, normalized)) {
+            return;
+        }
+        this.applyToolInput(entry, normalized);
+        this.toolUseCache.set(toolId, entry);
+        this.pushToolCall(mapClaudeRunningToolCall({
+            name: entry.name,
+            callId: toolId,
+            input: normalized,
+            output: null,
+        }));
+    }
+    normalizeToolInput(input) {
+        if (!isMetadata(input)) {
+            return null;
+        }
+        return input;
+    }
+    areToolInputsEqual(left, right) {
+        if (!left) {
+            return false;
+        }
+        const leftKeys = Object.keys(left);
+        const rightKeys = Object.keys(right);
+        if (leftKeys.length !== rightKeys.length) {
+            return false;
+        }
+        return rightKeys.every((key) => left[key] === right[key]);
+    }
+    applyToolInput(entry, input) {
+        entry.input = input;
+        if (this.isCommandTool(entry.name, input)) {
+            entry.classification = "command";
+            entry.commandText = this.extractCommandText(input) ?? entry.commandText;
+        }
+        else {
+            const files = this.extractFileChanges(input);
+            if (files?.length) {
+                entry.classification = "file_change";
+                entry.files = files;
+            }
+        }
+    }
+    isCommandTool(name, input) {
+        const normalized = name.toLowerCase();
+        if (normalized.includes("bash") ||
+            normalized.includes("shell") ||
+            normalized.includes("terminal") ||
+            normalized.includes("command")) {
+            return true;
+        }
+        if (typeof input.command === "string" || Array.isArray(input.command)) {
+            return true;
+        }
+        return false;
+    }
+    extractCommandText(input) {
+        const command = input.command;
+        if (typeof command === "string" && command.length > 0) {
+            return command;
+        }
+        if (Array.isArray(command)) {
+            const tokens = command.filter((value) => typeof value === "string");
+            if (tokens.length > 0) {
+                return tokens.join(" ");
+            }
+        }
+        if (typeof input.description === "string" && input.description.length > 0) {
+            return input.description;
+        }
+        return undefined;
+    }
+    extractFileChanges(input) {
+        if (typeof input.file_path === "string" && input.file_path.length > 0) {
+            const relative = this.relativizePath(input.file_path);
+            if (relative) {
+                return [{ path: relative, kind: this.detectFileKind(input.file_path) }];
+            }
+        }
+        if (typeof input.patch === "string" && input.patch.length > 0) {
+            const files = this.parsePatchFileList(input.patch);
+            if (files.length > 0) {
+                return files.map((entry) => ({
+                    path: this.relativizePath(entry.path) ?? entry.path,
+                    kind: entry.kind,
+                }));
+            }
+        }
+        if (Array.isArray(input.files)) {
+            const files = [];
+            for (const value of input.files) {
+                if (typeof value === "string" && value.length > 0) {
+                    files.push({
+                        path: this.relativizePath(value) ?? value,
+                        kind: this.detectFileKind(value),
+                    });
+                }
+            }
+            if (files.length > 0) {
+                return files;
+            }
+        }
+        return undefined;
+    }
+    detectFileKind(filePath) {
+        // A historical target may be on an unreachable mount; its current state says nothing
+        // about whether the past operation created or updated it.
+        if (this.replayingHistory) {
+            return "update";
+        }
+        try {
+            return fs.existsSync(filePath) ? "update" : "add";
+        }
+        catch {
+            return "update";
+        }
+    }
+    relativizePath(target) {
+        if (!target) {
+            return undefined;
+        }
+        const cwd = this.config.cwd;
+        if (cwd && target.startsWith(cwd)) {
+            const relative = path.relative(cwd, target);
+            return relative.length > 0 ? relative : path.basename(target);
+        }
+        return target;
+    }
+    parsePatchFileList(patch) {
+        const files = [];
+        const seen = new Set();
+        for (const line of patch.split(/\r?\n/)) {
+            const trimmed = line.trim();
+            let kind = null;
+            let parsedPath = null;
+            if (trimmed.startsWith("*** Add File:")) {
+                kind = "add";
+                parsedPath = trimmed.replace("*** Add File:", "").trim();
+            }
+            else if (trimmed.startsWith("*** Delete File:")) {
+                kind = "delete";
+                parsedPath = trimmed.replace("*** Delete File:", "").trim();
+            }
+            else if (trimmed.startsWith("*** Update File:")) {
+                kind = "update";
+                parsedPath = trimmed.replace("*** Update File:", "").trim();
+            }
+            if (kind && parsedPath && !seen.has(`${kind}:${parsedPath}`)) {
+                seen.add(`${kind}:${parsedPath}`);
+                files.push({ path: parsedPath, kind });
+            }
+        }
+        return files;
+    }
+}
+function hasToolLikeBlock(block) {
+    if (!block || typeof block !== "object") {
+        return false;
+    }
+    const type = typeof block.type === "string" ? block.type.toLowerCase() : "";
+    return type.includes("tool");
+}
+function readCompactionMetadata(source) {
+    const sourceRecord = toObjectRecord(source);
+    if (!sourceRecord) {
+        return null;
+    }
+    const candidates = [
+        sourceRecord.compact_metadata,
+        sourceRecord.compactMetadata,
+        sourceRecord.compactionMetadata,
+    ];
+    for (const candidate of candidates) {
+        const metadata = toObjectRecord(candidate);
+        if (!metadata) {
+            continue;
+        }
+        const trigger = typeof metadata.trigger === "string" ? metadata.trigger : undefined;
+        const preTokensRaw = metadata.preTokens ?? metadata.pre_tokens;
+        const preTokens = typeof preTokensRaw === "number" ? preTokensRaw : undefined;
+        const postTokensRaw = metadata.postTokens ?? metadata.post_tokens;
+        const postTokens = typeof postTokensRaw === "number" ? postTokensRaw : undefined;
+        return { trigger, preTokens, postTokens };
+    }
+    return null;
+}
+function normalizeHistoryBlocks(content) {
+    if (Array.isArray(content)) {
+        const blocks = content.filter((entry) => isClaudeContentChunk(entry));
+        return blocks.length > 0 ? blocks : null;
+    }
+    if (isClaudeContentChunk(content)) {
+        return [content];
+    }
+    return null;
+}
+/** The parent's card for a subagent, labeled with its type and task. */
+function buildClaudeSubagentCardDetail(facts) {
+    return {
+        type: "sub_agent",
+        ...(facts.title ? { subAgentType: facts.title } : {}),
+        ...(facts.description ? { description: facts.description } : {}),
+        // COMPAT(subagent-log): remove after 2027-04-30.
+        log: "",
+        actions: [],
+    };
+}
+/**
+ * Live, a Task call's card is built from the task protocol's declaration. Replay has no task
+ * protocol, so the generic tool mapper leaves the card unlabeled; label it from the same facts.
+ */
+function labelReplayedSubagentCard(item, subagentToolCalls) {
+    if (item.type !== "tool_call")
+        return item;
+    const facts = subagentToolCalls.get(item.callId);
+    if (!facts)
+        return item;
+    return { ...item, detail: buildClaudeSubagentCardDetail(facts) };
+}
+/**
+ * Collect what the parent transcript knows about its Task calls, in the shape the shared replay
+ * source consumes. The agentId scrape is kept only as a fallback for sessions recorded before
+ * Claude Code wrote the meta sidecar.
+ */
+async function readClaudeReplayParentFacts(entries) {
+    const toolCalls = new Map();
+    const linksByAgentId = new Map();
+    const outcomes = new Map();
+    for await (const entry of entries) {
+        const notification = readTaskNotificationFromHistoryRecord(entry);
+        const status = mapTaskStatus(notification?.status ?? undefined);
+        if (notification?.toolUseId && status) {
+            outcomes.set(notification.toolUseId, { status });
+        }
+        const content = toObjectRecord(entry.message)?.content;
+        if (!Array.isArray(content))
+            continue;
+        for (const value of content) {
+            const block = toObjectRecord(value);
+            const declaration = readClaudeReplayTaskDeclaration(entry.type, block);
+            if (declaration)
+                toolCalls.set(declaration.id, declaration.identity);
+            if (entry.type !== "user" ||
+                block?.type !== "tool_result" ||
+                typeof block.tool_use_id !== "string")
+                continue;
+            if (toObjectRecord(entry.toolUseResult)?.status !== "async_launched")
+                outcomes.set(block.tool_use_id, {
+                    status: block.is_error === true ? "failed" : "completed",
+                });
+            const agentId = readLegacyClaudeSubagentId(block.content);
+            if (agentId)
+                linksByAgentId.set(agentId, {
+                    toolCallId: block.tool_use_id,
+                });
+        }
+    }
+    return {
+        toolCalls,
+        linksByAgentId,
+        outcomesByToolCallId: new Map([...outcomes].filter(([id]) => toolCalls.has(id))),
+    };
+}
+function readClaudeReplayTaskDeclaration(entryType, block) {
+    if (entryType !== "assistant" ||
+        block?.type !== "tool_use" ||
+        (block.name !== "Task" && block.name !== "Agent") ||
+        typeof block.id !== "string")
+        return null;
+    const input = toObjectRecord(block.input);
+    const title = readNonEmptyString(input?.name) ?? readNonEmptyString(input?.subagent_type);
+    const description = readNonEmptyString(input?.description);
+    return {
+        id: block.id,
+        identity: { ...(title ? { title } : {}), ...(description ? { description } : {}) },
+    };
+}
+function readLegacyClaudeSubagentId(content) {
+    return /agentId:\s*([\w-]+)/.exec(JSON.stringify(content))?.[1];
+}
+async function mapAssistantHistoryBlocksWithMessageId(entry, content, mapBlocks) {
+    const items = await mapBlocks(content);
+    const assistantMessageId = typeof entry.uuid === "string" && entry.uuid.length > 0 ? entry.uuid : null;
+    if (!assistantMessageId) {
+        return items;
+    }
+    for (const item of items) {
+        if (item.type === "assistant_message" && !item.messageId) {
+            item.messageId = assistantMessageId;
+        }
+    }
+    return items;
+}
+function convertClaudeHistoryEntryPreamble(entry) {
+    if (entry.type === "system" && entry.subtype === "compact_boundary") {
+        const compactMetadata = readCompactionMetadata(entry);
+        return {
+            shortCircuit: [
+                {
+                    type: "compaction",
+                    status: "completed",
+                    trigger: compactMetadata?.trigger === "manual" ? "manual" : "auto",
+                    preTokens: compactMetadata?.preTokens,
+                },
+            ],
+        };
+    }
+    const taskNotificationItem = mapTaskNotificationSystemRecordToToolCall(entry);
+    if (taskNotificationItem) {
+        return { shortCircuit: [taskNotificationItem] };
+    }
+    if (entry.isCompactSummary) {
+        return { shortCircuit: [] };
+    }
+    if (entry.type === "user" && isSyntheticHistoryUserEntry(entry)) {
+        return { shortCircuit: [] };
+    }
+    const steeredPrompt = readSteeredPromptHistoryItem(entry);
+    if (steeredPrompt) {
+        return { shortCircuit: [steeredPrompt] };
+    }
+    // Only user and assistant records are conversation turns. Claude Code 2.1.x also journals each
+    // API request as `api-request-blob` records whose message replays the system context.
+    if (entry.type !== "user" && entry.type !== "assistant") {
+        return { shortCircuit: [] };
+    }
+    const message = entry?.message;
+    if (!message || !("content" in message)) {
+        return { shortCircuit: [] };
+    }
+    const content = message.content;
+    if ((entry.type === "user" || entry.type === "assistant") &&
+        isClaudeTranscriptNoiseContent(content)) {
+        return { shortCircuit: [] };
+    }
+    return { proceed: { content } };
+}
+function isProviderImageMessage(item) {
+    return item.type === "assistant_message" && isProviderImageMarkdown(item.text);
+}
+/**
+ * A message steered into a running turn. Claude Code gives it no user entry: it records a
+ * queued_command attachment in prompt mode, under the uuid Paseo minted for the message, which is
+ * also what a rewind to it resolves. The other modes carry task notifications, not user messages.
+ */
+function readSteeredPromptHistoryItem(entry) {
+    if (entry.type !== "attachment")
+        return null;
+    const attachment = toObjectRecord(entry.attachment);
+    if (attachment?.type !== "queued_command" || attachment.commandMode !== "prompt")
+        return null;
+    const text = extractUserMessageText(attachment.prompt);
+    if (!text)
+        return null;
+    const messageId = readTrimmedString(attachment.source_uuid);
+    return { type: "user_message", text, ...(messageId ? { messageId } : {}) };
+}
+export async function convertClaudeHistoryEntry(entry, mapBlocks) {
+    const preamble = convertClaudeHistoryEntryPreamble(entry);
+    if ("shortCircuit" in preamble) {
+        return preamble.shortCircuit;
+    }
+    const { content } = preamble.proceed;
+    const normalizedBlocks = normalizeHistoryBlocks(content);
+    const contentValue = typeof content === "string" ? content : normalizedBlocks;
+    const hasToolBlock = normalizedBlocks?.some((block) => hasToolLikeBlock(block)) ?? false;
+    const userMessageId = entry.type === "user" && typeof entry.uuid === "string" && entry.uuid.length > 0
+        ? entry.uuid
+        : null;
+    if (entry.type === "user") {
+        const userTaskNotificationItem = mapTaskNotificationUserContentToToolCall({
+            content,
+            messageId: userMessageId,
+            notificationId: typeof entry.notificationId === "string" ? entry.notificationId : undefined,
+        });
+        if (userTaskNotificationItem) {
+            return [userTaskNotificationItem];
+        }
+    }
+    const timeline = [];
+    if (entry.type === "user") {
+        const text = extractUserMessageText(content);
+        if (text) {
+            timeline.push({
+                type: "user_message",
+                text,
+                ...(userMessageId ? { messageId: userMessageId } : {}),
+            });
+        }
+    }
+    if (hasToolBlock && normalizedBlocks) {
+        const mapped = await mapBlocks(normalizedBlocks);
+        if (entry.type === "user") {
+            // tool_result handling (handleToolResult) emits image markdown as an assistant_message
+            // alongside the tool_call. User-entry text blocks also map to assistant_message in this path
+            // and must stay suppressed, so keep tool_calls plus only the image assistant_messages.
+            const toolItems = mapped.filter((item) => item.type === "tool_call" || isProviderImageMessage(item));
+            return timeline.length ? [...timeline, ...toolItems] : toolItems;
+        }
+        return mapped;
+    }
+    if (entry.type === "assistant" && contentValue) {
+        return await mapAssistantHistoryBlocksWithMessageId(entry, contentValue, mapBlocks);
+    }
+    return timeline;
+}
+function createAsyncMessageInput() {
+    const queue = [];
+    const resolvers = [];
+    let closed = false;
+    return {
+        push(item) {
+            if (closed) {
+                return;
+            }
+            const resolve = resolvers.shift();
+            if (resolve) {
+                resolve({ value: item, done: false });
+                return;
+            }
+            queue.push(item);
+        },
+        end() {
+            closed = true;
+            while (resolvers.length > 0) {
+                const resolve = resolvers.shift();
+                resolve?.({ value: undefined, done: true });
+            }
+        },
+        iterable: {
+            [Symbol.asyncIterator]() {
+                return {
+                    next: () => {
+                        if (queue.length > 0) {
+                            const value = queue.shift();
+                            if (value !== undefined) {
+                                return Promise.resolve({ value, done: false });
+                            }
+                        }
+                        if (closed) {
+                            return Promise.resolve({ value: undefined, done: true });
+                        }
+                        return new Promise((resolve) => {
+                            resolvers.push(resolve);
+                        });
+                    },
+                };
+            },
+        },
+    };
+}
+function claudeSessionCacheKey(filePath, stats) {
+    return `${filePath}\0${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}`;
+}
+function isMissingClaudeImportFile(error) {
+    return (error instanceof Error &&
+        "code" in error &&
+        (error.code === "ENOENT" || error.code === "ENOTDIR"));
+}
+function isExpectedClaudeImportFileError(error) {
+    if (!(error instanceof Error) || !("code" in error))
+        return false;
+    return (error.code === "ENOENT" ||
+        error.code === "ENOTDIR" ||
+        error.code === "EACCES" ||
+        error.code === "EPERM");
+}
+async function pathExists(target) {
+    try {
+        await fsPromises.access(target);
+        return true;
+    }
+    catch (error) {
+        if (!isMissingClaudeImportFile(error))
+            throw error;
+        return false;
+    }
+}
+async function collectRecentClaudeSessions(root, limit, options) {
+    const permissionErrors = [];
+    function recordDiscoveryFailure(error, targetPath) {
+        if (isMissingClaudeImportFile(error))
+            return;
+        if (!(error instanceof Error) || !isExpectedClaudeImportFileError(error))
+            throw error;
+        permissionErrors.push(error);
+        options.logger.warn({ err: error, path: targetPath }, "Skipping Claude session discovery path with denied access");
+    }
+    let rootEntries;
+    try {
+        rootEntries = await fsPromises.readdir(root);
+    }
+    catch (error) {
+        if (!isMissingClaudeImportFile(error))
+            throw error;
+        return [];
+    }
+    const fileEntries = options.rootIsProjectDir
+        ? rootEntries.filter((file) => file.endsWith(".jsonl")).map((file) => path.join(root, file))
+        : (await Promise.all(rootEntries.map(async (dirName) => {
+            const projectPath = path.join(root, dirName);
+            try {
+                const stats = await fsPromises.stat(projectPath);
+                if (!stats.isDirectory())
+                    return [];
+                const files = await fsPromises.readdir(projectPath);
+                return files
+                    .filter((file) => file.endsWith(".jsonl"))
+                    .map((file) => path.join(projectPath, file));
+            }
+            catch (error) {
+                recordDiscoveryFailure(error, projectPath);
+                return [];
+            }
+        }))).flat();
+    const statResults = await Promise.all(fileEntries.map(async (fullPath) => {
+        try {
+            const fileStats = await fsPromises.stat(fullPath);
+            if (!fileStats.isFile())
+                return null;
+            return {
+                path: fullPath,
+                mtime: fileStats.mtime,
+                cacheKey: claudeSessionCacheKey(fullPath, fileStats),
+            };
+        }
+        catch (error) {
+            recordDiscoveryFailure(error, fullPath);
+            return null;
+        }
+    }));
+    const candidates = statResults.filter((entry) => entry !== null);
+    if (candidates.length === 0 && permissionErrors.length > 0) {
+        throw new AggregateError(permissionErrors, `Cannot discover Claude sessions: access was denied to ${permissionErrors.length} paths and no transcripts could be discovered. ${permissionErrors[0].message}`);
+    }
+    return candidates.sort((a, b) => b.mtime.getTime() - a.mtime.getTime()).slice(0, limit);
+}
+const CLAUDE_IMPORT_DESCRIPTOR_RECORD_PATTERN = /"type"\s*:\s*"(?:user|custom-title|ai-title)"/;
+const CLAUDE_SESSION_ID_KEY_PATTERN = /"sessionId"\s*:/;
+const CLAUDE_CWD_KEY_PATTERN = /"cwd"\s*:/;
+function shouldParseClaudeSessionDescriptorLine(line, acc) {
+    return (CLAUDE_IMPORT_DESCRIPTOR_RECORD_PATTERN.test(line) ||
+        (!acc.sessionId && CLAUDE_SESSION_ID_KEY_PATTERN.test(line)) ||
+        (!acc.cwd && CLAUDE_CWD_KEY_PATTERN.test(line)));
+}
+function applyClaudeSessionEntryToAccumulator(entryRaw, acc) {
+    const entry = toObjectRecord(entryRaw);
+    if (!entry) {
+        return;
+    }
+    if (entry.isSidechain) {
+        return;
+    }
+    if (entry.type === "user" && isSyntheticUserEntry(entry)) {
+        return;
+    }
+    if (!acc.sessionId && typeof entry.sessionId === "string") {
+        acc.sessionId = entry.sessionId;
+    }
+    if (!acc.cwd && typeof entry.cwd === "string") {
+        acc.cwd = entry.cwd;
+    }
+    if (entry.type === "custom-title" && typeof entry.customTitle === "string") {
+        acc.customTitle = normalizeClaudeSessionTitle(entry.customTitle);
+        return;
+    }
+    if (entry.type === "ai-title" && typeof entry.aiTitle === "string") {
+        acc.aiTitle = normalizeClaudeSessionTitle(entry.aiTitle);
+        return;
+    }
+    if (entry.type === "user" && entry.message) {
+        const text = extractClaudeUserText(entry.message);
+        if (text) {
+            acc.firstPromptTitle ?? (acc.firstPromptTitle = text);
+            const preview = normalizeImportablePromptPreview(text);
+            acc.firstPromptPreview ?? (acc.firstPromptPreview = preview);
+            acc.lastPromptPreview = preview;
+        }
+        return;
+    }
+}
+async function parseClaudeSessionDescriptor(filePath, mtime, signal) {
+    const acc = {
+        sessionId: null,
+        cwd: null,
+        customTitle: null,
+        aiTitle: null,
+        firstPromptTitle: null,
+        firstPromptPreview: null,
+        lastPromptPreview: null,
+    };
+    // Keep only the current record, including image records larger than a read chunk.
+    const record = [];
+    const stream = fs.createReadStream(filePath, { highWaterMark: 64 * 1024, signal });
+    function applyRecord() {
+        const line = Buffer.concat(record).toString("utf8");
+        if (!line || !shouldParseClaudeSessionDescriptorLine(line, acc))
+            return;
+        let entry;
+        try {
+            entry = JSON.parse(line);
+        }
+        catch {
+            return;
+        }
+        applyClaudeSessionEntryToAccumulator(entry, acc);
+    }
+    try {
+        for await (const chunk of stream) {
+            signal.throwIfAborted();
+            let start = 0;
+            while (start < chunk.length) {
+                const newline = chunk.indexOf(10, start);
+                const end = newline === -1 ? chunk.length : newline;
+                record.push(chunk.subarray(start, end));
+                if (newline === -1)
+                    break;
+                applyRecord();
+                record.length = 0;
+                start = newline + 1;
+            }
+        }
+        if (record.length > 0)
+            applyRecord();
+    }
+    finally {
+        stream.destroy();
+    }
+    const { sessionId, cwd } = acc;
+    if (!sessionId || !cwd) {
+        return null;
+    }
+    return {
+        providerHandleId: sessionId,
+        cwd,
+        title: acc.customTitle ??
+            acc.aiTitle ??
+            normalizeClaudeSessionTitle(acc.firstPromptTitle) ??
+            `Claude session ${sessionId.slice(0, 8)}`,
+        firstPromptPreview: acc.firstPromptPreview,
+        lastPromptPreview: acc.lastPromptPreview,
+        lastActivityAt: mtime,
+    };
+}
+function normalizeClaudeSessionTitle(title) {
+    const normalized = title?.trim();
+    return normalized ? normalized : null;
+}
+const CLAUDE_CUSTOM_TITLE_TYPE = "custom-title";
+const CLAUDE_CUSTOM_TITLE_NEEDLE = Buffer.from(`"${CLAUDE_CUSTOM_TITLE_TYPE}"`);
+const CLAUDE_TITLE_SCAN_CHUNK_BYTES = 64 * 1024;
+function readClaudeCustomTitleFromRecord(record) {
+    // The needle also matches a prompt that quotes it, so a record still has to
+    // parse as a `custom-title` entry carrying a usable name. Records without the
+    // needle are never decoded, so a long one costs a byte search and nothing more.
+    if (!record.includes(CLAUDE_CUSTOM_TITLE_NEEDLE)) {
+        return null;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(record.toString("utf8").trim());
+    }
+    catch {
+        return null;
+    }
+    const entry = toObjectRecord(parsed);
+    if (!entry || entry.isSidechain || entry.type !== CLAUDE_CUSTOM_TITLE_TYPE) {
+        return null;
+    }
+    return normalizeClaudeSessionTitle(typeof entry.customTitle === "string" ? entry.customTitle : null);
+}
+/**
+ * The `custom-title` record is re-emitted every time the session is saved, so
+ * the current name is the last usable one in the file. Reading backwards a chunk
+ * at a time finds it without walking the transcript, which matters because
+ * sessions reach tens of megabytes, and never holds the file as one string, so a
+ * transcript past V8's maximum string length still imports.
+ */
+async function readLastClaudeCustomTitle(filePath) {
+    const handle = await fsPromises.open(filePath, "r");
+    try {
+        const stats = await handle.stat();
+        if (!stats.isFile()) {
+            // Opening a directory succeeds on Windows even though reading it does not,
+            // so reject the way reading the transcript as a file would.
+            throw Object.assign(new Error(`EISDIR: illegal operation on a directory, read '${filePath}'`), { code: "EISDIR", path: filePath });
+        }
+        let end = stats.size;
+        // Retain unfinished record pieces in reverse file order. Assemble each
+        // complete record once, so a large tool/image record costs linear work.
+        let pieces = [];
+        while (end > 0) {
+            const length = Math.min(CLAUDE_TITLE_SCAN_CHUNK_BYTES, end);
+            const chunk = Buffer.alloc(length);
+            await handle.read(chunk, 0, length, end - length);
+            let recordEnd = chunk.length;
+            for (let at = chunk.lastIndexOf(10); at >= 0; at = at === 0 ? -1 : chunk.lastIndexOf(10, at - 1)) {
+                pieces.push(chunk.subarray(at + 1, recordEnd));
+                const record = Buffer.concat(pieces.toReversed());
+                const title = readClaudeCustomTitleFromRecord(record);
+                if (title)
+                    return title;
+                pieces = [];
+                recordEnd = at;
+            }
+            if (recordEnd > 0)
+                pieces.push(chunk.subarray(0, recordEnd));
+            end -= length;
+        }
+        // The first record in the file has no newline in front of it.
+        return readClaudeCustomTitleFromRecord(Buffer.concat(pieces.toReversed()));
+    }
+    finally {
+        await handle.close();
+    }
+}
+function isErrnoException(error) {
+    return error instanceof Error && "code" in error;
+}
+async function readClaudeRenamedSessionTitle(input) {
+    try {
+        return await readLastClaudeCustomTitle(await claudeTranscriptPath(input));
+    }
+    catch (error) {
+        // A session with no transcript on disk has no rename to carry over. Every
+        // other read failure is a real fault and stays explicit.
+        if (isErrnoException(error) && error.code === "ENOENT") {
+            return null;
+        }
+        throw error;
+    }
+}
+function normalizeImportablePromptPreview(text) {
+    const normalized = text.trim().replace(/\s+/g, " ");
+    if (!normalized)
+        return null;
+    return normalized.length > 160 ? normalized.slice(0, 160) : normalized;
+}
+function normalizeClaudeUserPromptText(text) {
+    const normalized = text.trim();
+    if (!CLAUDE_COMMAND_MESSAGE_PATTERN.test(normalized)) {
+        return normalized || null;
+    }
+    const command = readClaudeCommandPromptName(normalized);
+    if (!command) {
+        return null;
+    }
+    const commandArgs = normalized.match(CLAUDE_COMMAND_ARGS_PATTERN)?.[1]?.trim();
+    if (commandArgs) {
+        return `${command} ${commandArgs}`;
+    }
+    return command;
+}
+function readClaudeCommandPromptName(text) {
+    const commandName = text.match(CLAUDE_COMMAND_NAME_PATTERN)?.[1]?.trim();
+    if (commandName) {
+        return commandName.startsWith("/") ? commandName : `/${commandName}`;
+    }
+    const commandMessage = text.match(CLAUDE_COMMAND_MESSAGE_PATTERN)?.[1]?.trim();
+    if (!commandMessage) {
+        return null;
+    }
+    return commandMessage.startsWith("/") ? commandMessage : `/${commandMessage}`;
+}
+function extractClaudeUserText(messageRaw) {
+    const message = toObjectRecord(messageRaw);
+    if (!message) {
+        return null;
+    }
+    if (typeof message.content === "string") {
+        const normalized = message.content.trim();
+        if (!normalized || isClaudeTranscriptNoiseText(normalized))
+            return null;
+        return normalizeClaudeUserPromptText(normalized);
+    }
+    if (typeof message.text === "string") {
+        const normalized = message.text.trim();
+        if (!normalized || isClaudeTranscriptNoiseText(normalized))
+            return null;
+        return normalizeClaudeUserPromptText(normalized);
+    }
+    if (isUnknownArray(message.content)) {
+        for (const block of message.content) {
+            const blockRecord = toObjectRecord(block);
+            if (blockRecord && typeof blockRecord.text === "string") {
+                const normalized = blockRecord.text.trim();
+                if (normalized && !isClaudeTranscriptNoiseText(normalized)) {
+                    return normalizeClaudeUserPromptText(normalized);
+                }
+            }
+        }
+    }
+    return null;
+}
+/** Runtime-only Claude frames are validated here because the SDK's public union omits them. */
+function readClaudeCommandLifecycle(message) {
+    const record = toObjectRecord(message);
+    if (record?.type !== "command_lifecycle")
+        return null;
+    if (typeof record.command_uuid !== "string" ||
+        !["queued", "started", "completed", "cancelled"].includes(String(record.state))) {
+        return null;
+    }
+    return {
+        commandUuid: record.command_uuid,
+        state: record.state,
+    };
+}
+async function transcriptExists(file) {
+    try {
+        await fs.promises.access(file);
+        return true;
+    }
+    catch (error) {
+        if (error.code === "ENOENT")
+            return false;
+        throw error;
+    }
+}
+//# sourceMappingURL=agent.js.map
