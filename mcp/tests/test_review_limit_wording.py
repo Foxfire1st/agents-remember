@@ -117,8 +117,8 @@ STOPS = (
 STAGE_PARTS = {
     "worker": (
         "Your stage ends when the candidate meets the requirement",
-        "the handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of its final bytes",
-        "the report is with the Reviewer",
+        "the handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of the frozen candidate",
+        "the reports are with the Reviewer and the Manager",
         "you repair, and you go on",
         "Your report names what you repaired",
         "tell that parent what and whom you await with `role_message` on `agents-remember-task`",
@@ -186,17 +186,17 @@ STAGE_CONTRACTS = {
             "Your stage ends when the candidate meets the requirement",
             "Your stage ends when the candidate meets the requirement",
         ),
-        "the handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of its final bytes": (
+        "the handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of the frozen candidate": (
             "role",
             "## Stop conditions and stage completion",
-            "the handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of the final bytes",
-            "the handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of the final bytes",
+            "the handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of the frozen candidate",
+            "the handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of the frozen candidate",
         ),
-        "the report is with the Reviewer": (
+        "the reports are with the Reviewer and the Manager": (
             "role",
             "## Stop conditions and stage completion",
-            "the report is with the Reviewer",
-            "the report is with the Reviewer",
+            "the reports are with the Reviewer and the Manager",
+            "the reports are with the Reviewer and the Manager",
         ),
         "you repair, and you go on": (
             "role",

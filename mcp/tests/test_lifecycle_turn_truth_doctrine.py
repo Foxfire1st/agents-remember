@@ -481,7 +481,7 @@ OWED_STATEMENTS: dict[str, tuple[str, ...]] = {
     ),
     "skills/l-01-agent-lifecycles/templates/turn-report.md": (
         "The [acceptance reference](../core/acceptance.md) owns acceptance",
-        "[final-candidate verification](../operations/implementation.md#verify-the-final-candidate) owns targeted handover checks.",
+        "[the checks before a freeze](../operations/implementation.md#check-the-candidate-before-each-freeze) owns targeted handover checks.",
     ),
 }
 
@@ -764,7 +764,7 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
                 "coordination",
                 (
                     "inspect the complete changed-file diff",
-                    "both verdicts before deciding the gate",
+                    "both verdicts and the Worker's report of the requirement's listed final checks before deciding the gate",
                     "never substitute shell commits or a finished turn for ar acceptance",
                 ),
             ),
@@ -805,7 +805,7 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
 
                 if role == "manager":
                     weakened = role_text.replace(
-                        "Inspect the complete changed-file diff and both verdicts before deciding the gate.",
+                        "Inspect the complete changed-file diff, both verdicts and the Worker's report of the requirement's listed final checks before deciding the gate.",
                         "Accept each deliverable onward.",
                         1,
                     )

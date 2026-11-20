@@ -33,7 +33,13 @@ Use the limit in the settings file when the round begins. A changed limit applie
 
 Where the lifecycle uses follow-up verification, the same Reviewer verifies the residuals of a passing round. Fix rounds resume the same builder.
 
-Fix-verification addresses only the original listed issues, subject to the two sanctioned routes below. Send every other matter outside that list to the developer; it does not become a successor finding.
+Fix-verification addresses only the original listed issues, subject to the sanctioned routes below. Send every other matter outside that list to the developer; it does not become a successor finding.
+
+## Run a requirement's final checks after the pass
+
+A round carries the Worker's focused tests and the fast commit-hook checks. A requirement's `## Final checks` section lists the runs that go beyond them, and those run once, on the tree the code review passed: the Worker runs them and reports each check, its result and that tree to the Manager and the Reviewer. The Reviewer's ready-for-closeout notice waits for that report, and the Manager closes out on the verdicts and the report.
+
+The final checks are no round and do not count under the limit. A failed final check is the third sanctioned route below: its repair is reviewed once and checked by the failed check and the focused tests of the repair, never by a second full run. A failed multi-step run's failed step plays that part.
 
 ## Preserve the original list through convergence
 
@@ -49,23 +55,24 @@ Mechanical tests and Worker diagnosis are evidence. They cannot publish Reviewer
 
 Changing the candidate, source, requirement version, model, seat, route or report label does not reset the list. The review refuses:
 
-- Unknown, duplicate, rewritten, reintroduced, newly discovered or outside-list issues, except through the two sanctioned routes below.
+- Unknown, duplicate, rewritten, reintroduced, newly discovered or outside-list issues, except through the sanctioned routes below.
 - New criteria, routes or lenses.
 - Whole-review requests.
 - Passing with unresolved items.
 
 This applies to native, plan, integration, route, lens, replacement, resumed, bootstrap, diagnostic, delta and final review labels alike.
 
-## Handle the two sanctioned routes for added findings
+## Handle the sanctioned routes for added findings
 
-Two routes may add a finding after the list is sealed:
+Three routes may add a finding after the list is sealed:
 
 - A valid code finding from the Curator.
 - A valid finding from an advisory review the Architect commissioned and forwarded in its questions file.
+- A final check that fails on the tree the code review passed.
 
-For both, add it as a new sealed finding with its own identifier and reopen the verdict for that point only. Earlier sealed findings stay as they are. The Worker repairs a valid finding in a successor. For an invalid finding, give the reason it does not hold.
+For all three, add it as a new sealed finding with its own identifier and reopen the verdict for that point only. Earlier sealed findings stay as they are. The Worker repairs a valid finding in a successor. For an invalid finding, give the reason it does not hold.
 
-A repair round for a Curator finding counts under the settings limit. Beyond it, send the extra-round question to the instructed reporting recipient where your role has one; otherwise send it through your parent, or ask in your own chat when you have no parent. An extra round for advisory findings is the Architect's grant. Every other new observation follows your role's developer-question route.
+A repair round for a Curator or final-check finding counts under the settings limit. Beyond it, send the extra-round question to the instructed reporting recipient where your role has one; otherwise send it through your parent, or ask in your own chat when you have no parent. An extra round for advisory findings is the Architect's grant. Every other new observation follows your role's developer-question route.
 
 ## Use the catalog for the review mode
 

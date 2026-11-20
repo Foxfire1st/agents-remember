@@ -874,7 +874,9 @@ review rounds a task may run without a further approval. `task_doc` reads it whe
 begins, from the user settings file only: a value in a repository settings file is accepted and
 not applied. A changed number holds for the next round without a restart. When the rounds of a
 task have reached the number plus the extra rounds approved for that task, the next round is
-refused with `review-budget-exhausted` until an approval of a further round is recorded.
+refused with `review-budget-exhausted` until an approval of a further round is recorded. A
+requirement's final checks are no review round: they run once after the code review passes and do
+not count under this number.
 
 The loader accepts and checks four more keys of `orchestration.loops`, and nothing reads them:
 

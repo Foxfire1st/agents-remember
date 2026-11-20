@@ -1,6 +1,6 @@
-# Verdict Template (adversarial reviewer)
+# Verdict Template
 
-The Reviewer uses this template to report an adversarial review at a seam: a boundary where work is checked before handover or integration. The gate owner and developer read the verdict as evidence; the gate owner decides acceptance.
+The Reviewer uses this template to report an independent review at a seam: a boundary where work is checked before handover or integration. The gate owner and developer read the verdict as evidence; the gate owner decides acceptance.
 
 In this template, ID means identifier.
 
@@ -20,7 +20,7 @@ This template shapes the artifact; it does not author rules. The sections below 
 3. **Refute-or-confirm:** every finding must survive an attempt to refute it. Rank findings and cite
    the backing evidence file.
 4. Use [Check baseline evidence](../reference/review-baseline.md#check-baseline-evidence) for the three review lenses. Full test suites and drift reports appear only when
-   the developer asked for them. The Curator's complete memory quality check in normal curation
+   the developer asked for them, or as a requirement's listed final checks on the tree the pass left. The Curator's complete memory quality check in normal curation
    is always required and always reported.
 5. Record the gate evidence reference exactly: `kind=reviewer-verdict`, `ref=<artifact path>`, and
    `verdict=<pass | pass-with-notes | block>`.
@@ -41,7 +41,7 @@ This template shapes the artifact; it does not author rules. The sections below 
 
 ## Additions to a sealed findings list
 
-For additions after sealing, follow the two routes and round authority in the [review operation’s Boundaries](../operations/review.md#boundaries). Record each new sealed identifier, its targeted reopening and the ruling on validity; retain earlier sealed findings.
+For additions after sealing, follow the three routes and round authority in the [review operation’s Boundaries](../operations/review.md#boundaries). Record each new sealed identifier, its targeted reopening and the ruling on validity; retain earlier sealed findings.
 
 ## Mandatory Requirement Adjudication Block (repeat once per stable ID + version in every variant)
 
@@ -242,7 +242,7 @@ The master owner records its review begin and result on the canonical master doc
 
 ## Lens 2 — Scoped Implementation Evidence
 - targeted leaf acceptance: current | failing:<which>
-- full quality/test suite: not run unless explicitly requested — <request/result if any>
+- full quality/test suite: not run unless explicitly requested, or the requirement's listed final checks after the pass — <request/result if any>
 - regressions vs the past (route indexes · native search): none | <finding>
 - backing evidence file: <quality/impact report path>
 
@@ -316,7 +316,7 @@ reviewer does not.
 
 ## Lens 2 — Scoped Implementation Evidence
 - targeted branch evidence: pass | failing:<which> | not-run:<reason>
-- full system/tools.md suite: not run unless explicitly requested — <request/result if any>
+- full system/tools.md suite: not run unless explicitly requested, or the requirement's listed final checks after the pass — <request/result if any>
 - branch-wide regressions vs the past and across masters (route indexes · native search): none | <finding>
 - backing evidence file: <quality/impact report path>
 

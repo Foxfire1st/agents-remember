@@ -47,16 +47,18 @@ The Architect sets the mode or runs an approver only within sufficient seat perm
 
 ## Outputs
 
-Write one concise pass/block recommendation with changed-file coverage, findings, checks and limitations. For every finding, give a stable identifier, location, evidence, impact and required repair or proof.
+Write one concise pass/block recommendation with changed-file coverage, findings, checks and limitations. For every finding, give a stable identifier, location, evidence, impact and required repair.
 
 A baseline covers the complete candidate diff, including all changed and unattributed files. Check each requirement against its evidence class and relevant behavior. A test result is evidence, not semantic acceptance.
 
 Fix-verification checks only the sealed outstanding findings against the same requirement and candidate lineage. Report a new contradiction or scope issue separately.
 
+A round carries none of the requirement's listed final checks; they run once on the tree your pass leaves, as [the final checks](implementation.md#run-the-final-checks-after-the-pass) say.
+
 <!-- ar:roles reviewer -->
 ## Select focused tests
 
-In a baseline review, rerun the Worker's recorded focused-test list and repeat its search on the frozen candidate; a test file the search finds that the Worker did not run is a finding. In fix-verification, apply the search to the repair's own touched names; an unrun matching test keeps the repaired finding open and is not a new finding.
+In a baseline review, rerun the Worker's recorded focused-test list and repeat its search on the frozen candidate; every matching test the Worker did not run is a finding. In fix-verification, apply the search to the repair's touched names; an unrun matching test keeps the repaired finding open, not a new finding.
 
 <!-- ar:gives producer-list to curator: list-file, freeze-identity, handoff-check-result -->
 ## Receive the intake and hand over the leaf verdict
@@ -70,22 +72,22 @@ For a leaf:
 3. Once the Curator exists, send it the passed freeze and code-`PASS` verdict directly.
 4. Review the Curator's memory change and return findings or `PASS` directly to it.
 
-A separately assigned packet cold read remains possible without an early normal leaf Reviewer.
-
 Every handover names the leaf, exact object, report or verdict path, and whole next stretch. Identify a code candidate by the head and change hash in the Worker's report, or identify the exact memory change. Use the sibling role and exact leaf task references from the handover, preserving product-supplied identifiers whole and unchanged.
 
 The Worker's message names the freeze and report. Its factual handover neither briefs nor limits the review. The Reviewer does not read the Worker's chat.
 
 For a cleanly synced leaf, expect no new freeze and open no round. When no path changed on both sides, the Worker reruns focused tests and the Manager's closeout preview decides. If a path changed on both sides or a focused test fails, the Worker sends exactly that repair for one look.
 
-When a freeze arrives, compare every finding with its entry in the Worker's freeze report. Return a freeze that lacks the entries without counting a round.
+Compare every finding with its entry in the Worker's freeze report; return one lacking them without counting a round.
 
-Before sending your hand-off list, run `handoff-check` against that freeze with the serving build's interpreter, identified by `server_info` on `agents-remember-task`. Name the result.
+Before sending your hand-off list, run `handoff-check` against that freeze with the serving build's interpreter from `server_info` on `agents-remember-task`; name the result.
 <!-- ar:roles all -->
 
 ## Record code review rounds
 
 The Reviewer opens each ordinary leaf code round with `task_doc(operation="begin_review")` and records its own verdict through `record_review` or the applicable `record_route_review`. Include any preceding result required before the next begin. Non-leaf seams retain owner recording and their seam's verdict recipient.
+
+A finding a sanctioned route adds after sealing is recorded with `addedFindings` (identifier, description, route) through `record_review`, or `record_route_review` on a routed leaf; it spends no round, and no route review attests a pass while it is open.
 
 <!-- ar:roles reviewer -->
 ## Recheck a repaired Worker record
@@ -117,21 +119,24 @@ Before a code edit, task-acceptance write, role start or Git publication, read [
 
 Memory review uses separate sealed reports, finding identifiers and its own pass count. The Reviewer records its own lane with `begin_review` and `record_review`, using `reviewKind=memory`. Code state stays unchanged. Memory review opens no code review-state round, resets no passed code review, code verdict or code baseline, and adds no identifiers to that baseline. Its ordinary pass limit is the same as code review's. A pass beyond the settings limit needs the Architect's or developer's instruction recorded by the Manager.
 
-After both code and memory return `PASS`, tell the Manager once that the leaf is ready for closeout, naming the passed freeze and both verdicts.
+After both code and memory return `PASS`, and the requirement's `## Final checks` are settled, tell the Manager once the leaf is ready for closeout: the passed freeze, both verdicts, and the final-check evidence — the passed tree's report, or after a repair that report with the repaired tree's targeted results; a requirement whose section lists none owes neither.
 
-Besides the code-`PASS` start notice and ready-for-closeout notice, Manager notices concern only authority, ownership, recovery, beyond-limit work or Curator code disagreement. The Manager relays no leaf contents. Developer questions follow the role's developer-question rule; candidate questions go directly to the Worker and memory questions to the Curator.
+Manager notices beyond those two concern only authority, ownership, recovery, beyond-limit work or Curator code disagreement; it relays no content. Developer questions follow the role's developer-question rule; candidate questions go directly to the Worker and memory questions to the Curator.
 
 <!-- ar:roles reviewer -->
 Before answering a Curator code finding, read [Curation failure handling](curation.md#failure-handling) for the Curator's evidenced concern and the Reviewer's recorded finding or explained rejection. Send your answer directly to the Curator and Worker.
 
-Two routes may add a finding after the list is sealed:
+States built by hand to defeat a check — forged or copied stamps, files rewound by Git while their history stays, edited histories, clones the product never makes — get no finding and no guard.
+
+Three routes may add a finding after the list is sealed:
 
 - a valid code finding from the Curator;
-- a valid finding from an advisory review the Architect commissioned and forwarded in its questions file.
+- a valid finding from an advisory review the Architect commissioned and forwarded in its questions file;
+- a failed final check on the passed tree.
 
-For both routes, add a new sealed finding with its own identifier and reopen the verdict for that point only. Earlier sealed findings stay as they are. Give the reason for an invalid finding. The Worker repairs an accepted finding in a successor.
+For all three, add a sealed finding with its own identifier and reopen only that point. Give the reason for an invalid finding. The Worker repairs an accepted finding in a successor.
 
-A repair round for a Curator finding counts under the settings limit. Beyond it, send the extra-round question to the instructed reporting recipient where your role has one; otherwise send it through your parent, or ask in your own chat when you have no parent. An extra round for advisory findings is the Architect's grant. Every other new observation follows your role's developer-question route.
+A repair round for a Curator or final-check finding counts under the settings limit. Beyond it, send the extra-round question to the instructed reporting recipient where your role has one; otherwise send it through your parent, or ask in your own chat when you have no parent. An extra round for advisory findings is the Architect's grant. Every other new observation follows your role's developer-question route.
 
 Send an unresolved disagreement or authority issue to the Manager.
 <!-- ar:roles all -->

@@ -68,6 +68,8 @@ from .execution_graph_validation import (
 from .launch_review_read import launch_review_fallback, preserve_unreadable_review
 from .progress import current_step, step_done, step_total  # noqa: F401  # preserve public exports
 from .route_review import (  # noqa: F401  # preserve existing task-document model exports
+    AddedFinding,
+    AddedFindingRound,
     MemoryReviewState,
     ReviewApproval,
     ReviewFinding,

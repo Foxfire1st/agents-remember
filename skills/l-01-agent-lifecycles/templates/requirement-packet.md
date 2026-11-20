@@ -60,7 +60,11 @@ Before writing the planned structure, read [proposed code changes](../reference/
 
 ## Expected Evidence
 
-<Describe the deliverable and verification evidence classes, the exact anchors the builder supplies and the omission or regression the verification must catch.>
+<Describe the deliverable and verification evidence classes for a review round, the exact anchors the builder supplies and the omission or regression the verification must catch. A whole test lane or a run on a real host belongs in Final Checks below, not here.>
+
+## Final Checks
+
+<Name the checks that run once, on the tree the code review passed, and list nothing that a round runs. Whole test lanes and runs on a real host or in a sandbox belong here when the requirement wants them. Only what this section lists is a final check. A requirement without this section asks for none beyond the landing's own commit hook, and the section itself is the developer's request for the full runs it names.>
 
 ## Authority And Provenance
 

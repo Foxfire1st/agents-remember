@@ -76,7 +76,7 @@ class RouteReviewScope(_RouteReviewDoc):
 
 
 class ReviewFinding(_RouteReviewDoc):
-    """An immutable issue definition from the exhaustive first review."""
+    """An immutable issue definition in the sealed review list."""
 
     findingId: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
     description: str = Field(min_length=1, max_length=8192)
@@ -87,6 +87,30 @@ class ReviewFinding(_RouteReviewDoc):
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("review finding identity and description must not be blank")
+        return cleaned
+
+
+ReviewFindingRoute = Literal["curator", "advisory", "final-check"]
+
+
+class AddedFindingRef(_RouteReviewDoc):
+    """The route that added a finding whose definition lives in the sealed list."""
+
+    findingId: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+    route: ReviewFindingRoute
+
+
+class AddedFinding(AddedFindingRef):
+    """A sanctioned addition supplied with its new finding definition."""
+
+    description: str = Field(min_length=1, max_length=8192)
+
+    @field_validator("description")
+    @classmethod
+    def _trim_added_finding_description(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("added review finding description must not be blank")
         return cleaned
 
 
@@ -120,6 +144,20 @@ class ReviewRound(_RouteReviewDoc):
     verdictRef: str | None = None
 
 
+class AddedFindingRound(_RouteReviewDoc):
+    """A sanctioned addition that reopened an already recorded round's verdict.
+
+    The addition spends no review round: the repair that follows is reviewed in
+    the next begun round and counts there. This record names the round whose
+    verdict it reopened and the identifiers it added, so the reopen stays
+    visible without debiting a round or a failed Worker try.
+    """
+
+    round: int = Field(ge=1)
+    verdictRef: str | None = None
+    findingIds: list[str]
+
+
 class ReviewState(_RouteReviewDoc):
     """Small persisted state for one monotonic review sequence."""
 
@@ -127,6 +165,13 @@ class ReviewState(_RouteReviewDoc):
     pending: bool = False
     baselineFindings: list[ReviewFinding] = Field(default_factory=list)
     remainingFindingIds: list[str] = Field(default_factory=list)
+    # The sealed list owns each description. These references retain which route added it.
+    addedFindings: list[AddedFindingRef] = Field(default_factory=list)
+    # The rounds whose verdicts a sanctioned addition reopened, with the
+    # identifiers it added. An addition spends no round: the repair is reviewed
+    # in the next begun round and counts there. This list keeps the reopen
+    # visible in typed history without a counted round or a failed Worker try.
+    addedFindingRounds: list[AddedFindingRound] = Field(default_factory=list)
     # MIK-R116 rule 2: the number in force for this task — the settings number
     # plus its approved extra rounds — as the last ``begin_review`` computed it.
     # 0 means the record predates per-task limits; the next begin recomputes it.
@@ -222,6 +267,8 @@ class RouteReviewRecord(_RouteReviewDoc):
     verdictSha256: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
     dependencies: EvidenceDependencies | None = None
     recordDigest: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+    # References to the review state's findings that warrant this blocking verdict.
+    addedFindingIds: list[str] = Field(default_factory=list)
 
     @field_validator("verdictRef", "reviewedAt")
     @classmethod
@@ -237,7 +284,7 @@ class RouteReviewRecord(_RouteReviewDoc):
         if len(names) != len(set(names)):
             raise ValueError("route-review routes must be unique")
         blocked = any(route.verdict == "block" for route in self.routes)
-        if self.verdict == "block" and not blocked:
+        if self.verdict == "block" and not blocked and not self.addedFindingIds:
             raise ValueError("a blocking route-review verdict requires at least one blocked route")
         if self.verdict != "block" and blocked:
             raise ValueError("a passing route-review verdict cannot contain a blocked route")
@@ -265,6 +312,10 @@ class RouteReviewRecord(_RouteReviewDoc):
                 exclude={"recordDigest"},
                 exclude_none=True,
             )
+            # A record without a sanctioned addition keeps the canonical bytes it was
+            # stamped with; the field enters the digest only when the record carries one.
+            if not payload.get("addedFindingIds"):
+                payload.pop("addedFindingIds", None)
             if canonical_sha256(payload) != self.recordDigest:
                 raise ValueError("route-review record digest does not match its canonical bytes")
         return self

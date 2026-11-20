@@ -158,10 +158,17 @@ The Manager starts the role agents of a task in this order:
 2. **Code review.** The Manager starts the Reviewer when the Worker freezes its candidate. The
    Reviewer records a verdict. The Worker repairs each finding and freezes again, until the review
    passes.
-3. **Memory update.** The Manager starts the Curator when the code review has passed. The Curator
-   brings the memory in the task's memory worktree in line with the reviewed change, and the
-   Reviewer reviews that memory change.
-4. **Closeout and landing.** The Manager closes out the task and lands it; see
+3. **Final checks.** When the code review has passed, the Worker runs the checks the requirement's
+   Final checks section lists, once, on the tree that passed, and reports each check, its command,
+   its result and that tree to the Manager and the Reviewer. A failed check becomes a sealed
+   finding: the Worker repairs it, the same Reviewer reviews that point, and the failed check and
+   the focused tests of the repair run on the new tree. The full run is not repeated; for a failed
+   multi-step run, the step that failed is the check. A requirement whose section lists none owes
+   no final-check report.
+4. **Memory update.** The Manager starts the Curator when the code review has passed, alongside the
+   final checks. The Curator brings the memory in the task's memory worktree in line with the
+   reviewed change, and the Reviewer reviews that memory change.
+5. **Closeout and landing.** The Manager closes out the task and lands it; see
    [Workflows](workflows.md#closeout).
 
 With `role_start_set` the Manager starts the three in one call: the Worker opens, and the Reviewer
@@ -182,7 +189,8 @@ the memory, that the task document records. The limit is five, unless
 `orchestration.loops.defaults.maxRounds` in the user settings file names another number. A round
 beyond the limit needs the approval of the Architect or yours: the Manager asks for it up the
 chain of parents, and the task document records the approval and whether the Architect or you
-gave it.
+gave it. A requirement's final checks are no round: they run once after the code review passes
+and do not count under the limit.
 
 ### The Investigator
 

@@ -122,6 +122,7 @@
         "implementation-before-repairing-a-sealed-finding-in-this-task-s-own-files-6c8c979b8f",
         "implementation-before-responding-to-a-non-work-reply-an-empty-or-doubled-se-6cfad93f70",
         "implementation-before-responding-to-a-non-work-reply-empty-or-doubled-seat--941ac3a166",
+        "implementation-before-running-the-final-checks-after-the-pass-51cc91bc41",
         "implementation-before-writing-the-report-650a46d425",
         "implementation-when-one-small-item-costs-about-an-hour-a-second-repair-roun-7fbad14ae9",
         "implementation-when-ruling-on-a-measured-defect-or-costly-small-work-adf28f77a3",
@@ -578,6 +579,10 @@
         "roles/architect.md"
       ],
       "implementation-when-the-master-line-moves-run-the-supported-sync-of-your-ow-19e3c76ab6": [
+        "roles/worker.md"
+      ],
+      "implementation-before-running-the-final-checks-after-the-pass-51cc91bc41": [
+        "operations/review.md",
         "roles/worker.md"
       ]
     },

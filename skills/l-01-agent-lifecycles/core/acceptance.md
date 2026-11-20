@@ -57,6 +57,8 @@ The independent Reviewer inspects the primary packet revision and cited artifact
 
 Missing rationale, an unapproved packet revision, missing evidence, evidence of the wrong class or invalid citations requires rejection. The overall verdict cannot pass while a requirement is rejected.
 
+The requirement's listed final checks are not evidence of a round. The Reviewer passes on everything the round carries, and those checks judge the tree after that pass.
+
 An accurately reported `blocked` row may be accepted as a truthful handoff. It still requires a `BLOCK` recommendation until the requirement is delivered or becomes an approved change.
 
 ## Keep requirement revisions and attempts distinct
@@ -100,7 +102,7 @@ The Reviewer never modifies the Worker record. Acceptance never carries forward 
 
 Rejection closes the attempt. A repair appends a successor citing its predecessor and sealed findings. Accepted attempts also remain closed.
 
-Use the two sanctioned routes for adding a finding after the list is sealed, defined in the [review operation's Boundaries](../operations/review.md#boundaries). Send all other observations outside the findings list and changed promises through the parent to the developer; do not add or reopen findings or reset review. The same-Reviewer and shrinking-list rules remain, subject to those defined routes.
+Use the sanctioned routes for adding a finding after the list is sealed, defined in the [review operation's Boundaries](../operations/review.md#boundaries): a Curator code finding, an advisory review's finding, and a final check that fails after the pass. Send all other observations outside the findings list and changed promises through the parent to the developer; do not add or reopen findings or reset review. The same-Reviewer and shrinking-list rules remain, subject to those defined routes.
 
 Reject a requirement contradiction or overconstraint and route it through the Architect for a developer-approved revision. Builders and Reviewers may propose a revision; they never rewrite or approve one themselves.
 
