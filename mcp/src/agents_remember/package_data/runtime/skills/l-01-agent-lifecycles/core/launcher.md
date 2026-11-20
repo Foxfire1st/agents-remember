@@ -19,7 +19,7 @@ For a sprint, task or other durable change that is not an explicit task-seat tak
 3. Call `role_start` once to start an Architect. The call carries no brief and, for an Architect, names no document.
 4. Tell the developer that the agent is in the dashboard and name the sprint document holding the request.
 
-The call carries no parent or brief. Everything the new agent must know is in the sprint document before the start; the developer names that document to the Architect in the dashboard. Role settings choose the harness, model, effort and permission mode.
+The call carries no parent or brief. Everything the new agent must know is in the sprint document before the start; the developer names that document to the Architect in the dashboard. Role settings choose the harness, model and effort. The permission mode comes from the launcher's "Role mode override" first, then the harness profile on its own agent, then the role's mode on its own harness, then the host's advertised default.
 
 For a first sprint only, create the sprint document, a master and its first leaf before you start the Architect. Write into them the developer's request and scope only: no requirement packets and no approved order.
 

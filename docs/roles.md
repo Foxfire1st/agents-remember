@@ -102,8 +102,12 @@ Reviewer or a Curator is refused with `intent-review-open` until the task's inte
 see [Workflows](workflows.md#the-intent-review-before-a-task-starts).
 
 A start may name the harness (argument `agent`), the model, the effort and feature values for this
-one role agent, or ask for the role's step-up. A start cannot set the permission mode. Where a
-start names none of these, the role settings decide; see [Harnesses](reference/harnesses.md).
+one role agent, or ask for the role's step-up. `role_start` names no permission mode. The mode of
+the chat follows the same rule everywhere: use a launcher-chosen mode first; otherwise use the mode
+named by an applicable host profile, then the mode named by an applicable settings row; if neither
+applies, use the host-advertised default when the harness's modes are known and the host advertises a
+default; if no mode applies, send no mode field. The role settings decide the harness, model and
+effort; see [Harnesses](reference/harnesses.md).
 
 ### Which role agent starts which
 

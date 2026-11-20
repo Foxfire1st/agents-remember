@@ -869,7 +869,8 @@ The start of the explainer does not read `stepUp`. A `stepUp` whose choices equa
 refuses the load of the settings, and so does `extraArgs` in the row.
 When the host cannot honour the row, "Send" is refused with `explainer-seat-config`. When the host
 starts the explainer on other values than the row names, the start is refused with
-`explainer-seat-config-unapplied`.
+`explainer-seat-config-unapplied`. That check covers the provider, the model, the effort and the
+feature values; it does not cover the mode, which the receipt records as the host reports it.
 
 `review-presenter` is no role that a user or a role agent starts. Only "Send" on the review page
 starts the explainer.

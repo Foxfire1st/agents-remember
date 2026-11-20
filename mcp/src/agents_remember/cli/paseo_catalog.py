@@ -349,6 +349,7 @@ def resolve_agent_selection(
     mode = pick(
         "mode",
         [
+            (call.get("modeId"), "start call"),
             (profile.get("modeId") if host_agent == agent_id else None, "host role"),
             (
                 _setting_value(defaults, "mode", (agent_id, None), ignored_settings)
@@ -358,12 +359,9 @@ def resolve_agent_selection(
             ),
         ],
     )
-    mode, choices["mode"] = _resolve_mode(
-        mode,
-        choices["mode"],
-        agent,
-        defaults.get("role"),
-        host_default=defaults.get("useHostDefaultMode", False),
+    mode, choices["mode"], choices["rowMode"] = (
+        *_resolve_mode(mode, choices["mode"], agent),
+        _row_mode_choice(defaults, settings_agent, ignored_settings),
     )
     model = _model_with_features(config, catalog, agent, (agent_id, model_id))
     call_features = _canonical_features(call_features, model)
@@ -515,39 +513,44 @@ def _choice_source(choice: dict[str, Any], key: str, role: str | None) -> str:
     return f"{key} from {source}"
 
 
+def _row_mode_choice(
+    defaults: dict[str, Any], settings_agent: str | None, ignored_settings: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """The settings row's own harness and mode, for a launcher that shows a default elsewhere.
+
+    It states the same rule the start applies: the row's mode holds on the row's own harness.
+    """
+
+    selection = (settings_agent or "", None)
+    return {
+        "harness": settings_agent,
+        "value": _setting_value(defaults, "mode", selection, ignored_settings),
+        "source": "our settings",
+    }
+
+
 def _resolve_mode(
     mode: str | None,
     choice: dict[str, Any],
     agent: dict[str, Any],
-    role: str | None,
-    *,
-    host_default: bool = False,
 ) -> tuple[str | None, dict[str, Any]]:
+    """The mode this start sends: a named one as named, else the host's own default.
+
+    The host is the authority on the modes of its own harness. A mode the host does not
+    list is sent as named, and a mode the host applies differently is reported by its own
+    answer and recorded on the receipt; the product refuses and replaces neither.
+    """
+
     if agent.get("modesKnown") is False:
         return mode, choice
     modes = agent["modes"]
-    if mode is None and host_default:
+    if mode is None:
         mode = agent.get("defaultModeId")
         choice = {"value": mode, "source": "host default"}
-    elif mode is None:
-        safe = {"claude": "default", "codex": "auto"}.get(agent["id"])
-        mode = safe if any(row["id"] == safe for row in modes) else None
-        choice = {
-            "value": mode,
-            "source": "least permissive mode" if mode else "none",
-            "reason": "least permissive supported mode for this agent kind"
-            if mode
-            else "no named least working mode offered for this agent kind",
-        }
     matched = _named(modes, mode) if mode is not None else None
     if matched is not None:
         mode = matched["id"]
         choice = {**choice, "value": mode}
-    if mode is not None and matched is None:
-        raise LaunchSelectionRefused(
-            "mode_not_offered",
-            f"Role {role}: {_choice_source(choice, 'mode', role)}={mode!r} is not offered for {agent['id']}; offered: {[row['id'] for row in modes]}",
-        )
     return mode, choice
 
 
@@ -830,7 +833,6 @@ def settings_role_launch(
         "hostRole": read_host_role(config, role),
         "settingsSources": [str(path) for path in settings.sources],
         "fieldOrigins": {key: asdict(value) for key, value in knobs.origins.items()},
-        "useHostDefaultMode": True,
     }
     return resolve_agent_selection(config, defaults, settings.harness_ids, None)
 

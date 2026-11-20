@@ -72,15 +72,18 @@ def select_step_up(
         "model", defaults.get("model")
     ) == defaults.get("model")
     selected = dict(defaults)
+    # A mode is never inherited: the step-up row is the row that applies to this seat, and a
+    # row that names no mode takes the host's own default for its harness.
+    inheritable = tuple(key for key in LAUNCH_FIELDS if key != "mode")
     selected.update(
-        {key: row.get(key, defaults.get(key) if same_scope else None) for key in LAUNCH_FIELDS}
+        {key: row.get(key, defaults.get(key) if same_scope else None) for key in inheritable}
     )
+    selected["mode"] = row.get("mode")
     selected["agent"] = provider
     selected["featureValues"] = dict(selected.get("featureValues") or {})
     if "service_tier" in (row.get("featureValues") or {}) and not row.get("serviceTier"):
         selected["serviceTier"] = None
     selected["hostRole"] = {}
-    selected["useHostDefaultMode"] = not same_scope and row.get("mode") is None
     selected["fieldOrigins"] = _step_up_origins(defaults, row, selected, same_scope)
     selected["notesKey"] = (
         selected["fieldOrigins"]

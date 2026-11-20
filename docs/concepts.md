@@ -615,10 +615,17 @@ from the running host, and Agents Remember never writes it.
 
 ### Permission mode
 
-The permission mode is the mode in which the harness of a role agent asks for permissions. The
-host profile of the role names it, or else the key `mode` of the role row in the user settings
-file; a start cannot set it. Where neither names one, the product takes the least permissive mode
-that it knows for the harness: `default` for Claude Code and `auto` for Codex.
+The permission mode is the mode in which the harness of a role agent asks for permissions, and the
+agent is in it before its first turn: no step of the product switches a role agent's mode after
+its start. The host profile of the role names it, or else the key `mode` of the role row in the
+user settings file, but that key holds only on the harness its row names. Everywhere else — on
+another harness than the row names, or on a row that names no mode — the agent starts in the
+default mode the host names for that harness. Where the host names no default, the start sends no
+mode and the host decides. The role launcher's mode selector names one for the chat it starts; it
+stands before the host profile, and its first option is the mode these rules give, with the source
+of that choice. The product keeps no list of allowed modes and no refusal of its own: a named mode
+goes to the host as named, and the start's answer and the launch receipt record the mode the host
+reports for the agent, with the source of the choice.
 
 ### Task document
 
