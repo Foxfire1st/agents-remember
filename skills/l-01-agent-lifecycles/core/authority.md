@@ -40,7 +40,7 @@ Sessions that the dashboard does not own follow their host harness's ordinary ru
 
 Start another role with `role_start` once, naming the role, a chosen request identifier and its exact required task references. To reconcile an uncertain result, use the same identifier and selection for the same start. `role_start_set` is not the stage-start route.
 
-Keep the per-start override route. After a start with overrides, the starter checks and sets the seat's mode and features. If the seat differs from the resolved choices, record a product issue rather than remove the overrides.
+Keep the per-start override route. After a start with overrides, the starter checks and sets the seat's features. If the seat differs from the resolved choices, record a product issue rather than remove the overrides.
 
 The agent that started a seat retires the agent in it with `retire_child`; the tool refuses any other caller.
 

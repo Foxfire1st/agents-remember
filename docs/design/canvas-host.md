@@ -169,8 +169,10 @@ keeps the durable attempt records readable and publishes through the confined fr
   `review-presenter` is no role. `settings_role_launch` in
   `cli/paseo_catalog.py` resolves the harness or the default harness, `model`, `effort`,
   `serviceTier`, `mode`, `featureValues` and `notes`. A setting that the host (Paseo) cannot honour refuses
-  the launch as `explainer-seat-config`, and an explainer that the host started on other values
-  refuses as `explainer-seat-config-unapplied` (`cli/paseo_explainer_host.py`).
+  the launch as `explainer-seat-config`, and an explainer that the host started on another provider,
+  model, effort or feature values refuses as `explainer-seat-config-unapplied`
+  (`cli/paseo_explainer_host.py`). The mode is not part of that refusal: the launch records the mode
+  the host reports for the seat.
 - **design guidance** comes from `trees/memory/system/design-guidelines.md` in the explainer's
   workspace, the memory that the workspace checks out at its binding, and from the files it routes
   to. The file is optional: the user keeps it in the memory repository, and nothing falls back to the example

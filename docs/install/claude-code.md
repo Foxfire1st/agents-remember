@@ -87,14 +87,16 @@ entry names another ground under "Checked".
 The keys of Agents Remember stand in the user settings file. That file can be read-only; the
 [settings reference](../reference/settings-json.md) shows the two commands that open and close it.
 
-- **A role agent asks before it uses a tool for the first time.** Without a
-  [permission mode](../concepts.md#permission-mode) in the user settings file, Agents Remember
-  starts Claude Code in the permission mode `default`, which the host labels "Always Ask". Only the
-  tool `server_info` of the tool server is approved beforehand.
+- **A role agent reviews its tool calls itself in the mode the host starts it in.** Without a
+  [permission mode](../concepts.md#permission-mode) in the user settings file, the agent starts in
+  the default mode that the host names for Claude Code, `auto`. That mode is the host's classifier
+  review: it decides each call itself instead of asking you first. Only the tool `server_info` of
+  the tool server is approved beforehand.
   - Setting: `orchestration.roles.<role>.mode` in the user settings file, for example `"auto"`. The
     host offers `plan`, `default`, `acceptEdits`, `auto` and `bypassPermissions` for Claude Code.
-  - Who: you state the permission mode. Agents Remember sends it with the start. A repository's
-    settings file that states one is refused, and no start call accepts one.
+  - Who: you state the permission mode. Agents Remember sends it with the start, and the role
+    launcher's "Role mode override" chooses one for the chat it starts. A repository's settings
+    file that states one is refused, and no `role_start` call accepts one.
   - Checked: the start mode and the key, in the code of Agents Remember; the permission modes and
     their labels, in the source of the host this build installs. The prompt itself was not
     reproduced.

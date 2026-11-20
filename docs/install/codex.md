@@ -77,16 +77,17 @@ reference](../reference/settings-json.md) shows the two commands that open and c
 settings file is `~/.config/agents-remember/agents-remember-settings.json`.
 
 - **A role agent on Codex can ask before a call of a tool of Agents Remember, and waits until you
-  answer.** Without a mode in the user settings file, Agents Remember starts Codex in the mode
-  `auto`, which the host labels "Default Permissions". The host starts that mode with Codex's
-  approval policy `on-request` and keeps a prompt open until you answer it.
+  answer.** Without a mode in the user settings file, the agent starts in the default mode that the
+  host names for Codex, `auto-review`. Agents Remember picks no mode of its own.
   - Setting: `orchestration.roles.<role>.mode` in the user settings file, for example
     `"auto-review"`. The host offers `auto`, `auto-review` and `full-access` for Codex. In the mode
     `auto-review` the host gives Codex the approval policy `on-request` and names its automatic
     reviewer; an approval that the review does not settle still reaches you as a prompt in the
-    agent's chat.
-  - Who: you state the mode. Agents Remember sends it with the start. You change the mode of a
-    running agent in its chat.
+    agent's chat. In `auto` the host starts Codex with the policy `on-request` too and keeps a
+    prompt open until you answer it.
+  - Who: you state the mode. Agents Remember sends it with the start, and the role launcher's
+    "Role mode override" chooses one for the chat it starts, with the source "start call". You
+    change the mode of a running agent in its chat.
   - Checked: the start mode and the key, in the code of Agents Remember; the modes, the approval
     policy of each and the reviewer each names, in the source of the host this build installs; the
     automatic approval review and its stage, in the feature list of Codex 0.166.0; and a role agent

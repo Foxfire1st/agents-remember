@@ -4902,7 +4902,7 @@
          43,
          43
        ],
-       "sha256": "71910711fa5de0e7443616d1f931b4f363be13f9ecd7d05b883684980fc01ed6",
+       "sha256": "503fa47cb3c1e3be8d5c260955f294f623ed7c1e021722bec8b18b7553c66799",
        "audience": [
          "architect",
          "manager",
@@ -7812,8 +7812,8 @@
      }
    },
    "digest": {
-     "sha256": "8c27af7759b59ab754b18b3d0f7bda1666656788eeaa70fa8a31618e738249ac",
-     "sizeWords": 2327
+     "sha256": "5258a0a3b9d50a4e7b5fba3bdafde59bd139b5959876b4b3c6b2d81e3d50e7a7",
+     "sizeWords": 2324
    },
    "places": {
      "place-01": {
@@ -8034,7 +8034,7 @@
          27,
          29
        ],
-       "sha256": "c972f318145d2918e206c86031f4abce527af08198a82dd289dc1c7da734e0af",
+       "sha256": "185952c8b18fd664b6b0e9014e7a45ce52cace2801c344e1fe0d38f63e4ee6ff",
        "clauses": [
          {
            "lines": [
@@ -8053,7 +8053,7 @@
              29,
              29
            ],
-           "sha256": "b001d7d978b429749ffc5766c3d33154681978da004cff44d95fe4cc6bcbedec",
+           "sha256": "f7f1e263b6568bbe838998952855cfae84b86588b0b22cab11edc88356a2d69d",
            "audience": [
              "architect",
              "manager",
@@ -8068,14 +8068,14 @@
          31,
          31
        ],
-       "sha256": "9e348d1653dbde0d8e96eb82c0f29fe79d7ea1779c9350450adfe29737fedf33",
+       "sha256": "5e55e9ea7675b61e133b00790afdaef5cc7d17c39405e3858b83d5c73dd08a11",
        "clauses": [
          {
            "lines": [
              31,
              31
            ],
-           "sha256": "9e348d1653dbde0d8e96eb82c0f29fe79d7ea1779c9350450adfe29737fedf33",
+           "sha256": "5e55e9ea7675b61e133b00790afdaef5cc7d17c39405e3858b83d5c73dd08a11",
            "audience": [
              "architect",
              "manager",

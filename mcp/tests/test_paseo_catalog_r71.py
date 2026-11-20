@@ -42,6 +42,7 @@ from agents_remember.kernel.agentic_settings import (
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.mcp.registration.core import _register_identity_tools
 from agents_remember.models.core import ServingBuildPayload
+from agents_remember.models.role_agents import RoleStartCall, SeatLaunchOverride
 from agents_remember.models.role_launcher import (
     LauncherRole,
     RoleAgentOverride,
@@ -173,31 +174,55 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
         self.assertEqual(choices["featureValues"]["service_tier"]["source"], "start call")
         self.assertEqual(choices["featureValues"]["plan_mode"]["source"], "host role")
 
-    def test_r71_explicit_safe_mode_is_not_catalog_default_or_inherited_user_policy(self) -> None:
-        self.assertEqual(self.select()[1]["mode"], "auto")
-        self.assertEqual(self.select()[1]["choices"]["mode"]["source"], "least permissive mode")
-        self.assertEqual(
-            self.select(override=RoleAgentOverride(agentId="claude"))[1]["mode"], "default"
-        )
+    def test_r71_unnamed_mode_takes_the_host_default_and_names_none_it_cannot_know(self) -> None:
+        # The host's own default, never a product pick of a least permissive mode.
+        self.assertEqual(self.select()[1]["mode"], "full-access")
+        self.assertEqual(self.select()[1]["choices"]["mode"]["source"], "host default")
+        # Claude names no default mode in this catalog, so this start sends no mode.
+        self.assertNotIn("mode", self.select(override=RoleAgentOverride(agentId="claude"))[1])
         self.assertNotIn("mode", self.select(override=RoleAgentOverride(agentId="eve"))[1])
+
+    def test_r71_the_launcher_mode_stands_first_and_keeps_its_source(self) -> None:
+        # The row names one mode and the host profile another; the launcher's own stands first.
+        role = {
+            **self.role,
+            "mode": "auto",
+            "hostRole": {
+                "profile": {
+                    "id": "first",
+                    "name": "worker",
+                    "provider": "codex",
+                    "model": "gpt-a",
+                    "modeId": "auto",
+                }
+            },
+        }
+        result = self.select(role, RoleAgentOverride(modeId="full-access"))[1]
+        self.assertEqual(result["mode"], "full-access")
+        self.assertEqual(result["choices"]["mode"]["source"], "start call")
 
     def test_r71_provider_and_model_overrides_do_not_inherit_foreign_permission_choices(
         self,
     ) -> None:
         role = {**self.role, "mode": "full-access", "featureValues": {"plan_mode": True}}
         result = self.select(role, RoleAgentOverride(agentId="claude"))[1]
-        self.assertEqual(result["mode"], "default")
+        self.assertNotIn("mode", result)
         self.assertEqual(result["featureValues"], {})
+        self.assertTrue(
+            any(
+                row.get("key") == "mode" and row.get("source") == "our settings"
+                for row in result["choices"]["omitted"]
+            )
+        )
         self.assertEqual(result["choices"]["omitted"][0]["key"], "featureValues.plan_mode")
         result = self.select(role, RoleAgentOverride(agentId="codex", modelId="gpt-b"))[1]
         self.assertEqual(result["featureValues"], {})
         self.assertNotIn("effort", result)
 
-    def test_r71_unoffered_mode_feature_and_value_refuse_then_corrected_selection_succeeds(
+    def test_r71_unoffered_feature_and_value_refuse_and_an_unoffered_mode_passes_through(
         self,
     ) -> None:
         cases = [
-            {"mode": "typo"},
             {"featureValues": {"missing": True}},
             {"featureValues": {"service_tier": "missing"}},
             {"featureValues": {"plan_mode": "true"}},
@@ -205,11 +230,25 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
         for bad in cases:
             with self.subTest(bad=bad), self.assertRaises(LaunchSelectionRefused):
                 self.select({**self.role, **bad})
+        # A mode the harness does not list reaches the host as named: the host owns the modes
+        # of its own harness and answers one it cannot apply.
+        self.assertEqual(self.select({**self.role, "mode": "typo"})[1]["mode"], "typo")
+        self.assertEqual(
+            self.select({**self.role, "mode": "typo"})[1]["choices"]["mode"]["source"],
+            "our settings",
+        )
         self.assertEqual(
             self.select({**self.role, "featureValues": {"plan_mode": False}})[1]["featureValues"],
             {"plan_mode": False},
         )
         self.assertFalse((self.config.coordination_root / "notes").exists())
+
+    def test_r71_a_long_opaque_mode_id_reaches_the_start_unchanged(self) -> None:
+        # The host owns its mode ids; nothing bounds their length on the way to the create call.
+        long_mode = "m" * 120
+        result = self.select({**self.role, "mode": long_mode})[1]
+        self.assertEqual(result["mode"], long_mode)
+        self.assertEqual(result["choices"]["mode"]["source"], "our settings")
 
     def test_r71_start_calls_cannot_supply_permission_authority(self) -> None:
         for key in ("plan_mode", "auto_accept", "unknown"):
@@ -218,8 +257,14 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
                 self.assertRaisesRegex(LaunchSelectionRefused, "user's settings"),
             ):
                 self.select(override=RoleAgentOverride(featureValues={key: False}))
+        # A start call names no mode at all; only the launcher's own override carries one.
+        self.assertNotIn("mode", RoleStartCall.__dataclass_fields__)
+        self.assertNotIn("mode", SeatLaunchOverride.__dataclass_fields__)
         with self.assertRaises(ValidationError):
             RoleAgentOverride.model_validate({"mode": "full-access"})
+        self.assertEqual(
+            RoleAgentOverride.model_validate({"modeId": "full-access"}).mode_id, "full-access"
+        )
 
     def test_r71_repository_authority_refusal_both_families_and_alias_merge(self) -> None:
         user = user_settings_path_for_write()
@@ -515,14 +560,31 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
         for stated in (None, "auto"):
             with self.subTest(stated=stated):
                 mode, _choice = paseo_catalog._resolve_mode(
-                    stated, {"source": "our settings"}, paseo_catalog._agent_row(row), "worker"
+                    stated, {"source": "our settings"}, paseo_catalog._agent_row(row)
                 )
                 self.assertEqual(mode, stated)
+        # A harness whose modes are known and that names no default sends no mode.
         mode, choice = paseo_catalog._resolve_mode(
-            None, {}, paseo_catalog._agent_row({"id": "codex", "models": [], "modes": []}), "worker"
+            None, {}, paseo_catalog._agent_row({"id": "codex", "models": [], "modes": []})
         )
         self.assertIsNone(mode)
-        self.assertIn("no named", choice["reason"])
+        self.assertEqual(choice, {"value": None, "source": "host default"})
+        # A listed mode is canonicalised to its id; one the harness does not list is sent as named.
+        known = paseo_catalog._agent_row(
+            {
+                "id": "codex",
+                "models": [],
+                "modes": [{"id": "full-access", "label": "Full Access"}],
+                "defaultModeId": "full-access",
+            }
+        )
+        self.assertEqual(
+            paseo_catalog._resolve_mode("Full Access", {"source": "our settings"}, known)[0],
+            "full-access",
+        )
+        self.assertEqual(
+            paseo_catalog._resolve_mode("typo", {"source": "our settings"}, known)[0], "typo"
+        )
 
     def test_r71_collection_reuses_unchanged_file_metadata_for_two_evidence_sizes(self) -> None:
         for size in (1024, 64 * 1024**2):
@@ -556,16 +618,16 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
         for extra, words in [
             (
                 {
-                    "mode": "bad",
+                    "model": "bad",
                     "fieldOrigins": {
-                        "mode": {
+                        "model": {
                             "source": "user.json",
-                            "key": "orchestration.roles.worker.mode",
+                            "key": "orchestration.roles.worker.model",
                             "provider": "codex",
                         }
                     },
                 },
-                ("user.json", "orchestration.roles.worker.mode"),
+                ("user.json", "orchestration.roles.worker.model"),
             ),
             (
                 {
@@ -574,11 +636,11 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
                             "id": "profile-one",
                             "name": "worker",
                             "provider": "codex",
-                            "modeId": "bad",
+                            "model": "bad",
                         }
                     }
                 },
-                ("profile-one", "worker", "modeId"),
+                ("profile-one", "worker", "model"),
             ),
         ]:
             with self.subTest(extra=extra), self.assertRaises(LaunchSelectionRefused) as error:
@@ -777,7 +839,9 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
         role, order = role_launch_preparation._role_defaults(config, context)
         # Discovery remains the test's offline host catalog, never a live process.
         agent_id, options = resolve_agent_selection(self.config, role, order, None)
-        self.assertEqual((agent_id, options["mode"]), ("claude", "default"))
+        self.assertEqual(agent_id, "claude")
+        self.assertNotIn("mode", options)
+        self.assertIsNone(options["choices"]["mode"]["value"])
         self.assertNotIn("model", options)
         self.assertNotIn("effort", options)
         self.assertEqual(options["featureValues"], {})
@@ -790,7 +854,8 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
         self.assertEqual(ignored[0]["origin"]["provider"], "codex")
         self.assertEqual(ignored[0]["origin"]["source"], str(user))
         self.assertEqual(ignored[0]["origin"]["key"], "orchestration.roles.worker.mode")
-        self.assertEqual(options["choices"]["mode"]["source"], "least permissive mode")
+        # A mode that names no default of its own sends none: the host applies its own.
+        self.assertEqual(options["choices"]["mode"]["source"], "host default")
         # A higher user-level choice binds to its own effective provider, without a new key.
         raw = json.loads(user.read_text())
         raw["orchestration"]["rolesPerLevel"] = {
@@ -833,7 +898,7 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
                 {"spawn": {"harness": "claude"}},
                 {},
                 "claude",
-                "default",
+                None,
             ),
             (
                 "spawn-same-provider",
@@ -849,7 +914,7 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
                 {"roles": {"worker": {"harness": "claude"}}},
                 {},
                 "claude",
-                "default",
+                None,
             ),
             (
                 "explicit-level-provider",
@@ -868,7 +933,7 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
                 },
                 {},
                 "claude",
-                "default",
+                None,
             ),
         ]
         for name, global_values, repo_values, own_values, expected_agent, expected_mode in cases:
@@ -886,7 +951,7 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
                 ):
                     role, order = role_launch_preparation._role_defaults(config, context)
                 agent, options = resolve_agent_selection(self.config, role, order, None)
-                self.assertEqual((agent, options["mode"]), (expected_agent, expected_mode))
+                self.assertEqual((agent, options.get("mode")), (expected_agent, expected_mode))
                 self.assertEqual(role["fieldOrigins"]["mode"]["provider"], "codex")
                 self.assertEqual(role["fieldOrigins"]["mode"]["source"], str(user))
                 self.assertEqual(
@@ -897,7 +962,7 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
                     self.assertEqual(role["fieldOrigins"]["model"]["provider"], "claude")
                     self.assertEqual(options["model"], "opus")
                 if expected_agent == "claude":
-                    self.assertEqual(options["choices"]["mode"]["source"], "least permissive mode")
+                    self.assertEqual(options["choices"]["mode"]["source"], "host default")
                     self.assertTrue(
                         any(
                             row.get("origin", {}).get("provider") == "codex"

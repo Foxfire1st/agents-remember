@@ -6,6 +6,7 @@ import {
   type RoleDefaults,
   type RoleEffortChoice,
   type RoleLaunchSelection,
+  type RoleModeChoice,
   type RoleModelChoice,
 } from "../roleLaunchModel";
 
@@ -111,4 +112,80 @@ export function displayedEffortLabel(
   }
   if (choice.defaultEffort) return choice.defaultEffort.label + " · default";
   return selection.agentOverride ? "Model default" : "Role default";
+}
+
+export interface ResolvedModeChoice {
+  modes: RoleModeChoice[];
+  defaultModeId: string;
+  defaultSource: string;
+}
+
+// Where a role's resolved mode came from, as the launcher names it.
+function roleModeSource(roleDefaults: RoleDefaults): string {
+  return roleDefaults.choices?.mode?.source ?? "host default";
+}
+
+// The modes the selected agent's harness offers and the mode this row starts in when none is
+// chosen: the row's own mode when the selected agent is the harness that row names, else the
+// role's resolved mode on its own agent, else the host's own default for that agent. The start
+// applies the same rule, so the shown default and the launched mode cannot disagree.
+function modesOf(choice: ResolvedAgentChoice): RoleModeChoice[] {
+  return choice.selectedAgent?.modes ?? [];
+}
+
+// The settings row's own mode, when the selected agent is the harness that row names.
+function rowModeDefault(
+  choice: ResolvedAgentChoice,
+  roleDefaults: RoleDefaults,
+): ResolvedModeChoice | null {
+  const rowMode = roleDefaults.choices?.rowMode as
+    | { harness?: string | null; value?: string | null }
+    | undefined;
+  if (!choice.selectedAgent || rowMode?.harness !== choice.selectedAgent.id || !rowMode.value) {
+    return null;
+  }
+  return { modes: modesOf(choice), defaultModeId: rowMode.value, defaultSource: "our settings" };
+}
+
+// The mode resolution already made for the role's own agent.
+function roleModeDefault(
+  choice: ResolvedAgentChoice,
+  roleDefaults: RoleDefaults,
+): ResolvedModeChoice | null {
+  if (!choice.selectedAgent || !matchesChoice(choice.selectedAgent, roleDefaults.agent)) return null;
+  return {
+    modes: modesOf(choice),
+    defaultModeId: roleDefaults.mode ?? "",
+    defaultSource: roleModeSource(roleDefaults),
+  };
+}
+
+// The host profile's mode, which the start applies before the settings row on the host's own
+// agent. It must win here too, or the row would show the row's mode where the start sends this.
+function hostRoleDefault(
+  choice: ResolvedAgentChoice,
+  roleDefaults: RoleDefaults,
+): ResolvedModeChoice | null {
+  if (!choice.selectedAgent || !matchesChoice(choice.selectedAgent, roleDefaults.agent)) return null;
+  if (roleModeSource(roleDefaults) !== "host role") return null;
+  return {
+    modes: modesOf(choice),
+    defaultModeId: roleDefaults.mode ?? "",
+    defaultSource: "host role",
+  };
+}
+
+export function resolveModeChoice(
+  choice: ResolvedAgentChoice,
+  roleDefaults: RoleDefaults,
+): ResolvedModeChoice {
+  return (
+    hostRoleDefault(choice, roleDefaults) ??
+    rowModeDefault(choice, roleDefaults) ??
+    roleModeDefault(choice, roleDefaults) ?? {
+      modes: modesOf(choice),
+      defaultModeId: choice.selectedAgent?.defaultModeId ?? "",
+      defaultSource: "host default",
+    }
+  );
 }

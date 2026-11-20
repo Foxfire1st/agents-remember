@@ -6217,8 +6217,8 @@
         "bootstrap/orientation": 1743,
         "bootstrap/recovery": 1450,
         "bootstrap/bootstrap": 2549,
-        "launcher/orientation": 1027,
-        "launcher/coordination": 1841
+        "launcher/orientation": 1057,
+        "launcher/coordination": 1871
       },
       "step_details": {
         "reference/bootstrap/failure-states.md": 605,
@@ -6261,7 +6261,7 @@
         "templates/turn-report.md": 1708
       },
       "digest": {
-        "core/every-role.md": 2327
+        "core/every-role.md": 2324
       },
       "ordinary_templates": {
         "templates/bootstrap-report.md": 309,
@@ -6338,24 +6338,24 @@
         "sha256": "4cf207f8c52bc403ede25b12b64691df3bd45eb807fa335f04d564166ca42e52"
       },
       "skills/l-01-agent-lifecycles/core/authority.md": {
-        "size_words": 2206,
-        "sha256": "d93f0f515c2ea493d145d063ee7e6b98a7a555cf1b6298f28ef5ffbcb4fc684a"
+        "size_words": 2204,
+        "sha256": "8b9547be89380e5997e7e1ca5aa5584a251f46ec46d26238f450f7520d10c3ce"
       },
       "skills/l-01-agent-lifecycles/core/digest-map.json": {
         "size_words": 18866,
-        "sha256": "5f43dc0273d23d445f344bdc5c04f469e2b5faf998391d1620bd28c59b7ecefe"
+        "sha256": "8656e8bb659bc2a1b5b1c89317a333e539062350feeb018d6b56663d43839b3b"
       },
       "skills/l-01-agent-lifecycles/core/every-role.md": {
-        "size_words": 2327,
-        "sha256": "8c27af7759b59ab754b18b3d0f7bda1666656788eeaa70fa8a31618e738249ac"
+        "size_words": 2324,
+        "sha256": "5258a0a3b9d50a4e7b5fba3bdafde59bd139b5959876b4b3c6b2d81e3d50e7a7"
       },
       "skills/l-01-agent-lifecycles/core/invariants.md": {
         "size_words": 1213,
         "sha256": "63fec8a32ae5a69ffa7acb472707122f8eae1f9126ffda60a98c20c0fcf9d753"
       },
       "skills/l-01-agent-lifecycles/core/launcher.md": {
-        "size_words": 500,
-        "sha256": "96ad30c5a89cbfc32a9ac59e9be60ef9ebfd85588365eaa898ddbcc6cabb60fb"
+        "size_words": 530,
+        "sha256": "a12603fbe8a85e641c39e2b851d4be344fbca25ac033a69a0f8dca16071c0bb5"
       },
       "skills/l-01-agent-lifecycles/core/lifecycle-frame.md": {
         "size_words": 390,
@@ -6690,10 +6690,10 @@
       "SKILL.md": "sha256:702b67efa7c5f61f541dc44373b76a74b320d1ffb4a8b251354bb58625a494eb",
       "composition-manifest.json": "sha256:8ed97cba6c7933aded1ba950ce99b8c6e4c0a243e517897b1e59673d58581719",
       "core/acceptance.md": "sha256:4cf207f8c52bc403ede25b12b64691df3bd45eb807fa335f04d564166ca42e52",
-      "core/authority.md": "sha256:d93f0f515c2ea493d145d063ee7e6b98a7a555cf1b6298f28ef5ffbcb4fc684a",
-      "core/every-role.md": "sha256:8c27af7759b59ab754b18b3d0f7bda1666656788eeaa70fa8a31618e738249ac",
+      "core/authority.md": "sha256:8b9547be89380e5997e7e1ca5aa5584a251f46ec46d26238f450f7520d10c3ce",
+      "core/every-role.md": "sha256:5258a0a3b9d50a4e7b5fba3bdafde59bd139b5959876b4b3c6b2d81e3d50e7a7",
       "core/invariants.md": "sha256:63fec8a32ae5a69ffa7acb472707122f8eae1f9126ffda60a98c20c0fcf9d753",
-      "core/launcher.md": "sha256:96ad30c5a89cbfc32a9ac59e9be60ef9ebfd85588365eaa898ddbcc6cabb60fb",
+      "core/launcher.md": "sha256:a12603fbe8a85e641c39e2b851d4be344fbca25ac033a69a0f8dca16071c0bb5",
       "core/lifecycle-frame.md": "sha256:661f7438655f25d884b1596b31cfcc04ba609633dd8e5906acc6f0b839cca405",
       "core/loop.md": "sha256:1f3cb72d010a174c059358504b072d04527fb38ae8dc7675f9ab2c59e2e020ad",
       "operations/bootstrap.md": "sha256:c988052b9a104b4206086b55f10178c308a38eebe091cac422d7b5976a73b96f",

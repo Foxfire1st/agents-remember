@@ -115,10 +115,12 @@ control stays visible.
 The selectors carry no visible title. The agent selector chooses the [harness](concepts.md#harness)
 of the role agent; the dashboard calls a harness that the host can start an agent.
 
-The hover text of the agent, model and effort selectors reads "<shown value> — <key>: <value> ·
-<source>". There <key> is "agent", "model" or "effort", <value> is the role's default, and
-<source> names where the default comes from: "our settings" for the role settings, "host role"
-for the [host profile](concepts.md#host-profile) of the role, or "host default".
+The hover text of the agent, model and effort selectors reads "<shown value> — <key>:
+<value> · <source>". There <key> is "agent", "model" or "effort", <value> is the role's
+default, and <source> names where the default comes from: "our settings" for the role settings,
+"host role" for the [host profile](concepts.md#host-profile) of the role, "host default", or
+"start call" for a choice the launcher itself carries. The mode selector's first option names the
+mode the start takes when you choose none, with that same source; its hover text says so.
 
 | Control | Accessible name | What it offers | When it shows |
 | --- | --- | --- | --- |
@@ -129,7 +131,7 @@ for the [host profile](concepts.md#host-profile) of the role, or "host default".
 | Agent | "Role agent override" | First "<agent> · default" or "Role default", the role's default harness; then every harness that the host knows. | Always. |
 | Model | "Role model override" | First "<model> · default", "Role default" or "Agent default"; then the models of the selected harness. | Always. |
 | Effort | "Role effort override" | First "<effort> · default", "Model default" or "Role default"; then the efforts of the selected model. | While the selected model offers efforts. |
-| Mode | a chip | The [permission mode](concepts.md#permission-mode) the role agent starts in, by the label the host gives it, or "none stated". The hover text names where it comes from, for example "our settings", and adds the host's description of it. | Always. |
+| Mode | "Role mode override" | First the mode this start takes anyway, by the label the host gives it, with the source of that choice ("host role", "our settings" or "host default"), or "No mode · <source>"; then the modes of the selected harness. | Always, while an agent resolves. |
 | Instructions | chip "Instructions" | The hover text names where the user instructions come from and says whether they replace the baseline or are added to it. | When the role settings hold user instructions. |
 | Features | "<feature> override" | "<feature> · default", then "On" and "Off" or the options of the feature. | One selector per feature the selected model offers. |
 | Speed | chip "Speed: <tier>" | The service tier of the role. | When the role settings state a service tier. |
@@ -142,15 +144,26 @@ role and the document it works on.
 The model selector can show a placeholder in place of a choice: "Pick an agent first", "Agent
 capabilities loading" or "No model choices".
 
-When the selected harness is not the role's default harness, the mode chip reads "At start": the
-permission mode is resolved for the selected harness at the start. The speed chip then reads
-"Speed: provider default": the service tier of the role applies only on the role's own harness.
+The mode of a start follows five steps: a launcher-chosen mode first; otherwise the mode named by an
+applicable host profile, then the mode named by an applicable settings row; if neither applies, the
+host-advertised default when the harness's modes are known and the host advertises a default; if no
+mode applies, no mode field. The mode selector's first option represents that rule with the launcher
+choice left empty: the host profile's mode where the profile is the selected harness (source
+"host role"), the role row's mode where the row is the selected harness even when that harness is not
+the one the profile names (source "our settings"), the host's advertised default where the selected
+harness's modes are known and it advertises one (source "host default"), or no default where no mode
+applies. An explicit launcher choice becomes the selected value and leaves the first option intact. The
+speed chip reads "Speed: provider default" when the selected harness is not the role's own: the
+service tier of the role applies only there.
 
 A feature that bears on permissions is a chip and cannot be changed in the launcher. Its hover
 text ends with "set in the user's settings".
 
-The defaults of a role come from the role settings in the user settings file, not from the
-host. A choice in the launcher changes no role setting.
+The harness, model and effort of a role come from the role settings in the user settings file. The
+permission mode follows the five steps: a launcher-chosen mode first; otherwise the mode named by an
+applicable host profile, then the mode named by an applicable settings row; if neither applies, the
+host-advertised default when the harness's modes are known and the host advertises a default; if no
+mode applies, no mode field is sent. A choice in the launcher changes no role setting.
 [Harnesses](reference/harnesses.md) and the [settings reference](reference/settings-json.md)
 describe the role settings.
 
