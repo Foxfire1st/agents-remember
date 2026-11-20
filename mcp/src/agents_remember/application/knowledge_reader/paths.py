@@ -60,6 +60,7 @@ from agents_remember.application.knowledge_reader.records import (
 )
 from agents_remember.application.knowledge_reader.selection import ReaderSelection
 from agents_remember.application.knowledge_reader.tree_coverage import read_tree_listing
+from agents_remember.application.record_standing_answers import stamp_summaries
 from agents_remember.memory.knowledge_index import Entry, KnowledgeIndex, Link
 from agents_remember.models.knowledge_files.documents import (
     ONBOARDING_ROOT,
@@ -143,7 +144,7 @@ def path_view(selection: ReaderSelection, raw_path: str) -> dict[str, Any]:
     }
     if kind == "directory":
         document.update(_directory_summary(index, path))
-    return document
+    return stamp_summaries(index, document)
 
 
 def path_prose(selection: ReaderSelection, raw_path: str) -> dict[str, Any]:

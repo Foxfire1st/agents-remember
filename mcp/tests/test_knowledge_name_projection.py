@@ -84,7 +84,13 @@ class KnowledgeNameProjectionTests(unittest.TestCase):
             self.assertTrue(rows, "the invariant view names no record")
             (member,) = [row for row in rows if row["id"] == REVIEW_INVARIANT]
             self.assertEqual(member["id"], REVIEW_INVARIANT)
-            self.assertEqual(set(member), {"id", "kind", "state", "location"}, member)
+            # The fixture's records are unconverted: proposed, written by unknown.
+            self.assertEqual(
+                set(member), {"id", "kind", "state", "location", "recordState", "writer"}, member
+            )
+            self.assertEqual(
+                (member["recordState"], member["writer"]), ("proposed", "unknown/unknown"), member
+            )
             location = member["location"]
             found = Path(location["file"])
             self.assertTrue(found.is_file(), location)
@@ -118,10 +124,14 @@ class KnowledgeNameProjectionTests(unittest.TestCase):
             self.assertTrue(rows, "the family view names no record")
             for row in rows:
                 with self.subTest(row=row.get("id")):
+                    # A record's row adds its derived state; an entry's does not.
                     self.assertEqual(
-                        set(row) - {"role", "memberOf"},
+                        set(row) - {"role", "memberOf", "recordState", "writer"},
                         {"id", "kind", "state", "location"},
                         row,
+                    )
+                    self.assertEqual(
+                        "recordState" in row, row["kind"] in {"invariant", "family"}, row
                     )
                     self.assertIn(
                         row["kind"],
@@ -826,7 +836,9 @@ class RegisteredDeclarationTests(unittest.TestCase):
     def test_move_between_selection_and_projection_is_refused(self) -> None:
         from agents_remember.application.knowledge_names import (  # noqa: PLC0415
             SelectionProvenance,
-            _memory_commit,
+        )
+        from agents_remember.application.memory_checkout_state import (  # noqa: PLC0415
+            memory_checkout_commit,
         )
         from agents_remember.application.published_intent import (  # noqa: PLC0415
             select_knowledge_dataset,
@@ -843,7 +855,7 @@ class RegisteredDeclarationTests(unittest.TestCase):
         memory = self._converted()
         selected = select_knowledge_dataset(memory, coordination_root=world.coord)
         assert selected.memory_tree is not None
-        first = _memory_commit(memory)
+        first = memory_checkout_commit(memory)
         assert first is not None
         provenance = SelectionProvenance(commit=first, dirty=False)
         (memory / "knowledge" / "moved.json").write_text(
@@ -856,7 +868,7 @@ class RegisteredDeclarationTests(unittest.TestCase):
         self.assertEqual(out["state"], "refused", out)
         self.assertEqual(out["refusalCode"], "snapshot_unavailable", out)
         self.assertIn(first, out["refusalDetail"], out)
-        self.assertIn(str(_memory_commit(memory)), out["refusalDetail"], out)
+        self.assertIn(str(memory_checkout_commit(memory)), out["refusalDetail"], out)
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ from agents_remember.kernel.memory_cache import (
     refresh_memory_cache,
 )
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
+from agents_remember.models.knowledge_files.history import ReviewFact
 from agents_remember.models.memory_content_excludes import (
     MEMORY_CONTENT_EXCLUDES,
 )
@@ -66,6 +67,7 @@ from agents_remember.worktrees.queue.closeout_recovery import (
     require_admitted_tip,
     resume_external_commits,
 )
+from agents_remember.worktrees.review_fact_source import NO_PASS_SENTENCE, leaf_review_fact
 from agents_remember.worktrees.series_closeout import series_memory_closeout
 from agents_remember.worktrees.services import LeafPublication
 
@@ -94,8 +96,17 @@ def external_closeout_commits(
             locked = leaf_cutover_refusal(contract, "the closeout")
             if locked is not None:
                 raise RuntimeError(locked)
-        refresh = _refresh_external_memory(contract, args, change)
-        closing = close_owner_history(contract.memory_worktree, _owner(contract))
+        # The history file is closed with the review's fact before the derived
+        # files are renewed, so whatever they derive from the tree reads the state that holds
+        # after it. The closing is taken back when the renewal fails, as the commit's own
+        # restoring block takes it back on any later refusal.
+        review = leaf_review_fact(contract)
+        closing = close_owner_history(contract.memory_worktree, _owner(contract), review)
+        try:
+            refresh = _refresh_external_memory(contract, args, change)
+        except BaseException:
+            closing.restore()
+            raise
         memory_commit, created = _commit_memory_content(
             contract,
             args,
@@ -118,11 +129,18 @@ def external_closeout_commits(
             refreshed_route_overviews=refresh.route_overviews,
             route_index_refresh=refresh.route_index,
             ledger_repair=cache,
+            review_note=_review_note(closing, review),
         )
     except RuntimeError as error:
         # MIK-R52 rule 9: the code commit is already published when the memory phase runs, so
         # every refusal from it says what is true.
         raise RuntimeError(_published_code_commit_detail(change.commit, str(error))) from error
+
+
+def _review_note(closing: HistoryClosing, review: ReviewFact | None) -> str:
+    """The closeout's sentence when it closed an open history file without a review fact."""
+
+    return NO_PASS_SENTENCE if review is None and closing.written != closing.previous else ""
 
 
 def _published_code_commit_detail(code_commit: str, detail: str) -> str:

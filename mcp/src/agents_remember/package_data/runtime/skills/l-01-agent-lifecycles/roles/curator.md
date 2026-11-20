@@ -96,6 +96,12 @@ Before authoring an encountered weakness or document dependency, read [encounter
 
 Discoveries in code—incidents, opportunities, alternative explanations or forward-learning hypotheses—do not automatically become current intent. Use `capture-candidate`, supply explicit evidence and confidence in the rationale, and leave routing to the owning hierarchy. Create no new register and never silently turn novelty into truth. Mark and route out-of-scope code. When repairing memory encountered during curation, follow [Repair and finish the stage](#repair-and-finish-the-stage) below for the writer, the named repairs and the routing of repairs you cannot make.
 
+### Leave the state to the product
+
+The product sets the state of each record revision; you name none. A revision is proposed when an agent wrote it, reviewed once its leaf's memory review passed and the leaf was closed out, and consolidated once a Consolidator kept or wrote it and that work was reviewed and closed out. A retired record has no state.
+
+`knowledge_write` on `agents-remember-task` refuses an entry or record whose `status` is `proposed`, `accepted`, `reviewed` or `consolidated`. Write `status: retired` only to retire a record; decisions keep their own status words.
+
 ## Produce the handover
 
 Affected onboarding states current truth in the leaf's memory worktree. A correction withdraws or qualifies every affected-body claim it makes false; adding a true paragraph does not answer a contradictory claim.

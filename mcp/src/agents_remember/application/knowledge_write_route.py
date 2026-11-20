@@ -18,6 +18,10 @@ mounted server's own settings, or a :class:`CommandRoute` whose loader either re
 names, in one fixed clause, why this command cannot reach the task document. The two routes agree on
 when a write is refused; only a refusal's remedy names the route the refusal came from (MIK-R194
 rule 9).
+
+Every route resolves its caller's stamp once per call, from the tool server's launch binding and the
+caller's launch receipt under the coordination root; nothing in a submission names
+it, and an unresolved caller is stamped ``unknown`` with the reason, never refused.
 """
 
 from __future__ import annotations
@@ -49,9 +53,15 @@ from agents_remember.application.knowledge_writer.open_questions import (
     UnavailableOpenQuestions,
 )
 from agents_remember.application.knowledge_writer.reconsideration import OpenQuestions
+from agents_remember.application.knowledge_writer.revision_stamps import (
+    stamp_owner,
+    unresolved_stamp,
+)
 from agents_remember.application.knowledge_writer.worklist_checks import worklist_shape_problem
+from agents_remember.application.writer_stamp_source import caller_stamp
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH, history_path
+from agents_remember.models.knowledge_files.writer_stamp import WriterStamp
 from agents_remember.tasks.leaf_decisions import leaf_decision_refusal
 from agents_remember.worktrees.cutover_lock import legacy_format_refusal
 from agents_remember.worktrees.knowledge_crossing import unconverted_line_refusal
@@ -159,6 +169,17 @@ def read_handoff_document(list_path: Path) -> object | str:
         return json.loads(list_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         return f"the hand-off list {list_path} is not JSON this writer can read: {error}"
+
+
+NO_COORDINATION_ROOT = "the write names no coordination root to resolve its caller in"
+
+
+def write_stamp(owner: Owner, coordination_root: Path | None) -> WriterStamp:
+    """The stamp of this call's caller for a write of ``owner``, never read from its input."""
+
+    if coordination_root is None:
+        return unresolved_stamp(owner, NO_COORDINATION_ROOT)
+    return caller_stamp(stamp_owner(owner), coordination_root=coordination_root)
 
 
 def leaf_decisions(contract: WorktreeContract) -> DecisionResolver:
@@ -316,11 +337,12 @@ def leaf_write_report(
         )
     if shape := worklist_shape_problem(worklist):
         return f"{contract.contract_path.parent / WORKLIST_FILE_NAME}: {shape.message}"
+    owner = leaf_owner(contract)
     return write_knowledge(
         WriteRequest(
             memory_root=contract.memory_worktree,
             code_root=contract.code_worktree,
-            owner=leaf_owner(contract),
+            owner=owner,
             handoff_path=submission.handoff_path,
             document=submission.document,
             commit=submission.commit,
@@ -331,6 +353,7 @@ def leaf_write_report(
             worklist=worklist,
             code_base=contract.code_base_commit or None,
             memory_base=_leaf_memory_base(contract),
+            stamp=write_stamp(owner, contract.coordination_root),
         )
     )
 
@@ -389,17 +412,19 @@ def crossing_write_report(
         )
     except (AnchorResolutionError, RuntimeError) as error:
         return f"the crossing's paired code cannot be read: {error}"
+    owner = Owner(task=leaf_owner(contract).task, kind="crossing", id=crossing)
     return write_knowledge(
         WriteRequest(
             memory_root=memory_root,
             code_root=contract.code_repo_path,
-            owner=Owner(task=leaf_owner(contract).task, kind="crossing", id=crossing),
+            owner=owner,
             handoff_path=submission.handoff_path,
             document=submission.document,
             commit=submission.commit,
             authorization=authorization,
             coordination_root=contract.coordination_root,
             code_base=local_branch_ref(contract.code_work_branch),
+            stamp=write_stamp(owner, contract.coordination_root),
         ),
         code=code,
     )
@@ -418,15 +443,17 @@ def wave_write_report(target: WaveTarget, submission: WriteSubmission) -> WriteR
             "the bootstrap writes knowledge files as a wave: --wave names it with "
             "[A-Za-z0-9._-] (its history file is knowledge/history/<wave>.json)"
         )
+    owner = Owner(task=target.task, kind="wave", id=wave)
     return write_knowledge(
         WriteRequest(
             memory_root=target.memory_root,
             code_root=target.code_root,
-            owner=Owner(task=target.task, kind="wave", id=wave),
+            owner=owner,
             handoff_path=submission.handoff_path,
             document=submission.document,
             commit=submission.commit,
             authorization=str(submission.authorization_ref or "").strip(),
             coordination_root=target.coordination_root,
+            stamp=write_stamp(owner, target.coordination_root),
         )
     )

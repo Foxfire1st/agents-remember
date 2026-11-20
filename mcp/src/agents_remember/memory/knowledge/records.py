@@ -16,8 +16,7 @@ from pydantic import TypeAdapter
 
 from agents_remember.kernel.canonical_json import decoded_json, sha256_digest
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
-from agents_remember.models.knowledge.authorship import ACCEPTED_STATE, PROPOSED_STATE, Authorship
-from agents_remember.models.knowledge.base import KnowledgeState
+from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.digest import (
     family_revision_payload_digest,
     revision_payload_digest,
@@ -39,6 +38,7 @@ from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.source import (
     SourceLocator,
 )
+from agents_remember.models.knowledge_files.record_state import RECORD_STATES, RecordState
 
 _LOCATOR_ADAPTER: TypeAdapter[Any] = TypeAdapter(SourceLocator)
 
@@ -53,17 +53,15 @@ def decode_authorship(text: str) -> Authorship:
     return Authorship.model_validate(decode_typed_column(text))
 
 
-def decode_state_at_origin(value: object) -> KnowledgeState:
-    """Narrow a stored origin state to the two authored states this schema admits."""
+def decode_state(value: object) -> RecordState:
+    """Narrow a stored revision state to the derived states (proposed, reviewed, consolidated)."""
 
     text = str(value)
-    if text == PROPOSED_STATE:
-        return PROPOSED_STATE
-    if text == ACCEPTED_STATE:
-        return ACCEPTED_STATE
+    for state in RECORD_STATES:
+        if text == state:
+            return state
     raise KnowledgeStorageError(
-        f"stored revision declares acceptance state {text!r}, which is not one of "
-        f"{PROPOSED_STATE!r} or {ACCEPTED_STATE!r}"
+        f"stored revision declares state {text!r}, which is not one of {list(RECORD_STATES)}"
     )
 
 
@@ -117,11 +115,10 @@ def decode_revision_row(
         applicability=str(row[5]),
         conditions=tuple(str(item) for item in decode_typed_column(str(row[6]))),
         exclusions=tuple(str(item) for item in decode_typed_column(str(row[7]))),
-        state_at_origin=decode_state_at_origin(row[8]),
-        acceptance_ref=None if row[9] is None else str(row[9]),
-        provenance=decode_authorship(str(row[10])),
+        state=decode_state(row[8]),
+        provenance=decode_authorship(str(row[9])),
         predecessors=tuple(sorted(predecessors)),
-        payload_digest=str(row[11]),
+        payload_digest=str(row[10]),
     )
     recomputed = revision_payload_digest(revision)
     if recomputed != revision.payload_digest:
@@ -173,11 +170,10 @@ def decode_family_revision_row(
         revision_id=str(row[2]),
         display_version=str(row[3]),
         joint_guarantee=str(row[4]),
-        state_at_origin=decode_state_at_origin(row[5]),
-        acceptance_ref=None if row[6] is None else str(row[6]),
-        provenance=decode_authorship(str(row[7])),
+        state=decode_state(row[5]),
+        provenance=decode_authorship(str(row[6])),
         predecessors=tuple(sorted(predecessors)),
-        payload_digest=str(row[8]),
+        payload_digest=str(row[7]),
     )
     recomputed = family_revision_payload_digest(revision)
     if recomputed != revision.payload_digest:

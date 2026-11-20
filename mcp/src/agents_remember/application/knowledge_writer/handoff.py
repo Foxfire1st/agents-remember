@@ -7,16 +7,17 @@ The document is JSON, one of two spellings:
 * an **object** with up to three sections, ``entries``, ``records`` and ``history``.
 
 **Entries** keep the producer's thirteen fields unchanged. The curator's keys beside them say what the
-entry becomes: ``scope`` and ``admission`` (and optionally ``status``) author an invariant record from
-the verbatim ``statement``; ``invariant_id`` names a stored invariant the entry updates instead of
-creating one; ``supersedes`` names what the new invariant supersedes; ``proofs`` lists the tests that
+entry becomes: ``scope`` and ``admission`` author an invariant record from the verbatim
+``statement`` (``status`` only retires it: no input names a record's state, :mod:`.typed_state`);
+``invariant_id`` names a stored invariant the entry updates instead of creating one; ``supersedes`` names what the new invariant supersedes; ``proofs`` lists the tests that
 prove it, each with the curator's ``facet``. Every ``target`` becomes a realization entry. An entry
 that authors no invariant (no target, no ``invariant_id``, no ``admission``) is a ruling and writes
 nothing.
 
 **Records** are curator-authored records of any kind: ``{key, kind, entry?, id?, slug?, fields}``.
 ``fields`` holds the kind's own fields (``status``, ``admission``, ``links`` …); the writer owns
-``id``, ``schema``, ``origin`` and ``revision`` and refuses them there.
+``id``, ``schema``, ``origin``, ``revision`` and the writer's stamp ``writer`` and refuses them
+there, and a ``status`` that names a record's state is refused (:mod:`.typed_state`).
 
 **History** rows are ``{subject, disposition, reason, items?, covers?, effect?, because?,
 examined?, considered?, ref?}``. The writer mints the row ID, fills the invariant's, family's or
@@ -38,7 +39,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, Final, get_args
+from typing import Any, Final
 
 from agents_remember.application.curator_realization_authoring import (
     EntryRealization,
@@ -46,12 +47,12 @@ from agents_remember.application.curator_realization_authoring import (
 )
 from agents_remember.application.curator_scope import CuratorScope, read_curator_scope
 from agents_remember.application.knowledge_writer.row_items import read_row_items
-from agents_remember.models.knowledge.effect import EffectLabel
+from agents_remember.application.knowledge_writer.typed_state import typed_state_refusal
 from agents_remember.models.knowledge_files.ids import RECORD_PREFIXES, RecordKind
 from agents_remember.models.knowledge_files.shapes import require_repository_path
 
 HANDLE_PREFIX: Final = "handoff:"
-WRITER_OWNED_FIELDS: Final = frozenset({"id", "schema", "origin", "revision"})
+WRITER_OWNED_FIELDS: Final = frozenset({"id", "schema", "origin", "revision", "writer"})
 SECTIONS: Final = ("entries", "records", "history")
 _ROW_KEYS: Final = frozenset(
     {
@@ -657,6 +658,8 @@ def read_producer_entry(position: int, raw: Any, problems: list[Problem]) -> Ent
     replacement = raw.get("replace_evidence", False)
     if not isinstance(replacement, bool):
         problems.append(Problem(where, "replace_evidence is a boolean"))
+    if refusal := typed_state_refusal(raw.get("status")):
+        problems.append(Problem(f"{where}.status", refusal))
     entry = EntryRequest(
         ruling=not raw.get("target") and invariant_id is None and admission is None,
         entry_id=entry_id,
@@ -723,6 +726,8 @@ def _record(position: int, raw: Any, problems: list[Problem]) -> RecordRequest |
     owned = sorted(WRITER_OWNED_FIELDS & set(fields))
     if owned:
         problems.append(Problem(where, f"the writer owns {owned}; remove them from 'fields'"))
+    if refusal := typed_state_refusal(fields.get("status")):
+        problems.append(Problem(f"{where}.fields.status", refusal))
     unknown = sorted(set(raw) - {"key", "kind", "entry", "id", "slug", "fields", "remove"})
     if unknown:
         problems.append(Problem(where, f"unknown record key(s) {unknown}"))
@@ -827,23 +832,6 @@ def _cover_rationale(
         problems.append(Problem(where, "a cover either removes its entry or revises its rationale"))
         return False, None
     return True, rationale
-
-
-def family_effect_refusal(request: RowRequest, subject: str) -> str | None:
-    """Why a family row's effect input is refused, or ``None``: only a changed row carries one."""
-
-    if request.disposition == "changed" and request.effect is None:
-        return (
-            f"family {subject}: a changed row records the curator's judgment of the meaning "
-            "change, so it needs an 'effect', one of "
-            f"{', '.join(get_args(EffectLabel))}; add it to this 'history' entry"
-        )
-    if request.disposition != "changed" and request.effect_supplied:
-        return (
-            f"family {subject}: a {request.disposition} row records no effect (only a changed row "
-            "does); remove 'effect' from this 'history' entry, or make it a changed row"
-        )
-    return None
 
 
 def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:

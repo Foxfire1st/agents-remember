@@ -25,6 +25,7 @@ from agents_remember.cli import (
     knowledge_bootstrap,
     knowledge_census,
     knowledge_convert,
+    knowledge_convert_states,
     knowledge_copies,
     knowledge_format,
     knowledge_index,
@@ -125,6 +126,15 @@ def _register_knowledge_commands(sub: argparse._SubParsersAction) -> None:
     )
     knowledge_convert.add_arguments(convert)
     convert.set_defaults(func=knowledge_convert.run)
+    convert_states = sub.add_parser(
+        "knowledge-convert-states",
+        help=(
+            "Convert a memory tree once to derived states: drop the typed words proposed and "
+            "accepted, stamp each current revision, record old passed reviews; --apply writes."
+        ),
+    )
+    knowledge_convert_states.add_arguments(convert_states)
+    convert_states.set_defaults(func=knowledge_convert_states.run)
     validate = sub.add_parser(
         "knowledge-validate",
         help="Validate a converted memory tree against the knowledge formats and integrity rules.",

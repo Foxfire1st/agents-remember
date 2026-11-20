@@ -40,6 +40,7 @@ from agents_remember.kernel.primitives.observer_paths import LANDING_FINAL_BASEN
 from agents_remember.tasks import master_sync
 from agents_remember.tasks.document import TaskDocument
 from agents_remember.tasks.leaf_doc import find_leaf_doc, require_task_document_in_place
+from agents_remember.tasks.reopen_decision import reopened_leaf_decision
 from agents_remember.tasks.store import (
     json_path_for,
     markdown_path_for,
@@ -501,7 +502,7 @@ def _plan_leaf_doc_reset(
     data.setdefault("decisions", []).append(
         {
             "at": stamp,
-            "decision": f"Leaf {contract.leaf_id} reopened under its original id.",
+            "decision": reopened_leaf_decision(contract.leaf_id),
             "rationale": (
                 "task_reopen reset the enclosure contract (review/closeout/integration "
                 "cleared, cleanup=reopened) and this document back to planning; the next "

@@ -316,6 +316,30 @@ dependent. A **decision record** holds one decision: its context, at least two a
 which exactly one is chosen, and the condition under which to reconsider it. The
 [knowledge-system reference](reference/knowledge-system.md) describes every file.
 
+### Record state
+
+Each revision of a knowledge record has one of three states. Agents Remember sets the state from
+the history files of the same memory tree; no agent names one.
+
+- **proposed**: an agent wrote the revision, and no review of it is recorded. Every new revision
+  starts proposed.
+- **reviewed**: the memory review of the task that wrote the revision passed, and the task was
+  closed out.
+- **consolidated**: a Consolidator kept or wrote the revision, and that work was reviewed and
+  closed out.
+
+A retired record shows no state. A decision's `active` and `under_reconsideration`, a weakness's
+`open` and `closed`, and whether a dependent's document is stale are words of their own kinds, not
+states. The [knowledge-system reference](reference/knowledge-system.md#state-writer-and-review)
+says which facts each state is read from.
+
+### Writer stamp
+
+The writer stamp names who wrote a revision of a knowledge record: the role, harness, model,
+effort and seat of the writing agent, its task, and the time. Agents Remember takes these values
+from the agent's launch, never from the input of a tool, and writes "unknown" with the reason for a
+value it cannot resolve.
+
 ### Invariant
 
 An invariant is a knowledge record that states one rule about the code. The record owns the

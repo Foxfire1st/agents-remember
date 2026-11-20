@@ -253,7 +253,7 @@ def _honest_context() -> ReviewFamilyContext:
         "revision_id": revision_id,
         "display_version": "v1",
         "joint_guarantee": "One authored guarantee.",
-        "state_at_origin": "proposed",
+        "state": "proposed",
         "provenance": {},
         "payload_digest": digest,
     }

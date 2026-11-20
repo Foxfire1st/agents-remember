@@ -5,6 +5,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { Components } from 'react-markdown';
 import { Markdown } from '../../grammar/Markdown';
+import { RecordStandingNote } from './RecordStanding';
 
 import { css, cx } from '../../../styled-system/css';
 import {
@@ -162,15 +163,18 @@ export function RecordLink({ summary }: { summary: RecordSummary }) {
     );
   }
   return (
-    <button
-      type="button"
-      className={linkButton}
-      data-testid="record-link"
-      data-record={summary.id}
-      onClick={() => nav.go({ repo: nav.repo, commit: nav.commit, view: 'record', id: summary.id })}
-    >
-      {label}
-    </button>
+    <>
+      <button
+        type="button"
+        className={linkButton}
+        data-testid="record-link"
+        data-record={summary.id}
+        onClick={() => nav.go({ repo: nav.repo, commit: nav.commit, view: 'record', id: summary.id })}
+      >
+        {label}
+      </button>
+      <RecordStandingNote summary={summary} />
+    </>
   );
 }
 

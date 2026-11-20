@@ -8,7 +8,6 @@ is a storage rule enforced by schema triggers and the operation's own preconditi
 from __future__ import annotations
 
 import uuid
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -26,34 +25,11 @@ LABEL_MAX_LENGTH = 512
 REFERENCE_MAX_LENGTH = 1024
 PATH_MAX_LENGTH = 4096
 
-PROPOSED_STATE: Literal["proposed"] = "proposed"
-ACCEPTED_STATE: Literal["accepted"] = "accepted"
-KnowledgeState = Literal["proposed", "accepted"]
-
 
 class KnowledgeModel(BaseModel):
     """Base class for the knowledge vocabulary: strict, frozen, no undeclared field."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-def require_consistent_acceptance(
-    state_at_origin: KnowledgeState, acceptance_ref: str | None
-) -> None:
-    """Refuse an origin state whose acceptance reference contradicts it.
-
-    Accepted origin data is accepted because a named authority accepted it, so the reference is
-    required; a proposed revision that carried one would claim an acceptance that never happened.
-    Both rules are properties of the authored value, so every revision aggregate in this
-    vocabulary applies them at construction rather than only at the storage boundary.
-    """
-
-    if state_at_origin == ACCEPTED_STATE:
-        if not (acceptance_ref or "").strip():
-            raise ValueError("accepted origin data requires a nonempty acceptance_ref")
-        return
-    if acceptance_ref is not None:
-        raise ValueError("a proposed revision must not carry an acceptance_ref")
 
 
 def require_plain_git_path(value: str, *, what: str) -> str:

@@ -55,7 +55,7 @@ from agents_remember.models.knowledge_files.documents import (
     history_path,
     owner_history_attempt,
 )
-from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA
+from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA, ReviewFact
 from agents_remember.worktrees.cutover_lock import cutover_lock_refusal
 from agents_remember.worktrees.disabled_memory import (
     is_disabled_contract,
@@ -455,19 +455,33 @@ def latest_owner_history(memory_root: Path, owner: str) -> Path:
     return attempts[max(attempts)] if attempts else plain
 
 
-def close_owner_history(memory_root: Path, owner: str) -> HistoryClosing:
+def close_owner_history(
+    memory_root: Path, owner: str, review: ReviewFact | None = None
+) -> HistoryClosing:
     """Set ``closed: true`` in the owner's history file, creating it with no rows when absent.
 
-    The rows are never rewritten: only the flag changes, and the file stays canonical. A file that
-    does not parse is not touched here; the validator names it and refuses the commit. For a leaf
-    reopened after its closeout, the file is its latest attempt; when that attempt is already closed
-    (the reopened leaf wrote no row), nothing is written and its history stays the closed file.
+    The closing preserves the authored judgment rows and updates the flag and optional review
+    fact together, keeping the file canonical. The validator names an unparseable file and refuses
+    the commit. A reopened leaf uses its latest attempt. An already closed attempt stays
+    byte-identical.
+
+    ``review`` is the fact of the memory review that passed the owner's change. It
+    is written in the same write that sets ``closed``, and only there: the file's ``review`` is the
+    closing's own, so one the open file already carried is replaced, or dropped when no pass is
+    recorded. A closed file keeps the fact it was closed with.
     """
 
     path = latest_owner_history(memory_root, owner)
     previous = path.read_bytes() if path.is_file() else None
+    fact = {"review": review.to_document()} if review is not None else {}
     if previous is None:
-        document: object = {"schema": HISTORY_SCHEMA, "leaf": owner, "closed": True, "rows": []}
+        document: object = {
+            "schema": HISTORY_SCHEMA,
+            "leaf": owner,
+            "closed": True,
+            "rows": [],
+            **fact,
+        }
     else:
         try:
             document = parse_json(previous.decode("utf-8"))
@@ -475,7 +489,8 @@ def close_owner_history(memory_root: Path, owner: str) -> HistoryClosing:
             return HistoryClosing(path, previous, previous)
         if not isinstance(document, dict) or document.get("closed") is True:
             return HistoryClosing(path, previous, previous)
-        document = {**document, "closed": True}
+        kept = {key: value for key, value in document.items() if key != "review"}
+        document = {**kept, "closed": True, **fact}
     path.parent.mkdir(parents=True, exist_ok=True)
     written = canonical_text(document)
     atomic_write_text(path, written)

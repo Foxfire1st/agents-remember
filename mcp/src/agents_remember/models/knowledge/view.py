@@ -801,7 +801,6 @@ class InvariantRow(KnowledgeModel):
     # them the row reports the omission rather than emitting a bare statement.
     conditions_omitted: bool = False
     lifecycle: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-    acceptance_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     order: OrderedPosition
     provenance: Provenance
 

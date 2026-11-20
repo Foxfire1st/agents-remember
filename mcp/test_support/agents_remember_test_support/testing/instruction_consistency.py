@@ -101,6 +101,9 @@ UNDOCUMENTED_COMMANDS = frozenset(
     {
         "explainer-browser",
         "knowledge-convert",
+        # The one-time state conversion of an existing memory runs on the
+        # developer's word, like knowledge-convert; no role text tells an agent to run it.
+        "knowledge-convert-states",
         "knowledge-census",
         "knowledge-census inventory",
         "knowledge-census report",

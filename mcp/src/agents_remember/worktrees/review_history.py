@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import ValidationError
 
 from agents_remember.kernel._agentic_settings_core import DEFAULT_LOOP_MAX_ROUNDS
 from agents_remember.tasks import ReviewApproval, ReviewFinding, ReviewState, TaskDocument
-from agents_remember.tasks.route_review import ReviewRound
+from agents_remember.tasks.route_review import ReviewRound, RouteReviewVerdict
 
 _CANDIDATE_TREE_PATTERN = re.compile(r"^[0-9a-f]{40,64}$")
 
@@ -106,6 +108,7 @@ def record_task_review(
     *,
     settings_limit: int | None = None,
     actual_candidate: str | None = None,
+    stamps: RoundStamps | None = None,
 ) -> TaskDocument:
     """Record one review result while preserving the sealed first-review definitions.
 
@@ -117,6 +120,17 @@ def record_task_review(
     supplied by the task-doc layer; ``None`` means unresolvable or unproven and
     admits no same-round record. The binding is persisted on every recorded
     round; the same-round guard compares bindings, never caller strings.
+
+    ``stamps`` carries the recorder's stamp, built from its launch binding.
+    At the first recording of a memory round, the task-doc layer stamps the
+    sole eligible Curator or Consolidator registered for the leaf, using that
+    recording's time. If it cannot name one, it records unknown with its reason.
+    A record-only correction keeps the handover stamp and time and can renew
+    the recorder's stamp.
+    A memory round also stores the memory tree the Reviewer named
+    (``candidateTree``) as ``memoryTree`` and its verdict. The named tree is the
+    Reviewer's statement: the closeout lets it speak only for the very memory
+    tree it closes.
     """
 
     _require_readable_review(document)
@@ -149,7 +163,14 @@ def record_task_review(
         updated = updated.model_copy(update={"candidateTree": candidate})
     if actual_candidate is not None:
         updated = updated.model_copy(update={"candidateIdentity": actual_candidate})
-    updated = _with_recorded_round(state, updated, payload)
+    memory = lane == "memoryReviewState"
+    facts = _RoundFacts(
+        memory_tree=candidate if memory else None,
+        recorded_by=_document(stamps.recorded_by if stamps else None),
+        handed_over_by=_document(stamps.handed_over_by if stamps and memory else None),
+        verdict=payload.get("verdict") if memory else None,
+    )
+    updated = _with_recorded_round(state, updated, payload, facts)
     return document.model_copy(update={lane: updated})
 
 
@@ -177,8 +198,32 @@ def role_review_state(document: TaskDocument, role: str) -> ReviewState | None:
     return {"worker": document.reviewState, "curator": document.memoryReviewState}.get(role)
 
 
+@dataclass(frozen=True)
+class RoundStamps:
+    """The stamps a recorded round stores, each a ``WriterStamp`` document: the agent recording it
+    and, for a memory round, the agent that handed the memory change to the review."""
+
+    recorded_by: Mapping[str, Any] | None = None
+    handed_over_by: Mapping[str, Any] | None = None
+
+
+def _document(stamp: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    return dict(stamp) if stamp is not None else None
+
+
+@dataclass(frozen=True)
+class _RoundFacts:
+    """What a recorded round stores beside its result: the named memory tree, the recorder and
+    the agent that handed the memory change over."""
+
+    memory_tree: str | None
+    recorded_by: dict[str, Any] | None
+    handed_over_by: dict[str, Any] | None
+    verdict: RouteReviewVerdict | None
+
+
 def _with_recorded_round(
-    state: ReviewState, updated: ReviewState, payload: dict[str, Any]
+    state: ReviewState, updated: ReviewState, payload: dict[str, Any], facts: _RoundFacts
 ) -> ReviewState:
     if not state.pending:
         prior = next((row for row in state.recordedRounds if row.round == state.round), None)
@@ -187,10 +232,19 @@ def _with_recorded_round(
                 "review-kind-invalid",
                 "A record-only check cannot change the round's reviewKind; use begin_review for new review work.",
             )
-        if prior and payload.get("verdictRef") is not None:
-            latest = ReviewRound.model_validate(
-                {**prior.model_dump(), "verdictRef": payload["verdictRef"]}
+        # The hand-over stamp stays as the round was first recorded: who was registered then, at
+        # that time. A record-only check renews the recorder, never the hand-over.
+        renewed = {
+            key: value
+            for key, value in (
+                ("verdictRef", payload.get("verdictRef")),
+                ("recordedBy", facts.recorded_by),
+                ("verdict", facts.verdict),
             )
+            if value is not None
+        }
+        if prior and renewed:
+            latest = ReviewRound.model_validate({**prior.model_dump(), **renewed})
             return updated.model_copy(
                 update={
                     "recordedRounds": [
@@ -205,6 +259,10 @@ def _with_recorded_round(
         kind=kind,
         findingsRemain=bool(updated.remainingFindingIds),
         verdictRef=payload.get("verdictRef"),
+        memoryTree=facts.memory_tree,
+        recordedBy=facts.recorded_by,
+        handedOverBy=facts.handed_over_by,
+        verdict=facts.verdict,
     )
     return updated.model_copy(update={"recordedRounds": [*state.recordedRounds, row]})
 
@@ -465,6 +523,7 @@ def _require_unique_ids(values: list[str], label: str) -> None:
 
 __all__ = [
     "ReviewHistoryError",
+    "RoundStamps",
     "begin_task_review",
     "record_task_review",
     "require_pending_review",

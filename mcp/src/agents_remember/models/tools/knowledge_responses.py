@@ -117,6 +117,10 @@ class KnowledgeReadResponse(ToolResponse):
     # MIK-R73 rule 2: the `record` view answers the reader's truth view of one record -- its
     # fields, its links with their states, and its history rows, each bounded with its total.
     record: dict[str, Any] | None = None
+    # The record's derived state and its writer as ``role/model``, repeated beside ``record`` as
+    # short scalars so that an answer cut to its overflow short form still names both.
+    recordState: str | None = None
+    writer: str | None = None
     prose: dict[str, Any] | None = None
     memoryRoot: str | None = None
     outgoing: list[dict[str, Any]] | None = None

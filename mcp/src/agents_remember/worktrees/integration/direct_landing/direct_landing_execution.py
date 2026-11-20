@@ -9,6 +9,7 @@ from agents_remember.kernel.memory_cache import refresh_memory_cache
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
 from agents_remember.models.lifecycles.mutation_evidence import GitMutationEvidence
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
+from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.worktrees.integration.direct_landing.direct_landing_errors import (
     DirectLandingError,
     DirectLandingPublicationRefused,
@@ -43,6 +44,7 @@ from agents_remember.worktrees.modules.git import (
     require_git,
     stage_tree,
 )
+from agents_remember.worktrees.review_note import committed_review_note
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -514,8 +516,15 @@ def _direct_landing_result(
         "ok": True,
         "operation": "direct_landing",
         "state": "landed",
-        "summary": "Direct landing: code commit verified and memory content published "
-        "or reused on the series memory branch.",
+        "summary": " ".join(
+            part
+            for part in (
+                "Direct landing: code commit verified and memory content published "
+                "or reused on the series memory branch.",
+                _review_note(contract, operation_input, memory_commit),
+            )
+            if part
+        ),
         "contractPath": contract.contract_path.as_posix(),
         "codeCommit": operation_input.codeCommit,
         "candidateTree": operation_input.candidateTree,
@@ -531,3 +540,20 @@ def _direct_landing_result(
     if documents is not None:
         result["staleDocuments"] = documents
     return result
+
+
+def _review_note(
+    contract: WorktreeContract, operation_input: DirectLandingOperationInput, memory_commit: str
+) -> str:
+    """The no-pass sentence when the landed leaf's history was closed without a review fact."""
+
+    if contract.memory_repo_path is None:
+        return ""
+    owner = operation_input.leafId
+    if not owner:
+        try:
+            topology = TaskDocumentTopology(contract.coordination_root)
+            owner = topology.resolve(operation_input.leafTaskDocumentRef).document.id
+        except TaskDocumentRefError:
+            return ""
+    return committed_review_note(Path(contract.memory_repo_path), memory_commit, owner)

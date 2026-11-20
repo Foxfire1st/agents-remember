@@ -62,6 +62,7 @@ class MemoryTreeSnapshot:
     source: SourceKind
     location: str
     files: Mapping[str, bytes]
+    repository: Path | None = None
 
 
 def is_indexed_path(path: str) -> bool:
@@ -112,7 +113,9 @@ def git_tree_snapshot(repository: Path, revision: str) -> MemoryTreeSnapshot:
     entries = _indexed_entries(read_git_tree_bytes(repository, tree))
     blobs = read_git_blobs_bytes(repository, entries.values())
     files = {path: blobs[blob_id] for path, blob_id in entries.items()}
-    return MemoryTreeSnapshot(key=tree, source="git", location=str(repository), files=files)
+    return MemoryTreeSnapshot(
+        key=tree, source="git", location=str(repository), files=files, repository=repository
+    )
 
 
 def directory_snapshot(directory: Path) -> MemoryTreeSnapshot:
@@ -130,7 +133,9 @@ def directory_snapshot(directory: Path) -> MemoryTreeSnapshot:
         key, entries = _capture(root)
         files = {path: _captured_bytes(root, path, blob) for path, blob in entries.items()}
         if all(_blob_id(data, key) == entries[path] for path, data in files.items()):
-            return MemoryTreeSnapshot(key=key, source="directory", location=str(root), files=files)
+            return MemoryTreeSnapshot(
+                key=key, source="directory", location=str(root), files=files, repository=root
+            )
     raise MemoryTreeError(
         f"the files under {root} kept changing while their state was captured; no key was taken"
     )

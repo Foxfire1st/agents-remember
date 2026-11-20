@@ -28,6 +28,15 @@ def receipt_holder(root: Path, directory_name: str = EXECUTIONS_DIRECTORY) -> Pa
     return root / "notes" / "reports" / directory_name
 
 
+def taskless_session_directory(root: Path, role: str) -> Path:
+    """Where a taskless seat's launch keeps one receipt per request: ``<holder>/<role>/sessions``.
+
+    Such a seat names no task document, so its receipts live under the coordination root's holder;
+    the launch that writes them and every reader that resolves a seat's receipt share this path.
+    """
+    return receipt_holder(root) / role / "sessions"
+
+
 def receipt_holder_chain(root: Path) -> tuple[Path, ...]:
     """Discovery parents, including absent candidates, from root through its holder."""
     chain = [root]

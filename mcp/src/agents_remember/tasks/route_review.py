@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Final, Literal, Self
 
 from pydantic import (
     AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
+from agents_remember.models.knowledge.base import REFERENCE_MAX_LENGTH
+from agents_remember.models.knowledge_files.writer_stamp import WriterStamp
 from agents_remember.models.lifecycles.evidence_dependencies import (
     EvidenceDependencies,
     canonical_sha256,
@@ -118,6 +122,62 @@ class ReviewRound(_RouteReviewDoc):
     kind: Literal["code", "memory"]
     findingsRemain: bool
     verdictRef: str | None = None
+    # The memory tree the Reviewer named in this round (memory rounds only), the writer's stamp of
+    # the agent that recorded the round, and the stamp of the agent that handed the memory change
+    # to the review, fixed when the round is recorded so that a later seat replacement cannot
+    # change it; each stamp is the plain JSON object of a ``WriterStamp``. Rounds recorded before
+    # these facts carry none of them.
+    memoryTree: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
+    recordedBy: dict[str, Any] | None = None
+    handedOverBy: dict[str, Any] | None = None
+    # The verdict of a memory round, so a block that names no finding never reads as passed.
+    verdict: RouteReviewVerdict | None = None
+
+    @field_validator("recordedBy", "handedOverBy")
+    @classmethod
+    def _stamps_are_writer_stamps(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return WriterStamp.model_validate(value).to_document()
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_stamp_facts(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        # A round recorded before these facts keeps the shape it was answered and stored with.
+        dumped = handler(self)
+        for name in ("memoryTree", "recordedBy", "handedOverBy", "verdict"):
+            if dumped.get(name) is None:
+                dumped.pop(name, None)
+        return dumped
+
+
+PASSING_VERDICTS: Final = frozenset({"pass", "pass-with-notes"})
+
+
+def passed_memory_round(round_: ReviewRound) -> bool:
+    """Whether a recorded round passed the memory: by its stored verdict, or, for a round recorded
+    before rounds stored their verdict, by leaving no finding open.
+
+    A stored ``block`` never passes, also when it names no finding.
+    """
+
+    if round_.kind != "memory":
+        return False
+    if round_.verdict is not None:
+        return round_.verdict in PASSING_VERDICTS
+    return not round_.findingsRemain
+
+
+def usable_verdict_ref(value: str | None) -> str | None:
+    """The verdict reference a review fact may carry: the stored text trimmed, when it is printable
+    text within the reference length; otherwise none.
+
+    The closeout and the conversion both read a round's reference through this one rule.
+    """
+
+    reference = (value or "").strip()
+    if not reference or not reference.isprintable() or len(reference) > REFERENCE_MAX_LENGTH:
+        return None
+    return reference
 
 
 class ReviewState(_RouteReviewDoc):

@@ -71,11 +71,10 @@ from agents_remember.memory.knowledge_index.projection import (
     text_uuid,
 )
 from agents_remember.memory.knowledge_index.tree import MemoryTreeSnapshot
-from agents_remember.models.knowledge.authorship import Authorship, KnowledgeState
+from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.base import (
     LABEL_MAX_LENGTH,
     PROSE_MAX_LENGTH,
-    REFERENCE_MAX_LENGTH,
     UUID_PATTERN,
     KnowledgeModel,
 )
@@ -146,8 +145,6 @@ class RevisionDraft(KnowledgeModel):
     conditions: tuple[str, ...] = ()
     exclusions: tuple[str, ...] = ()
     predecessors: tuple[str, ...] = ()
-    state_at_origin: KnowledgeState = "proposed"
-    acceptance_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     provenance: Authorship
 
     @model_validator(mode="after")
@@ -324,6 +321,8 @@ class _TextTree:
         self.invariants: dict[str, dict[str, Any]] = {}
         self.families: dict[str, dict[str, Any]] = {}
         self.sidecars: dict[str, dict[str, Any]] = {}
+        # History files by path: the review facts a fixture records (the state is derived from them).
+        self.histories: dict[str, dict[str, Any]] = {}
         self.invariant_sequence = 0
         self.family_sequence = 0
         self.entry_sequence = 0
@@ -437,8 +436,8 @@ class _TextTree:
             )
         for text_id, record in self.families.items():
             rendered[record_path("family", text_id, text_id.lower())] = canonical_json_bytes(record)
-        for path, sidecar in self.sidecars.items():
-            rendered[path] = canonical_json_bytes(sidecar)
+        for path, document in (*self.sidecars.items(), *self.histories.items()):
+            rendered[path] = canonical_json_bytes(document)
         return rendered
 
     def to_authoring(self) -> dict[str, Any]:
@@ -455,6 +454,7 @@ class _TextTree:
             "invariants": self.invariants,
             "families": self.families,
             "sidecars": self.sidecars,
+            "histories": self.histories,
             "invariant_sequence": self.invariant_sequence,
             "family_sequence": self.family_sequence,
             "entry_sequence": self.entry_sequence,
@@ -492,6 +492,7 @@ class _TextTree:
             tree.invariants = dict(data["invariants"])
             tree.families = dict(data["families"])
             tree.sidecars = dict(data["sidecars"])
+            tree.histories = dict(data["histories"])
             tree.invariant_sequence = int(data["invariant_sequence"])
             tree.family_sequence = int(data["family_sequence"])
             tree.entry_sequence = int(data["entry_sequence"])
@@ -641,7 +642,6 @@ class RowStore(OpenedKnowledgeStore):
             raise ValueError(f"invariant {text_id} already holds a revision; {_SINGLE_REVISION}")
         self.tree.invariant_revised.add(text_id)
         record["revision"] = _revision_number(draft.display_version)
-        record["status"] = "accepted" if draft.state_at_origin == "accepted" else "proposed"
         record["statement"] = draft.statement
         record["applicability"] = draft.applicability
         record["conditions"] = list(draft.conditions)
@@ -734,7 +734,6 @@ def create_family_revision(
         raise ValueError(f"family {text_id} already holds a revision; {_SINGLE_REVISION}")
     tree.family_revised.add(text_id)
     record["revision"] = _revision_number(draft.display_version)
-    record["status"] = "accepted" if draft.state_at_origin == "accepted" else "proposed"
     record["guarantee"] = draft.joint_guarantee
     tree.family_revision_families[draft.revision_id] = text_id
     revision = text_uuid("revision", f"{text_id}@{record['revision']}")

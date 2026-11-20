@@ -7,6 +7,7 @@ import subprocess
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 import test_role_step_up as step_up_support
@@ -26,6 +27,8 @@ from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentTopology
 from agents_remember.tasks.launch_review_read import tolerate_unreadable_review
 from agents_remember.tasks.route_review import RouteReviewRecord, RouteReviewUnit
+from agents_remember.worktrees.review_fact_source import _review_fact
+from agents_remember.worktrees.review_handover import NO_REGISTERED_HANDOVER
 from agents_remember.worktrees.review_history import (
     ReviewHistoryError,
     begin_task_review,
@@ -148,14 +151,23 @@ def test_memory_baseline_after_code_pass_is_independent_and_persisted(tmp_path: 
             review={"reviewKind": "memory", "verdict": "pass", "remainingFindingIds": []},
         )
     assert state["remainingFindingIds"] == ["M1"]
-    assert state["recordedRounds"] == [
+    # The round also stores the recorder's and the hand-over's stamps; this server has
+    # no binding and no Curator or Consolidator is registered on the leaf.
+    rounds = state["recordedRounds"]
+    stamps = {"recordedBy", "handedOverBy"}
+    assert [{k: v for k, v in row.items() if k not in stamps} for row in rounds] == [
         {
             "round": 1,
             "kind": "memory",
             "findingsRemain": True,
             "verdictRef": "reports/memory-first.md",
+            "verdict": "block",
         }
     ]
+    assert rounds[0]["recordedBy"]["unknown"]["role"] == (
+        "this tool server was not launched for an agent"
+    )
+    assert rounds[0]["handedOverBy"]["unknown"]["role"] == NO_REGISTERED_HANDOVER
     TaskDocResponse.model_validate(recorded)
     restored = TaskDocument.model_validate_json(_leaf_doc(config).model_dump_json())
     assert restored.reviewState is not None
@@ -218,6 +230,139 @@ def test_memory_record_only_binds_memory_bytes_not_code_bytes(tmp_path: Path) ->
     )
     assert passed["reviewState"] == code
     assert failed_role_tries(_leaf_doc(config), "curator") == 1
+
+
+def _register_curator(holder: Path, request_id: str, *, name: str = "curator.json") -> Path:
+    receipt = holder / name
+    receipt.write_text(
+        json.dumps(
+            {
+                "schema": "ar-role-execution/v1",
+                "requestId": request_id,
+                "role": "curator",
+                "status": "running",
+                "selection": {
+                    "taskDocumentRef": {
+                        "repository": "agents-remember",
+                        "path": "review-api/review_api.json",
+                    }
+                },
+                "agent": {"id": "codex", "model": request_id.lower(), "effort": "xhigh"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return receipt
+
+
+def _replace_curator(holder: Path, receipt: Path) -> None:
+    (holder / "history").mkdir()
+    receipt.rename(holder / "history" / "01KORIGINAL.json")
+    _register_curator(holder, "01KREPLACEMENT")
+
+
+def _retire_curator(_holder: Path, receipt: Path) -> None:
+    receipt.write_text(receipt.read_text().replace('"running"', '"stopped"'), encoding="utf-8")
+
+
+def _add_second_curator(holder: Path, _receipt: Path) -> None:
+    _register_curator(holder, "01KSECOND", name="curator-second.json")
+
+
+@pytest.mark.parametrize(
+    ("between", "new_round", "seat"),
+    [
+        (None, False, "01KORIGINAL"),
+        (_replace_curator, False, "01KORIGINAL"),
+        (_retire_curator, False, "01KORIGINAL"),
+        (_add_second_curator, False, "01KORIGINAL"),
+        (_replace_curator, True, "01KREPLACEMENT"),
+    ],
+    ids=["unchanged", "replaced", "retired", "two-registered", "replaced-then-new-round"],
+)
+def test_a_record_only_correction_keeps_the_hand_over_stamped_when_the_round_was_recorded(
+    tmp_path: Path, between: Any, new_round: bool, seat: str
+) -> None:
+    """A passed memory round names the Curator registered when it was recorded; correcting its
+    record (here its verdict reference) after the seats changed renews the recorder only.
+
+    Catches the correction stamping whoever is registered at that later moment, in the stored
+    round and in the fact closeout builds from it. A new round takes the seat registered then.
+    """
+
+    config, memory = _memory_config(tmp_path)
+    _create(config)
+    folder = config.coordination_root / "tasks/agents-remember/review-api"
+    holder = folder / "notes/reports/paseo-native-executions"
+    holder.mkdir(parents=True)
+    receipt = _register_curator(holder, "01KORIGINAL")
+    tree = subprocess.run(
+        ["git", "-C", str(memory), "write-tree"], check=True, text=True, capture_output=True
+    ).stdout.strip()
+    memory_review = {"reviewKind": "memory", "verdict": "pass", "candidateTree": tree}
+    _call(config, "begin_review", review={"reviewKind": "memory"})
+    first = _call(
+        config, "record_review", review={**memory_review, "findings": [], "verdictRef": "a.md"}
+    )["memoryReviewState"]["recordedRounds"][0]["handedOverBy"]
+    if between is not None:
+        between(holder, receipt)
+    if new_round:
+        _call(config, "begin_review", review={"reviewKind": "memory"})
+    review = {**memory_review, "remainingFindingIds": [], "verdictRef": "b.md"}
+    rounds = _call(config, "record_review", review=review)["memoryReviewState"]["recordedRounds"]
+
+    stored = rounds[-1]
+    assert (len(rounds), stored["verdictRef"]) == (2 if new_round else 1, "b.md")
+    assert stored["handedOverBy"]["seat"] == seat
+    if not new_round:
+        assert stored["handedOverBy"] == first
+    fact = _review_fact(folder / "review_api.json", tree, lambda: "2026-11-20T08:45:00+01:00")
+    assert fact is not None
+    assert fact.handed_over_by.to_document() == stored["handedOverBy"]
+
+
+def test_a_round_turned_to_block_and_back_keeps_its_hand_over_and_other_memory_needs_a_round(
+    tmp_path: Path,
+) -> None:
+    """The hand-over belongs to the round's tree: correcting the same round from PASS to BLOCK
+    and back after the Curator was replaced keeps the stamp of its first recording; a memory
+    that changed cannot be recorded into that round at all, so a new round stamps anew.
+
+    Catches a correction to BLOCK or back to PASS renewing the stamp, and a changed tree
+    slipping into a round recorded for another one.
+    """
+
+    config, memory = _memory_config(tmp_path)
+    _create(config)
+    holder = (
+        config.coordination_root
+        / "tasks/agents-remember/review-api/notes/reports"
+        / "paseo-native-executions"
+    )
+    holder.mkdir(parents=True)
+    receipt = _register_curator(holder, "01KORIGINAL")
+    tree = subprocess.run(
+        ["git", "-C", str(memory), "write-tree"], check=True, text=True, capture_output=True
+    ).stdout.strip()
+    base = {"reviewKind": "memory", "candidateTree": tree, "remainingFindingIds": []}
+    first = {"reviewKind": "memory", "candidateTree": tree, "findings": [], "verdict": "pass"}
+    _call(config, "begin_review", review={"reviewKind": "memory"})
+    _call(config, "record_review", review={**first, "verdictRef": "a.md"})
+    _replace_curator(holder, receipt)
+
+    def stored() -> list[tuple[str | None, str]]:
+        state = _leaf_doc(config).memoryReviewState
+        assert state is not None
+        return [(one.verdict, (one.handedOverBy or {})["seat"]) for one in state.recordedRounds]
+
+    _call(config, "record_review", review={**base, "verdict": "block", "verdictRef": "b.md"})
+    assert stored() == [("block", "01KORIGINAL")]
+    _call(config, "record_review", review={**base, "verdict": "pass", "verdictRef": "c.md"})
+    assert stored() == [("pass", "01KORIGINAL")]
+    (memory / "memory.json").write_text('{"candidate": "changed"}\n')
+    with pytest.raises(TaskDocError, match="review-candidate-changed"):
+        _call(config, "record_review", review={**base, "verdict": "pass", "verdictRef": "d.md"})
+    assert stored() == [("pass", "01KORIGINAL")]
 
 
 def test_memory_lane_strict_reader_and_launch_only_diagnostic_preserve_raw_state() -> None:

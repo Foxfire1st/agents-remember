@@ -3,7 +3,9 @@
 A **truth view** shows one record of the selected tree with every field it records, its explanation
 prose (the record's ``.md``) when it has one, its outgoing links (the record's own ``links``, and a
 family's members and routes) and its incoming links (every relationship any file records towards
-it), and its timeline (:mod:`.timeline`). Per kind:
+it), and its timeline (:mod:`.timeline`). Its ``record`` carries the record's derived state and the
+writer of its current revision (``recordState``, ``writer``;
+:mod:`agents_remember.application.record_standing_answers`). Per kind:
 
 * **invariant** -- statement, applicability, conditions, exclusions, status, admission; its
   realizations and proofs, each with its MIK-R03 state at the selection's code tree, and the
@@ -55,11 +57,16 @@ from agents_remember.application.knowledge_reader.selection import READ_FAILURES
 from agents_remember.application.knowledge_reader.timeline import record_timeline
 from agents_remember.application.knowledge_reader.weakness_closure import closure_document
 from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
+from agents_remember.application.record_standing_answers import stamp_summaries, standing_fields
 from agents_remember.memory.knowledge_index import Entry, HistoryRow, KnowledgeIndex, Record
 from agents_remember.memory_quality.knowledge_census import census_reports, read_censuses
 from agents_remember.models.knowledge_files.documents import RECORD_DIRECTORIES
 from agents_remember.models.knowledge_files.history import membership_subject
-from agents_remember.models.knowledge_files.records import RECORD_MODELS, WeaknessRecord
+from agents_remember.models.knowledge_files.records import (
+    LEGACY_STATE_WORDS,
+    RECORD_MODELS,
+    WeaknessRecord,
+)
 from agents_remember.serving.media import media_type_for
 from agents_remember.serving.scope import language_for
 
@@ -88,6 +95,7 @@ def record_view(
     document: dict[str, Any] = {
         "record": {
             **summary,
+            **standing_fields(index.standing(record.id).value),
             "path": record.path,
             "heading": summary["title"],
             "document": record_document,
@@ -139,6 +147,10 @@ def _kind_part(
     if record.kind == "decision":
         return {"decision": decision_document(decisions, record.id)}, ()
     facet = {key: value for key, value in record.document.items() if key not in _FACET_FRAME}
+    if facet.get("status") in LEGACY_STATE_WORDS:
+        # An old typed state word is no lifecycle word: the record's state is derived and shown as
+        # ``recordState``, so the facet must not contradict it. ``retired`` stays.
+        del facet["status"]
     return {"facet": facet}, ()
 
 
@@ -277,7 +289,7 @@ def _family(selection: ReaderSelection, record: Record) -> dict[str, Any]:
     header = None if currentness is None else next(iter(currentness.families), None)
     return {
         "currentness": _currentness_header(selection, currentness, problem),
-        "members": members,
+        "members": stamp_summaries(index, members),
         "routes": list(knowledge.routes),
         "staleMembers": [] if header is None else list(header.stale_members),
         "locations": [{"path": path, "entries": locations[path]} for path in sorted(locations)],
@@ -290,15 +302,16 @@ def _family(selection: ReaderSelection, record: Record) -> dict[str, Any]:
 
 
 def record_list(selection: ReaderSelection) -> dict[str, Any]:
-    """Every record of the selected tree, by kind: the reader's index of truths."""
+    """Every record of the selected tree, by kind, with its state and writer: the reader's index of
+    truths."""
 
     index: KnowledgeIndex = selection.index
-    return {
-        "kinds": {
-            kind: [summary_of(record) for record in index.records_of_kind(kind).value]
-            for kind in RECORD_DIRECTORIES
-        }
+    kinds = {
+        kind: [summary_of(record) for record in index.records_of_kind(kind).value]
+        for kind in RECORD_DIRECTORIES
     }
+    # Each record shows its derived state and the writer of its current revision.
+    return {"kinds": stamp_summaries(index, kinds)}
 
 
 def census_view(selection: ReaderSelection, census_id: str | None) -> dict[str, Any]:

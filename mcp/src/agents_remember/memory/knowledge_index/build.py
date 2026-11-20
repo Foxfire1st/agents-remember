@@ -14,6 +14,12 @@ without choosing, so it names the file and says it is incomplete. Integrity beyo
 IDs resolve, markers match references, routes cover members -- is the validator's (MIK-R22); this
 module derives nothing it cannot read off recorded fields.
 
+**State and writer.** A record's state is derived once per build from the
+history files of the same tree (:mod:`.record_standing`) and stored on its ``ix_record`` row with
+the writer of its current revision, so a read of either is one lookup and no search through files.
+Every revision a file names is stored too, with its writer and whether it is reviewed
+(``ix_revision``), so the writer table is read without the history files.
+
 **Parsed documents kept by their bytes (D569).** A document's model is a function of its exact
 bytes, and the models are frozen. Inside :func:`kept_document_parses` -- the reviewer worklist
 child, which parses both memory trees of every comparison -- each parsed document is kept per
@@ -39,8 +45,15 @@ import apsw
 from agents_remember.memory.knowledge.connection import create_or_validate_schema
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge_index import projection
+from agents_remember.memory.knowledge_index.record_standing import RecordStanding, StandingDeriver
 from agents_remember.memory.knowledge_index.schema import INDEX_DDL, INDEX_FORMAT
 from agents_remember.memory.knowledge_index.tree import MemoryTreeSnapshot
+from agents_remember.memory.knowledge_index.writer_table import NamedRevision, named_revisions
+from agents_remember.memory.reviewed_content import reviewed_content
+from agents_remember.models.knowledge_files.converted_reviews import (
+    CONVERTED_REVIEWS_PATH,
+    ConvertedReviews,
+)
 from agents_remember.models.knowledge_files.documents import (
     KNOWLEDGE_ROOT,
     LAYOUT_MARKER_PATH,
@@ -58,7 +71,9 @@ from agents_remember.models.knowledge_files.history import (
     merged_leaf_history,
 )
 from agents_remember.models.knowledge_files.ids import RecordKind
+from agents_remember.models.knowledge_files.record_state import RevisionStates
 from agents_remember.models.knowledge_files.records import (
+    LEGACY_STATE_WORDS,
     RECORD_MODELS,
     FamilyRecord,
     KnowledgeRecord,
@@ -115,6 +130,8 @@ class ParsedTree:
     """Each owner's history: all of its files read as one (a reopened leaf's attempts, L37)."""
     history_files: dict[str, HistoryFile] = field(default_factory=dict)
     """Each history file, by path."""
+    converted_reviews: ConvertedReviews | None = None
+    """The review facts of owners closed before reviews were recorded in the memory, if any."""
     layout: LayoutMarker | None = None
     problems: list[tuple[str, str]] = field(default_factory=list)
 
@@ -194,6 +211,8 @@ def build_index(snapshot: MemoryTreeSnapshot, destination: Path) -> BuildReport:
     """Write the index of ``snapshot`` to ``destination`` (a new file) and report what it holds."""
 
     parsed = parse_tree(snapshot)
+    states = _revision_states(parsed, snapshot.repository)
+    standings = record_standings(parsed, states)
     connection = apsw.Connection(str(destination))
     try:
         connection.execute("PRAGMA journal_mode=OFF")
@@ -203,8 +222,9 @@ def build_index(snapshot: MemoryTreeSnapshot, destination: Path) -> BuildReport:
         connection.execute("BEGIN")
         for statement in INDEX_DDL:
             connection.execute(statement)
-        _write_rows(connection, parsed)
-        projection.project(connection, parsed)
+        _write_rows(connection, parsed, standings)
+        _write_revisions(connection, parsed, states)
+        projection.project(connection, parsed, standings)
         _write_meta(connection, snapshot, parsed)
         connection.execute("COMMIT")
     finally:
@@ -218,6 +238,25 @@ def build_index(snapshot: MemoryTreeSnapshot, destination: Path) -> BuildReport:
         entry_count=len(parsed.entries),
         history_row_count=sum(len(history.rows) for history in parsed.history_files.values()),
     )
+
+
+def _revision_states(parsed: ParsedTree, repository: Path | None = None) -> RevisionStates:
+    matches = reviewed_content(repository) if repository is not None else None
+    return RevisionStates.of(
+        parsed.history_files.values(), parsed.converted_reviews, review_content_matches=matches
+    )
+
+
+def record_standings(
+    parsed: ParsedTree, states: RevisionStates | None = None
+) -> dict[str, RecordStanding]:
+    """Every record's derived state and writer, from the tree's own history files, read once."""
+
+    deriver = StandingDeriver(states if states is not None else _revision_states(parsed))
+    return {
+        record_id: deriver.standing_of(indexed.record)
+        for record_id, indexed in parsed.records.items()
+    }
 
 
 # --------------------------------------------------------------------------------------------------
@@ -251,6 +290,12 @@ def _parse_knowledge_file(
     if len(parts) != 3:
         raise ValueError("not a knowledge file location: knowledge/<kind-dir>/<file>.json")
     directory, filename = parts[1], parts[2]
+    if path == CONVERTED_REVIEWS_PATH:
+        converted = read(text)
+        if not isinstance(converted, ConvertedReviews):
+            raise ValueError(f"{path} is not an ar-converted-reviews/v1 document")
+        parsed.converted_reviews = converted
+        return
     if directory == _HISTORY_DIRECTORY:
         history = history_document(path, read(text))
         parsed.history_files[path] = history
@@ -315,10 +360,12 @@ def _json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-def _write_rows(connection: apsw.Connection, parsed: ParsedTree) -> None:
+def _write_rows(
+    connection: apsw.Connection, parsed: ParsedTree, standings: dict[str, RecordStanding]
+) -> None:
     connection.executemany("INSERT INTO ix_problem (path, detail) VALUES (?, ?)", parsed.problems)
-    for indexed in parsed.records.values():
-        _write_record(connection, indexed)
+    for record_id, indexed in parsed.records.items():
+        _write_record(connection, indexed, standings[record_id])
     for indexed in parsed.entries.values():
         document = indexed.entry.to_document()
         document["anchor"] = {**document["anchor"], "path": indexed.path}
@@ -346,16 +393,24 @@ def _write_rows(connection: apsw.Connection, parsed: ParsedTree) -> None:
         _write_history(connection, path, history)
 
 
-def _write_record(connection: apsw.Connection, indexed: IndexedRecord) -> None:
+def _write_record(
+    connection: apsw.Connection, indexed: IndexedRecord, standing: RecordStanding
+) -> None:
     record = indexed.record
+    writer = standing.writer
     connection.execute(
-        "INSERT INTO ix_record (id, kind, path, revision, status, document) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO ix_record (id, kind, path, revision, status, state, writer_role, "
+        "writer_harness, writer_model, document) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             record.id,
             record.record_kind,
             indexed.path,
             getattr(record, "revision", None),
-            str(getattr(record, "status", "")),
+            _stored_status(record),
+            standing.state,
+            writer.role,
+            writer.harness,
+            writer.model,
             _json(record.to_document()),
         ),
     )
@@ -375,6 +430,13 @@ def _write_record(connection: apsw.Connection, indexed: IndexedRecord) -> None:
         _link(connection, owner, "supersedes", ("record", superseded, {"id": superseded}))
     for link in getattr(record, "links", ()):
         _write_link(connection, owner, link)
+
+
+def _stored_status(record: KnowledgeRecord) -> str:
+    """The record's lifecycle word; an old stored state word is none and reads as empty."""
+
+    word = getattr(record, "status", None) or ""
+    return "" if word in LEGACY_STATE_WORDS else str(word)
 
 
 def _write_link(connection: apsw.Connection, owner: _Owner, link: Link) -> None:
@@ -479,6 +541,24 @@ def _write_history(connection: apsw.Connection, path: str, history: HistoryFile)
                     else ("requirement", _requirement_key(because), because.to_document())
                 )
                 _link(connection, _Owner(row.id, "history_row", path), "because", endpoint)
+
+
+def _write_revisions(
+    connection: apsw.Connection, parsed: ParsedTree, states: RevisionStates
+) -> None:
+    """One ``ix_revision`` row per revision a file of the tree names (the writer table's input)."""
+
+    records = (indexed.record for indexed in parsed.records.values())
+    connection.executemany(
+        "INSERT INTO ix_revision (record, revision, writer_role, writer_harness, writer_model, "
+        "seat, reviewed) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [_revision_row(one) for one in named_revisions(records, states)],
+    )
+
+
+def _revision_row(one: NamedRevision) -> tuple[str | int | None, ...]:
+    role, harness, model = one.writer if one.writer is not None else (None, None, None)
+    return (one.record, one.revision, role, harness, model, one.seat, int(one.reviewed))
 
 
 def _write_meta(
