@@ -13,13 +13,13 @@ Implementation does not expand scope or edit task status, the contract, memory o
 
 ## Outputs
 
-### Verify the final candidate
+### Check the candidate before each freeze
 
-Before each freeze, pass the coding guidelines' handover checks on a clean copy of the final candidate. Name each check, the copy's tree and its result in the freeze report. Repair failures before freezing.
+Before each freeze, pass the coding guidelines' handover checks on a clean copy of the frozen candidate. Name each check, the copy's tree and its result in the freeze report. Repair failures before freezing.
 
 Choose a freeze's focused tests by searching the repository's tracked test files for each touched path or bare name and each touched rule, tool or record identifier. Add tests using a matching test-support file, the knowledge-lookup proofs, and yours. Record names and files in the checks and run them; repairs follow the same rule.
 
-These fast deterministic checks are distinct from full code-quality operations, which require the developer's explicit request.
+These fast deterministic checks are the work of a round, and full code-quality operations still require the developer's explicit request. A requirement's listed final checks are not round evidence and do not run before a freeze.
 
 ### Make the measurement handover
 
@@ -52,6 +52,14 @@ A check or evidence run carries over only when the files it exercises are byte-i
 The freeze travels as a file: the message names the freeze report file, never its pasted text. This is a factual handover, not a review brief. Use the sibling role and exact leaf task references in the handover; keep product-supplied identifiers whole and unchanged.
 
 The Manager receives the first-freeze notice so it can start the Reviewer, plus its authority or recovery matters. Do not send it routine report notices or ask it to relay handover contents.
+
+### Run the final checks after the pass
+
+When the Reviewer has passed the code, run the checks the requirement's `## Final checks` section lists, once, on the passed tree byte for byte, and change nothing until they finish. A repair after them is its own freeze.
+
+Record each check, its exact command, its result and that tree's hash in the report that named the passed freeze. Send the same facts to the Manager and the Reviewer, so the ready-for-closeout notice and the closeout rest on the tree that was checked.
+
+A final check that fails is not a round's finding. The Reviewer seals it as the third route in [review Boundaries](review.md#boundaries) describes. The Worker repairs it, the same Reviewer reviews that point, and the failed check and the focused tests of the repair run on the new tree; the full run is not repeated. For a failed multi-step run, the step that failed is the check, and that step with the repair's focused tests is the successor's evidence, recorded beside the original report rather than in a second full run.
 
 ## Boundaries
 

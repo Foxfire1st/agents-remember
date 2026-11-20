@@ -25,8 +25,9 @@ from agents_remember.kernel.agentic_settings import (
 )
 from agents_remember.kernel.direct_execution_grants import DirectGrantError, require_grant
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.lifecycles.evidence_dependencies import EvidenceDependencyError
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import TaskDocument
+from agents_remember.tasks import RouteReviewRecord, TaskDocument
 from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import (
     TerminalLeafResolutionError,
@@ -41,6 +42,7 @@ from agents_remember.worktrees.review_history import (
 )
 from agents_remember.worktrees.route_review import (
     RouteReviewError,
+    build_route_addition_block,
     build_route_review,
     document_ref,
 )
@@ -162,10 +164,19 @@ def _record_route_review_bound(
     if payload is None:
         raise TaskDocError("record_route_review requires a review object")
     _require_code_route_kind(payload)
+    _require_reopened_route_verdict(payload)
     if doc.kind == "master":
         _require_master_route_review_binding(binding)
         contract = binding.contract
         assert contract is not None
+        if "addedFindings" in payload and doc.routeReview is not None:
+            return _record_routed_addition(
+                doc,
+                payload,
+                binding,
+                settings_limit=settings_limit,
+                actual_candidate=actual_candidate,
+            )
         try:
             review = build_master_route_review(
                 contract,
@@ -188,6 +199,10 @@ def _record_route_review_bound(
         reject_atomic_child_route_review(contract)
     except RouteReviewError as exc:
         raise TaskDocError(str(exc)) from exc
+    if "addedFindings" in payload and doc.routeReview is not None:
+        return _record_routed_addition(
+            doc, payload, binding, settings_limit=settings_limit, actual_candidate=actual_candidate
+        )
     try:
         review = build_route_review(
             contract,
@@ -299,22 +314,65 @@ def candidate_identity_for_review(
 def _record_task_review_bound(
     doc: TaskDocument,
     payload: dict[str, Any] | None,
-    binding: _RouteReviewBinding | None = None,
+    binding: _RouteReviewBinding,
     *,
     settings_limit: int | None = None,
     actual_candidate: str | None = None,
 ) -> TaskDocument:
-    """Record generic review state without authoring code-route evidence."""
-
-    del binding
+    """Record review state and publish a route block for a sanctioned code addition."""
     if payload is None:
         raise TaskDocError("record_review requires a review object")
     try:
-        return record_task_review(
+        updated = record_task_review(
             doc, payload, settings_limit=settings_limit, actual_candidate=actual_candidate
         )
     except ReviewHistoryError as exc:
         raise TaskDocError(f"{exc.status}: {exc}") from exc
+    if payload.get("reviewKind") == "memory" or "addedFindings" not in payload:
+        return updated
+    prior = doc.routeReview
+    state = updated.reviewState
+    if prior is None or state is None:
+        return updated
+    open_ids = set(state.remainingFindingIds)
+    finding_ids = [item.findingId for item in state.addedFindings if item.findingId in open_ids]
+    try:
+        review = build_route_addition_block(
+            binding.task_root, prior, finding_ids, state.addedFindingRounds[-1].verdictRef
+        )
+    except (RouteReviewError, ValidationError, EvidenceDependencyError) as exc:
+        raise TaskDocError(str(exc)) from exc
+    return _with_route_record(updated, review)
+
+
+def _record_routed_addition(
+    doc: TaskDocument,
+    payload: dict[str, Any],
+    binding: _RouteReviewBinding,
+    *,
+    settings_limit: int | None,
+    actual_candidate: str | None,
+) -> TaskDocument:
+    prior = doc.routeReview
+    assert prior is not None
+    route = _route_payload(payload)
+    units = [unit.model_dump(mode="json", exclude={"evidenceSha256"}) for unit in prior.routes]
+    if (
+        set(route) != {"verdict", "verdictRef", "routes"}
+        or not isinstance(route["verdictRef"], str)
+        or route["routes"] != units
+    ):
+        raise TaskDocError(
+            "route-review-invalid: a sanctioned addition names its verdictRef and "
+            "reuses the previously recorded routes"
+        )
+    return _record_task_review_bound(
+        doc,
+        _state_payload(payload, prior),
+        binding,
+        settings_limit=settings_limit,
+        actual_candidate=actual_candidate,
+    )
 
 
 def with_review_lane_result(
@@ -346,25 +404,32 @@ def _require_code_route_kind(payload: dict[str, Any]) -> None:
         )
 
 
-def _state_payload(payload: dict[str, Any], review: Any = None) -> dict[str, Any]:
+def _state_payload(payload: dict[str, Any], review: RouteReviewRecord) -> dict[str, Any]:
     """Keep route evidence out of the shared, generic state transition.
 
     L116-F01: the plane-stamped candidate tree the route builder resolved is
     the reviewer's checked-candidate claim for the generic guard; it travels
     in the state payload, never in route evidence. The authority binding is
     resolved separately from the contract and passed alongside.
+
+    The fixed-list state owns the sanctioned finding and its route. The
+    blocking route verdict carries its identifier as an evidence reference.
     """
 
     _require_code_route_kind(payload)
     state = {
         key: payload[key]
-        for key in ("verdict", "verdictRef", "findings", "remainingFindingIds", "reviewKind")
+        for key in (
+            "verdict",
+            "verdictRef",
+            "findings",
+            "remainingFindingIds",
+            "addedFindings",
+            "reviewKind",
+        )
         if key in payload
     }
-    if "candidateTree" not in state:
-        plane_tree = getattr(review, "candidateTree", None)
-        if isinstance(plane_tree, str) and plane_tree:
-            state["candidateTree"] = plane_tree
+    state["candidateTree"] = review.candidateTree
     return state
 
 
@@ -374,8 +439,27 @@ def _route_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
         for key, value in payload.items()
-        if key not in {"findings", "remainingFindingIds", "reviewKind"}
+        if key not in {"findings", "remainingFindingIds", "addedFindings", "reviewKind"}
     }
+
+
+def _require_reopened_route_verdict(payload: dict[str, Any]) -> None:
+    """A sanctioned addition reopens the verdict; a route PASS cannot survive it.
+
+    The route record is the evidence the closeout door reads. When a sanctioned
+    route adds a finding after the list is sealed, the same review must be sent
+    as a blocking result, so no existing consumer can keep attesting a current
+    PASS for the reopened point.
+    """
+
+    if "addedFindings" not in payload:
+        return
+    if payload.get("verdict") != "block":
+        raise TaskDocError(
+            "route-review-invalid: a sanctioned addition reopens the verdict for the "
+            "point it adds; send the route review as block with its verdictRef, "
+            "never as a pass"
+        )
 
 
 def _with_route_review_state(
@@ -395,7 +479,11 @@ def _with_route_review_state(
         )
     except ReviewHistoryError as exc:
         raise TaskDocError(f"{exc.status}: {exc}") from exc
-    data = updated.model_dump(by_alias=True)
+    return _with_route_record(updated, review)
+
+
+def _with_route_record(doc: TaskDocument, review: RouteReviewRecord) -> TaskDocument:
+    data = doc.model_dump(by_alias=True)
     data["routeReview"] = review.model_dump(mode="json")
     return _validate(data)
 

@@ -157,7 +157,7 @@ class InstructionFileWordingTests(unittest.TestCase):
                 (
                     "Work step to step and wave to wave in one turn, collecting helper results",
                     "End only at your handover, a named wait or a nearly full context",
-                    "handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of the final bytes",
+                    "handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of the frozen candidate",
                 ),
             ),
             (
@@ -266,10 +266,10 @@ class InstructionFileWordingTests(unittest.TestCase):
                     "files it exercises are byte-identical",
                     "For each rerun, name the changed file that required it",
                     "Before each freeze",
-                    "handover checks on a clean copy of the final candidate",
+                    "handover checks on a clean copy of the frozen candidate",
                     "the copy's tree and its result",
                     "Repair failures before freezing",
-                    "distinct from full code-quality operations",
+                    "are the work of a round",
                 ),
             ),
             (
@@ -893,7 +893,7 @@ class InstructionFileWordingTests(unittest.TestCase):
             ],
             ("reviewer", "review"): [
                 # Rule 13: each finding is checked against its entry, with no round counted.
-                "compare every finding with its entry in the Worker's freeze report",
+                "Compare every finding with its entry in the Worker's freeze report",
                 "without counting a round",
                 # Rule 9: a cleanly synced leaf is not sent back for a new freeze.
                 "For a cleanly synced leaf, expect no new freeze and open no round",

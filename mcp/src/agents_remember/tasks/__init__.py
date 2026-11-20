@@ -69,6 +69,8 @@ from .execution_graph_titles import (
 from .readiness import CompletionBlocker, completion_blockers, master_is_terminal
 from .render import render_markdown
 from .route_review import (
+    AddedFinding,
+    AddedFindingRound,
     ReviewApproval,
     ReviewFinding,
     ReviewState,
@@ -96,6 +98,8 @@ __all__ = [
     "SKIP_STEP_DECISION_PREFIX",
     "TASK_DOCUMENT_SCHEMA",
     "AcceptanceObligationQuestion",
+    "AddedFinding",
+    "AddedFindingRound",
     "ApprovedRequirementPacketRef",
     "CodeExample",
     "CompletionBlocker",

@@ -414,10 +414,22 @@ refused `review-budget-exhausted`; a further round then needs, in the review obj
 An approval before the bound is refused `review-admission-invalid`. `reviewKind: "memory"`
 selects the separate sequence of memory reviews; the default is `code`.
 `record_review` takes `{verdict, findings:[{findingId, description}]}` first,
-then `remainingFindingIds:[...]`; successors only shrink the sealed set. `record_route_review`
-takes `{verdict, verdictRef, routes:[{route, verdict, evidenceRef}]}`; the plane stamps the
-candidate tree and time, every evidence path must be a real task-relative file, and it
-overwrites the prior candidate's review.
+then `remainingFindingIds:[...]`; successors only shrink the sealed set. A finding that a
+sanctioned route adds after sealing is recorded instead as
+`{verdict:"block", addedFindings:[{findingId, description, route}]}`, `route` being one of
+`curator`, `advisory` and `final-check`: that round adds the finding to the sealed list and
+reopens that point only, without a counted round; where the document carries a route review,
+both operations require the addition's own `verdictRef`. The new blocking route record binds
+that file and the previously recorded route units to the reviewed tree. The sealed finding
+list stores the description, and the route history keeps the finding ID and route. The door
+returns `route-review-blocked` until the Reviewer publishes a passing routed verdict for the
+repair. The repair round counts toward the configured limit. Generic `record_review`
+can record the finding and reopen the route, but the repair's evidence must be
+published through `record_route_review` on a routed leaf. `record_route_review` takes
+`{verdict, verdictRef, routes:[{route, verdict, evidenceRef}]}`. The plane stamps the
+candidate tree and time, every evidence path must be a real task-relative file, and the
+new record becomes the current route record. A routed addition supplies the previously
+recorded routes together with the new verdict reference and `addedFindings`.
 - Atomic masters: the operation targets the master's task document and binds the accumulated
 candidate, membership and evidence; a child publishes no independent review; master review is
 required only when the master lands into its parent. `branch_addressed=true` (accepted only for

@@ -75,8 +75,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
         operation = " ".join(read(LIFECYCLE / "operations/review.md").split())
         for clause in (
             "Before sending your hand-off list, run `handoff-check` against that freeze",
-            "with the serving build's interpreter, identified by `server_info` on `agents-remember-task`",
-            "Name the result.",
+            "with the serving build's interpreter from `server_info` on `agents-remember-task`; name the result.",
         ):
             self.assertIn(clause, operation)
         onboarding = " ".join(read(LIFECYCLE / "criteria/onboarding-memory.md").split())
@@ -512,7 +511,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                 (
                     (
                         "roles/manager.md",
-                        "Read each leaf's reports and task records yourself. Before directing handovers, repair loops, review rounds, memory passes or relays, read [leaf coordination procedures](../operations/coordination.md) for stage timing, review records, message delivery and relay limits. Inspect the complete changed-file diff and both verdicts before deciding the gate. Reviews supply evidence; you decide the gate and retain closeout, integration, status, acceptance writes and landing order. Relay no freeze, finding, verdict or memory change. Preserve stable requirement and finding identifiers. Distinguish implementation, review, curation and publication status.",
+                        "Read each leaf's reports and task records yourself. Before directing handovers, repair loops, review rounds, memory passes or relays, read [leaf coordination procedures](../operations/coordination.md) for stage timing, review records, message delivery and relay limits. Inspect the complete changed-file diff, both verdicts and the Worker's report of the requirement's listed final checks before deciding the gate. Reviews supply evidence; you decide the gate and retain closeout, integration, status, acceptance writes and landing order. Relay no freeze, finding, verdict or memory change. Preserve stable requirement and finding identifiers. Distinguish implementation, review, curation and publication status.",
                     ),
                     (
                         "roles/manager.md",

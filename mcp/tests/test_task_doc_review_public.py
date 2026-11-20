@@ -203,6 +203,249 @@ def test_successor_cannot_add_a_new_finding(tmp_path: Path) -> None:
         )
 
 
+def test_sanctioned_addition_spends_no_round_and_reopens_only_its_point(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    _create(config)
+    _call(config, "begin_review", review={})
+    _call(
+        config,
+        "record_review",
+        review={"verdict": "block", "findings": [{"findingId": "A", "description": "issue"}]},
+    )
+    _call(config, "begin_review", review={})
+    passed = _call(config, "record_review", review={"verdict": "pass", "remainingFindingIds": []})
+    assert passed["reviewState"]["remainingFindingIds"] == []
+    sealed_before = passed["reviewState"]["baselineFindings"]
+    rounds_before = passed["reviewState"]["recordedRounds"]
+
+    # A final check that fails after the pass is a sanctioned route. It amends
+    # the recorded verdict without begin_review: no round is spent and no failed
+    # Worker try is debited, so the repair is reviewed in the next ordinary round.
+    blocked = _call(
+        config,
+        "record_review",
+        review={
+            "verdict": "block",
+            "addedFindings": [
+                {"findingId": "F1", "description": "unit lane failed", "route": "final-check"}
+            ],
+        },
+    )
+    state = blocked["reviewState"]
+    assert state["round"] == 2
+    assert state["pending"] is False
+    assert state["recordedRounds"] == rounds_before
+    assert [finding["findingId"] for finding in state["baselineFindings"]] == ["A", "F1"]
+    assert state["baselineFindings"][:1] == sealed_before
+    assert state["remainingFindingIds"] == ["F1"]
+    assert state["addedFindingRounds"] == [{"round": 2, "verdictRef": None, "findingIds": ["F1"]}]
+    persisted = read_task_doc(
+        config.coordination_root / "tasks" / "agents-remember" / "review-api" / "review_api.json"
+    )
+    assert persisted.reviewState is not None
+    assert [(f.findingId, f.route) for f in persisted.reviewState.addedFindings] == [
+        ("F1", "final-check")
+    ]
+
+    # The repair round counts under the limit and reopens that point only.
+    repair = _call(config, "begin_review", review={})
+    assert repair["reviewState"]["round"] == 3
+    with pytest.raises(TaskDocError, match="review-remaining-invalid"):
+        _call(
+            config,
+            "record_review",
+            review={"verdict": "pass", "remainingFindingIds": ["A"]},
+        )
+    closed = _call(config, "record_review", review={"verdict": "pass", "remainingFindingIds": []})
+    assert closed["reviewState"]["remainingFindingIds"] == []
+    assert closed["reviewState"]["recordedRounds"][-1]["round"] == 3
+
+
+def test_each_sanctioned_route_adds_a_finding_and_keeps_the_others_open(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    _create(config)
+    _call(config, "begin_review", review={})
+    _call(
+        config,
+        "record_review",
+        review={"verdict": "block", "findings": [{"findingId": "B1", "description": "baseline"}]},
+    )
+    _call(config, "begin_review", review={})
+    _call(config, "record_review", review={"verdict": "pass", "remainingFindingIds": []})
+
+    curator = _call(
+        config,
+        "record_review",
+        review={
+            "verdict": "block",
+            "addedFindings": [
+                {"findingId": "C1", "description": "curator finding", "route": "curator"}
+            ],
+        },
+    )
+    assert curator["reviewState"]["remainingFindingIds"] == ["C1"]
+
+    # Curation and the final checks run concurrently after a pass: a second
+    # route's finding joins the open set instead of replacing it.
+    advisory = _call(
+        config,
+        "record_review",
+        review={
+            "verdict": "block",
+            "addedFindings": [
+                {"findingId": "R1", "description": "advisory finding", "route": "advisory"}
+            ],
+        },
+    )
+    state = advisory["reviewState"]
+    assert state["remainingFindingIds"] == ["C1", "R1"]
+    assert [finding["findingId"] for finding in state["baselineFindings"]] == ["B1", "C1", "R1"]
+    assert state["round"] == 2
+    assert [row["findingIds"] for row in state["addedFindingRounds"]] == [["C1"], ["R1"]]
+    assert state["baselineFindings"][1:] == [
+        {"findingId": "C1", "description": "curator finding"},
+        {"findingId": "R1", "description": "advisory finding"},
+    ]
+    assert state["addedFindings"] == [
+        {"findingId": "C1", "route": "curator"},
+        {"findingId": "R1", "route": "advisory"},
+    ]
+
+    # The route each addition came by is a persisted record, not just a caller's
+    # assertion: a dropped or retagged provenance would fail here.
+    persisted = read_task_doc(
+        config.coordination_root / "tasks" / "agents-remember" / "review-api" / "review_api.json"
+    )
+    assert persisted.reviewState is not None
+    assert [(f.findingId, f.route) for f in persisted.reviewState.addedFindings] == [
+        ("C1", "curator"),
+        ("R1", "advisory"),
+    ]
+    assert [row.findingIds for row in persisted.reviewState.addedFindingRounds] == [["C1"], ["R1"]]
+
+    # A successor cannot pass while one of them is still open.
+    _call(config, "begin_review", review={})
+    with pytest.raises(TaskDocError, match="review-unresolved-findings"):
+        _call(
+            config,
+            "record_review",
+            review={"verdict": "pass", "remainingFindingIds": ["R1"]},
+        )
+    resolved_one = _call(
+        config, "record_review", review={"verdict": "block", "remainingFindingIds": ["R1"]}
+    )
+    assert resolved_one["reviewState"]["remainingFindingIds"] == ["R1"]
+
+
+def test_addition_after_the_limit_round_needs_the_existing_approval(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    _create(config)
+    _call(config, "begin_review", review={})
+    _call(
+        config,
+        "record_review",
+        review={"verdict": "block", "findings": [{"findingId": "A", "description": "issue"}]},
+    )
+    limit = _call(config, "begin_review", review={})["reviewState"]["limit"]
+    _call(config, "record_review", review={"verdict": "block", "remainingFindingIds": ["A"]})
+    while _call(config, "begin_review", review={})["reviewState"]["round"] < limit:
+        _call(config, "record_review", review={"verdict": "block", "remainingFindingIds": ["A"]})
+    passed = _call(config, "record_review", review={"verdict": "pass", "remainingFindingIds": []})
+    assert passed["reviewState"]["round"] == limit
+
+    # The addition itself still spends no round, even at the limit.
+    added = _call(
+        config,
+        "record_review",
+        review={
+            "verdict": "block",
+            "addedFindings": [
+                {"findingId": "F1", "description": "unit lane failed", "route": "final-check"}
+            ],
+        },
+    )
+    assert added["reviewState"]["round"] == limit
+
+    # Its repair is beyond the limit: the existing approval opens the round.
+    with pytest.raises(TaskDocError, match="review-budget-exhausted"):
+        _call(config, "begin_review", review={})
+    approved = _call(
+        config,
+        "begin_review",
+        review={
+            "developerApproval": "Developer authorizes the repair round.",
+            "additionalRounds": 1,
+        },
+    )
+    assert approved["reviewState"]["round"] == limit + 1
+
+
+def test_added_finding_records_no_counted_round_and_no_other_route_fields(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    _create(config)
+    _call(config, "begin_review", review={})
+    _call(
+        config,
+        "record_review",
+        review={"verdict": "block", "findings": [{"findingId": "A", "description": "issue"}]},
+    )
+    _call(config, "begin_review", review={})
+
+    with pytest.raises(TaskDocError, match="review-publication-invalid"):
+        _call(
+            config,
+            "record_review",
+            review={
+                "verdict": "block",
+                "addedFindings": [
+                    {"findingId": "B", "description": "new issue", "route": "curator"}
+                ],
+                "remainingFindingIds": ["A"],
+            },
+        )
+
+    # An open round has no verdict to reopen; its result is recorded first.
+    with pytest.raises(TaskDocError, match="review-added-findings-invalid"):
+        _call(
+            config,
+            "record_review",
+            review={
+                "verdict": "block",
+                "addedFindings": [
+                    {"findingId": "B", "description": "new issue", "route": "curator"}
+                ],
+            },
+        )
+    _call(config, "record_review", review={"verdict": "pass", "remainingFindingIds": []})
+    added = _call(
+        config,
+        "record_review",
+        review={
+            "verdict": "block",
+            "addedFindings": [{"findingId": "B", "description": "new issue", "route": "curator"}],
+        },
+    )
+    assert added["reviewState"]["round"] == 2
+    assert [row["round"] for row in added["reviewState"]["recordedRounds"]] == [1, 2]
+
+
+def test_route_addition_must_reopen_the_route_verdict() -> None:
+    """F03: an organizational route PASS cannot survive a sanctioned addition."""
+
+    added = [{"findingId": "F1", "description": "unit lane failed", "route": "final-check"}]
+    with pytest.raises(TaskDocError, match="reopens the verdict"):
+        tools._require_reopened_route_verdict({"verdict": "pass", "addedFindings": added})
+    with pytest.raises(TaskDocError, match="reopens the verdict"):
+        tools._require_reopened_route_verdict(
+            {"verdict": "pass-with-notes", "addedFindings": added}
+        )
+    # The reopened review is the blocking one, and a plain review is untouched.
+    tools._require_reopened_route_verdict({"verdict": "block", "addedFindings": added})
+    tools._require_reopened_route_verdict({"verdict": "pass"})
+
+
 def test_public_review_api_enforces_cap_and_carries_explicit_extra_rounds(
     tmp_path: Path,
 ) -> None:

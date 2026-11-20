@@ -423,6 +423,40 @@ def build_route_review(
     return record
 
 
+def build_route_addition_block(
+    task_root: Path,
+    prior: RouteReviewRecord,
+    finding_ids: list[str],
+    verdict_ref: str | None,
+) -> RouteReviewRecord:
+    """Publish a new verdict on the reviewed tree and preserve the prior route units."""
+    if verdict_ref is None or not verdict_ref.strip():
+        raise RouteReviewError(
+            "route-review-invalid",
+            "an addition that publishes a route verdict requires its own nonblank verdictRef",
+        )
+    payload = prior.model_dump(mode="json", exclude={"recordDigest"}, exclude_none=True)
+    payload.update(
+        verdict="block",
+        verdictRef=verdict_ref.strip(),
+        reviewedAt=datetime.now(UTC).replace(microsecond=0).isoformat(),
+        addedFindingIds=finding_ids,
+    )
+    if prior.dependencies is not None:
+        _require_evidence_files(task_root, prior)
+        payload["verdictSha256"] = _evidence_file_sha256(task_root.resolve(), payload["verdictRef"])
+        direct_edges = [edge for edge in prior.dependencies.edges if edge.kind != "evidence-bytes"]
+        direct_edges.extend(
+            dependency("evidence-bytes", ref, digest)
+            for ref, digest in _stamped_evidence(payload).items()
+        )
+        payload["dependencies"] = build_evidence_dependencies(
+            "route-review/v1", direct_edges
+        ).model_dump(mode="json")
+        payload["recordDigest"] = canonical_sha256(payload)
+    return RouteReviewRecord.model_validate(payload)
+
+
 def require_current_route_review(contract: WorktreeContract) -> dict[str, object]:
     """Return current passing evidence or refuse before curator/closeout work begins."""
     if contract.kind != "leaf":

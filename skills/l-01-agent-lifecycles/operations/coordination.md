@@ -46,7 +46,7 @@ Complete this start and first-intake procedure before the seat's first inspectio
 
 The complete intake contains the mode, canonical task and purpose, seam, exact requirement set and resolved tools. Candidate identity and attempt records arrive with the Worker's freeze, or in the integration/master-exit intake as that procedure specifies.
 
-The Worker, Reviewer and Curator run the repair loop directly through `role_message` on `agents-remember-task`: Worker freeze to Reviewer; verdict and sealed findings to Worker; passed freeze and producer lists to Curator; memory change and verdict between Curator and Reviewer.
+The Worker, Reviewer and Curator run the repair loop directly through `role_message` on `agents-remember-task`: Worker freeze to Reviewer; verdict and sealed findings to Worker; passed freeze and producer lists to Curator; memory change and verdict between Curator and Reviewer. After the code pass the Worker sends the requirement's listed final checks, run once on that tree, to the Manager and the Reviewer.
 
 Before sending or answering a Curator's code concern, read [Curation failure handling](curation.md#failure-handling) for both recipients, post-`PASS` handling, the finding and answer, and disagreement routing.
 
