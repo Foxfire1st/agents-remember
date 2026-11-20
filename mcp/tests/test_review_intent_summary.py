@@ -11,7 +11,8 @@ the production summary over it, so the counts asserted are the counts the entry 
 * divergent successors cannot be retained -- one text record holds one revision (MIK-R74 rule
   3), so the write plane refuses the second and the no-single-head branch is unmeasured;
 * a pair whose knowledge is missing is ``unavailable`` with the owner's refusal and no counts;
-* a record-only successor -- the same text with a changed origin state, or only a new version --
+* a record-only successor -- the same text, only a new version (a new revision reads proposed, and the
+  derived state is not compared) --
   counts once on each side like any revision, while a successor that only changes a family's members
   stays membership-only;
 * the route answers every typed state (counted, partial, unavailable with its refusal) with HTTP 200
@@ -133,22 +134,20 @@ def _uid(*parts: str) -> str:
 
 @dataclass(frozen=True)
 class _InvariantSpec:
-    """One invariant's whole side-specific record: its words and its record status."""
+    """One invariant's whole side-specific record: its words and its version."""
 
     label: str
     statement: str
-    state: Literal["proposed", "accepted"] = "proposed"
     version: int = 1
 
 
 @dataclass(frozen=True)
 class _FamilySpec:
-    """One family's whole side-specific record: its guarantee, members and record status."""
+    """One family's whole side-specific record: its guarantee, members and version."""
 
     label: str
     guarantee: str
     members: tuple[str, ...]
-    state: Literal["proposed", "accepted"] = "proposed"
     version: int = 1
 
 
@@ -216,7 +215,7 @@ def _build_side(
             )
             assert result.state == "created", result.refusal
             _write_revision(store, authorship, slot, spec)
-            revisions[slot] = _uid("revision", slot, spec.statement, spec.state, str(spec.version))
+            revisions[slot] = _uid("revision", slot, spec.statement, str(spec.version))
         family_heads: dict[str, str] = {}
         for slot, spec in family_specs.items():
             result = families.create_family(
@@ -239,14 +238,11 @@ def _build_side(
                             "family-revision",
                             slot,
                             spec.guarantee,
-                            spec.state,
                             str(spec.version),
                             *sorted(spec.members),
                         ),
                         display_version=f"v{spec.version}",
                         joint_guarantee=spec.guarantee,
-                        state_at_origin=spec.state,
-                        acceptance_ref=("developer:accepted" if spec.state == "accepted" else None),
                         provenance=authorship,
                     ),
                 ),
@@ -256,7 +252,6 @@ def _build_side(
                 "family-revision",
                 slot,
                 spec.guarantee,
-                spec.state,
                 str(spec.version),
                 *sorted(spec.members),
             )
@@ -521,15 +516,13 @@ def _write_revision(
         RevisionRequest(
             repository_id=REPOSITORY_ID,
             revision=RevisionDraft(
-                revision_id=_uid("revision", slot, spec.statement, spec.state, str(spec.version)),
+                revision_id=_uid("revision", slot, spec.statement, str(spec.version)),
                 invariant_id=_uid("invariant", slot),
                 display_version=f"v{spec.version}",
                 statement=spec.statement,
                 applicability=APPLICABILITY,
                 conditions=CONDITIONS,
                 exclusions=EXCLUSIONS,
-                state_at_origin=spec.state,
-                acceptance_ref="developer:accepted" if spec.state == "accepted" else None,
                 provenance=authorship,
             ),
         )
@@ -575,7 +568,7 @@ def test_a_revised_statement_two_families_share_counts_once_on_each_side(tmp_pat
 
 
 def test_a_record_only_successor_counts_once_on_each_side(tmp_path: Path) -> None:
-    """Same text, new status or only a new version: still a revision, unlike a membership-only one."""
+    """Same text, only a new version: still a revision, unlike a membership-only one."""
 
     base = _shared_base(tmp_path)
     before_path = base.directory / "before.sqlite"
@@ -590,12 +583,10 @@ def test_a_record_only_successor_counts_once_on_each_side(tmp_path: Path) -> Non
         after_path,
         invariants={
             **_BASE_INVARIANTS,
-            # The same statement, accepted: a status-only successor of the realized invariant's
-            # head. The record status is compared, so the new head counts as a revision; the new
-            # version mints it a different head from the proposed one.
-            "realized": _InvariantSpec(
-                "realized", "The obligation whose code moves.", "accepted", version=2
-            ),
+            # The same statement, only a new version: a record-only successor of the realized
+            # invariant's head. The new version mints it a different head, so it counts as a
+            # revision.
+            "realized": _InvariantSpec("realized", "The obligation whose code moves.", version=2),
         },
         family_specs={
             # The same guarantee and the same members, only a new version: a record-only

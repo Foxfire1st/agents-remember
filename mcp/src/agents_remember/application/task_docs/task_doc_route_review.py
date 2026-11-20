@@ -35,6 +35,7 @@ from agents_remember.tasks.leaf_doc import (
 from agents_remember.worktrees.candidate_identity import resolve_candidate_identity
 from agents_remember.worktrees.review_history import (
     ReviewHistoryError,
+    RoundStamps,
     begin_task_review,
     record_task_review,
     review_state_field,
@@ -299,19 +300,25 @@ def candidate_identity_for_review(
 def _record_task_review_bound(
     doc: TaskDocument,
     payload: dict[str, Any] | None,
-    binding: _RouteReviewBinding | None = None,
     *,
     settings_limit: int | None = None,
     actual_candidate: str | None = None,
+    recorded_by: RoundStamps | None = None,
 ) -> TaskDocument:
-    """Record generic review state without authoring code-route evidence."""
+    """Record generic review state without authoring code-route evidence.
 
-    del binding
+    ``recorded_by`` carries the stamps a memory round stores: its recorder's and the hand-over's.
+    """
+
     if payload is None:
         raise TaskDocError("record_review requires a review object")
     try:
         return record_task_review(
-            doc, payload, settings_limit=settings_limit, actual_candidate=actual_candidate
+            doc,
+            payload,
+            settings_limit=settings_limit,
+            actual_candidate=actual_candidate,
+            stamps=recorded_by,
         )
     except ReviewHistoryError as exc:
         raise TaskDocError(f"{exc.status}: {exc}") from exc

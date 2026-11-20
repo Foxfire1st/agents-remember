@@ -39,8 +39,8 @@ export interface ReviewFamilyGuarantee {
   revision_id: string;
   display_version: string;
   joint_guarantee: string;
-  state_at_origin: string;
-  acceptance_ref?: string;
+  // The revision's state, derived from the history files of the tree it was read from.
+  state: "proposed" | "reviewed" | "consolidated";
   provenance: Record<string, unknown>;
   payload_digest: string;
 }
@@ -304,7 +304,7 @@ export const UNRESOLVED_SELECTION_STATES: ReviewRevisionSelectionState[] = [
 // store does not support.
 export type GuaranteeComparison =
   | { kind: "unrecorded"; detail: string }
-  | { kind: "unchanged_revision"; guarantee: ReviewFamilyGuarantee }
+  | { kind: "unchanged_revision"; guarantee: ReviewFamilyGuarantee; before: ReviewFamilyGuarantee }
   | { kind: "identical_text"; before: ReviewFamilyGuarantee; after: ReviewFamilyGuarantee }
   | { kind: "changed"; before: ReviewFamilyGuarantee; after: ReviewFamilyGuarantee }
   | { kind: "one_sided"; side: ReviewFamilySideName; guarantee: ReviewFamilyGuarantee };
@@ -313,7 +313,9 @@ export type GuaranteeComparison =
 //
 //   * `unchanged_revision` -- both snapshots selected the SAME family revision, so there is one
 //     authored guarantee and nothing was authored between them. This is the only shape in which a
-//     surface may say "the guarantee is unchanged".
+//     surface may say "the guarantee is unchanged". `guarantee` is the after (candidate) side and
+//     `before` the baseline's: a closeout can review a revision without changing its id, so the
+//     derived state of one revision may differ between the two trees.
 //   * `identical_text` -- two DISTINCT authored revisions whose guarantee text happens to be equal.
 //     Something was authored; the text did not move. Calling this "unchanged" would hide the new
 //     revision the store records.
@@ -339,7 +341,7 @@ function twoRecordedGuarantees(
   after: ReviewFamilyGuarantee,
 ): GuaranteeComparison {
   if (before.revision_id === after.revision_id) {
-    return { kind: "unchanged_revision", guarantee: before };
+    return { kind: "unchanged_revision", guarantee: after, before };
   }
   return before.joint_guarantee === after.joint_guarantee
     ? { kind: "identical_text", before, after }

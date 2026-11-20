@@ -185,8 +185,8 @@ def test_payload_digest_seals_more_than_the_statement(
             next(
                 tamperer.execute(
                     "SELECT repository_id, invariant_id, revision_id, display_version, statement, "
-                    "applicability, conditions, exclusions, state_at_origin, acceptance_ref, "
-                    "provenance, payload_digest FROM invariant_revision WHERE revision_id = ?",
+                    "applicability, conditions, exclusions, state, provenance, payload_digest "
+                    "FROM invariant_revision WHERE revision_id = ?",
                     (fixture.second_revision_id,),
                 )
             )
@@ -232,6 +232,7 @@ def test_the_created_file_carries_the_one_declared_schema(tmp_path: Path) -> Non
             "ix_route",
             "ix_link",
             "ix_history_row",
+            "ix_revision",
             "ix_uuid",
         }
         == tables
@@ -254,11 +255,11 @@ def test_the_declared_schema_is_pinned_and_a_changed_table_definition_fails_the_
     require_pinned_schema_unchanged()
     assert CURRENT_GENERATION.fingerprint == SCHEMA_FINGERPRINT
     assert (CURRENT_GENERATION.schema_name, CURRENT_GENERATION.user_version) == (
-        "ar-knowledge-sqlite/v9",
-        9,
+        "ar-knowledge-sqlite/v10",
+        10,
     )
     assert len(CURRENT_GENERATION.tables) == 8
-    assert schema.generation_for_name("ar-knowledge-sqlite/v8") is None
+    assert schema.generation_for_name("ar-knowledge-sqlite/v9") is None
     assert not hasattr(schema, "GENERATIONS")  # no registry of openable generations
 
     edited = dict(CURRENT_GENERATION.columns)
@@ -298,7 +299,7 @@ def test_a_database_that_is_not_this_schema_refuses_to_open(tmp_path: Path) -> N
     with pytest.raises(KnowledgeStorageError, match="missing immutability trigger"):
         open_existing_knowledge_store(untriggered, str(uuid4()))
 
-    for version in (1, 8, 10):
+    for version in (1, 9, 11):
         legacy = built(f"generation-{version}.db")
         connection = apsw.Connection(str(legacy))
         connection.execute(f"PRAGMA user_version = {version}")

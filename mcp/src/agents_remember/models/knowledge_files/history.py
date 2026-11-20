@@ -10,6 +10,9 @@ two leaves' history never conflicts (rule 9).
 *judgment* history is the set of rows about it across all history files. Nothing here is written
 into a record file, and no row is ever produced automatically.
 
+**What the product writes.** Beside the curator's rows, a file carries two parts only the product
+writes ``written``, ``review`` and ``sharedRevisions``; their models are in :mod:`.history_product`.
+
 **Rows.** Every row has ``id`` (``ROW-…``, minted by the writer), ``subject``, ``disposition``, a
 nonblank ``reason`` and ``items[]`` (the worklist item IDs it answered when written; informational
 only -- the gate finds a row by ``subject``, MIK-R09). A row's kind is decided by its subject, through
@@ -57,12 +60,19 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Annotated, Any, ClassVar, Final, Literal
 
 from pydantic import Field, SerializeAsAny, StrictBool, StrictInt, field_validator, model_validator
 
 from agents_remember.models.knowledge.effect import EffectLabel
 from agents_remember.models.knowledge_files.canonical import CanonicalFormatError, parse_json
+from agents_remember.models.knowledge_files.history_product import (
+    CrossingSelection,
+    ReviewFact,
+    SharedRevision,
+    WrittenRevision,
+)
 from agents_remember.models.knowledge_files.ids import (
     ENTRY_ID_PATTERN,
     RECORD_PREFIXES,
@@ -596,6 +606,18 @@ class HistoryFile(FileModel):
     wave or crossing file."""
     closed: StrictBool
     rows: tuple[SerializeAsAny[HistoryRow], ...]
+    written: tuple[WrittenRevision, ...] | None = Field(default=None, min_length=1)
+    """Every revision this owner wrote, with its stamp; absent while there is none."""
+    shared_revisions: tuple[SharedRevision, ...] | None = Field(
+        default=None, alias="sharedRevisions", min_length=1
+    )
+    """Revision numbers at which this crossing saw two different contents."""
+    crossing_selections: tuple[CrossingSelection, ...] | None = Field(
+        default=None, alias="crossingSelections", min_length=1
+    )
+    """Selected-side evidence for records whose standing could otherwise change in the merge."""
+    review: ReviewFact | None = None
+    """The fact of the memory review that passed this owner's change, written at its closeout."""
 
     @field_validator("rows", mode="before")
     @classmethod
@@ -613,7 +635,24 @@ class HistoryFile(FileModel):
             raise ValueError("only a leaf's history is attempt-qualified (a reopened leaf)")
         require_unique(tuple(row.id for row in self.rows), what="row ids")
         require_unique(tuple(row.subject for row in self.rows), what="row subjects")
+        require_unique(
+            tuple((one.record, one.revision) for one in self.written or ()),
+            what="written revisions",
+        )
         return self
+
+    def written_revision(self, record: str, revision: int) -> WrittenRevision | None:
+        """The stamp row of ``record`` at ``revision`` if this owner wrote it; one map lookup."""
+
+        source, by_revision = self._written_index
+        if source is not self.written:  # a copy with another ``written`` carried the old map
+            vars(self).pop("_written_index", None)
+            source, by_revision = self._written_index
+        return by_revision.get((record, revision))
+
+    @cached_property
+    def _written_index(self) -> tuple[object, dict[tuple[str, int], WrittenRevision]]:
+        return self.written, {(one.record, one.revision): one for one in self.written or ()}
 
     @property
     def owner_kind(self) -> OwnerKind:
@@ -822,61 +861,6 @@ def invariant_revision_violation(
     if row.disposition != "changed" and candidate_revision != base_revision:
         return f"a {row.disposition} row keeps the K_B revision {base_revision}"
     return None
-
-
-def keeps_change_visible(row: InvariantRow | FamilyRow) -> bool:
-    """Whether ``row`` may govern a record its leaf changed: the ``changed`` row of that change, or
-    the row that retires the record (``deleted`` for an invariant, ``retired`` for a family)."""
-
-    return row.disposition in {"changed", "deleted", "retired"}
-
-
-def changed_record_row_violation(
-    row: InvariantRow, *, base_revision: int | None, candidate_revision: int | None
-) -> str | None:
-    """Return why ``row`` cannot govern an invariant whose revision the leaf changed, or ``None``.
-
-    ``base_revision`` is the invariant's revision on the parent line (the leaf's K_B) and
-    ``candidate_revision`` its revision in K_C. While the two differ, the leaf changed the
-    invariant's meaning, and the leaf's governing row about it -- the latest across its attempt
-    files -- is the ``changed`` row of that change (or the ``deleted`` row that retires it). A
-    later ``no_impact``, ``moved`` or ``extended`` row would replace that judgment and hide the
-    change, so it is refused at the routes (L37 ruling of 2026-10-01T22:49:36, Q2 b). The writer's
-    own form of the rule is :func:`invariant_revision_violation`, against its base.
-    """
-
-    if base_revision is None or candidate_revision is None or base_revision == candidate_revision:
-        return None
-    if keeps_change_visible(row):
-        return None
-    return (
-        f"{_a_row(row)} governs an invariant this leaf changed (revision "
-        f"{base_revision} on the parent line, {candidate_revision} in K_C); the governing row of "
-        "a changed record is its changed row"
-    )
-
-
-def changed_family_row_violation(row: FamilyRow, *, guarantee_changed: bool) -> str | None:
-    """Return why ``row`` cannot govern a family whose guarantee the leaf changed, or ``None``.
-
-    A family has one governing row, the leaf's latest about it (rule 5; MIK-R06 rule 3 reads "the
-    latest family row"). ``guarantee_changed`` says that K_C states another guarantee than the
-    parent line (the leaf's K_B). While it does, the governing row is the ``changed`` row of that
-    change (or the ``retired`` row that retires the family): a ``no_impact``, ``assigned`` or
-    ``rerouted`` row would replace that judgment. Route work is recorded under the ``changed``
-    row, which answers the family's route conditions too (L37 ruling of 2026-10-02T01:04:49).
-    """
-
-    if not guarantee_changed or keeps_change_visible(row):
-        return None
-    return (
-        f"{_a_row(row)} governs a family whose guarantee this leaf changed; the governing row of "
-        "such a family is its changed row, which answers its route conditions too (MIK-R06 rule 3)"
-    )
-
-
-def _a_row(row: HistoryRow) -> str:
-    return f"{'an' if row.disposition[:1] in 'aeiou' else 'a'} {row.disposition} row"
 
 
 def stale_examined_members(row: FamilyRow, candidate_revisions: Mapping[str, int]) -> list[str]:

@@ -249,6 +249,10 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "kind": EVIDENCE,
         "findingsRemain": EVIDENCE,
         "verdictRef": EVIDENCE,
+        "memoryTree": EVIDENCE,
+        "recordedBy": EVIDENCE,
+        "handedOverBy": EVIDENCE,
+        "verdict": EVIDENCE,
     },
     RouteReviewRecord: {
         "candidateTree": EVIDENCE,

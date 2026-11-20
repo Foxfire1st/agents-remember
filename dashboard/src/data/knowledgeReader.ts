@@ -58,6 +58,19 @@ export interface ReaderAnswer {
   detail?: string;
 }
 
+// The state the product derives for a record's current revision; a retired record has none.
+export type RecordState = 'proposed' | 'reviewed' | 'consolidated';
+
+// The writer of an indexed current revision. Unavailable attribution has explicit unknown role,
+// harness and model. A summary's nullable writer represents absent projected writer data.
+export interface RecordWriter {
+  role: string;
+  harness: string;
+  model: string;
+}
+
+// A link to a record. The record view's own record and the summaries of the record lists (a path's
+// records, the record list, a family's members) carry its state and writer.
 export interface RecordSummary {
   id: string;
   kind?: string;
@@ -65,6 +78,8 @@ export interface RecordSummary {
   revision?: number | null;
   title?: string;
   missing?: boolean;
+  recordState?: RecordState | null;
+  writer?: RecordWriter | null;
 }
 
 export interface Anchor {

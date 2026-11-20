@@ -1,14 +1,16 @@
 """The sealed revision payloads and their digests.
 
 One function owns what a revision's identity seals. The payload is the complete authored
-semantic content -- statement, essential applicability, conditions, exclusions, origin state,
-acceptance reference, the provenance envelope and the *sorted* predecessor set -- and the
-digest excludes only itself. Because the predecessor set is inside the digest, an edge cannot
+semantic content -- statement, essential applicability, conditions, exclusions, the provenance
+envelope and the *sorted* predecessor set -- and the digest excludes itself and the revision's
+derived ``state``: the state is no authored content but what the history files of the tree being
+read say of the revision (proposed, reviewed or consolidated), so one revision keeps one seal while
+a review fact is added beside it. Because the predecessor set is inside the digest, an edge cannot
 be edited behind an existing sealed revision: adding or removing one changes the aggregate
 the revision identity stands for.
 
-A family revision is sealed by the same rule over its own payload: the joint guarantee, origin
-state, acceptance reference, provenance and sorted predecessor set. The two payloads carry
+A family revision is sealed by the same rule over its own payload: the joint guarantee,
+provenance and sorted predecessor set. The two payloads carry
 different payload versions because they seal different field sets, so a digest can never be
 mistaken for the other object's identity.
 """
@@ -23,8 +25,9 @@ from agents_remember.models.knowledge.invariant import InvariantRevision
 
 # Bumped only when the sealed field set changes. A different payload version is a different
 # identity computation, so it is recorded rather than inferred from the presence of fields.
-REVISION_PAYLOAD_VERSION = "invariant-revision-payload/v1"
-FAMILY_REVISION_PAYLOAD_VERSION = "family-revision-payload/v1"
+# v2: the authored origin state and its acceptance reference left the payload; the state is derived.
+REVISION_PAYLOAD_VERSION = "invariant-revision-payload/v2"
+FAMILY_REVISION_PAYLOAD_VERSION = "family-revision-payload/v2"
 
 
 def canonical_revision_payload(revision: InvariantRevision) -> dict[str, Any]:
@@ -45,8 +48,6 @@ def canonical_revision_payload(revision: InvariantRevision) -> dict[str, Any]:
         "applicability": revision.applicability,
         "conditions": list(revision.conditions),
         "exclusions": list(revision.exclusions),
-        "state_at_origin": revision.state_at_origin,
-        "acceptance_ref": revision.acceptance_ref,
         "provenance": revision.provenance.model_dump(mode="json"),
         "predecessors": sorted(revision.predecessors),
     }
@@ -73,8 +74,6 @@ def canonical_family_revision_payload(revision: FamilyRevision) -> dict[str, Any
         "revision_id": revision.revision_id,
         "display_version": revision.display_version,
         "joint_guarantee": revision.joint_guarantee,
-        "state_at_origin": revision.state_at_origin,
-        "acceptance_ref": revision.acceptance_ref,
         "provenance": revision.provenance.model_dump(mode="json"),
         "predecessors": sorted(revision.predecessors),
     }

@@ -9,11 +9,11 @@ count and what they cannot be:
 * ``removed`` (the minus) counts the revisions that are the current head on the before side only --
   a retired statement, or the superseded text of a revised one. A revised statement is therefore
   counted once on each side, and a statement both sides hold at the same head is in neither;
-* every successor revision is a revision: new text, a changed origin state or acceptance reference,
-  or a record-only successor (only the version moved) counts once on each side;
-* a relationship-only change is in neither number: a successor whose text and record status are
-  unchanged while an invariant's realizations or a family's members differ, or an unchanged head whose
-  realizations moved. It is carried as its own typed count, so a caller can show it separately
+* every successor revision is a revision: new text or a record-only successor (only the version
+  moved) counts once on each side;
+* a relationship-only change is in neither number: a successor whose text is unchanged while an
+  invariant's realizations or a family's members differ, or an unchanged head whose realizations
+  moved. It is carried as its own typed count, so a caller can show it separately
   without folding it into plus/minus;
 * an identity whose head revision cannot be established on one side is carried as ``unresolved`` and
   the whole answer is ``partial``: the counted numbers then describe the identities that could be

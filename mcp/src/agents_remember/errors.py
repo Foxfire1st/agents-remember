@@ -694,3 +694,10 @@ class PaseoRuntimeFailure(AgentsRememberError):
 
     def as_payload(self) -> dict[str, object]:
         return {"code": self.code, "step": self.step, "message": str(self), "detail": self.detail}
+
+
+class StateConversionError(AgentsRememberError):
+    """The one-time state conversion of a memory tree cannot run on its input.
+
+    The message names the file and what to do; the conversion writes nothing when it is raised.
+    """

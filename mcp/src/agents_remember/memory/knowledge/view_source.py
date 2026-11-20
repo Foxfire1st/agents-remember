@@ -53,7 +53,7 @@ REGISTERED_FAMILIES = "SELECT COUNT(*) FROM family WHERE repository_id = ?"
 INVARIANT_REVISIONS = (
     "SELECT invariant.invariant_id, invariant.display_label, revision.revision_id, "
     "revision.display_version, revision.statement, revision.applicability, revision.conditions, "
-    "revision.exclusions, revision.state_at_origin, revision.acceptance_ref, revision.provenance "
+    "revision.exclusions, revision.state, revision.provenance "
     "FROM invariant AS invariant "
     "LEFT JOIN invariant_revision AS revision "
     "ON revision.repository_id = invariant.repository_id "
@@ -63,8 +63,7 @@ INVARIANT_REVISIONS = (
 
 FAMILY_REVISIONS = (
     "SELECT family.family_id, family.display_label, revision.revision_id, "
-    "revision.display_version, revision.joint_guarantee, revision.state_at_origin, "
-    "revision.acceptance_ref, revision.provenance "
+    "revision.display_version, revision.joint_guarantee, revision.state, revision.provenance "
     "FROM family AS family "
     "LEFT JOIN family_revision AS revision "
     "ON revision.repository_id = family.repository_id "
@@ -235,7 +234,7 @@ class StoreViewReader:
             record_id=str(row[0]),
             revision_id=None if row[2] is None else str(row[2]),
             lifecycle=None if row[8] is None else str(row[8]),
-            author_ref=_provenance_author(row[10]),
+            author_ref=_provenance_author(row[9]),
             payload={
                 "display_label": _text(row[1]),
                 "display_version": _text(row[3]),
@@ -243,7 +242,6 @@ class StoreViewReader:
                 "applicability": _text(row[5]),
                 "conditions": _sequence(row[6]),
                 "exclusions": _sequence(row[7]),
-                "acceptance_ref": _text(row[9]),
             },
         )
 
@@ -254,12 +252,11 @@ class StoreViewReader:
             record_id=str(row[0]),
             revision_id=None if row[2] is None else str(row[2]),
             lifecycle=None if row[5] is None else str(row[5]),
-            author_ref=_provenance_author(row[7]),
+            author_ref=_provenance_author(row[6]),
             payload={
                 "display_label": _text(row[1]),
                 "display_version": _text(row[3]),
                 "joint_guarantee": _text(row[4]),
-                "acceptance_ref": _text(row[6]),
             },
         )
 

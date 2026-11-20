@@ -6206,9 +6206,9 @@
         "worker/orientation": 3200,
         "worker/implementation": 3274,
         "worker/recovery": 2532,
-        "curator/orientation": 3926,
-        "curator/curation": 4424,
-        "curator/recovery": 3234,
+        "curator/orientation": 4020,
+        "curator/curation": 4518,
+        "curator/recovery": 3328,
         "reviewer/orientation": 3865,
         "reviewer/review": 4112,
         "reviewer/recovery": 3197,
@@ -6343,7 +6343,7 @@
       },
       "skills/l-01-agent-lifecycles/core/digest-map.json": {
         "size_words": 18866,
-        "sha256": "5f43dc0273d23d445f344bdc5c04f469e2b5faf998391d1620bd28c59b7ecefe"
+        "sha256": "059c964944e71336418b10ec61c43f5d84bd550a28f2fc7d694a6d67ade636cf"
       },
       "skills/l-01-agent-lifecycles/core/every-role.md": {
         "size_words": 2327,
@@ -6594,8 +6594,8 @@
         "sha256": "11994559aec49ff91c037d4b276c7870c355754696cf062692a875802ca61d3f"
       },
       "skills/l-01-agent-lifecycles/roles/curator.md": {
-        "size_words": 2911,
-        "sha256": "eb1985fff70e4ce8c1c6f564b173837d76ef976bd2ea2840f8f8b24df9e525b3"
+        "size_words": 3005,
+        "sha256": "aa5112af73e980dfc70e18c25ca3f766fd29e2b39f7c3c4002e40deb80d6dc75"
       },
       "skills/l-01-agent-lifecycles/roles/investigator.md": {
         "size_words": 1160,
@@ -6626,8 +6626,8 @@
         "sha256": "c7e324024b92d3f63c62ea6f0e604002fd8b8ed94d846b04308a43b3b22273c0"
       },
       "skills/l-01-agent-lifecycles/templates/curator-handoff-ingestion.md": {
-        "size_words": 6287,
-        "sha256": "d3c1273715f3b7fcc23d52d26d9e97f95de76f183b00dd1411403b29f9e9b21b"
+        "size_words": 6423,
+        "sha256": "03403625f2e22984464c757d51296bf0a10c95c6982b49fe5c17bfcb976edcb2"
       },
       "skills/l-01-agent-lifecycles/templates/curator-handoff-list.md": {
         "size_words": 3078,
@@ -6744,7 +6744,7 @@
       "reference/writing/visual-explainers.md": "sha256:c11ed6c846183bd54433dd007c53467810982712f021400a7cbb3794b0f79ad3",
       "roles/architect.md": "sha256:f5e83f13d0e4c3c07041b58d2d7c98a926d2a2d9ba3001cca4147c40eabcb3d6",
       "roles/bootstrap.md": "sha256:11994559aec49ff91c037d4b276c7870c355754696cf062692a875802ca61d3f",
-      "roles/curator.md": "sha256:eb1985fff70e4ce8c1c6f564b173837d76ef976bd2ea2840f8f8b24df9e525b3",
+      "roles/curator.md": "sha256:aa5112af73e980dfc70e18c25ca3f766fd29e2b39f7c3c4002e40deb80d6dc75",
       "roles/investigator.md": "sha256:a9568fd887bbc7b34443e94f060623a43689a42abbde634c18c7157f8cabea9a",
       "roles/manager.md": "sha256:6d36410ee6f3108a0b01f4f66864dea6dc420e7538a25f9d2f757c250ec4c491",
       "roles/orchestrator.md": "sha256:10ca8084d12e5052765acdbc50bb94b7c39d96caf81f080cf3e7d52bcb2ca623",

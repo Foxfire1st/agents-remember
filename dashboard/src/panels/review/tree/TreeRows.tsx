@@ -1,7 +1,8 @@
 // The tree's rows (MIK-R86 v2 rules 1-4; mockup app.js:202-227). Every row is one line and three
 // cells: a caret, a name cut with an ellipsis, and one trailing cell — its reason, and, on a graded
 // location, the explainer's grade chip beside it (MIK-R211 v1 rule 5). A family heading may also
-// carry `kept`. Nothing else.
+// carry `kept`; a family or subject row ends with its record's state, whose title names the writer
+// (role and model). Nothing else.
 // The accessible name keeps the title and the change badge (INV-W09GQM), the tooltip the whole title
 // (INV-PKFP2R).
 import { useId } from 'react';
@@ -20,6 +21,7 @@ import {
 } from '../changeSetOrder';
 import { meaningBadgeText } from '../MeaningEffects';
 import type { ReviewSelection } from '../reviewSelection';
+import type { ReviewOutlineStanding } from '../../../data/review';
 import { treeArrow } from './treeKeys';
 import * as styles from './treeStyles';
 
@@ -40,6 +42,49 @@ function KeptTag({ keptFor, description }: { keptFor?: string; description: stri
         Kept; last read for {keptFor}.
       </span>
     </>
+  );
+}
+
+// The record's state in the candidate memory tree, in the row's muted reason look; the writer (role
+// and model) rides its title and the row's accessible name, so the one-line row keeps its name.
+export function standingText(standing?: ReviewOutlineStanding): string {
+  if (!standing?.record_state) return '';
+  const writer = standing.writer ? ` · written by ${standing.writer.role} · ${standing.writer.model}` : '';
+  return `${standing.record_state}${writer}`;
+}
+
+function StandingTag({ standing }: { standing?: ReviewOutlineStanding }) {
+  if (!standing?.record_state) return null;
+  return (
+    <span
+      className={styles.reason}
+      data-testid="review-record-state"
+      data-record-state={standing.record_state}
+      title={standingText(standing)}
+    >
+      {standing.record_state}
+    </span>
+  );
+}
+
+// A subject row's trailing cell: its reason, and its record's state beside it when the candidate
+// tree names one. One cell either way, as a location row's.
+function SubjectTail({
+  text,
+  badge,
+  standing,
+}: {
+  text: string;
+  badge?: string;
+  standing?: ReviewOutlineStanding;
+}) {
+  const reason = <Reason text={text} badge={badge} />;
+  if (!standing?.record_state) return reason;
+  return (
+    <span className={styles.reasonCell}>
+      {reason}
+      <StandingTag standing={standing} />
+    </span>
   );
 }
 
@@ -103,7 +148,9 @@ export function FamilyRow({
       data-subject-id={row.selectorId}
       data-change-primary={aggregate ? 'unchanged' : row.badge}
       aria-current={current || undefined}
-      aria-label={[row.title, row.badge, family.kept ? 'kept' : ''].filter(Boolean).join(' ')}
+      aria-label={[row.title, row.badge, family.kept ? 'kept' : '', standingText(row.standing)]
+        .filter(Boolean)
+        .join(' ')}
       aria-describedby={family.kept ? description : undefined}
       title={row.title}
       onClick={onSelect}
@@ -114,6 +161,7 @@ export function FamilyRow({
       <span className={css({ display: 'flex', gap: '0.35rem', alignItems: 'baseline' })}>
         <Reason text={family.reason} badge={row.badge} />
         <KeptTag keptFor={family.kept} description={description} />
+        <StandingTag standing={row.standing} />
       </span>
     </button>
   );
@@ -166,7 +214,14 @@ export function SubjectRow({
       data-meaning={meaning}
       data-stale={stale ? 'true' : undefined}
       aria-current={current || undefined}
-      aria-label={[row.title, row.badge, meaning, node.reason === row.badge ? '' : node.reason, stale ? 'changed by the move' : '']
+      aria-label={[
+        row.title,
+        row.badge,
+        meaning,
+        node.reason === row.badge ? '' : node.reason,
+        stale ? 'changed by the move' : '',
+        standingText(row.standing),
+      ]
         .filter(Boolean)
         .join(' ')}
       title={row.title}
@@ -179,7 +234,7 @@ export function SubjectRow({
         <span className={styles.id}>{row.id}</span>
         {summary}
       </span>
-      <Reason text={node.reason} badge={row.badge} />
+      <SubjectTail text={node.reason} badge={row.badge} standing={row.standing} />
     </button>
   );
 }

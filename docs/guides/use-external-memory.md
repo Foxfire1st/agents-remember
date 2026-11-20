@@ -129,11 +129,11 @@ order:
    reads the setting from the user settings file, from `system/settings.json` of the checkout in
    which the hook runs and, for a worktree, from that of its main checkout; a later file wins.
 3. **The code commit.** The closeout commits the judged code tree on the branch of the task.
-4. **The memory update.** The closeout refreshes the [route indexes](../concepts.md#route-index)
-   and the fingerprints of the [entity catalog](../concepts.md#entity-catalog): for each entity a
-   hash over the Git blobs of the files that define it, at the new code commit. It closes the
-   history file of the task. The gate then judges the resulting memory tree against the new code
-   commit.
+4. **The memory update.** The closeout closes the task's history file with any qualifying review
+   fact, then refreshes the [route indexes](../concepts.md#route-index) and
+   [entity catalog](../concepts.md#entity-catalog) fingerprints from the defining files' Git blobs
+   at the new code commit. If refresh fails, it restores the history closing. The gate then
+   judges the resulting memory tree against the new code commit.
 5. **The memory commit.** The closeout runs the pre-commit hook of the memory repository on that
    tree and commits it with the `Code-Commit:` trailer of step 3.
 6. **The cache.** The closeout computes `<memory-root>/memory.md` again. The file is not

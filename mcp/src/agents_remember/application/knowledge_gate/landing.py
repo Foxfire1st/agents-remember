@@ -39,6 +39,7 @@ from agents_remember.application.knowledge_currentness.observe import (
     EntryObservation,
     open_code_tree,
 )
+from agents_remember.application.knowledge_gate.change_reach import dependent_touches, record_id_of
 from agents_remember.application.knowledge_gate.gate import RUN_INCOMPLETE, GateFinding
 from agents_remember.application.knowledge_gate.predicates import GateContext, GitReadFailed
 from agents_remember.application.knowledge_reader.marks import dependent_movement
@@ -55,6 +56,7 @@ from agents_remember.kernel.git_command import (
 )
 from agents_remember.kernel.git_preparation import GitPreparationError
 from agents_remember.memory.knowledge_index import MemoryTreeError, git_tree_snapshot
+from agents_remember.models.knowledge_files.converted_reviews import is_converted_reviews_path
 from agents_remember.models.knowledge_files.documents import (
     KNOWLEDGE_ROOT,
     LAYOUT_MARKER_PATH,
@@ -62,7 +64,6 @@ from agents_remember.models.knowledge_files.documents import (
     history_path,
     owner_history_attempt,
     parse_document_text,
-    split_record_filename,
 )
 from agents_remember.models.knowledge_files.history import is_closed_history
 from agents_remember.models.knowledge_files.records import DependentRecord
@@ -309,23 +310,9 @@ def _changed_record_ids(repository: Path, base: str, tip: str) -> frozenset[str]
     found = {
         record_id
         for path in listed.split("\0")
-        if path.strip() and (record_id := _record_id_of(path)) is not None
+        if path.strip() and (record_id := record_id_of(path)) is not None
     }
     return frozenset(found)
-
-
-def _record_id_of(path: str) -> str | None:
-    """The record ID a ``knowledge/<record directory>/<ID>-<slug>.json`` path names, or ``None``."""
-
-    parts = path.split("/")
-    if len(parts) != 3 or parts[0] != KNOWLEDGE_ROOT or not parts[2].endswith(".json"):
-        return None
-    if parts[1] not in set(RECORD_DIRECTORIES.values()):
-        return None
-    try:
-        return split_record_filename(parts[2])[0]
-    except ValueError:
-        return None
 
 
 def _touched_at(
@@ -338,25 +325,9 @@ def _touched_at(
         records={
             record_id: record
             for record_id, record in memory.records.items()
-            if _touches(record, changed_paths, changed_records)
+            if dependent_touches(record, changed_paths, changed_records)
         },
     )
-
-
-def _touches(
-    record: DependentRecord,
-    changed_paths: frozenset[str],
-    changed_records: frozenset[str],
-) -> bool:
-    """Whether one dependent has a link at a changed path or at a record that changed."""
-
-    for link in record.stands_on:
-        if link.kind == "record":
-            if link.id in changed_records:
-                return True
-        elif (link.anchor.path if link.kind == "anchor" else link.path) in changed_paths:
-            return True
-    return False
 
 
 @dataclass(frozen=True)
@@ -466,7 +437,7 @@ def _record_paths_at(repository: Path, revision: str) -> dict[str, str]:
     for path in listed.split("\0"):
         if not path.strip():
             continue
-        record_id = _record_id_of(path)
+        record_id = record_id_of(path)
         if record_id is not None:
             paths[record_id] = path
     return paths
@@ -1127,11 +1098,13 @@ def _master_history_ownership(request: LandingGateRequest) -> list[GateFinding]:
         return [listed]
     landed_ids, bases, blobs = listed
     # Only newly closed files need an owner: a base that already holds a file closed freezes it.
-    # Masters with no new history files never read the contract or the journal here.
+    # Masters with no new history files never read the contract or the journal here. The
+    # converted review facts lie beside the history files but are none: no owner closes them.
     newly_closed = [
         path
         for path in sorted(landed_ids)
         if path.endswith(".json")
+        and not is_converted_reviews_path(path)
         and not any(path in base and is_closed_history(blobs.get(base[path])) for base in bases)
     ]
     if not newly_closed:

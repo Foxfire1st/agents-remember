@@ -10,7 +10,7 @@ import type {
   ReviewFamilyMember,
   ReviewMemberChange,
 } from '../../data/reviewFamily';
-import type { ReviewOutlineMeaning } from '../../data/review';
+import type { ReviewOutlineMeaning, ReviewOutlineStanding } from '../../data/review';
 import type { ReviewSort } from './reviewSelection';
 import type { ReviewCodeChange } from '../../data/reviewTrees';
 
@@ -214,6 +214,8 @@ export interface OutlineRow {
   // The tree badge joins the labels when the row's change badge is added, removed or
   // changed; `none` shows no badge.
   meaning?: ReviewOutlineMeaning;
+  // The record's state and writer in the candidate memory tree.
+  standing?: ReviewOutlineStanding;
 }
 export interface OutlineGroup {
   family?: OutlineRow;
@@ -329,7 +331,13 @@ function outlineMember(
     ),
     revisionId,
     meaning,
+    standing: standingOf(invariant),
   };
+}
+// A row's state and writer in the candidate tree; none for a record the outline does not list.
+function standingOf(entry: ReviewOutlineStanding | undefined): ReviewOutlineStanding | undefined {
+  if (!entry || (!entry.record_state && !entry.writer)) return undefined;
+  return { record_state: entry.record_state, writer: entry.writer };
 }
 function groupWeight(group: OutlineGroup): number {
   const badge = group.family?.badge;
@@ -378,6 +386,7 @@ export function outlineGroups(
         title,
         badge,
         meaning: entry.meaning,
+        standing: standingOf(entry),
       },
       members,
     };

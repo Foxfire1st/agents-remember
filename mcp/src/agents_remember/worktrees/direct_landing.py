@@ -96,6 +96,7 @@ from agents_remember.worktrees.closeout_input import (
     resolve_closeout_plan,
 )
 from agents_remember.worktrees.cutover_lock import CUTOVER_LOCK_CODE
+from agents_remember.worktrees.direct_history_closing import reviewed_closing
 from agents_remember.worktrees.disabled_memory import (
     OPT_OUT_STATUS,
     is_disabled_contract,
@@ -152,7 +153,6 @@ from agents_remember.worktrees.knowledge_gate import (
     DirectGenerationState,
     HistoryClosing,
     checkout_memory_converted,
-    close_owner_history,
     direct_gate_source,
     direct_gate_verdict,
     forget_direct_closing,
@@ -1622,9 +1622,9 @@ def _close_gated_leaf(
         if not selected.applies:
             return None
         assert selected.source is not None and selected.owner is not None
-        ignore_memory_cache(memory_repo)
-        ignore_before = HistoryClosing(ignore, ignore_previous, ignore.read_bytes())
-        closing = close_owner_history(memory_repo, selected.owner)
+        close = reviewed_closing(contract, memory_repo, selected.owner)  # before any write
+        ignore_before = HistoryClosing(ignore, ignore_previous, ignore_memory_cache(memory_repo))
+        closing = close()
         if closing.path.relative_to(memory_repo).as_posix() != selected.source.history_path:
             raise DirectLandingError(
                 "direct-landing-knowledge-gate-refused",

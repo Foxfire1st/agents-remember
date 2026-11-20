@@ -9,7 +9,6 @@ schema before it is written.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections import Counter
 from collections.abc import Callable
@@ -68,6 +67,7 @@ from agents_remember.worktrees.worktree_contract import (
 
 from . import task_doc_steps, task_sprint_linkage
 from .alignment_sweep import alignment_sweep
+from .review_round_stamp import memory_round_stamp
 from .task_doc_content_edits import (
     _apply_set_field,
     _apply_set_status,
@@ -77,6 +77,7 @@ from .task_doc_content_edits import (
 )
 from .task_doc_discard import DiscardUnstartedRequest, discard_unstarted_subtask
 from .task_doc_field_homes import enforce_prose_field_homes, enforce_waits_for_write
+from .task_doc_file_inputs import read_text_input
 from .task_doc_phrases import _updated_phrase
 from .task_doc_publication import (
     TaskDocPublication,
@@ -271,36 +272,6 @@ def _refuse_open_direct_sibling_for_task_doc(
         ) from error
 
 
-# By-file text inputs (fields/section bodies) are KB-scale; this budget stops
-# a pathological file from turning a write into unbounded work, refusing
-# loudly with the bound instead of reading on.
-_TASK_DOC_INPUT_MAX_BYTES = 1024 * 1024
-
-
-def _read_text_file(path: str) -> tuple[str, str]:
-    """Read one by-file text input once, or refuse the call in one sentence."""
-
-    candidate = Path(path)
-    if not candidate.is_absolute():
-        raise TaskDocError(f"task_doc file input must name an absolute path, not {path!r}.")
-    if not candidate.is_file():
-        raise TaskDocError(f"task_doc file input is no regular file: {path}.")
-    try:
-        raw = candidate.read_bytes()
-    except OSError as exc:
-        raise TaskDocError(f"task_doc file input cannot be read: {path} ({exc}).") from exc
-    if len(raw) > _TASK_DOC_INPUT_MAX_BYTES:
-        raise TaskDocError(
-            f"task_doc file input too large: {path} holds {len(raw)} bytes, over the "
-            f"{_TASK_DOC_INPUT_MAX_BYTES} byte budget; pass the text inline instead."
-        )
-    digest = hashlib.sha256(raw).hexdigest()
-    try:
-        return raw.decode("utf-8"), digest
-    except UnicodeDecodeError as exc:
-        raise TaskDocError(f"task_doc file input is not UTF-8 text: {path}.") from exc
-
-
 def _resolve_file_texts(
     operation: str, edit: TaskDocEdit
 ) -> tuple[TaskDocEdit, list[tuple[str, str]]]:
@@ -323,7 +294,7 @@ def _resolve_file_texts(
                 "task_doc takes fields inline or by file, not both: pass only one of "
                 "fields and fields_file."
             )
-        text, digest = _read_text_file(edit.fields_file)
+        text, digest = read_text_input(edit.fields_file)
         try:
             fields = json.loads(text)
         except ValueError as exc:
@@ -346,7 +317,7 @@ def _resolve_file_texts(
                 "task_doc takes a section body inline or by file, not both: pass only "
                 "one of section.body and section_body_file."
             )
-        text, digest = _read_text_file(edit.section_body_file)
+        text, digest = read_text_input(edit.section_body_file)
         rows.append((edit.section_body_file, digest))
         edit = replace(edit, section={**section, "body": text}, section_body_file=None)
     return edit, rows
@@ -621,6 +592,13 @@ def _prepare_task_doc_edit(
             settings_limit=review_settings_limit(request.config.coordination_root),
             actual_candidate=candidate_identity_for_review(
                 request.config, request.contract, request.repo_id, request.edit.review
+            ),
+            recorded_by=memory_round_stamp(
+                request.config.coordination_root,
+                request.task_root,
+                original,
+                request.edit.review,
+                repository=request.repo_id,
             ),
         )
     elif request.operation == "record_route_review":

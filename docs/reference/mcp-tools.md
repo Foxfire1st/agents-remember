@@ -165,7 +165,7 @@ carryover.
 
 | Tool | Purpose | Main arguments |
 | --- | --- | --- |
-| `knowledge_read` | Name the records of one memory-tree view (`source_context`, `invariant`, `family`, `record`, `weakness`, `dependent`) at one snapshot, paged; each row holds the text ID, kind, state and memory-checkout location. No record text: open the named files with your own tools. | `memoryRoot`, `view`, `limit=32`, `continuation`, the seed of the view (`sourcePath`, `invariantRevisionId`, `familyRevisionId`, `recordId`), filters `weaknessKind`, `includeClosed`, `staleOnly`, `standsOn` |
+| `knowledge_read` | Name one view of a memory snapshot (`source_context`, `invariant`, `family`, `record`, `weakness`, `dependent`, `writers`). Paged record rows hold the text ID, kind, state and memory-checkout location. Open the named files for record text. The `writers` view returns bounded aggregates by role, harness and model, with revision counts and the path to the complete report. | `memoryRoot`, `view`, `limit=32`, `continuation`, the seed of the view (`sourcePath`, `invariantRevisionId`, `familyRevisionId`, `recordId`), filters `weaknessKind`, `includeClosed`, `staleOnly`, `standsOn` |
 | `knowledge_write` | Plan or write the [hand-off list](../concepts.md#hand-off-list) that a Curator gives it, through the one writer of knowledge files, which `agents-remember knowledge-ingest` and `agents-remember knowledge-bootstrap` also use. Without `commit` it plans and validates; with it, writes knowledge files and makes no Git commit. The answer names the whole report and all refusals. | `contractPath`, `handoff` + `handoffName` or `handoffPath`, `authorizationRef`, `commit=false`; for a [foundation wave](../concepts.md#knowledge-foundation), a write that belongs to no task, `repoId` + `wave`; for a crossing, the sync of a master's branch that opened a history file for conflicting records, the master's `contractPath` + `crossing` |
 | `knowledge_diff` | Name the changed records of two memory trees beside a caller-readable report holding the whole comparison: the two trees, counts by kind, changed records, report location. | `memoryRoot`, `beforeRevision="HEAD"`, `afterRevision`, `recordId`, `path` |
 | `knowledge_integrity_check` | Validate a memory tree: `validation.ok`, refusal/report counts, rule counts and bounded violations. With `contractPath`, use the task's code and memory worktrees and return its latest persisted worklist; no semantic judgment is inferred. | `memoryRoot`, `codeRoot`, `baseCommits`, or a task's `contractPath` |
@@ -181,6 +181,25 @@ resumes the same selection at the same memory tree, until every row has been ret
 The views `invariant` and `family` accept the text ID of a record in `recordId`, beside the
 revision IDs. The view `record` answers one record of any kind: its state, its links with the
 state of each target, the records that link to it and its [judgment rows](../concepts.md#judgment-row).
+
+The view `writers` answers one table of how each writer did, counted from the selected memory
+tree. A row names a writer by the role, harness and model of its
+[stamp](knowledge-system.md#state-writer-and-review) and counts that writer's revisions: `written`;
+of them `reviewed` (reviewed or consolidated); `laterChangedByAnother`, where a later revision of
+the same record carries another seat's stamp; `laterChangedWriterUnknown`, where a later revision
+changed it but a seat on either side is unknown, so the change is not counted as another writer's;
+and `retired`, the revision that was live when its record was retired. A revision without a stamp,
+such as an earlier revision of a record written before stamps existed, counts under the writer
+`unknown`. The answer holds at most 20 rows, most revisions written first, with the totals of
+writers, revisions and records. Its `report` names a file that holds every row and, for each
+number, the revisions behind it as `<record>@<revision>` (`<record>@<first>..<last>` for a run of
+revisions that no file names). The columns of a Consolidator come with that role.
+
+`knowledge_write` takes `status` only as `retired`, to retire a record, and as a decision's own
+status words. It refuses an entry, or the fields of a record, whose `status` is `proposed`,
+`accepted`, `reviewed` or `consolidated`, and says that the product sets the state. It stamps each
+revision it writes with its caller from the caller's launch, never from its input
+([State, writer and review](knowledge-system.md#state-writer-and-review)).
 
 A task closes its own weakness with the task and a reason, and the reader supplies the code commit from the closing memory commit's `Code-Commit` trailer after closeout or says that the commit comes with the task's closeout beforehand; a closure by another task names a real commit of the code repository.
 

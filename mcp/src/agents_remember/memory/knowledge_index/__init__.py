@@ -45,6 +45,7 @@ from agents_remember.memory.knowledge_index.query import (
     Link,
     Record,
 )
+from agents_remember.memory.knowledge_index.record_standing import RecordStanding, RecordWriter
 from agents_remember.memory.knowledge_index.schema import INDEX_FORMAT
 from agents_remember.memory.knowledge_index.tree import (
     MemoryTreeError,
@@ -76,6 +77,8 @@ __all__ = [
     "MemoryTreeError",
     "MemoryTreeSnapshot",
     "Record",
+    "RecordStanding",
+    "RecordWriter",
     "build_index",
     "default_cache_directory",
     "directory_key",

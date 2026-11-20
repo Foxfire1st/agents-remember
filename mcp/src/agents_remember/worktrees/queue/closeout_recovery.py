@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
@@ -28,6 +28,7 @@ from agents_remember.worktrees.modules.git import (
     require_git,
     worktree_dirty,
 )
+from agents_remember.worktrees.review_note import committed_review_note
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -102,6 +103,8 @@ class MemoryCloseoutOutcome:
     refreshed_route_overviews: list[dict[str, str]] = field(default_factory=list)
     route_index_refresh: dict[str, object] = field(default_factory=dict)
     ledger_repair: dict[str, object] = field(default_factory=dict)
+    review_note: str = ""
+    """The sentence a closeout adds when it closed the leaf's history without a review fact."""
 
 
 def prove_closeout_recovery_commits(
@@ -234,6 +237,15 @@ def resume_external_commits(
     """Memory was already committed; reprove it and refresh only its disposable view."""
 
     outcome = _prove_memory_output(contract, memory_commit)
+    if contract.memory_worktree is not None:
+        # The closing was made by the interrupted run; the committed history file says whether it
+        # carried a review fact.
+        outcome = replace(
+            outcome,
+            review_note=committed_review_note(
+                contract.memory_worktree, memory_commit, contract.leaf_id
+            ),
+        )
     report_operation_progress(
         args,
         "memory-commit",

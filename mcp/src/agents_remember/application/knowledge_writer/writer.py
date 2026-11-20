@@ -71,6 +71,7 @@ from agents_remember.models.knowledge_files.documents import (
 from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA
 from agents_remember.models.knowledge_files.records import DependentRecord
 from agents_remember.models.knowledge_files.unexplained import FILE_ITEM_KIND, HUNK_ITEM_KIND
+from agents_remember.models.knowledge_files.writer_stamp import WriterStamp
 
 UNCONVERTED = (
     "this memory tree has no layout marker, so it is unconverted: the file writer writes converted "
@@ -118,6 +119,10 @@ class WriteRequest:
     (MIK-R53 rule 2), so writer and gate agree in preclosed and reopened leaves. A persisted
     worklist flag never overrides it. Without it the operation's own ``HEAD`` is compared
     when no persisted worklist names the subject."""
+    stamp: WriterStamp | None = None
+    """The caller's stamp, resolved once by the write's route from its launch binding and receipt,
+    never from the hand-off. Without it every revision is stamped ``unknown``
+    with the reason."""
 
 
 def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) -> WriteReport:
@@ -154,6 +159,7 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         onboarding_counted=_onboarding_counted(request.worklist),
         memory_base=request.memory_base,
         coordination_root=request.coordination_root,
+        stamp=request.stamp,
     )
     authoring.run(document)
     carried = carry_entries(state, snapshot, request.owner)

@@ -6,7 +6,21 @@ import { DiffPane } from '../changeset/DiffPane';
 import type { DiffMode as DiffLayout } from '../changeset/DiffPane';
 import { card, sectionLabel, prose, muted } from './familyCenterStyles';
 
-function GuaranteeBlock({ guarantee, side }: { guarantee: ReviewFamilyGuarantee; side?: string }) {
+// The derived state of each side's revision, named by its side: the two trees can hold one revision
+// in two states, so a state without its side would not say which tree it belongs to.
+function sidesState(before: ReviewFamilyGuarantee, after: ReviewFamilyGuarantee): string {
+  return before.state === after.state ? `${after.state} before and after` : `${after.state} after · ${before.state} before`;
+}
+
+function GuaranteeBlock({
+  guarantee,
+  side,
+  state,
+}: {
+  guarantee: ReviewFamilyGuarantee;
+  side?: string;
+  state: string;
+}) {
   return (
     <div
       className={card}
@@ -16,14 +30,15 @@ function GuaranteeBlock({ guarantee, side }: { guarantee: ReviewFamilyGuarantee;
     >
       <p className={sectionLabel}>Joint guarantee{side ? ` · ${side}` : ''}</p>
       <p className={prose}>{guarantee.joint_guarantee}</p>
-      <p className={muted}>State at origin: {guarantee.state_at_origin}</p>
+      <p className={muted} data-testid="review-center-guarantee-state">
+        State: {state}
+      </p>
       <details data-disclosure="identifiers">
         <summary>Guarantee record</summary>
         <p className={muted}>
           family {guarantee.family_id}
           {side ? ` · ${side} snapshot` : ''} · revision {guarantee.revision_id} · version{' '}
           {guarantee.display_version}
-          {guarantee.acceptance_ref ? ` · accepted by ${guarantee.acceptance_ref}` : ''}
         </p>
       </details>
     </div>
@@ -62,7 +77,11 @@ export function GuaranteeComparisonBlock({
             {comparison.side} only · no {other} revision
           </p>
         )}
-        <GuaranteeBlock guarantee={comparison.guarantee} side={comparison.side} />
+        <GuaranteeBlock
+          guarantee={comparison.guarantee}
+          side={comparison.side}
+          state={`${comparison.guarantee.state} ${comparison.side}`}
+        />
       </div>
     );
   }
@@ -70,7 +89,7 @@ export function GuaranteeComparisonBlock({
     return (
       <div data-testid="review-center-guarantee-unchanged">
         <p className={muted}>Guarantee unchanged · same recorded revision</p>
-        <GuaranteeBlock guarantee={comparison.guarantee} />
+        <GuaranteeBlock guarantee={comparison.guarantee} state={sidesState(comparison.before, comparison.guarantee)} />
       </div>
     );
   }
@@ -83,7 +102,7 @@ export function GuaranteeComparisonBlock({
         <p className={muted}>
           Wording unchanged · {revisionMeta(...guaranteeRevisionLabels(before, after))}
         </p>
-        <GuaranteeBlock guarantee={after} />
+        <GuaranteeBlock guarantee={after} state={sidesState(before, after)} />
         <details data-disclosure="identifiers">
           <summary>Revision records</summary>
           <p className={muted}>

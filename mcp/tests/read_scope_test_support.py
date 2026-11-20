@@ -32,7 +32,6 @@ resolves is a fact about a snapshot and not a condition for recording it.
 from __future__ import annotations
 
 import dataclasses
-import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -43,12 +42,14 @@ from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.memory.knowledge.store import OpenedKnowledgeStore, open_read_only_store
 from agents_remember.memory.knowledge_index.projection import text_uuid
 from agents_remember.models.knowledge.authorship import Authorship
-from agents_remember.models.knowledge.base import KnowledgeState
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
 from agents_remember.models.knowledge.graph import FamilyMemberDraft, RealizationRole
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.source import FileLocator, LineRangeLocator, SourceLocator
+from agents_remember.models.knowledge_files.history_product import record_content_digest
+from agents_remember_test_support.testing.fixture_git import fixture_git
 from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
+from knowledge_review_fact_test_support import history_document, review_fact, written
 from knowledge_rows_test_support import (
     INDEX_REPOSITORY_ID,
     FamilyMemberRequest,
@@ -146,7 +147,6 @@ class RevisionSeed:
     predecessors: tuple[str, ...]
     applicability: str = ""
     exclusions: tuple[str, ...] = ()
-    state_at_origin: KnowledgeState = "proposed"
 
 
 @dataclass(frozen=True)
@@ -186,7 +186,8 @@ class ExtraInvariantSeed:
     family context (``no_family_recorded``) measurable. The text ID derives from the
     caller-minted invariant UUID rather than the authoring position, so the same caller
     identity projects the same record on both sides of a comparison while two different
-    caller identities never share one.
+    caller identities never share one. ``reviewed_by`` names a leaf whose closed history file
+    records the revision as written and holds a review fact, so the revision reads reviewed.
     """
 
     invariant_id: str
@@ -196,7 +197,7 @@ class ExtraInvariantSeed:
     applicability: str
     conditions: tuple[str, ...]
     exclusions: tuple[str, ...]
-    state_at_origin: KnowledgeState = "proposed"
+    reviewed_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -541,10 +542,11 @@ def _build_invariants(
                 predecessors=(),
                 applicability=extra.applicability,
                 exclusions=extra.exclusions,
-                state_at_origin=extra.state_at_origin,
             ),
         )
         extra_revision_ids[extra.revision_id] = revision.revision_id
+        if extra.reviewed_by is not None:
+            _record_review(store, extra.invariant_id, extra.reviewed_by)
     return invariant_ids, revision_ids, extra_invariant_ids, extra_revision_ids
 
 
@@ -648,6 +650,20 @@ def _create_invariant(
     return created
 
 
+def _record_review(store: RowStore, invariant_id: str, leaf: str) -> None:
+    """Bind the review fact in the leaf's closed history to the invariant's exact content."""
+
+    text_id = store.tree.invariant_text_id(invariant_id)
+    invariant = store.tree.invariants[text_id]
+    # The reviewed side uses the current document shape, with state derived from its history.
+    invariant.pop("status", None)
+    row = written(text_id, int(invariant["revision"]), leaf)
+    row["contentDigest"] = record_content_digest(invariant)
+    path, document = history_document(leaf, written_rows=(row,), review=review_fact(leaf))
+    store.tree.histories[path] = document
+    store._rebuild()
+
+
 def _create_revision(store: RowStore, fixture: ReadScopeFixture, seed: RevisionSeed):
     created = store.create_revision(
         RevisionRequest(
@@ -661,7 +677,6 @@ def _create_revision(store: RowStore, fixture: ReadScopeFixture, seed: RevisionS
                 conditions=seed.conditions,
                 exclusions=seed.exclusions or EXCLUSIONS,
                 predecessors=seed.predecessors,
-                state_at_origin=seed.state_at_origin,
                 provenance=fixture.authorship,
             ),
         )
@@ -1011,9 +1026,9 @@ def _write_git_tree(fixture: ReadScopeFixture) -> None:
     """
 
     fixture.git_root.mkdir(parents=True, exist_ok=True)
-    _git(fixture.git_root, ["init", "-q", "--initial-branch=main"])
-    _git(fixture.git_root, ["config", "user.email", "fixture@example.invalid"])
-    _git(fixture.git_root, ["config", "user.name", "read fixture"])
+    fixture_git(fixture.git_root, ["init", "-q", "--initial-branch=main"])
+    fixture_git(fixture.git_root, ["config", "user.email", "fixture@example.invalid"])
+    fixture_git(fixture.git_root, ["config", "user.name", "read fixture"])
     for path, text in (
         # ``INTEGRATION_PATH`` carries a real nested Python definition beside the prose the fixture
         # is named for: a symbol locator is observed through the shipped tree-sitter extractor, so
@@ -1030,18 +1045,18 @@ def _write_git_tree(fixture: ReadScopeFixture) -> None:
         target = fixture.git_root / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
-    _git(fixture.git_root, ["add", "-A"])
-    _git(fixture.git_root, ["commit", "-q", "-m", "fixture tree"])
+    fixture_git(fixture.git_root, ["add", "-A"])
+    fixture_git(fixture.git_root, ["commit", "-q", "-m", "fixture tree"])
     object.__setattr__(
         fixture,
         "git_tree_id",
-        _git(fixture.git_root, ["rev-parse", "HEAD^{tree}"]),
+        fixture_git(fixture.git_root, ["rev-parse", "HEAD^{tree}"]),
     )
     object.__setattr__(
         fixture,
         "git_blobs",
         {
-            path: _git(fixture.git_root, ["rev-parse", f"HEAD:{path}"])
+            path: fixture_git(fixture.git_root, ["rev-parse", f"HEAD:{path}"])
             for path in (
                 INTEGRATION_PATH,
                 SYNCHRONIZATION_PATH,
@@ -1067,24 +1082,6 @@ def _blob_of(fixture: ReadScopeFixture, path: str) -> str:
         return fixture.git_blobs[path]
     except KeyError as error:
         raise AssertionError(f"the fixture tree holds no blob for {path}") from error
-
-
-def _git(root: Path, args: list[str]) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-        env={
-            "PATH": "/usr/bin:/bin:/usr/local/bin",
-            "HOME": str(root),
-            "GIT_CONFIG_NOSYSTEM": "1",
-        },
-    )
-    if result.returncode != 0:
-        raise AssertionError(f"fixture git {' '.join(args)} failed: {result.stderr.strip()}")
-    return result.stdout.strip()
 
 
 def _require(step: str, state: str, refusal_value: object) -> None:
