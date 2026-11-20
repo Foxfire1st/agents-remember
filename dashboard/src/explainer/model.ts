@@ -161,17 +161,17 @@ export function firstRequestLine(
 }
 
 /**
- * What an empty Send asks for: the end-to-end review. `explainer_service.py` composes the same ask in
+ * What an empty Send asks for: the end-to-end explanation. `explainer_service.py` composes the same ask in
  * `END_TO_END_REQUEST` when a Send carries no words, so the form's line and the seat's first turn
  * say one thing (MIK-R211 v2 rule 5, and the developer's F1). On a task in planning there is no
  * change set to review: the empty Send asks for its requirement and planned effects, as
  * `explainer_service.py` composes in `PLANNED_REQUEST` (BUG-R02 rule 2).
  */
-export const END_TO_END_LINE = 'One message: the end-to-end review of the comparison on screen.';
-export const PLANNED_LINE = "One message: this task's requirement and its planned effects.";
+export const END_TO_END_LINE = 'One message: the end-to-end explanation, the essay first and the page last.';
+export const PLANNED_LINE = "One message: the planned explanation, the essay first and the page last.";
 
 /**
- * Send is always possible: an empty request is the end-to-end review, so none of the request's facts
+ * Send is always possible: an empty request is the end-to-end explanation, so none of the request's facts
  * is a gate any more. The parameters stay because every caller passes them, and what they carry is
  * still what the seat receives.
  */

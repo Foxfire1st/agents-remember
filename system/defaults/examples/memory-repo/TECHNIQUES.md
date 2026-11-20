@@ -8,7 +8,7 @@ isolation.
 
 Every technique a page uses, with its numbers and still form. Colours are the treatment's roles.
 Each row names its kit part (`kit/<name>/<version>/`) or plain DOM, SVG, CSS or Canvas2D. The rows
-the reader drives come first; "How it works" uses at least one of them.
+the reader drives come first; a part uses one only where it helps its explanation.
 
 ## Shared numbers
 

@@ -248,7 +248,7 @@ function RequestFields({
         placeholder={
           planned
             ? 'What do you want explained? Leave it empty for the requirement and planned effects.'
-            : 'What do you want explained? Leave it empty for the end-to-end review.'
+            : 'What do you want explained? Leave it empty for the end-to-end explanation.'
         }
         value={message}
         onChange={(event) => trayStore.getState().setText(event.target.value)}
