@@ -117,6 +117,58 @@ def test_a_page_that_moves_without_a_reduced_motion_rule_is_not_ready() -> None:
     assert "autoplays" in report.failures[0].detail
 
 
+def test_a_video_is_a_figure_a_reader_drives() -> None:
+    """A video asset is admitted, and the page check refuses a loop or missing controls."""
+
+    clip = _assets(**{"clip.webm": b"\x1a\x45\xdf\xa3webm-bytes"})
+
+    played = dict(clip)
+    played["index.html"] = b"<!doctype html><video controls src='clip.webm'></video>"
+    assert check_page(played, entrypoint="index.html", packet=packet(record())).ready
+
+    looping = dict(clip)
+    looping["index.html"] = b"<!doctype html><video controls loop src='clip.webm'></video>"
+    report = check_page(looping, entrypoint="index.html", packet=packet(record()))
+    assert not report.ready
+    assert "loops" in report.failures[0].detail
+
+    uncontrolled = dict(clip)
+    uncontrolled["index.html"] = b"<!doctype html><video src='clip.webm'></video>"
+    report = check_page(uncontrolled, entrypoint="index.html", packet=packet(record()))
+    assert not report.ready
+    assert "without controls" in report.failures[0].detail
+
+    autoplaying = dict(clip)
+    autoplaying["index.html"] = b"<!doctype html><video controls autoplay src='clip.webm'></video>"
+    report = check_page(autoplaying, entrypoint="index.html", packet=packet(record()))
+    assert not report.ready
+    assert "autoplays" in report.failures[0].detail
+
+    named = _assets(
+        **{
+            "clip.webm": b"\x1a\x45\xdf\xa3webm-bytes",
+            "loop.webm": b"\x1a\x45\xdf\xa3loop-bytes",
+            "controls.webm": b"\x1a\x45\xdf\xa3controls-bytes",
+            "autoplay.webm": b"\x1a\x45\xdf\xa3autoplay-bytes",
+        }
+    )
+    beyond_name = dict(named)
+    beyond_name["index.html"] = b"<!doctype html><video controls src='loop.webm'></video>"
+    assert check_page(beyond_name, entrypoint="index.html", packet=packet(record())).ready
+
+    missing_controls = dict(named)
+    missing_controls["index.html"] = b"<!doctype html><video src='controls.webm'></video>"
+    report = check_page(missing_controls, entrypoint="index.html", packet=packet(record()))
+    assert not report.ready
+    assert "without controls" in report.failures[0].detail
+
+    value_not_word = dict(named)
+    value_not_word["index.html"] = (
+        b"<!doctype html><video controls src='autoplay.webm' data-note='loop controls'></video>"
+    )
+    assert check_page(value_not_word, entrypoint="index.html", packet=packet(record())).ready
+
+
 def test_a_script_is_noted_not_failed_because_this_check_never_executes_the_page() -> None:
     assets = _assets(**{"app.js": b"document.body.append('ready')"})
     assets["index.html"] = b"<!doctype html><script src='app.js'></script><p>x</p>"

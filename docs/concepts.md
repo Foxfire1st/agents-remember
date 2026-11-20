@@ -854,6 +854,14 @@ it; one heading of the dashboard calls it the explainer's environment. The **bin
 explainer is the comparison that the explainer's workspace was built for. The button "Retire chat"
 retires the explainer: the host archives its chat, and the workspace is deleted.
 
+The workspace holds the task document and the requirement packets it names in `inputs/`.
+The `reports.md` manifest lists the source paths and SHA-256 digests of the selected leaf's
+reports, which the explainer reads in place. The staged work in `stages/` records what the
+explainer read, the chosen changes, their parts, one self-contained explanation per part,
+the essay and the visual plan. The page is built from the essay; a visual is made only where it
+helps a part of the essay, and the page reads in full without its animations. Neither `inputs/` nor
+`stages/` is published with the page.
+
 ### Canvas host
 
 The canvas host is the part of the dashboard's server that serves the page an explainer publishes,
@@ -871,7 +879,9 @@ A revision is one saved page of the explainer's explanation. Each time the expla
 the task keeps a new numbered revision. The revisions of a task share a size limit of 512 MiB: a
 publication beyond it is refused until the user removes old revisions. The revision that the user
 agreed to before work started is marked "agreed" and cannot be removed. A retained revision is one
-that the user has not removed.
+that the user has not removed. A revision's assets may include a video rendered from code (`.webm`
+or `.mp4`); it plays only on the reader's act, has controls, never loops or autoplays, and with
+reduced motion shows a still frame with its steps listed.
 
 ### Grade
 

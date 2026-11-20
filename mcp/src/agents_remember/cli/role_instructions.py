@@ -182,7 +182,7 @@ CAPABILITY_RESOURCES: dict[str, CapabilityResource] = {
         capability="review-presenter",
         canonical_path="mcp/src/agents_remember/canvas/review-presenter.md",
         packaged_path="package_data/canvas/review-presenter.md",
-        word_budget=1100,
+        word_budget=1500,
         required_wording=(
             "You are not the Reviewer",
             "Keywords:",

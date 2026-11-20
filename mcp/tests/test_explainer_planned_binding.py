@@ -268,6 +268,25 @@ def _comparison_record(code: Path, memory: Path, number: int) -> ReviewTreeCompa
     )
 
 
+def test_a_blank_planned_build_sends_the_planned_first_request(tmp_path: Path) -> None:
+    runtime, _, _, _, contract = _planning_world(tmp_path)
+    host = _RecordingHost()
+    client = _client(_composition(runtime, host, contract))
+
+    answer = client.post(
+        _url("build"),
+        json={"requestId": "r-planned-empty", "message": "", "planned": True, "history": "planned"},
+    )
+
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["seat"]["messageSent"]
+    assert host.sent == [
+        "Explain this task's requirement and its planned effects: choose the code and memory it "
+        "touches and the parts that will change, explain each on its own, write the essay, then "
+        "plan and make each visual and build the page."
+    ]
+
+
 # --- E03: one exact record, refused before effects -------------------------------------------------
 
 

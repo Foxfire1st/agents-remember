@@ -67,8 +67,8 @@ are what the figures draw.
 ### Explanation Pages
 
 The explainer reads `TREATMENT.md` and `TECHNIQUES.md` before it builds. It plans the page around
-what the reader will operate: in "How it works" at least one driven figure from the table's default
-rows, drawn from this comparison; claims, code lines and figure nodes linked; the still form in the
+the essay: in "How it works" a figure only where one helps a part, never a quota, drawn from this
+comparison when one is drawn; claims, code lines and figure nodes linked; the still form in the
 markup. When it needed a technique the table lacks, or a number did not hold, it proposes a row in
 its report.
 
@@ -134,11 +134,11 @@ are not proof.
 - **Operation.** It operates every control by pointer and keyboard, with reduced motion and at
   narrow width. A control that fails, traps focus, shifts content under the reader or lacks a
   still form is a finding.
-- **Explains through interaction.** On an explanation page, "How it works" has a figure the
-  reader drives, built from this comparison and not a generic illustration; each control answers
-  a question and agrees with the code it cites; claims, lines and figures link both ways; there
-  is no claim list; a figure drawn from code says so, a model is marked as reading. A page that
-  reads as a static report is a finding.
+- **Explains through interaction.** On an explanation page, "How it works" may have a figure the
+  reader drives where it helps the essay; text alone is right when no figure helps. Each control
+  answers a question and agrees with the code it cites; claims, lines and figures link both ways;
+  there is no claim list; a figure drawn from code says so, a model is marked as reading. A page
+  that adds a figure without a part that needs it is a finding.
 - **Readouts** trace to the reference, not the implementation. **Reuse:** no second control for
   one job. **Tokens:** no raw values. **Baselines:** none changed without approval.
 

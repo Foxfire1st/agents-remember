@@ -439,11 +439,11 @@ The form has these parts.
 - The references. Each has "+ note" and "×". More presses on "⊕" add references to the open form.
   Without one the form says "No references yet. Press ⊕ on a block or an invariant; more ⊕ clicks
   add references to this form."
-- The text box "What do you want explained? Leave it empty for the end-to-end review." An empty
-  box asks the explainer for one review of the whole comparison on screen.
+- The text box "What do you want explained? Leave it empty for the end-to-end explanation." An
+  empty box asks the explainer for one explanation of the whole comparison on screen.
 - The target "to: a new explainer for <task>". It is fixed.
-- A summary of the message, for example "One message: the end-to-end review of the comparison on
-  screen."
+- A summary of the message, for example "One message: the end-to-end explanation, the essay first
+  and the page last."
 - "Cancel" and "Send". "Cancel" removes the picks from the tray and clears the text.
 
 Under the form the page says what the press does: "Nothing is sent until you press Send. Sending
@@ -465,14 +465,29 @@ with the tools of its harness. It holds:
 - the evidence that Agents Remember prepared for that comparison;
 - the explainer's instructions and the [presentation kit](../concepts.md#presentation-kit), the
   set of libraries that a page of the explainer may load;
+- the task document and the requirement packets it names in `inputs/`, with `reports.md` listing
+  the source paths and SHA-256 digests of the selected leaf's reports for reading in place;
 - the reference files of the task;
-- the revisions, a draft and a scratch folder.
+- the revisions, a draft, a `stages/` folder and a scratch folder.
+
+The explainer works in stages and leaves a file for each in `stages/`: what it read, the files and
+changes it chose, their parts, one self-contained explanation per part, the essay with its
+evidence, and the visual plan. It writes and makes each visual only after the essay is complete,
+then builds the page from the essay and the assets. `stages/` and `inputs/` are working material.
+The published revision contains the page and its assets. The render check takes page assets from
+`drafts/assets/` and checks claims against `instructions/evidence.json`. The text
+carries the content; a visual is made only where it helps a part of the essay, and the page reads
+in full without its animations.
 
 The explainer writes the claims of its page into the file `drafts/assets/claim-map.json`, the
-claim map. The claim map lists each claim with its id, its statement and the bases it rests on,
-such as a file in a tree of the comparison, a knowledge record or a judgment row. The product
+claim map. The claim map lists each claim with its id, its statement and the bases it rests on, such
+as a file in a tree of the comparison, a knowledge record or a judgment row. The product
 reads the claim map when the explainer publishes. Each time the explainer checks its draft, the
 report and the pictures of that check go into a folder `renders/run-NNN/`.
+
+A page may carry a video rendered from code, as `.webm` or `.mp4`. It plays only on the reader's
+act, has controls, and never loops or autoplays; with reduced motion it shows a still frame with
+its steps listed.
 
 The workspace is bound to the comparison it was built for: its worktrees and its evidence are
 those of that comparison. That comparison is the binding of the
@@ -702,8 +717,9 @@ stale parts and grades. With a live explainer the press sends the request at onc
 shows no notice of the send: the button reads "Regenerating…" while the request goes out, and a
 refused request shows its reason under the button. After the send the tab "Explanation" carries
 the mark "◌". Without a live explainer the press opens the chat sidebar and the first-request
-form, which says "Pre-filled with the stale parts: …". The explainer answers with a new revision
-of the same page. Nothing regenerates by itself.
+form, which says "Pre-filled with the stale parts: …". The explainer renews the explanations of
+the stale parts and the essay before their visuals, leaves the renewed stage files in `stages/`,
+and answers with a new revision of the same page. Nothing regenerates by itself.
 
 ### The update of the explainer's workspace
 
@@ -817,9 +833,12 @@ the task is built against. The page of the task in the tab "Operations" shows th
 The planned view is where you plan before the work starts. On the tab "Explanation" you can start
 the explainer and ask it, as on the review page of a started task: "✦ Explain the change set" opens
 the first-request form. On a task in planning the form's empty request asks for the task's requirement
-and its planned effects, one sentence, and the explainer presents the plan the page lists. When you
-agree a revision with your `go`, the Architect records that revision together with the `go`, and it is
-pinned in the revision list. The page and its revisions change nothing of the task.
+and its planned effects, one sentence, and the explainer presents the plan the page lists. It follows
+the same staged work: reading the requirement and declared effects, choosing the code and memory it
+touches and their parts, one explanation per part, the essay, the visuals, then the page; the stage
+files are in `stages/`. When you agree a revision with your `go`, the Architect records that revision
+together with the `go`, and it is pinned in the revision list. The page and its revisions change
+nothing of the task.
 
 ## Presentation questions and system changes
 
