@@ -60,6 +60,7 @@ from pathlib import Path
 from agents_remember.cli.dashboard import serving_collaborators
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving.review import register_review_routes
+from agents_remember_test_support.testing.event_loop import new_test_event_loop
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -79,7 +80,7 @@ register_review_routes(
     collaborators.knowledge_review_entries,
     collaborators.review_source_content,
 )
-with TestClient(app) as client:
+with TestClient(app, backend_options={"loop_factory": new_test_event_loop}) as client:
     response = client.get(
         descriptor["route"], params=descriptor["params"], follow_redirects=True
     )

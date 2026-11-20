@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+from asyncio import events
 from collections.abc import Iterator
 from unittest import mock
 
 import pytest
 
+from agents_remember_test_support.testing.event_loop import new_test_event_loop
 from agents_remember_test_support.testing.global_state import (
     begin_pytest_process,
     end_pytest_process,
@@ -18,6 +21,14 @@ from agents_remember_test_support.testing.global_state import (
 from agents_remember_test_support.testing.random_order import shuffle_items
 
 begin_pytest_process()
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    # Runner uses events.new_event_loop. Tests can also use asyncio's public alias.
+    for module in (events, asyncio):
+        factory = mock.patch.object(module, "new_event_loop", new_test_event_loop)
+        factory.start()
+        config.add_cleanup(factory.stop)
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
