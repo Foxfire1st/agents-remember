@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest import mock
 
 from agents_remember.models.closeout.input import CloseoutCorrectedCall, EffectiveCloseoutInput
 from agents_remember.models.lifecycles.door import (
@@ -36,17 +34,11 @@ from agents_remember.worktrees.closeout_input import (
     normalize_closeout_input,
     raw_closeout_messages,
 )
-from agents_remember.worktrees.integration.closeout.operation_admission import (
-    CloseoutOperationAdmission,
-)
 from agents_remember.worktrees.integration.closeout.recovery_projection import (
     derive_closeout_recovery_commits,
 )
 from agents_remember.worktrees.integration.closeout.task_intent_identity import (
     contract_task_intent,
-)
-from agents_remember.worktrees.integration.lifecycle import (
-    lifecycle_operations as lifecycle_operations_module,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
@@ -54,11 +46,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identit
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     terminal_operation_record,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
-    start_or_observe_closeout_operation,
-)
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.worktree_contract import load_contract
 
 
 class MutationEvidenceRecorder:
@@ -92,52 +80,6 @@ class MutationEvidenceRecorder:
     def assert_proven(self, *legs: CloseoutMutationLeg) -> None:
         assert set(self.evidence) == set(legs)
         assert all(self.evidence[leg].state == "commit-proven" for leg in legs)
-
-
-def start_closeout_operation(
-    operation_input: CloseoutOperationInput,
-    **options,
-):
-    """Route a durable-input fixture through canonical raw, lease-bound admission.
-
-    Older lifecycle suites exercise behavior below the L3 scheduling boundary. They receive an
-    explicit synthetic waiting door and bypass only the first-ready projection assertion for that
-    synthetic generation. Fixtures that already own a real door still exercise the production
-    scheduling fence unchanged.
-    """
-    fixture_bypass_scheduling = bool(options.pop("fixture_bypass_scheduling", False))
-    effective = operation_input.effectiveInput
-    contract, bypass_scheduling_fence = ensure_fixture_waiting_door(
-        load_contract(Path(operation_input.contractPath)),
-        force_synthetic=fixture_bypass_scheduling,
-    )
-    scheduling_fence = (
-        mock.patch.object(lifecycle_operations_module, "require_first_ready_generation")
-        if bypass_scheduling_fence or fixture_bypass_scheduling
-        else nullcontext()
-    )
-    with scheduling_fence:
-        return start_or_observe_closeout_operation(
-            CloseoutOperationAdmission(
-                config_path=operation_input.configPath,
-                contract_path=Path(operation_input.contractPath),
-                messages=raw_closeout_messages(
-                    code=_enabled_message(effective, "code"),
-                    memory=_enabled_message(effective, "memory"),
-                ),
-                approval_note=operation_input.approvalNote,
-                gate_policy=operation_input.gatePolicy,
-                corrected_call=CloseoutCorrectedCall(
-                    tool="worktree_closeout_apply",
-                    arguments={
-                        "contract_path": operation_input.contractPath,
-                        "intent_note": "<developer intent>",
-                    },
-                ),
-            ),
-            contract,
-            **options,
-        )
 
 
 def ensure_fixture_waiting_door(contract, *, force_synthetic: bool = False):

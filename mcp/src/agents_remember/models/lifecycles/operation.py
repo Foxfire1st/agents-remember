@@ -56,7 +56,6 @@ from agents_remember.models.lifecycles.preparation_state import (
 )
 from agents_remember.models.lifecycles.termination import (
     LifecycleCancellationEvidence,
-    WorkerTerminationEvidence,
 )
 from agents_remember.models.task_intent import TaskIntentIdentity, TaskIntentState
 
@@ -337,6 +336,19 @@ LifecycleOperationInput = Annotated[
 ]
 
 
+# Members an older build wrote that no writer can produce again. The record parser drops
+# them so a leftover journal stays readable; see _drop_retired_operation_authority.
+_RETIRED_RECORD_FIELDS: tuple[str, ...] = (
+    "workerPid",
+    "workerLease",
+    "workerProcessFingerprint",
+    "workerTermination",
+    "workerTerminationHistory",
+    "terminationReturnStatus",
+    "terminationReturnPhase",
+)
+
+
 class LifecycleOperationRecord(BaseModel):
     """The validated, internal operation snapshot stored in an enclosure."""
 
@@ -405,15 +417,6 @@ class LifecycleOperationRecord(BaseModel):
         max_length=256,
     )
     attempt: int = Field(default=1, ge=1)
-    workerPid: int | None = Field(default=None, ge=1)
-    workerLease: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    workerProcessFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    workerTermination: WorkerTerminationEvidence | None = None
-    workerTerminationHistory: list[WorkerTerminationEvidence] = Field(default_factory=list)
-    terminationReturnStatus: (
-        Literal["queued", "running", "input-required", "failed", "completed"] | None
-    ) = None
-    terminationReturnPhase: LifecycleOperationPhase | None = None
     cancellationEvidence: LifecycleCancellationEvidence | None = None
     legacyMigration: LegacyCloseoutMigrationProof | None = None
     dependencies: EvidenceDependencies | None = None
@@ -428,6 +431,34 @@ class LifecycleOperationRecord(BaseModel):
         ):
             return {**value, "taskIntent": {"state": "missing-intent"}}
         return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_operation_authority(cls, value: Any) -> Any:
+        """Parse a journal an older build wrote with detached-worker or command authority.
+
+        The detached lifecycle worker and the private preparation commands are gone, but a
+        stored record still names them and must stay readable: a closeout or integration
+        record is answered with the tool that replaces it, and a direct landing's record is
+        still controlled. Dropping the retired members here is what lets those records parse;
+        no writer can produce them again.
+        """
+
+        if not isinstance(value, dict):
+            return value
+        dropped = {key: item for key, item in value.items() if key not in _RETIRED_RECORD_FIELDS}
+        preparation = dropped.get("preparation")
+        if isinstance(preparation, dict) and isinstance(preparation.get("legs"), list):
+            dropped["preparation"] = {
+                **preparation,
+                "legs": [
+                    {key: item for key, item in leg.items() if key != "commands"}
+                    if isinstance(leg, dict)
+                    else leg
+                    for leg in preparation["legs"]
+                ],
+            }
+        return dropped
 
     @model_validator(mode="after")
     def _require_altitude_authority(self) -> LifecycleOperationRecord:
@@ -515,7 +546,7 @@ def require_lifecycle_operation_dependencies(
 # advances the wait cursor (generation/status/phase/disposition/approval claim/
 # irreversible boundary/mutation evidence/typed failure/result/cancel/recovery/
 # finalization). Heartbeat/current-command timestamps and append-only histories
-# (mutationHistory, workerTerminationHistory, doorPublicationHistory) are
+# (mutationHistory, doorPublicationHistory) are
 # deliberately absent: they archive or refresh already-observed state and must
 # never wake a status-change waiter.
 _MEANINGFUL_STATE_FIELDS: tuple[str, ...] = (
@@ -528,9 +559,6 @@ _MEANINGFUL_STATE_FIELDS: tuple[str, ...] = (
     "irreversibleBoundaryEntered",
     "cancelRequested",
     "cancellationEvidence",
-    "workerTermination",
-    "terminationReturnStatus",
-    "terminationReturnPhase",
     "mutationEvidence",
     "recoveryCommits",
     "closeoutFinalizedContractSha256",
@@ -636,7 +664,6 @@ def _require_altitude_authority(record: LifecycleOperationRecord) -> None:
         _require_closeout_mutation_evidence(record)
     elif record.mutationEvidence:
         raise ValueError("integration operation cannot carry closeout mutation evidence")
-    _require_worker_authority(record)
     _require_cancellation_evidence(record)
     _require_legacy_migration(record)
 
@@ -827,83 +854,6 @@ def _require_legacy_effective_input(
     )
     if observed != expected:
         raise ValueError("legacy migration must bind unfinished memory intent exactly")
-
-
-def _require_worker_authority(record: LifecycleOperationRecord) -> None:
-    if record.operationKind == "direct-landing":
-        _require_no_direct_worker_authority(record)
-        return
-    binding = (record.workerPid, record.workerLease, record.workerProcessFingerprint)
-    _require_complete_worker_binding(binding)
-    _require_termination_return_identity(record)
-    termination = record.workerTermination
-    if termination is None:
-        _require_no_termination_return(record)
-        return
-    _require_live_termination_identity(record, termination)
-    _require_exited_worker_release(termination, binding)
-
-
-def _require_complete_worker_binding(binding: tuple[int | None, str | None, str | None]) -> None:
-    present = tuple(value is not None for value in binding)
-    if any(present) != all(present):
-        raise ValueError("detached worker pid, lease, and process fingerprint are one authority")
-
-
-def _require_termination_return_identity(record: LifecycleOperationRecord) -> None:
-    return_identity = (
-        record.terminationReturnStatus is not None,
-        record.terminationReturnPhase is not None,
-    )
-    expected = (True, True) if record.status == "termination-required" else (False, False)
-    if return_identity != expected:
-        raise ValueError(
-            "termination-required status must retain one exact return status and phase identity"
-        )
-
-
-def _require_no_termination_return(record: LifecycleOperationRecord) -> None:
-    if record.terminationReturnStatus is not None:
-        raise ValueError("termination return status requires durable termination evidence")
-
-
-def _require_live_termination_identity(
-    record: LifecycleOperationRecord,
-    termination: WorkerTerminationEvidence,
-) -> None:
-    if termination.state == "exited":
-        return
-    if (termination.lease, termination.pid) != (record.workerLease, record.workerPid):
-        raise ValueError("unproven worker termination must retain the exact pid and lease")
-
-
-def _require_exited_worker_release(
-    termination: WorkerTerminationEvidence,
-    binding: tuple[int | None, str | None, str | None],
-) -> None:
-    if termination.state != "exited":
-        return
-    if _binding_present(binding):
-        raise ValueError("proven worker exit must release pid and lease authority")
-
-
-def _binding_present(binding: tuple[int | None, str | None, str | None]) -> bool:
-    return any(value is not None for value in binding)
-
-
-def _require_no_direct_worker_authority(record: LifecycleOperationRecord) -> None:
-    if any(
-        value is not None
-        for value in (
-            record.workerPid,
-            record.workerLease,
-            record.workerProcessFingerprint,
-            record.workerTermination,
-            record.terminationReturnStatus,
-            record.terminationReturnPhase,
-        )
-    ):
-        raise ValueError("synchronous direct landing cannot carry detached worker authority")
 
 
 def _require_cancellation_evidence(record: LifecycleOperationRecord) -> None:

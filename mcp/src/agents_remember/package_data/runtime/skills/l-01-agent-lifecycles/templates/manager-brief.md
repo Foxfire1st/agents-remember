@@ -89,9 +89,9 @@ After that handoff and a current-lineage proof, the Manager closes the leaf out 
 2. the approval stop: the developer's commit approval for standalone or final work, or the recorded delegated series authority;
 3. `worktree_closeout_apply`, with an explicit message for each enabled leg and that authority as its intent note.
 
-The apply proves admission itself (task intent, lineage, the knowledge gate and the Curator's coherence record) and records journal evidence per leg. No release by an Orchestrator is needed.
+Before apply, confirm the [required curation evidence](../operations/closeout.md#bind-the-accepted-inputs-and-evidence), including the Curator's coherence validation when the checklist requires it. The apply checks task intent, lineage and the knowledge gate and records transaction evidence per leg. No release by an Orchestrator is needed.
 
-Before recovering an unfinished closeout, read [Recover an unfinished closeout](../operations/coordination.md#recover-an-unfinished-closeout) for its generation-bound controls and journal status. Unfinished-closeout result: `<current operation reference and outcome, or none>`.
+Before retrying closeout, read [Recover an unfinished closeout](../operations/coordination.md#recover-an-unfinished-closeout) for the apply result and retry inputs. Record `<apply outcome and per-leg evidence, or none>`.
 
 When an Orchestrator coordinates the sprint, send it the apply's result or refusal with the leaf, master and sprint references, blockers and acceptance facts. Report facts only; do not rank other masters.
 
@@ -99,7 +99,7 @@ When an Orchestrator coordinates the sprint, send it the apply's result or refus
 
 ### Apply task edits
 
-Before applying task edits or responding to their projection effects, read [Apply task edits and rebuild projections](../operations/coordination.md#apply-task-edits-and-rebuild-projections) for mutation-first ordering, incomplete effects and accepted-generation evidence.
+Before applying task edits or responding to their projection effects, read [Apply task edits and rebuild projections](../operations/coordination.md#apply-task-edits-and-rebuild-projections) for mutation-first ordering, incomplete effects and closeout evidence to re-prove before retry.
 
 ### Assign the review
 
@@ -147,7 +147,7 @@ Before coordinating build and landing order, read [Let dependencies determine th
 
 - This master’s actual dependencies and landing authority: `<refs>`.
 
-An atomic block exposes no intermediate leaf to super. For post-claim journal status and controls, follow [Recover an unfinished closeout](../operations/coordination.md#recover-an-unfinished-closeout) for its generation-bound controls and journal status.
+An atomic block exposes no intermediate leaf to super. For a closeout retry, follow [Recover an unfinished closeout](../operations/coordination.md#recover-an-unfinished-closeout) for the apply result and retry inputs.
 
 ### Retire leaf agents
 

@@ -16,11 +16,15 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from agents_remember.application import worktree_tools
+from agents_remember.application.worktree_tool_requests import (
+    CloseoutApproval,
+    CloseoutCommitMessages,
+)
+from agents_remember.application.worktree_tools import worktree_closeout_apply_tool
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_cache import (
     derive_memory_ledger,
@@ -29,7 +33,6 @@ from agents_remember.kernel.memory_cache import (
 )
 from agents_remember.kernel.memory_ledger import find_mapping
 from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
-from agents_remember.models.lifecycles.operation import IntegrateOperationInput
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import SprintExecutionGraph, read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
@@ -40,13 +43,6 @@ from agents_remember.worktrees.activation.atomic_series_activation import (
 )
 from agents_remember.worktrees.activation.atomic_series_activation_release import (
     release_atomic_series_selection,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
-    start_or_observe_operation,
 )
 from agents_remember.worktrees.knowledge_gate import close_owner_history
 from agents_remember.worktrees.modules import integrate as integrate_module
@@ -64,20 +60,12 @@ from agents_remember.worktrees.series_closeout import (
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
     load_contract,
-    write_contract,
 )
 from checkpoint_landing_test_support import (
     accumulate_master_line,
     checkpoint,
     memory_repository,
     rev,
-)
-from closeout_input_test_support import (
-    closeout_operation_input,
-    finish_operation_record,
-    publish_closeout_finalization,
-    start_closeout_operation,
-    start_operation_record,
 )
 from test_closeout_queue import (
     MASTER_A,
@@ -251,46 +239,26 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         )
         memory_content = git(contract.memory_worktree, "rev-parse", "HEAD")
         refresh_memory_cache(contract.memory_worktree, repo_name=contract.repo_name)
-        start_closeout_operation(
-            closeout_operation_input(
-                contract,
-                config_path=self.fixture.config_path,
-                approval_note="approved atomic child candidate",
+        applied = worktree_closeout_apply_tool(
+            self.fixture.cfg,
+            contract.contract_path.as_posix(),
+            CloseoutCommitMessages(
+                code="Add atomic child candidate",
+                memory="Document atomic child memory content",
             ),
-            launcher=lambda *_: None,
+            CloseoutApproval(intent_note="approved atomic child candidate"),
         )
-        store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
-        assert start_operation_record(store).status == "running"
-        finalized = replace(
-            contract,
-            human_review_status="approved",
-            approved_for_commit=True,
-            closeout_status="completed",
-            code_commit=candidate_commit,
-            memory_content_commit=memory_content,
-        )
-        write_contract(finalized.contract_path, finalized)
-        publish_closeout_finalization(store, finalized)
-        finish_operation_record(store, {"state": "closed"}, ok=True)
-        closed = load_contract(finalized.contract_path)
+        assert applied["ok"] is True, applied
+        closed = load_contract(contract.contract_path)
+        assert closed.closeout_status == "completed"
+        assert closed.code_commit == candidate_commit
+        assert closed.memory_content_commit == memory_content
 
-        operation_input = IntegrateOperationInput(
-            configPath=self.fixture.config_path.as_posix(),
-            contractPath=closed.contract_path.as_posix(),
-        )
-        start_or_observe_operation(operation_input, closed, launcher=lambda *_: None)
-        integrate_store = LifecycleOperationStore(
-            operation_record_path(closed.worktree_group, "integrate")
-        )
-        running = integrate_store.read()
-        assert running is not None
         args = WorktreeArgs(
             contract_path=closed.contract_path,
             certification_profile=Path("mcp/certification-profile-v1.json"),
             strategy="ff-only",
             approved=True,
-            operation_key=running.operationKey,
-            operation_generation=running.generation,
         )
         result = integrate_module.integrate_result(args, load_contract(closed.contract_path))
         self.assertEqual(

@@ -120,12 +120,12 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         dry_run: bool = False,
         corrective_dispositions: list[RedCatalogDisposition] | None = None,
     ) -> dict[str, Any]:
-        """Apply an approved worktree closeout and return promptly. States: closed, blocked,
-        closeout-gate-blocked. Answers the state reached and the next call; the whole result
-        is in the log file. Delivered-against-reviewed names
-        same, different, or no review recorded. Poll worktree_status for progress. On converted
-        memory, the invariant gate judges the exact candidate trees; knowledge-gate-refused
-        carries its findings. Reference: docs/reference/mcp-tools.md."""
+        """Apply an approved worktree closeout in one call. States: closed, blocked,
+        closeout-gate-blocked. Returns the state reached and the next call. The whole result
+        is in the log file. Delivered-against-reviewed names same, different, or no review
+        recorded. On converted memory, the invariant gate judges the exact candidate trees.
+        A knowledge-gate-refused answer carries its findings.
+        Reference: docs/reference/mcp-tools.md."""
         return tools.worktree_closeout_apply_payload(
             config,
             contract_path,
@@ -211,9 +211,12 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         dry_run: bool = False,
         caller: DeclaredCaller | None = None,
     ) -> dict[str, Any]:
-        """Retry, recover, resume, cancel, retire or supersede one closeout, integrate or direct-
-        direct-landing generation. States: refused, or the controlled generation's status. Answers the state reached and the next call;
-        the log file. Reference: docs/reference/mcp-tools.md."""
+        """Retry, recover, resume, cancel, retire or supersede one direct-landing generation.
+        States: refused, or the controlled generation's status. Answers the state reached and the
+        next call; the whole result is in the log file. For closeout or integration, an absent
+        or matching journal record returns the replacement tool. When a record exists and its
+        generation differs, the response shows the requested and observed generations.
+        Reference: docs/reference/mcp-tools.md."""
         return tools.worktree_operation_control_payload(
             config,
             OperationControlRequest(

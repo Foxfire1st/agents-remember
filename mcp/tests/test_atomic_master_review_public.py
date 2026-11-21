@@ -6,36 +6,24 @@ import asyncio
 import json
 import os
 import sys
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
-from agents_remember.models.lifecycles.operation import IntegrateOperationInput
+from agents_remember.application.worktree_tool_requests import (
+    CloseoutApproval,
+    CloseoutCommitMessages,
+)
+from agents_remember.application.worktree_tools import worktree_closeout_apply_tool
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.worktrees.activation.atomic_series_activation import (
     publish_atomic_series_selection,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
-    start_or_observe_operation,
 )
 from agents_remember.worktrees.modules import integrate as integrate_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
     load_contract,
-    write_contract,
-)
-from closeout_input_test_support import (
-    closeout_operation_input,
-    finish_operation_record,
-    publish_closeout_finalization,
-    start_closeout_operation,
-    start_operation_record,
 )
 from mcp.client.stdio import stdio_client
 from mcp.types import CallToolResult, TextContent
@@ -104,21 +92,12 @@ def _integrate_exact_leaf(
 ) -> dict[str, Any]:
     """Run the production leaf landing after public dry-run admission."""
 
-    operation_input = IntegrateOperationInput(
-        configPath=config_path.as_posix(),
-        contractPath=leaf.contract_path.as_posix(),
-    )
-    start_or_observe_operation(operation_input, leaf, launcher=lambda *_: None)
-    store = LifecycleOperationStore(operation_record_path(leaf.worktree_group, "integrate"))
-    running = store.read()
-    assert running is not None
+    assert config_path.is_file()
     args = WorktreeArgs(
         contract_path=leaf.contract_path,
         certification_profile=Path("mcp/certification-profile-v1.json"),
         strategy="ff-only",
         approved=True,
-        operation_key=running.operationKey,
-        operation_generation=running.generation,
     )
     result = integrate_module.integrate_result(args, load_contract(leaf.contract_path))
     assert result.returncode == 0
@@ -150,34 +129,20 @@ def _prepare_atomic_leaf_landing(
         git(contract.memory_worktree, "commit", "-m", "atomic child memory content")
     fixture.declare(MASTER_A)
     contract = load_contract(contract.contract_path)
-    start_closeout_operation(
-        closeout_operation_input(
-            contract,
-            config_path=fixture.config_path,
-            approval_note="approved atomic child candidate",
+    applied = worktree_closeout_apply_tool(
+        fixture.cfg,
+        contract.contract_path.as_posix(),
+        CloseoutCommitMessages(
+            code="Add atomic child candidate",
+            memory="Document atomic child candidate",
         ),
-        launcher=lambda *_: None,
+        CloseoutApproval(intent_note="approved atomic child candidate"),
     )
-    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
-    assert start_operation_record(store).status == "running"
-    current = load_contract(contract.contract_path)
-    memory_content_commit = (
-        git(current.memory_worktree, "rev-parse", "HEAD")
-        if current.memory_worktree is not None
-        else ""
-    )
-    finalized = replace(
-        current,
-        human_review_status="approved",
-        approved_for_commit=True,
-        closeout_status="completed",
-        code_commit=candidate_commit,
-        memory_content_commit=memory_content_commit,
-    )
-    write_contract(finalized.contract_path, finalized)
-    publish_closeout_finalization(store, finalized)
-    finish_operation_record(store, {"state": "closed"}, ok=True)
-    return load_contract(finalized.contract_path), candidate_commit
+    assert applied["ok"] is True, applied
+    finalized = load_contract(contract.contract_path)
+    assert finalized.closeout_status == "completed"
+    assert finalized.code_commit == candidate_commit
+    return finalized, candidate_commit
 
 
 def test_closeout_never_gates_on_a_route_review_record_at_either_altitude(

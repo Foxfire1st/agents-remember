@@ -638,7 +638,6 @@
         "componentBindings": {
           "result": "7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab",
           "approval": "7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab",
-          "worker": "7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab",
           "recommendedAction": "7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab",
           "legalControls": ["7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab"]
         },
@@ -660,13 +659,6 @@
         },
         "failure": "fixture failure",
         "guidance": "Fix the reported preflight failure, then restart this task operation.",
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "workerIdentitySha256": "92daae5d6056a7e2e41637cfa2da4c0a252cfe30bff5a219435aba94c814c856",
-          "observedAt": "2026-08-12T12:00:10+00:00",
-          "detail": "exact worker exit is proven"
-        },
         "approval": {
           "state": "claimed"
         },
@@ -806,7 +798,6 @@
         },
         "componentBindings": {
           "approval": "a3119b1285b75a0ea1d1f3507cc457448627800a3ec53f7c120a025b827a2bc2",
-          "worker": "a3119b1285b75a0ea1d1f3507cc457448627800a3ec53f7c120a025b827a2bc2",
           "legalControls": ["a3119b1285b75a0ea1d1f3507cc457448627800a3ec53f7c120a025b827a2bc2"]
         },
         "kind": "closeout",
@@ -819,12 +810,6 @@
         "taskIntent": {
           "schema": "task-intent/v1",
           "digest": "0be82e48f26f53a27f76f21c58eb539503a1734a9360db63fbae7a503faffcd1"
-        },
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:00+00:00",
-          "detail": "no live worker authority is retained"
         },
         "approval": {
           "state": "unclaimed"
@@ -882,7 +867,6 @@
         },
         "componentBindings": {
           "approval": "022c44d824eb102397dd7975505ffa0230c0f09d234230d5d6d667bcecb6e8e1",
-          "worker": "022c44d824eb102397dd7975505ffa0230c0f09d234230d5d6d667bcecb6e8e1",
           "recommendedAction": "022c44d824eb102397dd7975505ffa0230c0f09d234230d5d6d667bcecb6e8e1",
           "legalControls": ["022c44d824eb102397dd7975505ffa0230c0f09d234230d5d6d667bcecb6e8e1"]
         },
@@ -896,12 +880,6 @@
         "taskIntent": {
           "schema": "task-intent/v1",
           "digest": "45b581fa62d48d48038f68c84598edd6f3ed15d0d751059cf7e75203bca1f21b"
-        },
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:00+00:00",
-          "detail": "no live worker authority is retained"
         },
         "approval": {
           "state": "unclaimed"
@@ -968,7 +946,6 @@
         },
         "componentBindings": {
           "approval": "943056f531c1839f0d7b57778defa99a613dc3437f38725410a99bf6545e9a51",
-          "worker": "943056f531c1839f0d7b57778defa99a613dc3437f38725410a99bf6545e9a51",
           "recommendedAction": "943056f531c1839f0d7b57778defa99a613dc3437f38725410a99bf6545e9a51",
           "legalControls": ["943056f531c1839f0d7b57778defa99a613dc3437f38725410a99bf6545e9a51"]
         },
@@ -982,12 +959,6 @@
         "taskIntent": {
           "schema": "task-intent/v1",
           "digest": "ab32b12da0317111d6cb9d76aa37728a01c3efd68a83964c24b12be42cc7e235"
-        },
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:00+00:00",
-          "detail": "no live worker authority is retained"
         },
         "approval": {
           "state": "unclaimed"
@@ -1054,7 +1025,6 @@
         },
         "componentBindings": {
           "approval": "585ec4dc5b87c9c19a07e372f2ec9f9e05849e854b971a2bf36514431b0fa047",
-          "worker": "585ec4dc5b87c9c19a07e372f2ec9f9e05849e854b971a2bf36514431b0fa047",
           "recommendedAction": "585ec4dc5b87c9c19a07e372f2ec9f9e05849e854b971a2bf36514431b0fa047",
           "legalControls": ["585ec4dc5b87c9c19a07e372f2ec9f9e05849e854b971a2bf36514431b0fa047"]
         },
@@ -1068,12 +1038,6 @@
         "taskIntent": {
           "schema": "task-intent/v1",
           "digest": "1fe3355fb9fc56b1a31c065e6614beff26929d73d7f56916a0ef86d707d45b77"
-        },
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:00+00:00",
-          "detail": "no live worker authority is retained"
         },
         "approval": {
           "state": "unclaimed"
@@ -1140,7 +1104,6 @@
         },
         "componentBindings": {
           "approval": "cb098248cdd4f5714c3ee9400d2dc2fa5f4ea54a15bb9c27c854a5c0f95f71ea",
-          "worker": "cb098248cdd4f5714c3ee9400d2dc2fa5f4ea54a15bb9c27c854a5c0f95f71ea",
           "recommendedAction": "cb098248cdd4f5714c3ee9400d2dc2fa5f4ea54a15bb9c27c854a5c0f95f71ea",
           "legalControls": ["cb098248cdd4f5714c3ee9400d2dc2fa5f4ea54a15bb9c27c854a5c0f95f71ea"]
         },
@@ -1154,12 +1117,6 @@
         "taskIntent": {
           "schema": "task-intent/v1",
           "digest": "a29af036598447113467fe10b711219a553112462a40ca5447b55673c6e62ea0"
-        },
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:00+00:00",
-          "detail": "no live worker authority is retained"
         },
         "approval": {
           "state": "unclaimed"
@@ -1227,7 +1184,6 @@
         "componentBindings": {
           "result": "12573f8dfe0a73aeb16f49ea0d0e8628f2e3aaee02dba83d2c9b97f965f1e54b",
           "approval": "12573f8dfe0a73aeb16f49ea0d0e8628f2e3aaee02dba83d2c9b97f965f1e54b",
-          "worker": "12573f8dfe0a73aeb16f49ea0d0e8628f2e3aaee02dba83d2c9b97f965f1e54b",
           "legalControls": []
         },
         "kind": "closeout",
@@ -1243,12 +1199,6 @@
         },
         "result": {
           "nextAction": "recover"
-        },
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:00+00:00",
-          "detail": "no live worker authority is retained"
         },
         "approval": {
           "state": "unclaimed"
@@ -1291,7 +1241,6 @@
         },
         "componentBindings": {
           "approval": "df83b14c3debaa408c8cb33b5dfabe9d046b9ce31fb72a5423b320cf496c16fe",
-          "worker": "df83b14c3debaa408c8cb33b5dfabe9d046b9ce31fb72a5423b320cf496c16fe",
           "recommendedAction": "df83b14c3debaa408c8cb33b5dfabe9d046b9ce31fb72a5423b320cf496c16fe",
           "legalControls": []
         },
@@ -1305,12 +1254,6 @@
         "taskIntent": {
           "schema": "task-intent/v1",
           "digest": "48145cec62e2959ba30262ce5bc3b67d6e47b7161d88725040399edd37b10153"
-        },
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:00+00:00",
-          "detail": "no live worker authority is retained"
         },
         "approval": {
           "state": "unclaimed"
@@ -1362,7 +1305,6 @@
         },
         "componentBindings": {
           "approval": "fade008c49ef89e71d12fb73f13e82733167608091dd865412cd69a8adb85a37",
-          "worker": "fade008c49ef89e71d12fb73f13e82733167608091dd865412cd69a8adb85a37",
           "recommendedAction": "fade008c49ef89e71d12fb73f13e82733167608091dd865412cd69a8adb85a37",
           "legalControls": []
         },
@@ -1376,12 +1318,6 @@
         "taskIntent": {
           "schema": "task-intent/v1",
           "digest": "84478b3ea00c14d220d63f50abbbec2defc96fa336b7d4211d17b12a8b16ec7d"
-        },
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:00+00:00",
-          "detail": "no live worker authority is retained"
         },
         "approval": {
           "state": "unclaimed"
@@ -1433,7 +1369,6 @@
         },
         "componentBindings": {
           "approval": "2c1fd918a2e396e29b4723faf08fde02f6dad6e2901d227c6dfe21a66b7581f1",
-          "worker": "2c1fd918a2e396e29b4723faf08fde02f6dad6e2901d227c6dfe21a66b7581f1",
           "recommendedAction": "2c1fd918a2e396e29b4723faf08fde02f6dad6e2901d227c6dfe21a66b7581f1",
           "legalControls": []
         },
@@ -1447,12 +1382,6 @@
         "taskIntent": {
           "schema": "task-intent/v1",
           "digest": "b5da01e7b1ad207da128d009eccb580c0b5cb255112a75d0d3ca0fcb2c7af05e"
-        },
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:00+00:00",
-          "detail": "no live worker authority is retained"
         },
         "approval": {
           "state": "unclaimed"
@@ -1504,7 +1433,6 @@
         },
         "componentBindings": {
           "approval": "1db0324d4f8f596f8b42146c2ed069a0981acfb80225f0cf0e6caaae4524c0a1",
-          "worker": "1db0324d4f8f596f8b42146c2ed069a0981acfb80225f0cf0e6caaae4524c0a1",
           "recommendedAction": "1db0324d4f8f596f8b42146c2ed069a0981acfb80225f0cf0e6caaae4524c0a1",
           "legalControls": ["1db0324d4f8f596f8b42146c2ed069a0981acfb80225f0cf0e6caaae4524c0a1"]
         },
@@ -1515,12 +1443,6 @@
         "elapsedSeconds": 10.0,
         "currentCommand": "lifecycle stage: integration-replay",
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:00+00:00",
-          "detail": "no live worker authority is retained"
-        },
         "approval": {
           "state": "unclaimed"
         },
@@ -1586,7 +1508,6 @@
         },
         "componentBindings": {
           "approval": "2bb81ddf11e811c8cba043a62604662580cb673e6b3c98cc095c874c2f63afdd",
-          "worker": "2bb81ddf11e811c8cba043a62604662580cb673e6b3c98cc095c874c2f63afdd",
           "recommendedAction": "2bb81ddf11e811c8cba043a62604662580cb673e6b3c98cc095c874c2f63afdd",
           "legalControls": ["2bb81ddf11e811c8cba043a62604662580cb673e6b3c98cc095c874c2f63afdd"]
         },
@@ -1597,12 +1518,6 @@
         "elapsedSeconds": 11.0,
         "currentCommand": "lifecycle stage: integration-quality",
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:00+00:00",
-          "detail": "no live worker authority is retained"
-        },
         "approval": {
           "state": "unclaimed"
         },
@@ -1668,7 +1583,6 @@
         },
         "componentBindings": {
           "approval": "aa60f57bb2941ceb966500df4956a2e2481f7bcdf26e6555ad0bcce637fe64d5",
-          "worker": "aa60f57bb2941ceb966500df4956a2e2481f7bcdf26e6555ad0bcce637fe64d5",
           "recommendedAction": "aa60f57bb2941ceb966500df4956a2e2481f7bcdf26e6555ad0bcce637fe64d5",
           "legalControls": []
         },
@@ -1679,12 +1593,6 @@
         "elapsedSeconds": 12.0,
         "currentCommand": "lifecycle stage: source-merge",
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:00+00:00",
-          "detail": "no live worker authority is retained"
-        },
         "approval": {
           "state": "unclaimed"
         },
@@ -1736,7 +1644,6 @@
         "componentBindings": {
           "result": "6338f3c418af0bd1be1d78e81cc6e57e4fd85171b89405d6ff0daf7446307861",
           "approval": "6338f3c418af0bd1be1d78e81cc6e57e4fd85171b89405d6ff0daf7446307861",
-          "worker": "6338f3c418af0bd1be1d78e81cc6e57e4fd85171b89405d6ff0daf7446307861",
           "legalControls": []
         },
         "kind": "integrate",
@@ -1748,12 +1655,6 @@
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
         "result": {
           "nextAction": "recover"
-        },
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:00+00:00",
-          "detail": "no live worker authority is retained"
         },
         "approval": {
           "state": "unclaimed"
@@ -1796,7 +1697,6 @@
         },
         "componentBindings": {
           "approval": "4a82f605665599ff631768af2b535bc1e44de3df9fe2afd7903a1e2fdf599283",
-          "worker": "4a82f605665599ff631768af2b535bc1e44de3df9fe2afd7903a1e2fdf599283",
           "recommendedAction": "4a82f605665599ff631768af2b535bc1e44de3df9fe2afd7903a1e2fdf599283",
           "legalControls": []
         },
@@ -1808,12 +1708,6 @@
         "elapsedSeconds": 14.0,
         "currentCommand": "lifecycle stage: completed",
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:14+00:00",
-          "detail": "no live worker authority is retained"
-        },
         "approval": {
           "state": "unclaimed"
         },
@@ -1864,7 +1758,6 @@
         },
         "componentBindings": {
           "approval": "9b526ee22c636111f290e0aca97b60e4665aea45018baa1c484a2a6d1c19bea4",
-          "worker": "9b526ee22c636111f290e0aca97b60e4665aea45018baa1c484a2a6d1c19bea4",
           "legalControls": []
         },
         "kind": "integrate",
@@ -1875,12 +1768,6 @@
         "elapsedSeconds": 15.0,
         "currentCommand": "lifecycle stage: cancelled",
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
-        "worker": {
-          "state": "exited",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:15+00:00",
-          "detail": "no live worker authority is retained"
-        },
         "approval": {
           "state": "unclaimed"
         },
@@ -2278,7 +2165,6 @@
             "componentBindings": {
               "result": "9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa",
               "approval": "9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa",
-              "worker": "9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa",
               "recommendedAction": "9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa",
               "legalControls": ["9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa"]
             },
@@ -2300,13 +2186,6 @@
             },
             "failure": "fixture failure",
             "guidance": "Fix the reported preflight failure, then restart this task operation.",
-            "worker": {
-              "state": "exited",
-              "identityRetained": false,
-              "workerIdentitySha256": "92daae5d6056a7e2e41637cfa2da4c0a252cfe30bff5a219435aba94c814c856",
-              "observedAt": "2026-08-12T12:00:10+00:00",
-              "detail": "exact worker exit is proven"
-            },
             "approval": {
               "state": "claimed"
             },

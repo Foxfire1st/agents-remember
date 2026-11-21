@@ -442,10 +442,10 @@ def _fixed_short_part(
     if "buildCurrentness" in answer:
         short["buildCurrentness"] = answer["buildCurrentness"]
     if isinstance(answer.get("runningOperation"), str):
-        # A live lifecycle operation is never traded away for space. The status
-        # answer says which operation this enclosure is running, and the closeout tool's
-        # description tells its caller to poll that answer for progress, so the sentence
-        # rides the short form whole -- a short string cannot crowd out the fixed part.
+        # The status answer puts a queued or running direct landing in one compact
+        # sentence. Keep that line with the fixed fields of the short form so the
+        # caller can identify the live generation even when reading the full result
+        # requires opening its log.
         short["runningOperation"] = answer["runningOperation"][:TOOL_ANSWER_SHORT_STRING_MAX]
     short["overflow"] = True
     short["answerTokens"] = answer_tokens
