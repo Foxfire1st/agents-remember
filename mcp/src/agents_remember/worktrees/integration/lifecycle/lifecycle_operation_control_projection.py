@@ -9,26 +9,17 @@ from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.models.task_intent import TaskIntentIdentity
-from agents_remember.worktrees.integration.closeout.initial_door_recovery import (
-    classify_initial_closeout_door_recovery,
-)
 from agents_remember.worktrees.integration.closeout.recovery_projection import (
     closeout_generation_retained,
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_recovery_state import (
     classify_direct_landing_recovery,
 )
-from agents_remember.worktrees.integration.integration_operation_decision import (
-    IntegrationOperationObservation,
-    classify_integration_operation,
-)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_errors import (
     LifecycleControlError,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
-    closeout_contract_sha256,
     completed_direct_owner,
-    operation_state_fingerprint,
     retired_direct_record,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
@@ -40,21 +31,16 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
 from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
     classify_migrated_lifecycle,
 )
-from agents_remember.worktrees.integration.lifecycle.worker.termination import (
-    worker_exit_unproven,
-)
-from agents_remember.worktrees.integration.mutation_evidence import closeout_requires_recovery
 from agents_remember.worktrees.modules.git import branch_commit, require_git
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 @dataclass(frozen=True)
 class LifecycleControlProjectionContext:
-    """Caller authority plus the two live observations read for one projection."""
+    """Caller authority for the direct-landing controls projection."""
 
     allow_completed_disposition: bool = False
     caller: DeclaredCaller | None = None
-    integration: IntegrationOperationObservation | None = None
 
 
 def legal_operation_controls(
@@ -66,58 +52,33 @@ def legal_operation_controls(
     """Derive only controls whose public handler can revalidate this generation."""
 
     context = context or LifecycleControlProjectionContext()
-    base = _control_arguments(contract, record, context.caller)
-    publication = record.doorPublication
-    if record.operationKind == "direct-landing" and publication is not None:
-        # A stored record of the earlier shape, which carries a door
-        # publication, is offered no control (ruling e55c0093 point 5); no
-        # writer can produce such a record, and reading one is no error.
+    if record.operationKind != "direct-landing":
+        # Only a direct landing keeps a generation in the journal; a closeout or integration
+        # record left by an older build is refused with the tool that replaces it, so offering
+        # a control here would advertise a call that always refuses.
         return []
-    if publication is not None and publication.state == "intent":
-        pending = _pending_door_control(
-            record,
-            base,
-            allow_completed_disposition=context.allow_completed_disposition,
-        )
-        return _without_legacy_generation_reuse(
-            record,
-            [pending] if pending is not None else [],
-        )
-    integration_observation, evidence_controls = _evidence_controls(
-        contract,
-        record,
-        base,
-        context.integration,
-    )
-    if evidence_controls is not None:
-        return _without_legacy_generation_reuse(record, evidence_controls)
+    base = _control_arguments(contract, record, context.caller)
+    if record.doorPublication is not None:
+        # A legacy direct-landing generation with a door publication stays visible for audit.
+        return []
+    if classify_direct_landing_recovery(contract, record).state == "developer-decision":
+        return []
     migration = classify_migrated_lifecycle(record)
     if migration.state == "terminal" and record.status == "failed":
         return []
     if record.status == "termination-required":
         controls = [_control("cancel", base, "Complete exact same-generation cancellation.")]
-    elif worker_exit_unproven(record):
-        controls = [_control("cancel", base, "Retry exact worker termination and prove exit.")]
     elif record.status == "cancelled":
-        controls = _cancelled_controls(
-            contract,
-            record,
-            base,
-            integration_observation=integration_observation,
-        )
+        controls = [_direct_successor_control(contract, record)]
     elif record.status == "completed":
-        controls = _completed_controls(
+        controls = _completed_direct_controls(
             contract,
             record,
             base,
             allow_completed_disposition=context.allow_completed_disposition,
         )
     else:
-        controls = _nonterminal_controls(
-            record,
-            base,
-            integration_observation=integration_observation,
-        )
+        controls = _nonterminal_controls(record, base)
     return _without_legacy_generation_reuse(record, controls)
 
 
@@ -125,24 +86,9 @@ def _without_legacy_generation_reuse(
     record: LifecycleOperationRecord,
     controls: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    if record.operationKind not in {"closeout", "direct-landing"} or isinstance(
-        record.taskIntent, TaskIntentIdentity
-    ):
+    if isinstance(record.taskIntent, TaskIntentIdentity) or _direct_generation_bound(record):
         return controls
-    if (
-        record.operationKind == "direct-landing"
-        and _direct_generation_bound(record)
-        and record.doorPublication is None
-    ):
-        # A current direct-landing generation binds its leaf on its own
-        # input; only a legacy generation without that binding reuses
-        # recover/retry unsafely (F04). A direct landing is admitted by its
-        # own request and never carries a task intent; its recover is a real
-        # control (MIK-R143 rule 3b). A record of the earlier shape, which
-        # carries a door publication, keeps the strip: it is offered no
-        # recover and no retry (ruling e55c0093 point 5). Only a closeout
-        # without an intent keeps today's treatment.
-        return controls
+    # An older generation without a leaf binding cannot reuse recover or retry safely.
     return [control for control in controls if control["action"] not in {"recover", "retry"}]
 
 
@@ -154,62 +100,6 @@ def _direct_generation_bound(record: LifecycleOperationRecord) -> bool:
         isinstance(operation_input, DirectLandingOperationInput)
         and operation_input.leafTaskDocumentRef is not None
     )
-
-
-def _evidence_controls(
-    contract: WorktreeContract,
-    record: LifecycleOperationRecord,
-    base: dict[str, object],
-    observation: IntegrationOperationObservation | None,
-) -> tuple[IntegrationOperationObservation | None, list[dict[str, Any]] | None]:
-    recovery_controls = _recovery_evidence_controls(contract, record)
-    if recovery_controls is not None:
-        return observation, recovery_controls
-    observation = _integration_observation(
-        contract,
-        record,
-        observation,
-    )
-    if observation is not None and observation.decision is not None:
-        return observation, []
-    repair_controls = _repair_controls(observation, base)
-    if repair_controls is not None:
-        return observation, repair_controls
-    return observation, None
-
-
-def _recovery_evidence_controls(
-    contract: WorktreeContract,
-    record: LifecycleOperationRecord,
-) -> list[dict[str, Any]] | None:
-    initial_door = classify_initial_closeout_door_recovery(contract, record)
-    if initial_door.state == "developer-decision":
-        return []
-    direct_recovery = classify_direct_landing_recovery(contract, record)
-    if direct_recovery.state == "developer-decision":
-        return []
-    return None
-
-
-def _integration_observation(
-    contract: WorktreeContract,
-    record: LifecycleOperationRecord,
-    observation: IntegrationOperationObservation | None,
-) -> IntegrationOperationObservation | None:
-    if record.operationKind != "integrate":
-        return None
-    return observation or classify_integration_operation(contract, record)
-
-
-def _repair_controls(
-    observation: IntegrationOperationObservation | None,
-    base: dict[str, object],
-) -> list[dict[str, Any]] | None:
-    if observation is None or observation.repair.state == "not-applicable":
-        return None
-    if observation.repair.state == "accepted":
-        return [_control("cancel", base, "Publish and prove the exact contract reset.")]
-    return []
 
 
 def _control_arguments(
@@ -232,47 +122,15 @@ def _control_arguments(
 def _nonterminal_controls(
     record: LifecycleOperationRecord,
     base: dict[str, object],
-    *,
-    integration_observation: IntegrationOperationObservation | None,
 ) -> list[dict[str, Any]]:
-    if record.operationKind == "integrate":
-        assert integration_observation is not None
-        if (
-            integration_observation.refs is not None
-            and integration_observation.refs.state == "conflict"
-        ):
-            return []
-    if record.operationKind == "closeout":
-        if closeout_requires_recovery(record):
-            return [_control("resume", base, "Reconcile and continue this exact generation.")]
-        controls = [_control("cancel", base, "Cancel after proving no publication output.")]
-        if record.status in {"failed", "input-required"} or (
-            record.status == "queued" and record.workerPid is None
-        ):
-            controls.insert(
-                0,
-                _resume_control(record, base),
-            )
-        return controls
+    """The two controls a live direct landing has; every other kind is refused before this."""
+
     if generation_requires_recovery(record):
         return [_control("recover", base, "Reconcile and continue this exact generation.")]
-    if record.operationKind == "direct-landing":
-        return [
-            _control("recover", base, "Execute the admitted synchronous generation."),
-            _control("cancel", base, "Cancel after proving both Git legs unchanged."),
-        ]
-    controls = [_control("cancel", base, "Cancel after proving no output and worker exit.")]
-    if record.status == "queued" and record.workerPid is None:
-        controls.insert(
-            0,
-            _control("recover", base, "Launch the accepted generation after publication."),
-        )
-    if record.status in {"failed", "input-required"}:
-        controls.insert(
-            0,
-            _control("retry", base, "Retry the same immutable input and candidate."),
-        )
-    return controls
+    return [
+        _control("recover", base, "Execute the admitted synchronous generation."),
+        _control("cancel", base, "Cancel after proving both Git legs unchanged."),
+    ]
 
 
 def generation_requires_recovery(record: LifecycleOperationRecord) -> bool:
@@ -281,30 +139,6 @@ def generation_requires_recovery(record: LifecycleOperationRecord) -> bool:
     if record.operationKind in {"closeout", "direct-landing"}:
         return closeout_generation_retained(record)
     return record.irreversibleBoundaryEntered or record.integrationPublication is not None
-
-
-def _pending_door_control(
-    record: LifecycleOperationRecord,
-    base: dict[str, object],
-    *,
-    allow_completed_disposition: bool,
-) -> dict[str, Any] | None:
-    publication = record.doorPublication
-    if publication is None or publication.state != "intent":
-        return None
-    disposition = publication.generation.disposition
-    action = pending_door_action(record)
-    if action is None:
-        return None
-    if action in {"retire", "supersede"} and not allow_completed_disposition:
-        return None
-    if action == "supersede":
-        return _supersede_control(record, base)
-    return _control(
-        action,
-        base,
-        f"Finish the exact pending {disposition} closeout-door publication.",
-    )
 
 
 def pending_door_action(
@@ -323,72 +157,6 @@ def pending_door_action(
         if record.status == "cancelled":
             return "cancel"
     return None
-
-
-def _cancelled_controls(
-    contract: WorktreeContract,
-    record: LifecycleOperationRecord,
-    base: dict[str, object],
-    *,
-    integration_observation: IntegrationOperationObservation | None,
-) -> list[dict[str, Any]]:
-    publication = record.doorPublication
-    if publication is not None and publication.state == "intent":
-        return [_control("cancel", base, "Finish the durable cancellation disposition.")]
-    if record.operationKind == "closeout":
-        return [_resume_control(record, base)]
-    if record.operationKind == "direct-landing":
-        return [_direct_successor_control(contract, record)]
-    assert integration_observation is not None
-    return _cancelled_integration_controls(
-        contract,
-        record,
-        base,
-        integration_observation=integration_observation,
-    )
-
-
-def _cancelled_integration_controls(
-    contract: WorktreeContract,
-    record: LifecycleOperationRecord,
-    base: dict[str, object],
-    *,
-    integration_observation: IntegrationOperationObservation,
-) -> list[dict[str, Any]]:
-    if record.organizationalRepair is not None:
-        if integration_observation.repair.state == "accepted":
-            return [_control("cancel", base, "Prove the exact journal-owned contract reset.")]
-        if integration_observation.repair.state != "not-applicable":
-            return []
-    if contract.closeout_status != "completed":
-        return []
-    if operation_state_fingerprint(contract) != record.candidateState:
-        return [_integration_control(contract, summary="Start a freshly validated successor.")]
-    return []
-
-
-def _completed_controls(
-    contract: WorktreeContract,
-    record: LifecycleOperationRecord,
-    base: dict[str, object],
-    *,
-    allow_completed_disposition: bool,
-) -> list[dict[str, Any]]:
-    if record.operationKind == "direct-landing":
-        return _completed_direct_controls(
-            contract,
-            record,
-            base,
-            allow_completed_disposition=allow_completed_disposition,
-        )
-    if record.operationKind != "closeout":
-        return []
-    return _completed_closeout_controls(
-        contract,
-        record,
-        base,
-        allow_completed_disposition=allow_completed_disposition,
-    )
 
 
 def _completed_direct_controls(
@@ -435,42 +203,6 @@ def direct_supersede_refusal(
     )
 
 
-def _completed_closeout_controls(
-    contract: WorktreeContract,
-    record: LifecycleOperationRecord,
-    base: dict[str, object],
-    *,
-    allow_completed_disposition: bool,
-) -> list[dict[str, Any]]:
-    if record.generationDisposition == "superseded":
-        publication = record.doorPublication
-        exact_successor = bool(
-            publication is not None and publication.generation.disposition == "waiting"
-        )
-        return (
-            [_supersede_control(record, base)]
-            if allow_completed_disposition and exact_successor
-            else []
-        )
-    exact_owner = (
-        contract.integration_status != "completed"
-        and record.generationDisposition == "active"
-        and closeout_generation_retained(record)
-        and record.closeoutFinalizedContractSha256 == closeout_contract_sha256(contract)
-    )
-    if not exact_owner or _integration_claim_active(contract):
-        return []
-    controls = [_integration_control(contract, summary="Integrate the exact completed generation.")]
-    if allow_completed_disposition:
-        controls.extend(
-            (
-                _control("retire", base, "Retire the completed unintegrated generation."),
-                _supersede_control(record, base),
-            )
-        )
-    return controls
-
-
 def _integration_claim_active(contract: WorktreeContract) -> bool:
     try:
         record = located_lifecycle_operation_store(contract, "integrate").read()
@@ -481,36 +213,6 @@ def _integration_claim_active(contract: WorktreeContract) -> bool:
         and record.integrationPublication is not None
         and record.status not in {"cancelled", "failed"}
     )
-
-
-def _supersede_control(
-    record: LifecycleOperationRecord,
-    base: dict[str, object],
-) -> dict[str, Any]:
-    publication = record.doorPublication
-    door = (
-        publication.generation
-        if publication is not None and publication.generation.disposition == "waiting"
-        else None
-    )
-    if door is None:
-        return _control("supersede", base, "Publish one fresh waiting door successor.")
-    control = _control("supersede", base, "Publish one fresh waiting door successor.")
-    control["arguments"].update(
-        {
-            "grade": {
-                "priority": door.schedulingProvenance.priority,
-                "judgmentId": door.schedulingProvenance.judgmentId,
-            },
-            "admission": {
-                "resourceReady": door.admissionProvenance.resourceReady,
-                "resourceReason": door.admissionProvenance.resourceReason,
-                "admissionReady": door.admissionProvenance.admissionReady,
-                "admissionReason": door.admissionProvenance.admissionReason,
-            },
-        }
-    )
-    return control
 
 
 def _control(action: str, base: dict[str, object], summary: str) -> dict[str, Any]:
@@ -527,41 +229,6 @@ def _control(action: str, base: dict[str, object], summary: str) -> dict[str, An
         "generationEffect": generation_effect,
         "tool": "worktree_operation_control",
         "arguments": {**base, "action": action},
-        "summary": summary,
-    }
-
-
-def _resume_control(
-    record: LifecycleOperationRecord,
-    base: dict[str, object],
-) -> dict[str, Any]:
-    control = _control("resume", base, "Validate and publish one fresh successor.")
-    operation_input = record.input
-    effective = getattr(operation_input, "effectiveInput", None)
-    arguments = control["arguments"]
-    for leg in ("code", "memory"):
-        arguments[f"{leg}_commit_message"] = (
-            f"<fresh nonblank {leg} commit message>"
-            if effective is not None and effective.enabled(leg)
-            else None
-        )
-    return control
-
-
-def _integration_control(
-    contract: WorktreeContract,
-    *,
-    summary: str,
-) -> dict[str, Any]:
-    return {
-        "action": "integrate",
-        "generationEffect": "successor",
-        "tool": "worktree_integrate",
-        "arguments": {
-            "contract_path": contract.contract_path.as_posix(),
-            "strategy": "ff-only",
-            "dry_run": False,
-        },
         "summary": summary,
     }
 

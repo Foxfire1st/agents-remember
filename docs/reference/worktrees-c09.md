@@ -202,12 +202,16 @@ this route, where the contract's integration strategy is set and is not the pull
 route without a strategy, and a pull-request route whose pull request is not opened yet, reads
 `planned`, and a route whose observation needs `gh` reads `unknown` with `factState` `missing` while
 `gh` is unavailable. That tool
-controls one run that the journal records (`operation_kind` `closeout`, `integrate` or
-`direct-landing`): its `action` is `retry`, `recover`, `resume`, `cancel`, `retire` or
-`supersede`, and it also takes `contract_path`, `expected_generation` and `intent_note` (see
+takes an `operation_kind` of `closeout`, `integrate` or `direct-landing`, its `action` is `retry`,
+`recover`, `resume`, `cancel`, `retire` or `supersede`, and it also takes `contract_path`,
+`expected_generation` and `intent_note` (see
 [Closeout and landing](mcp-tools.md#closeout-and-landing)). Only a direct landing leaves a run in
-the journal. For `operation_kind` `closeout` or `integrate`, a request that passes the checks of
-its shape, its contract and its caller is refused with `lifecycle-operation-missing`. For a direct
+the journal and can be controlled. For `operation_kind` `closeout` or `integrate` the call is
+refused with `lifecycle-operation-retired`, which names `worktree_closeout_apply` or
+`worktree_integrate` as the way on: a closeout and an integration run inside their own call and
+record nothing. The replacement is returned when the journal has no record of that kind or the
+requested generation matches an older record. A mismatch returns `lifecycle-generation-changed`
+with the requested and observed generation. Older records remain visible for audit. For a direct
 landing, a failure before any output may retry the same input or cancel; a changed input needs a
 new `direct_landing` call, because `supersede` is refused for a direct landing with
 `lifecycle-direct-supersede-unavailable`. Ambiguous or proven output must recover the same

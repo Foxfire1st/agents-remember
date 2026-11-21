@@ -36,7 +36,6 @@ from agents_remember.models.closeout.input import (
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.tasks import TaskEnclosureRef, read_task_doc, write_task_doc
 from agents_remember.worktrees.integration.closeout import curator_coherence as coherence
-from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
 from agents_remember.worktrees.modules import closeout_external
 from agents_remember.worktrees.modules import git as git_owner
 from agents_remember.worktrees.modules.landing_commit_check import LandingCommitCheckRefusal
@@ -285,13 +284,12 @@ def _closeout_fixture(tmp_path, *, converted: bool = False):
 
 
 def _apply(config, contract) -> dict:
-    with mock.patch.object(lifecycle_operations, "require_first_ready_generation"):
-        return worktree_tools.worktree_closeout_apply_tool(
-            config,
-            contract.contract_path.as_posix(),
-            MESSAGES,
-            CloseoutApproval(intent_note="approved confined transaction"),
-        )
+    return worktree_tools.worktree_closeout_apply_tool(
+        config,
+        contract.contract_path.as_posix(),
+        MESSAGES,
+        CloseoutApproval(intent_note="approved confined transaction"),
+    )
 
 
 def _move_branch(repository: Path) -> None:
@@ -484,12 +482,6 @@ def _closeout_through_failing_then_passing_hooks(config, contract, messages, roo
     with ExitStack() as stack:
         for patcher in _forbid_acceptance_tools():
             stack.enter_context(patcher)
-        # The existing helper publishes a deliberately non-applicable waiting door.  Its
-        # disposable sprint has no queue projection, so bypass only that fixture fence while
-        # retaining the public apply admission.
-        stack.enter_context(
-            mock.patch.object(lifecycle_operations, "require_first_ready_generation")
-        )
         preview = worktree_tools.worktree_closeout_preview_tool(
             config, contract.contract_path.as_posix(), messages
         )

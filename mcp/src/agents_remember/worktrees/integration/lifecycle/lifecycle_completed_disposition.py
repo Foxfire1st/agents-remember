@@ -43,12 +43,6 @@ def require_completed_disposition(
         record,
     )
     _require_completed_owner(contract, record, exact_owner)
-    if record.workerPid is not None:
-        raise LifecycleControlError(
-            "lifecycle-worker-still-authoritative",
-            "completed operation worker exit has not been proven",
-            next_action="cancel",
-        )
 
 
 def _require_idle_integration_claim(

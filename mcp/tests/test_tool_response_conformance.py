@@ -68,6 +68,9 @@ from agents_remember.worktrees.activation import atomic_series_activation_termin
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_errors import (
     LifecycleControlError,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
+    _retired_generation_refusal,
+)
 from agents_remember.worktrees.modules.finalize import FinalizeArgs, _finalized_result
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 from mcp.server.fastmcp import FastMCP
@@ -811,22 +814,25 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
     def test_every_next_tool_its_own_refusals_advertise_is_declared(self) -> None:
         """T8: the narrowed ``nextTool`` Literal must carry what the producers emit.
 
-        The value set is derived from the lifecycle integration package's own source, so a
-        fourth successor cannot be added without this case seeing it -- that is the shape
-        the defect had: two refusals emitted ``worktree_closeout_preview`` while the
-        response model's three-value ``Literal`` forbade it, and the refusal was raised
-        *after* the journal mutation, so the caller lost status, detail and next action.
-        The refusal payload is assembled exactly as
-        ``application/worktree_tools.py:683-696`` assembles it.
+        Read the package's literal successors and exercise the retirement producer, whose
+        replacements depend on the operation kind. Each emitted tool must survive the
+        same response boundary that would otherwise discard the refusal's status and advice.
         """
 
         emitted: set[str] = set()
         for path in sorted(LIFECYCLE_PACKAGE.glob("*.py")):
             emitted |= literal_keyword_values(path, "next_tool")
+        for kind in ("closeout", "integrate"):
+            with self.assertRaises(LifecycleControlError) as retired:
+                _retired_generation_refusal(kind, "/scratch/series-contract.md")
+            replacement = retired.exception.next_tool
+            assert replacement is not None
+            emitted.add(replacement)
         self.assertEqual(
             {
                 "direct_landing",
-                "worktree_closeout_preview",
+                "worktree_closeout_apply",
+                "worktree_integrate",
                 "worktree_operation_control",
             },
             emitted,

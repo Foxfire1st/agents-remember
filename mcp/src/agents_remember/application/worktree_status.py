@@ -458,20 +458,29 @@ def _replace_operation_status(
     ]
     result["lifecycleOperationCount"] = len(operations)
     if (line := _running_operation_line(operations)) is not None:
-        # A running closeout must survive the answer's size guard: the guard keeps a short
-        # string where it drops the projection list, and the closeout tool's own description
-        # tells the caller to poll this answer for progress. So one sentence names the
-        # operation, its generation and its state, and `_fixed_short_part` keeps it whole.
+        # One compact sentence names the kind, generation and state of a queued or
+        # running direct landing. `_fixed_short_part` keeps it when the answer is
+        # cut for size. The saved result retains the full projection list for
+        # inspection.
         result["runningOperation"] = line
 
 
 LIVE_OPERATION_STATUSES = frozenset({"queued", "running"})
+
+# The only kind this journal runs. A closeout and an integration run inside their own call and
+# record nothing, so any record of either kind is history to inspect, not work to report.
+JOURNAL_CONTROLLED_KINDS = frozenset({"direct-landing"})
 
 
 def _running_operation_line(operations: list[LifecycleOperationProjection]) -> str | None:
     """Name the operation this enclosure is running, in one short sentence, or ``None``."""
 
     for operation in operations:
+        if operation.kind not in JOURNAL_CONTROLLED_KINDS:
+            # A closeout and an integration record nothing, so a queued or running record of
+            # either kind is an older build's leftover: it stays inspectable in the journal and
+            # is never presented as live work with controls that cannot run.
+            continue
         if operation.status not in LIVE_OPERATION_STATUSES:
             continue
         generation = f" generation {operation.generation}" if operation.generation else ""

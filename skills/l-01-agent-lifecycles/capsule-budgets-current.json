@@ -6188,19 +6188,19 @@
         "architect/orientation": 4664,
         "architect/planning": 4434,
         "architect/review": 4675,
-        "architect/coordination": 5496,
+        "architect/coordination": 5462,
         "architect/authorized-closeout": 4078,
         "architect/recovery": 3907,
         "orchestrator/orientation": 2810,
         "orchestrator/planning": 2144,
         "orchestrator/review": 2492,
-        "orchestrator/coordination": 3765,
+        "orchestrator/coordination": 3731,
         "orchestrator/authorized-closeout": 2328,
         "orchestrator/recovery": 2157,
         "manager/orientation": 3466,
         "manager/review": 3148,
         "manager/curation": 3300,
-        "manager/coordination": 4596,
+        "manager/coordination": 4562,
         "manager/authorized-closeout": 2984,
         "manager/recovery": 2813,
         "worker/orientation": 3261,
@@ -6394,8 +6394,8 @@
         "sha256": "0d42dc6e8fefde7dc9d349da15fa0e5b0cabf48e5393d7b93daa2c6ec40ccf8e"
       },
       "skills/l-01-agent-lifecycles/operations/coordination.md": {
-        "size_words": 2242,
-        "sha256": "105a7bbced55c529bada31c8be63362def6344230ebdcf4a6e8a9f0481fbc70b"
+        "size_words": 2208,
+        "sha256": "e080d75e7e2c8b4bb001bed45b7095c6f2a5861f6088e7d3283256ed34bfdc7d"
       },
       "skills/l-01-agent-lifecycles/operations/curation.md": {
         "size_words": 1730,
@@ -6646,8 +6646,8 @@
         "sha256": "78fedcd5acfb265b0ea28f7ace834df5bcdc9a759150b7b0d3eb68e4a7bcb1eb"
       },
       "skills/l-01-agent-lifecycles/templates/manager-brief.md": {
-        "size_words": 1455,
-        "sha256": "5488060f32244e500220deb21c609e5b3308e05211e99c3ce9c954b2ae1560a3"
+        "size_words": 1465,
+        "sha256": "8938f7dc698a85538e3e29ff6bb407898d7dc6dc980869c4299097afb7cd446f"
       },
       "skills/l-01-agent-lifecycles/templates/master-handover-packet.md": {
         "size_words": 742,
@@ -6698,7 +6698,7 @@
       "core/loop.md": "sha256:7d47ecf18036fdba20740dcb8d5811898abc1dd0cf142f3275b4eea1a9fc92ee",
       "operations/bootstrap.md": "sha256:c988052b9a104b4206086b55f10178c308a38eebe091cac422d7b5976a73b96f",
       "operations/closeout.md": "sha256:0d42dc6e8fefde7dc9d349da15fa0e5b0cabf48e5393d7b93daa2c6ec40ccf8e",
-      "operations/coordination.md": "sha256:105a7bbced55c529bada31c8be63362def6344230ebdcf4a6e8a9f0481fbc70b",
+      "operations/coordination.md": "sha256:e080d75e7e2c8b4bb001bed45b7095c6f2a5861f6088e7d3283256ed34bfdc7d",
       "operations/curation.md": "sha256:1857e1beb8ca9269588a3c811ad6b395f112edd2e0ddc81dc5bbb03b504b5a3a",
       "operations/implementation.md": "sha256:d469d2dc23df72eb45627493074e2c93b70f5974c41016e9a1a143df08b1ab82",
       "operations/orientation.md": "sha256:3120f8aea8dbc2fafb10fd9722e54e4e58c03f87dbe630a343e44bdb87f5cd30",

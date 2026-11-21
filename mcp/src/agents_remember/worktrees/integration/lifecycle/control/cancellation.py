@@ -14,7 +14,6 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.models.lifecycles.termination import (
     LifecycleCancellationEvidence,
-    WorkerTerminationEvidence,
 )
 from agents_remember.worktrees.integration.closeout.door import (
     live_closeout_door,
@@ -51,13 +50,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_project
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
 )
-from agents_remember.worktrees.integration.lifecycle.worker.state import release_worker_after_exit
-from agents_remember.worktrees.integration.lifecycle.worker.termination import (
-    bounded_worker_termination_outcome,
-    public_worker_termination_evidence,
-    signal_worker_and_prove_exit,
-    worker_termination_request,
-)
 from agents_remember.worktrees.integration.organizational_completion_repair import (
     OrganizationalRepairPublicationError,
     prepare_organizational_completion_repair,
@@ -78,18 +70,12 @@ def cancel_operation(
     *,
     dry_run: bool,
 ) -> LifecycleOperationProjection:
-    """Cancel one generation without allowing its worker authority to escape."""
+    """Cancel one generation and prove it published no Git output."""
 
     _require_readable_direct_closings(contract, record)
     terminal = _terminal_cancel_projection(contract, store, record, dry_run=dry_run)
     if terminal is not None:
         return terminal
-    record = _terminate_worker(
-        store,
-        record,
-        dry_run=dry_run,
-        cancellation_pending=True,
-    )
     evidence, record = prove_cancellable_git(store, record, publish=not dry_run)
     if dry_run:
         return operation_projection(record, contract=contract)
@@ -128,14 +114,6 @@ def _terminal_cancel_projection(
         projection = operation_projection(completed, contract=current_contract)
         return project_closeout_refresh(projection, current_contract, completed, dry_run=dry_run)
     if record.status == "completed":
-        if record.workerPid is not None:
-            terminated = _terminate_worker(
-                store,
-                record,
-                dry_run=dry_run,
-                cancellation_pending=False,
-            )
-            return operation_projection(terminated, contract=contract)
         raise LifecycleControlError(
             "lifecycle-cancel-completed",
             "a completed operation cannot be cancelled; choose retire or supersede",
@@ -196,8 +174,6 @@ def _publish_cancelled_outcome(
                 "currentCommand": "publish cancelled journal outcome",
                 "generationDisposition": "cancelled",
                 "cancellationEvidence": evidence,
-                "terminationReturnStatus": None,
-                "terminationReturnPhase": None,
                 "guidance": _cancelled_guidance(record.operationKind),
             }
         )
@@ -328,70 +304,6 @@ def _raise_queue_repair_failure(
         },
         next_action="developer-decision",
     ) from error
-
-
-def _terminate_worker(
-    store: LifecycleOperationStore,
-    record: LifecycleOperationRecord,
-    *,
-    dry_run: bool,
-    cancellation_pending: bool,
-) -> LifecycleOperationRecord:
-    if record.workerPid is None:
-        if record.workerTermination is not None and record.workerTermination.state != "exited":
-            raise LifecycleControlError(
-                "worker-termination-ambiguous",
-                "worker termination authority is unproven",
-                observed=public_worker_termination_evidence(record.workerTermination),
-                next_action="cancel",
-            )
-        return record
-    request = record.workerTermination or worker_termination_request(record)
-    if dry_run:
-        return record
-    needs_intent = record.workerTermination is None or (
-        cancellation_pending and not record.cancelRequested
-    )
-    if needs_intent:
-        record = store.update(
-            lambda current: _request_worker_termination(
-                current,
-                request=request,
-                cancellation_pending=cancellation_pending,
-            )
-        )
-    outcome = bounded_worker_termination_outcome(signal_worker_and_prove_exit(request))
-    if outcome.state != "exited":
-        store.update(lambda current: current.model_copy(update={"workerTermination": outcome}))
-        raise LifecycleControlError(
-            "worker-termination-required",
-            outcome.detail,
-            expected={"state": "exited", "workerAuthority": "retained-until-proof"},
-            observed=public_worker_termination_evidence(outcome),
-            next_action="cancel",
-        )
-    return store.update(lambda current: release_worker_after_exit(current, outcome))
-
-
-def _request_worker_termination(
-    current: LifecycleOperationRecord,
-    *,
-    request: WorkerTerminationEvidence,
-    cancellation_pending: bool,
-) -> LifecycleOperationRecord:
-    if current.status == "termination-required":
-        return current
-    return current.model_copy(
-        update={
-            "status": "termination-required",
-            "phase": "termination-required",
-            "cancelRequested": cancellation_pending or current.cancelRequested,
-            "workerTermination": request,
-            "terminationReturnStatus": current.status,
-            "terminationReturnPhase": current.phase,
-            "currentCommand": "terminate exact lifecycle worker process",
-        }
-    )
 
 
 def _cancelled_guidance(kind: LifecycleOperationKind) -> str:

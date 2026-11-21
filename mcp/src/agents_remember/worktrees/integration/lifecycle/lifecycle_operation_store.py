@@ -29,8 +29,6 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationStatus,
     meaningful_state_changed,
 )
-from agents_remember.models.lifecycles.preparation_state import validate_preparation_transition
-from agents_remember.models.lifecycles.termination import WorkerTerminationEvidence
 from agents_remember.models.task_intent import (
     require_task_intent_identity,
     task_intent_is_missing,
@@ -45,7 +43,7 @@ _OWNERSHIP = StoreOwnership(
     store="lifecycle-operation",
     writers=("mcp", "lifecycle-operation"),
     compaction_owner=None,
-    rationale="the MCP starts operations and its detached worker advances the same record",
+    rationale="the MCP starts and advances one lifecycle operation record",
 )
 _TERMINAL = frozenset({"completed", "failed", "cancelled"})
 _NON_RESUMABLE = frozenset({"completed", "cancelled"})
@@ -190,71 +188,6 @@ def _validate_mutation_evidence_identity(
         raise RuntimeError("closeout pre-command Git evidence is immutable")
 
 
-def _validate_worker_transition(
-    current: LifecycleOperationRecord,
-    updated: LifecycleOperationRecord,
-) -> None:
-    before = current.workerTermination
-    after = updated.workerTermination
-    if before is not None and not _worker_exit_was_archived(current, updated):
-        _validate_worker_termination_evidence(before, after)
-    _validate_worker_authority_transition(current, updated)
-    history = current.workerTerminationHistory
-    if updated.workerTerminationHistory[: len(history)] != history:
-        raise RuntimeError("worker termination history is append-only")
-
-
-def _worker_exit_was_archived(
-    current: LifecycleOperationRecord,
-    updated: LifecycleOperationRecord,
-) -> bool:
-    before = current.workerTermination
-    return (
-        before is not None
-        and before.state == "exited"
-        and updated.workerTermination is None
-        and updated.workerTerminationHistory == [*current.workerTerminationHistory, before]
-    )
-
-
-def _validate_worker_termination_evidence(
-    before: WorkerTerminationEvidence,
-    after: WorkerTerminationEvidence | None,
-) -> None:
-    allowed = {
-        "requested": {"requested", "termination-required", "exited"},
-        "termination-required": {"termination-required", "exited"},
-        "exited": {"exited"},
-    }
-    if after is None or after.state not in allowed[before.state]:
-        raise RuntimeError("worker termination evidence is monotonic")
-    if (
-        after.pid != before.pid
-        or after.lease != before.lease
-        or after.processFingerprint != before.processFingerprint
-        or after.requestedAt != before.requestedAt
-    ):
-        raise RuntimeError("worker termination identity is immutable")
-
-
-def _validate_worker_authority_transition(
-    current: LifecycleOperationRecord,
-    updated: LifecycleOperationRecord,
-) -> None:
-    after = updated.workerTermination
-    if current.workerLease is not None and updated.workerLease not in {
-        current.workerLease,
-        None,
-    }:
-        raise RuntimeError("worker lease cannot be replaced before proven exit")
-    if (
-        current.workerPid is not None
-        and updated.workerPid is None
-        and (after is None or after.state != "exited")
-    ):
-        raise RuntimeError("worker authority cannot clear before proven exit")
-
-
 def _validate_door_publication_transition(
     current: LifecycleOperationRecord,
     updated: LifecycleOperationRecord,
@@ -369,7 +302,6 @@ def _validate_identity_and_evidence_transition(
     _validate_integration_publication_transition(current, updated)
     _validate_organizational_repair_transition(current, updated)
     _validate_mutation_evidence_transition(current, updated)
-    _validate_worker_transition(current, updated)
     _validate_door_publication_transition(current, updated)
     _validate_legacy_migration_transition(current, updated)
     if (
@@ -397,26 +329,6 @@ def _validate_private_preparation_transition(
         and updated.closeoutFinalizedContractSha256 is None
     ):
         raise RuntimeError("private preparation is unfinished work, not closeout completion")
-    termination = current.workerTermination
-    exited = (
-        (termination.pid, termination.lease, termination.processFingerprint)
-        if termination is not None and termination.state == "exited"
-        else (None, None, None)
-    )
-    worker = (current.workerPid, current.workerLease, current.workerProcessFingerprint)
-    validate_preparation_transition(
-        current.preparation,
-        updated.preparation,
-        can_start=current.status == "running"
-        and updated.status == "running"
-        and not current.cancelRequested
-        and not updated.cancelRequested
-        and current.generationDisposition == "active"
-        and worker == (updated.workerPid, updated.workerLease, updated.workerProcessFingerprint)
-        and all(value is not None for value in worker),
-        worker=worker,
-        exited_worker=exited,
-    )
     if current.preparation != updated.preparation:
         for field in (
             "mutationEvidence",
@@ -933,10 +845,6 @@ class LifecycleOperationStore:
             )
         if candidate.preparation is not None:
             raise RuntimeError("private preparation must be selected by the successor owner")
-        if current.workerPid is not None or (
-            current.workerTermination is not None and current.workerTermination.state != "exited"
-        ):
-            raise RuntimeError("terminal lifecycle generation retains unproven worker authority")
         for field in ("taskId", "taskName", "contractPath", "operationKind"):
             if getattr(candidate, field) != getattr(current, field):
                 raise RuntimeError(f"a sequential lifecycle operation cannot change {field}")
@@ -1065,8 +973,7 @@ def terminal_operation_record(
     rejects. Keeping this transition pure preserves one exact owner boundary for the transaction
     result before its consumers execute.
 
-    Moved here from the deleted ``application.lifecycle.lifecycle_operation_worker``: the
-    terminal transition belongs with the store that persists it, and the registered
+    The terminal transition belongs with the store that persists it, and the registered
     causal preflight ``schema:lifecycle-operation-terminalization:v1`` owns this symbol.
     """
 

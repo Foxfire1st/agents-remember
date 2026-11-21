@@ -288,7 +288,6 @@ export interface LifecycleOperationProjection {
   stateMatrixVersion: "lifecycle-operation-state-matrix/v1";
   status: "queued" | "running" | "input-required" | "termination-required" | "completed" | "failed" | "cancelled" | "unreadable" | "incoherent";
   taskIntent?: TaskIntentIdentity;
-  worker?: LifecycleWorkerObservation;
 }
 
 export interface LifecycleProjectionComponentBindings {
@@ -300,8 +299,6 @@ export interface LifecycleProjectionComponentBindings {
   recommendedAction?: string;
   /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
   result?: string;
-  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
-  worker?: string;
 }
 
 export interface LifecycleProjectionIdentity {
@@ -329,16 +326,6 @@ export interface LifecycleRecommendedAction {
   summary: string;
   /** JSON Schema refinements: {"maxLength":256} */
   tool?: string;
-}
-
-export interface LifecycleWorkerObservation {
-  /** JSON Schema refinements: {"maxLength":1024} */
-  detail: string;
-  identityRetained: boolean;
-  observedAt?: string;
-  state: "live" | "termination-requested" | "termination-required" | "exited";
-  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
-  workerIdentitySha256?: string;
 }
 
 export interface LimitedSeat {

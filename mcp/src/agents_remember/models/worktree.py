@@ -548,6 +548,7 @@ class WorktreeOperationControlResponse(WorktreeCommandResponse):
         Literal[
             "worktree_operation_control",
             "worktree_integrate",
+            "worktree_closeout_apply",
             "direct_landing",
             "worktree_closeout_preview",
         ]

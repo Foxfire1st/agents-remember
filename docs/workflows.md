@@ -177,9 +177,12 @@ Three more tools belong to the landing:
 - `worktree_checkpoint_landing` publishes the finished tasks of a master that is not finished.
 - `worktree_operation_control` controls one run of a direct landing, the only run that leaves a
   record in the [operation journal](concepts.md#operation-journal): it recovers or cancels an
-  interrupted run, or retires a completed run so that it stays only as a record. A closeout and
-  `worktree_integrate` run inside their call, and for them the tool answers
-  `lifecycle-operation-missing`.
+  interrupted run, or retires a completed run so that it stays only as a record.
+  `worktree_closeout_apply` and `worktree_integrate` each run inside their call. For
+  `operation_kind` `closeout` or `integrate`, the control tool answers `lifecycle-operation-retired`
+  when the journal has no record of that kind or the requested generation matches the record.
+  The answer names `worktree_closeout_apply` or `worktree_integrate`, respectively. If the
+  requested generation differs from the recorded one, the tool answers `lifecycle-generation-changed`.
 - `closeout_queue` shows the tasks of a sprint whose [closeout door](concepts.md#closeout-door)
   waits. No tool of the tool server creates a closeout door, so the queue shows no task.
 

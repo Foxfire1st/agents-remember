@@ -1,0 +1,215 @@
+{
+  "schemaVersion": "3.0",
+  "taskId": "LEAF",
+  "taskName": "/var/tmp/agents-remember/ar-c07a208f7f40/R2-bt13/popen-gw0/test_an_old_writer_closeout_re0/coord/worktrees/repo-a/direct-task-ar",
+  "contractPath": "/var/tmp/agents-remember/ar-c07a208f7f40/R2-bt13/popen-gw0/test_an_old_writer_closeout_re0/coord/tasks/repo-a/direct-task/series-contract.md",
+  "operationKind": "closeout",
+  "candidateState": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "candidateTree": null,
+  "taskIntent": {
+    "schema": "task-intent/v1",
+    "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "operationKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "generation": 1,
+  "recordRevision": 1,
+  "meaningfulRevision": 1,
+  "predecessorFingerprint": "",
+  "successorFingerprint": "",
+  "generationDisposition": "active",
+  "supersedeDeclarationFingerprint": null,
+  "integrationAuthority": null,
+  "input": {
+    "kind": "closeout",
+    "configPath": "/var/tmp/agents-remember/ar-c07a208f7f40/R2-bt13/popen-gw0/test_an_old_writer_closeout_re0/coord/settings.json",
+    "contractPath": "/var/tmp/agents-remember/ar-c07a208f7f40/R2-bt13/popen-gw0/test_an_old_writer_closeout_re0/coord/tasks/repo-a/direct-task/series-contract.md",
+    "effectiveInput": {
+      "route": "worktree",
+      "contractKind": "series",
+      "memoryMode": "external",
+      "code": {
+        "state": "not-applicable",
+        "reason": "series closeout records an existing code commit"
+      },
+      "memory": {
+        "state": "not-applicable",
+        "reason": "series closeout records existing memory content"
+      }
+    },
+    "approvalNote": "developer approved this exact candidate",
+    "gatePolicy": [],
+    "correctiveDispositions": []
+  },
+  "status": "running",
+  "phase": "preflight",
+  "queuedAt": "2026-08-01T00:00:00+00:00",
+  "startedAt": null,
+  "heartbeatAt": null,
+  "finishedAt": null,
+  "currentCommand": "",
+  "reportPath": "/var/tmp/agents-remember/ar-c07a208f7f40/R2-bt13/popen-gw0/test_an_old_writer_closeout_re0/coord/worktrees/repo-a/direct-task-ar/reports/closeout-operation.log",
+  "result": null,
+  "failure": null,
+  "guidance": null,
+  "cancelRequested": false,
+  "irreversibleBoundaryEntered": false,
+  "approvalClaimed": false,
+  "mutationEvidence": {},
+  "mutationHistory": {},
+  "recoveryCommits": null,
+  "closeoutFinalizedContractSha256": null,
+  "qualityCertification": null,
+  "certification": {
+    "schemaVersion": "lifecycle-certification-selection/v1",
+    "operationKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "generation": 1,
+    "frozenRun": {
+      "schemaVersion": "closeout-certificate-object-reference/v1",
+      "kind": "frozen-run",
+      "semanticDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "contentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "sizeBytes": 1
+    },
+    "candidateAuthorities": {
+      "schemaVersion": "closeout-certificate-object-reference/v1",
+      "kind": "candidate-authorities",
+      "semanticDigest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "contentSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "sizeBytes": 1
+    },
+    "lifecycleAdmission": {
+      "schemaVersion": "closeout-certificate-object-reference/v1",
+      "kind": "lifecycle-admission",
+      "semanticDigest": "3333333333333333333333333333333333333333333333333333333333333333",
+      "contentSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "sizeBytes": 1
+    },
+    "priorRedDisposition": null,
+    "predecessor": null,
+    "inputTerminals": [],
+    "recoveryDecisions": [
+      {
+        "reference": {
+          "schemaVersion": "closeout-certificate-object-reference/v1",
+          "kind": "recovery",
+          "semanticDigest": "4444444444444444444444444444444444444444444444444444444444444444",
+          "contentSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "sizeBytes": 1
+        },
+        "memoryInputs": null
+      }
+    ],
+    "terminals": [],
+    "terminalHistory": []
+  },
+  "preparation": {
+    "schemaVersion": "closeout-preparation-selection/v1",
+    "operationKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "generation": 1,
+    "legs": [
+      {
+        "leg": "code",
+        "intent": {
+          "schemaVersion": "closeout-certificate-object-reference/v1",
+          "kind": "preparation-intent",
+          "semanticDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "contentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "sizeBytes": 1
+        },
+        "commands": [
+          {
+            "kind": "create",
+            "cwd": "/coordination/worktrees/leaf/code",
+            "argv": [
+              "git",
+              "create",
+              "-m",
+              "prepared code"
+            ],
+            "workerPid": 4242,
+            "workerLease": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "workerProcessFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "startedAt": "2026-08-01T00:00:00+00:00",
+            "terminal": {
+              "outcome": "succeeded",
+              "observedAt": "2026-08-01T00:00:05+00:00",
+              "returnCode": 0,
+              "stdoutSha256": "9999999999999999999999999999999999999999999999999999999999999999",
+              "stderrSha256": "8888888888888888888888888888888888888888888888888888888888888888",
+              "detail": ""
+            }
+          },
+          {
+            "kind": "materialize",
+            "cwd": "/coordination/worktrees/leaf/code",
+            "argv": [
+              "git",
+              "materialize",
+              "-m",
+              "prepared code"
+            ],
+            "workerPid": 4242,
+            "workerLease": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "workerProcessFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "startedAt": "2026-08-01T00:00:00+00:00",
+            "terminal": {
+              "outcome": "succeeded",
+              "observedAt": "2026-08-01T00:00:05+00:00",
+              "returnCode": 0,
+              "stdoutSha256": "9999999999999999999999999999999999999999999999999999999999999999",
+              "stderrSha256": "8888888888888888888888888888888888888888888888888888888888888888",
+              "detail": ""
+            }
+          },
+          {
+            "kind": "commit",
+            "cwd": "/coordination/worktrees/leaf/code",
+            "argv": [
+              "git",
+              "commit",
+              "-m",
+              "prepared code"
+            ],
+            "workerPid": 4242,
+            "workerLease": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "workerProcessFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "startedAt": "2026-08-01T00:00:00+00:00",
+            "terminal": {
+              "outcome": "succeeded",
+              "observedAt": "2026-08-01T00:00:05+00:00",
+              "returnCode": 0,
+              "stdoutSha256": "9999999999999999999999999999999999999999999999999999999999999999",
+              "stderrSha256": "8888888888888888888888888888888888888888888888888888888888888888",
+              "detail": ""
+            }
+          }
+        ],
+        "output": {
+          "schemaVersion": "closeout-certificate-object-reference/v1",
+          "kind": "prepared-output",
+          "semanticDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "contentSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "sizeBytes": 1
+        }
+      }
+    ]
+  },
+  "preparedCodeRetention": null,
+  "integrationCertification": null,
+  "integrationPublication": null,
+  "organizationalRepair": null,
+  "doorPublication": null,
+  "doorPublicationHistory": [],
+  "attempt": 1,
+  "workerPid": null,
+  "workerLease": null,
+  "workerProcessFingerprint": null,
+  "workerTermination": null,
+  "workerTerminationHistory": [],
+  "terminationReturnStatus": null,
+  "terminationReturnPhase": null,
+  "cancellationEvidence": null,
+  "legacyMigration": null,
+  "dependencies": null
+}

@@ -35,13 +35,11 @@ def selected_preparation_intents(
     for selected in state.legs:
         intent = load_typed(objects, selected.intent, CloseoutPreparationIntent)
         _require_intent_owner(contract, record, intent)
-        if intent.leg != selected.leg or (not intent.writeEnabled and selected.commands):
+        if intent.leg != selected.leg:
             refuse("preparation-intent-selection-mismatch", intent.leg, selected.leg)
         if selected.output is not None:
             output = load_typed(objects, selected.output, PreparedCloseoutOutput)
             require_prepared_output_matches_intent(output, intent)
-            if intent.writeEnabled and len(selected.commands) != 3:
-                refuse("preparation-command-proof-missing", "original commit command", selected)
         intents.append(intent)
     return tuple(intents)
 

@@ -32,7 +32,6 @@ from agents_remember.models.certification.corrective import RedCatalogDispositio
 from agents_remember.models.closeout.input import CloseoutCorrectedCall, EffectiveCloseoutInput
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import (
-    GatePolicyRuleSnapshot,
     IntegrateStrategy,
     LifecycleOperationKind,
     LifecycleOperationProjection,
@@ -672,14 +671,6 @@ def _execute_operation_control(
     disposition_authorized: bool,
 ) -> dict[str, Any]:
     confined = configured.contract_path
-    resume_messages = (
-        raw_closeout_messages(
-            code=request.code_commit_message,
-            memory=request.memory_commit_message,
-        )
-        if request.action == "resume"
-        else None
-    )
     contract = configured.contract
     try:
         execution = execute_configured_contract_operation(
@@ -694,10 +685,6 @@ def _execute_operation_control(
                     expected_generation=request.expected_generation,
                     intent_note=request.intent_note,
                     dry_run=request.dry_run,
-                    resume_messages=resume_messages,
-                    resume_gate_policy=(
-                        _gate_policy_snapshot(config) if request.action == "resume" else None
-                    ),
                     corrective_dispositions=request.corrective_dispositions,
                     supersede_grade=request.grade,
                     supersede_admission=request.admission,
@@ -754,17 +741,6 @@ def _journal_read_refusal(
         "detail": decision.detail,
         **{key: value for key, value in payload.items() if key != "state"},
     }
-
-
-def _gate_policy_snapshot(config: McpRuntimeConfig) -> list[GatePolicyRuleSnapshot]:
-    return [
-        GatePolicyRuleSnapshot(
-            kind=rule.kind,
-            delegatedRole=rule.delegated_role,
-            requireReviewerVerdict=rule.require_reviewer_verdict,
-        )
-        for rule in config.orchestration.gate_policy.rules
-    ]
 
 
 def _operation_acknowledgement(

@@ -632,10 +632,33 @@ def test_an_operation_record_that_is_unfinished_or_unreadable_is_open_work(world
     assert _facts(world) is not None and world.retire()["state"] == "retired"
 
 
-@pytest.mark.parametrize("operation", [name for name in OPERATIONS if "locator" not in name])
-def test_an_operation_record_of_an_enclosure_with_a_live_locator_names_the_tool(world, operation):
+@pytest.mark.parametrize(
+    ("arrange", "tool"),
+    [
+        *(
+            pytest.param(
+                arrange, "worktree_sync" if "sync" in name else "worktree_closeout_apply", id=name
+            )
+            for name, (arrange, _) in OPERATIONS.items()
+            if "locator" not in name
+        ),
+        pytest.param(
+            _broken("integrate-operation.generation-1.json"),
+            "worktree_integrate",
+            id="a retained integration generation that cannot be read",
+        ),
+        pytest.param(
+            _broken("direct-landing-operation.generation-1.json"),
+            "worktree_operation_control",
+            id="a retained direct-landing generation that cannot be read",
+        ),
+    ],
+)
+def test_an_operation_record_of_an_enclosure_with_a_live_locator_names_the_tool(
+    world, arrange, tool
+):
     series = world.series()
-    record = OPERATIONS[operation][0](world, series)
+    record = arrange(world, series)
     inspect = readiness.inspect_lifecycle_operation_locator
 
     def live(coordination_root: Path, contract_path: Path) -> LifecycleLocatorObservation:
@@ -645,10 +668,15 @@ def test_an_operation_record_of_an_enclosure_with_a_live_locator_names_the_tool(
 
     with patch.object(readiness, "inspect_lifecycle_operation_locator", side_effect=live):
         refusal = _refusal(world)
-    tool = "worktree_sync" if "sync" in operation else "worktree_operation_control"
     assert tool in refusal and f"mv -n {record}" not in refusal, refusal
-    if "sync" not in operation:
+    if tool != "worktree_sync":
         assert record.as_posix() in refusal
+        remedy = (
+            "resolve the named generation through"
+            if tool == "worktree_operation_control"
+            else "run the operation again with"
+        )
+        assert f"{remedy} {tool} or restore its admitted evidence" in refusal, refusal
 
 
 def test_the_manual_move_keeps_an_earlier_given_up_record(world):
