@@ -79,7 +79,7 @@ class InstalledCoordinationRootTests(unittest.TestCase):
             )
 
     def test_retired_package_source_shape_uses_the_ancestor_default(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(dir="/var/tmp") as temporary:
             root = Path(temporary) / "package"
             source = root / "mcp/src/agents_remember/kernel/coordination_context/paths.py"
             source.parent.mkdir(parents=True)

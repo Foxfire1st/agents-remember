@@ -388,11 +388,8 @@ class DeveloperSendTests(RoleToolsTestCase):
             (row["senderAgentId"], row["senderLine"]), ("developer", "From developer · 01_LEAF")
         )
         self.assertTrue(row["text"].startswith("Please look.\n\n[1] task · task title\n    read "))
-        self.assertTrue(
-            row["text"].endswith(
-                f"Message file: {held['messageFile']} (SHA-256 {held['messageFileSha256']})"
-            )
-        )
+        locator = f"Message file: {held['messageFile']} (SHA-256 {held['messageFileSha256']})"
+        self.assertTrue(row["text"].endswith(locator))
         self.assertTrue(Path(held["messageFile"]).is_file())
         with self.subTest("a later send waits behind it; nothing overtakes"):
             behind = self.send(worker, text="second")
@@ -418,8 +415,15 @@ class DeveloperSendTests(RoleToolsTestCase):
             for size in (100, HELD_TEXT_LIMIT * 3):
                 long = self.send(worker, text="y" * size)
                 row = json.loads(store_path_for(folder, worker).read_text())["messages"][-1]
-                self.assertLess(len(row["text"]), HELD_TEXT_LIMIT + 400)
-                self.assertTrue(row["text"].endswith(long["messageFileSha256"] + ")"))
+                locator = (
+                    f"Message file: {long['messageFile']} (SHA-256 {long['messageFileSha256']})"
+                )
+                excerpt = "y" * min(size, HELD_TEXT_LIMIT)
+                if size > HELD_TEXT_LIMIT:
+                    excerpt += (
+                        f"\n[cut at {HELD_TEXT_LIMIT} characters: the whole message is in its file]"
+                    )
+                self.assertEqual(row["text"], f"{excerpt}\n{locator}")
                 self.assertIn("y" * size, Path(long["messageFile"]).read_text())
 
     def test_an_archived_target_is_refused_by_name_and_the_other_target_is_served(self) -> None:

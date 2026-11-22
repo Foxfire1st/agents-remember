@@ -16,6 +16,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 from agents_remember.application.task_docs.task_ref import TaskRef
@@ -56,6 +57,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
     LifecycleOperationStore,
     operation_record_path,
 )
+from agents_remember.worktrees.integration.lifecycle.observation import projection
 from agents_remember.worktrees.modules.git import branch_commit
 from test_completed_direct_landing_disposition import _interrupted, _landed
 from test_direct_landing import _converted_series_fixture
@@ -451,6 +453,36 @@ def test_the_retained_old_build_record_loads_with_its_command_leg(tmp_path: Path
     # Audit inspection survives the refusal: the same bytes still read, and offer no control.
     assert store.read() is not None
     assert legal_operation_controls(contract, record) == []
+
+
+def test_observation_projects_retired_journals_and_reconciles_direct_landing(
+    tmp_path: Path,
+) -> None:
+    missing_contract = (tmp_path / "retired" / "series-contract.md").as_posix()
+    direct = _journal_record(tmp_path)
+
+    with patch.object(
+        projection,
+        "reconcile_closeout_mutations",
+        wraps=projection.reconcile_closeout_mutations,
+    ) as reconcile:
+        for source in (OLD_WRITER_RECORD, OLD_WRITER_INTEGRATE_RECORD):
+            record = LifecycleOperationRecord.model_validate_json(source.read_bytes()).model_copy(
+                update={"contractPath": missing_contract}
+            )
+            observed = projection.observed_operation_projection(record)
+            assert observed is not None
+            assert observed.kind == record.operationKind
+            assert (observed.status, observed.phase) == (record.status, record.phase)
+            assert observed.identity is not None
+            assert observed.identity.contractPath == missing_contract
+            assert observed.legalControls == []
+            assert observed.recommendedAction is None
+
+        current = projection.observed_operation_projection(direct)
+        assert current is not None
+        assert current.kind == "direct-landing"
+        reconcile.assert_called_once_with(direct, temporary_indices=True)
 
 
 @pytest.mark.integration

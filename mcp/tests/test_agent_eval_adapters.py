@@ -12,6 +12,7 @@ import unittest
 from contextlib import closing
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -1420,44 +1421,47 @@ def test_paseo_native_connection_probes_build_and_applies_actor_before_message(
         batch._batch_authority()
 
 
-def test_native_identity_discovery_requires_unique_fresh_exact_project(tmp_path: Path) -> None:
-    project = tmp_path / "fresh-project"
-    project.mkdir()
-    path = _jsonl(
-        tmp_path / "native1.jsonl",
-        [
-            {
-                "type": "session_meta",
-                "timestamp": "2026-10-29T12:00:00Z",
-                "payload": {"id": "original-native-id", "cwd": str(project)},
-            },
-        ],
-    )
-    capture = discover_capture("codex", [path], project=project, not_before=1)
-    assert capture.session_id == "original-native-id"
-    assert not capture.unknowns
-    second = _jsonl(
-        tmp_path / "native2.jsonl",
-        [
-            {
-                "type": "session_meta",
-                "timestamp": "2026-10-29T12:00:00Z",
-                "payload": {"id": "different-native-id", "cwd": str(project)},
-            },
-        ],
-    )
-    ambiguous = discover_capture("codex", [path, second], project=project, not_before=1)
-    assert not ambiguous.session_id and any("observed 2" in item for item in ambiguous.unknowns)
-    source_home = tmp_path / "native-home"
-    sessions = source_home / "sessions"
-    sessions.mkdir(parents=True)
-    fresh = sessions / "fresh.jsonl"
-    fresh.write_bytes(path.read_bytes())
-    _assert_bound_native_session(tmp_path, project, sessions, fresh, second)
-    stale = discover_capture("codex", [path], project=project, not_before=9999999999)
-    assert not stale.session_id and stale.unknowns
-    wrong_project = discover_capture("codex", [path], project=tmp_path, not_before=1)
-    assert not wrong_project.session_id and wrong_project.unknowns
+def test_native_identity_discovery_requires_unique_fresh_exact_project() -> None:
+    # Paseo flattens the absolute project path into one directory name.
+    with TemporaryDirectory(prefix="ar-", dir="/tmp") as temporary:
+        tmp_path = Path(temporary).resolve()
+        project = tmp_path / "fresh-project"
+        project.mkdir()
+        path = _jsonl(
+            tmp_path / "native1.jsonl",
+            [
+                {
+                    "type": "session_meta",
+                    "timestamp": "2026-10-29T12:00:00Z",
+                    "payload": {"id": "original-native-id", "cwd": str(project)},
+                },
+            ],
+        )
+        capture = discover_capture("codex", [path], project=project, not_before=1)
+        assert capture.session_id == "original-native-id"
+        assert not capture.unknowns
+        second = _jsonl(
+            tmp_path / "native2.jsonl",
+            [
+                {
+                    "type": "session_meta",
+                    "timestamp": "2026-10-29T12:00:00Z",
+                    "payload": {"id": "different-native-id", "cwd": str(project)},
+                },
+            ],
+        )
+        ambiguous = discover_capture("codex", [path, second], project=project, not_before=1)
+        assert not ambiguous.session_id and any("observed 2" in item for item in ambiguous.unknowns)
+        source_home = tmp_path / "native-home"
+        sessions = source_home / "sessions"
+        sessions.mkdir(parents=True)
+        fresh = sessions / "fresh.jsonl"
+        fresh.write_bytes(path.read_bytes())
+        _assert_bound_native_session(tmp_path, project, sessions, fresh, second)
+        stale = discover_capture("codex", [path], project=project, not_before=9999999999)
+        assert not stale.session_id and stale.unknowns
+        wrong_project = discover_capture("codex", [path], project=tmp_path, not_before=1)
+        assert not wrong_project.session_id and wrong_project.unknowns
 
 
 def _assert_bound_native_session(
