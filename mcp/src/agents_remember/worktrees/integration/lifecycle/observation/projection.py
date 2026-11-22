@@ -226,7 +226,8 @@ def _project_observed_record(
     projected = record
     if projected is None:
         return None
-    if projected.operationKind not in {"closeout", "direct-landing"}:
+    if projected.operationKind != "direct-landing":
+        # Retired journals carry historical paths and are read for audit.
         return projected
     reconciled = reconcile_closeout_mutations(projected, temporary_indices=True)
     recovery_commits = derive_closeout_recovery_commits(projected, mutations=reconciled)

@@ -27,18 +27,40 @@ tokens, or at the lower bound of its tool; a few tools have a higher bound of at
 A list in an answer is cut at 20 entries, or at 10 in a status answer, and carries its count. An
 answer over its bound arrives as a short form of at most 400 tokens. If the recorded result's
 path cannot fit after the other droppable fields are removed, the full path and final hint remain
-and the short form exceeds 400 tokens. It always holds
-`overflow: true`, `answerTokens` and `log`, and `ok`, `code` and `buildCurrentness` where the
-answer has them. A recorded result's place is always named: where the path did not fit beside the
-other fields, the short form drops those fields first, so `log` rides whenever the whole result was
-written (`resultKept: false` and `logError` say why it was not). It then adds `error`, cut when long
-(`errorCut`), and the answer's other numbers, booleans and short texts while they fit;
-`droppedFields` counts the fields left out.
+and the short form exceeds 400 tokens. It always holds `overflow: true` and `answerTokens`.
+It keeps `ok`, `code` and `buildCurrentness` where the answer has them. When the whole result
+was recorded, `log` gives its exact path. Otherwise the answer carries `resultKept: false`
+and includes `logError` when a logging error is available.
+
+The shared guard selects a row by tool name and the reply's top-level Boolean `ok`.
+When its validator refuses, `knowledge_integrity_check` replies with `ok: true` and
+`state: refused`. The guard considers only fields present with their declared type in the
+validated whole result. Each fitting field keeps its whole value and type, including
+any nested object, map or list. The table lists fields in priority order. Fields are strings
+unless the table gives another type.
+
+| Tool | Wire `ok` | Declared fields |
+| --- | --- | --- |
+| `memory_carryover_plan` | `true` | `state`, `next.summary`, `counts` (map from names to integers) |
+| `memory_carryover_plan` | `false` | `nextAction`, `message` |
+| `knowledge_integrity_check` | `true` | `state`, `validation.candidate`, `bases` (list of strings) |
+| `memory_init` | `true` | `git.repairAttempted` (boolean) |
+| `memory_init` | `false` | `memoryRoot`, `initialBranch` |
+
+Fitting outcome and next-action fields appear before the locator. Counts and other selected
+fields follow it. If a declared value cannot fit whole, the guard omits it and, when there is
+room, adds its name and measured size to `cut.omittedFields` as `field` and `sizeTokens`.
+A fitting omission keeps its place before the guard considers the next declared field.
+`droppedFields` still counts omissions when their names and sizes cannot fit. The guard also
+fits `error`, shortened when needed (`errorCut`), and other numbers, booleans and short texts
+as space permits.
 
 Every cut answer ends with one last field, `cut`: it says that the answer was cut and names the file
 that holds the whole result (`log`), with `readIt` telling the reader to read the rest there. Where
 nothing was recorded, `cut.log` is `null` and `cut.why` names the reason, so no reader is sent to a
 path that holds nothing.
+
+The `read_ar_files` tool defines its own short-answer fields.
 
 `worktree_status` replies with `lifecycleOperationCount` and saves the full `lifecycleOperations`
 list in the file named by `log`. For a queued or running direct landing, `runningOperation`

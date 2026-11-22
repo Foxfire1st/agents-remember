@@ -4,6 +4,7 @@ Split text-identical out of test_tool_answer_table.py under MIK-R196 rule 10."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -14,6 +15,7 @@ from unittest.mock import patch
 from agents_remember.application.agent_binding import AgentBinding
 from agents_remember.application.tool_answer_log import TOOL_LOG_BASENAME_PREFIX, tool_call_context
 from agents_remember.application.tool_response import complete_tool_response
+from agents_remember.mcp.compact_content import _compact_text_block
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import (
     ENVELOPE_STRIPPED_FIELDS,
@@ -24,14 +26,102 @@ from agents_remember.models.tools.tool_answer import (
     TOOL_ANSWER_OVERFLOW_FIXED_MAX_TOKENS,
     TOOL_ANSWER_OVERFLOW_MAX_TOKENS,
     TOOL_CODE_MAX_CHARS,
+    ShortFormLocation,
     bound_for,
     is_valid_tool_code,
     next_from_next_step,
     short_form,
     truncate_lists,
 )
+from agents_remember.models.tools.tool_answer_short_fields import declared_short_fields
+from mcp.types import TextContent
 from tool_answer_table_support import _big_blob, _server_info_case, _stub_config
 from tool_entry_point_sweep_support import EntryPointWorld, classify
+
+
+class DeclaredOverflowTests(unittest.TestCase):
+    def test_declared_outcome_and_action_precede_the_locator(self) -> None:
+        outcomes = (
+            (
+                {
+                    "ok": True,
+                    "state": "would-carryover",
+                    "next": {"summary": "Review the plan."},
+                    "counts": {"auto-carry": 1},
+                },
+                ("ok", "state", "next", "log", "counts", "cut"),
+            ),
+            (
+                {
+                    "ok": False,
+                    "code": "legacy-format",
+                    "nextAction": "Read the conversion directions.",
+                    "message": "Source memory still uses the legacy format.",
+                },
+                ("ok", "code", "nextAction", "log", "message", "cut"),
+            ),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            for payload, order in outcomes:
+                with (
+                    self.subTest(ok=payload["ok"]),
+                    tool_call_context("memory_carryover_plan", {}, config=_stub_config(Path(tmp))),
+                ):
+                    full = {**payload, "largeDetail": _big_blob()}
+                    answer = complete_tool_response("memory_carryover_plan", full)
+                    self.assertTrue(answer["overflow"])
+                    self.assertEqual(answer["cut"]["log"], answer["log"])
+                    self.assertEqual(next(reversed(answer)), "cut")
+                    block = _compact_text_block(TextContent(type="text", text=json.dumps(answer)))
+                    for delivered in (answer, json.loads(block.text)):
+                        self.assertEqual(tuple(key for key in delivered if key in order), order)
+
+    def test_higher_priority_omission_keeps_its_space(self) -> None:
+        candidate = "/tmp/" + "/".join(
+            hashlib.sha512(f"candidate-{index}".encode()).hexdigest() for index in range(6)
+        )
+        bases = [hashlib.sha256(f"base-{index}".encode()).hexdigest()[:40] for index in range(9)]
+        locator = "/tmp/tool-results/" + hashlib.sha512(b"integrity-log").hexdigest()[:88] + ".json"
+        whole = {
+            "ok": True,
+            "state": "reported",
+            "validation": {"candidate": candidate},
+            "bases": bases,
+        }
+        fields = declared_short_fields("knowledge_integrity_check", whole, whole)
+        location = ShortFormLocation(log=locator)
+        other_fields = tuple(field for field in fields if field.name != "validation.candidate")
+        with_bases, _, _ = short_form(
+            whole,
+            answer_tokens=2400,
+            location=location,
+            count=count_response_tokens,
+            declared_fields=other_fields,
+        )
+        self.assertEqual(with_bases["bases"], bases)
+        named = {
+            "field": "validation.candidate",
+            "sizeTokens": count_response_tokens({"validation": whole["validation"]}),
+        }
+        together = {
+            **with_bases,
+            "droppedFields": 1,
+            "cut": {**with_bases["cut"], "omittedFields": [named]},
+        }
+        self.assertGreater(count_response_tokens(together), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
+        short, dropped, _ = short_form(
+            whole,
+            answer_tokens=2400,
+            location=location,
+            count=count_response_tokens,
+            declared_fields=fields,
+        )
+        self.assertEqual(short["cut"]["log"], locator)
+        self.assertEqual(short["cut"]["omittedFields"][0], named)
+        self.assertNotIn("validation", short)
+        self.assertNotIn("bases", short)
+        self.assertEqual(dropped, 2)
+        self.assertLessEqual(count_response_tokens(short), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
 
 
 class ToolAnswerGuardTests(unittest.TestCase):
@@ -48,7 +138,7 @@ class ToolAnswerGuardTests(unittest.TestCase):
         short, _dropped, error_cut = short_form(
             big,
             answer_tokens=tokens,
-            log="/logs/ar-tools/d.json",
+            location=ShortFormLocation(log="/logs/ar-tools/d.json"),
             count=count_response_tokens,
         )
         self.assertTrue(short["ok"])
@@ -69,7 +159,10 @@ class ToolAnswerGuardTests(unittest.TestCase):
             "blob": _big_blob(),
         }
         short, _dropped, error_cut = short_form(
-            refusal, answer_tokens=9999, log="/logs/d.json", count=count_response_tokens
+            refusal,
+            answer_tokens=9999,
+            location=ShortFormLocation(log="/logs/d.json"),
+            count=count_response_tokens,
         )
         self.assertEqual(short["code"], "start-reservation-conflict")
         self.assertIn("recover this reserved start", short["error"])
@@ -86,7 +179,7 @@ class ToolAnswerGuardTests(unittest.TestCase):
         short, dropped, error_cut = short_form(
             answer,
             answer_tokens=tokens,
-            log="/logs/d.json",
+            location=ShortFormLocation(log="/logs/d.json"),
             count=count_response_tokens,
         )
         self.assertEqual(short["code"], "start-blocked")
@@ -104,7 +197,7 @@ class ToolAnswerGuardTests(unittest.TestCase):
         short, _dropped, error_cut = short_form(
             refusal,
             answer_tokens=99999,
-            log="/logs/d.json",
+            location=ShortFormLocation(log="/logs/d.json"),
             count=count_response_tokens,
         )
         self.assertEqual(short["code"], "start-blocked")
@@ -128,9 +221,11 @@ class ToolAnswerGuardTests(unittest.TestCase):
             short, _dropped, _cut = short_form(
                 {"ok": False, "code": code, "error": "what to do. " * 40},
                 answer_tokens=99999,
-                log=(
-                    "/coord/worktrees/agents-remember/108_x/logs/ar-tools-2026-10-08/"
-                    "160323398195-worktree_closeout_preview-717bc84c.json"
+                location=ShortFormLocation(
+                    log=(
+                        "/coord/worktrees/agents-remember/108_x/logs/ar-tools-2026-10-08/"
+                        "160323398195-worktree_closeout_preview-717bc84c.json"
+                    )
                 ),
                 count=count_response_tokens,
             )
@@ -150,7 +245,7 @@ class ToolAnswerGuardTests(unittest.TestCase):
         short, dropped, _cut = short_form(
             {"ok": False, "code": "start-blocked", "error": "what to do.", "note": "y" * 150},
             answer_tokens=99999,
-            log=log,
+            location=ShortFormLocation(log=log),
             count=count_response_tokens,
         )
         self.assertEqual(short["log"], log)
@@ -171,7 +266,7 @@ class ToolAnswerGuardTests(unittest.TestCase):
         short, _dropped, error_cut = short_form(
             refusal,
             answer_tokens=99999,
-            log="/logs/d.json",
+            location=ShortFormLocation(log="/logs/d.json"),
             count=count_response_tokens,
         )
         self.assertEqual(short["code"], "start-blocked")
@@ -192,7 +287,7 @@ class ToolAnswerGuardTests(unittest.TestCase):
             short, _dropped, _cut = short_form(
                 {"ok": False, "code": bad, "error": "what to do."},
                 answer_tokens=9999,
-                log="/logs/d.json",
+                location=ShortFormLocation(log="/logs/d.json"),
                 count=count_response_tokens,
             )
             self.assertFalse(short["ok"] is None)
@@ -252,7 +347,7 @@ class ToolAnswerGuardTests(unittest.TestCase):
         short, _dropped, _cut = short_form(
             answer,
             answer_tokens=tokens,
-            log="/logs/d.json",
+            location=ShortFormLocation(log="/logs/d.json"),
             count=count_response_tokens,
         )
         self.assertLessEqual(count_response_tokens(short), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
@@ -282,12 +377,42 @@ class ToolAnswerGuardTests(unittest.TestCase):
         short, _dropped, _cut = short_form(
             {"ok": True, "blob": _big_blob()},
             answer_tokens=9999,
-            log_error="the whole result was not recorded: no space.",
+            location=ShortFormLocation(log_error="the whole result was not recorded: no space."),
             count=count_response_tokens,
         )
         self.assertIn("not recorded", short["logError"])
         self.assertFalse(short["resultKept"])
         self.assertNotIn("log", short)
+
+    def test_oversized_declared_action_is_omitted_whole_with_its_size(self) -> None:
+        action = _big_blob()
+        payload = {
+            "ok": False,
+            "code": "legacy-format",
+            "message": "Convert the source memory first.",
+            "nextAction": action,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _stub_config(Path(tmp))
+            with tool_call_context("memory_carryover_plan", {}, config=config):
+                answer = complete_tool_response("memory_carryover_plan", payload)
+            self.assertFalse(answer["ok"])
+            self.assertEqual(answer["code"], payload["code"])
+            self.assertEqual(answer["message"], payload["message"])
+            self.assertNotIn("nextAction", answer)
+            self.assertEqual(answer["cut"]["log"], answer["log"])
+            self.assertEqual(
+                answer["cut"]["omittedFields"],
+                [
+                    {
+                        "field": "nextAction",
+                        "sizeTokens": count_response_tokens({"nextAction": action}),
+                    }
+                ],
+            )
+            whole = json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
+            self.assertEqual(whole["nextAction"], action)
+            self.assertLessEqual(count_response_tokens(answer), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
 
     def test_envelope_stripped_from_every_answer(self) -> None:
         answer = complete_tool_response(

@@ -308,7 +308,8 @@ def test_the_managed_parent_is_private_and_ours(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     parent = tmp_path / "outside"
-    parent.mkdir(mode=0o755)
+    parent.mkdir()
+    os.chmod(parent, 0o755)
 
     with pytest.raises(outside_scratch.OutsideScratchError, match="mode"):
         outside_scratch.prepare_parent(parent)

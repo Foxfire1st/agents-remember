@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -284,10 +285,10 @@ def test_only_a_definite_non_repository_reads_as_holding_no_converted_memory(
     nothing on disk says there is one; any other failure refuses by name (MIK-R09 rule 6)."""
 
     world = _unconverted(tmp_path)
-    plain = tmp_path / "plain"
-    plain.mkdir()
-    assert converted_memory_location(plain) is None
-    assert cutover_lock.cutover_lock_refusal(plain, operation="op", line="l") is None
+    with tempfile.TemporaryDirectory(dir="/var/tmp") as plain_directory:
+        plain = Path(plain_directory)
+        assert converted_memory_location(plain) is None
+        assert cutover_lock.cutover_lock_refusal(plain, operation="op", line="l") is None
 
     pruned = tmp_path / "pruned"
     git(world.memory, "worktree", "add", "-q", "--detach", str(pruned), "main")

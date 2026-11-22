@@ -12,7 +12,6 @@ anchors they build come from ``converted_onboarding_drift_support``.
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -48,6 +47,8 @@ from agents_remember.memory.conversion.convert import convert_memory
 from agents_remember.memory.conversion.inputs import memory_from_directory, write_changed
 from agents_remember.memory_quality.converted_check import CONVERTED_BASE_RULE
 from agents_remember.models.knowledge_files.canonical import canonical_text
+from agents_remember.tasks.task_paths import leaf_enclosure_path
+from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 from converted_onboarding_drift_support import (
     LAYOUT_MARKER,
     REPO_ID,
@@ -191,83 +192,45 @@ def test_descriptions_say_what_the_check_is() -> None:
         )
 
 
-_REAL_LEAF_CONTRACT = Path(
-    "/home/firefox/projects/ar-coordination/tasks/agents-remember"
-    "/260928_maintained-invariant-knowledge/enclosures/260928-mik-l44/series-contract.md"
-)
-
-
-def _live_code_base_commit(text: str) -> str:
-    """The live contract's code-cell base commit, read live.
-
-    The helper copies the real enclosure contract, so its ``base_commit``
-    literal must come from that file as it stands — pinning a base hash here
-    would stale on the next sync. Only the ``code:`` cell's line qualifies;
-    the memory cell's base is untouched by this helper's replacements.
-    """
-
-    code_cell = re.search(r"^code:\n((?:  .*\n)+)", text, re.MULTILINE)
-    assert code_cell is not None, "live leaf contract has no code cell"
-    base = re.search(r"^  base_commit: ([0-9a-f]{40})$", code_cell.group(1), re.MULTILINE)
-    assert base is not None, "live leaf contract code cell has no base commit"
-    return base.group(1)
-
-
-def _leaf_contract(coord: Path, *, code: Path, memory: Path, code_commit: str) -> Path:
-    """A loadable leaf enclosure contract pointing at fixture checkouts (L44-C1-05).
-
-    A copy of the real L44 enclosure contract with every root remapped under
-    ``coord`` and the code/memory cells pointed at the fixtures, so the leaf
-    scope machinery (scope resolution, leaf base, cache authority) runs
-    hermetically inside tmp.
-    """
-
-    side = coord.parent
-    task = side / "task"
-    group = side / "group"
-    for path in (coord, task, group):
-        path.mkdir(parents=True, exist_ok=True)
-    (task / "task.md").write_text("# fixture task\n", encoding="utf-8")
-    contract = coord / "leaf-contract.md"
-    text = _REAL_LEAF_CONTRACT.read_text(encoding="utf-8")
-    replacements = {
-        "repo_name: agents-remember": f"repo_name: {REPO_ID}",
-        "root: /home/firefox/projects/ar-coordination": f"root: {coord.as_posix()}",
-        "task_root: /home/firefox/projects/ar-coordination/tasks/agents-remember"
-        "/260928_maintained-invariant-knowledge": f"task_root: {task.as_posix()}",
-        "series_contract_path: /home/firefox/projects/ar-coordination/tasks/agents-remember"
-        "/260928_maintained-invariant-knowledge/enclosures/260928-mik-l44/series-contract.md": (
-            f"series_contract_path: {contract.as_posix()}"
-        ),
-        "task_artifact: /home/firefox/projects/ar-coordination/tasks/agents-remember"
-        "/260928_maintained-invariant-knowledge/task.md": (
-            f"task_artifact: {task.as_posix()}/task.md"
-        ),
-        "worktree_group: /home/firefox/projects/ar-coordination/worktrees/agents-remember"
-        "/44_truthful-converted-onboarding-drift-97edbca63c-ar": (
-            f"worktree_group: {group.as_posix()}"
-        ),
-        "repo_path: /home/firefox/projects/agents-remember": (f"repo_path: {code.as_posix()}"),
-        f"base_commit: {_live_code_base_commit(text)}": (f"base_commit: {code_commit}"),
-        "worktree: /home/firefox/projects/ar-coordination/worktrees/agents-remember"
-        "/44_truthful-converted-onboarding-drift-97edbca63c-ar"
-        "/44_truthful-converted-onboarding-drift-97edbca63c": (f"worktree: {code.as_posix()}"),
-        "worktree: /home/firefox/projects/ar-coordination/worktrees/agents-remember"
-        "/44_truthful-converted-onboarding-drift-97edbca63c-ar"
-        "/memory-44_truthful-converted-onboarding-drift-97edbca63c": (
-            f"worktree: {memory.as_posix()}"
-        ),
-        "ledger: /home/firefox/projects/ar-coordination/worktrees/agents-remember"
-        "/44_truthful-converted-onboarding-drift-97edbca63c-ar"
-        "/memory-44_truthful-converted-onboarding-drift-97edbca63c/memory.md": (
-            f"ledger: {memory.as_posix()}/memory.md"
-        ),
-    }
-    for old, new in sorted(replacements.items(), key=lambda item: -len(item[0])):
-        assert old in text, old
-        text = text.replace(old, new)
-    contract.write_text(text, encoding="utf-8")
-    return contract
+def _leaf_contract(
+    coord: Path, *, code: Path, memory: Path, code_commit: str, memory_commit: str
+) -> Path:
+    """Publish a leaf contract bound to the fixture repositories and their bases."""
+    task_name = "drift-fixture"
+    leaf_id = "DRIFT-FIXTURE-L1"
+    task = coord / "tasks" / REPO_ID / task_name
+    group = coord / "worktrees" / REPO_ID / "drift-fixture-ar"
+    task.mkdir(parents=True)
+    group.mkdir(parents=True)
+    task_artifact = task / "task.md"
+    task_artifact.write_text("# fixture task\n", encoding="utf-8")
+    path = leaf_enclosure_path(task, leaf_id)
+    contract = WorktreeContract(
+        task_id="DRIFT-FIXTURE",
+        task_name=task_name,
+        repo_name=REPO_ID,
+        workflow_kind="light-task",
+        memory_mode="external",
+        coordination_root=coord,
+        task_root=task,
+        contract_path=path,
+        task_artifact=task_artifact,
+        worktree_group=group,
+        code_repo_path=code,
+        code_source_branch="main",
+        code_work_branch="main",
+        code_base_commit=code_commit,
+        code_worktree=code,
+        memory_repo_path=memory,
+        memory_source_branch="main",
+        memory_work_branch="main",
+        memory_base_commit=memory_commit,
+        memory_worktree=memory,
+        ledger_path=memory / "memory.md",
+        leaf_id=leaf_id,
+    )
+    write_contract(path, contract)
+    return path
 
 
 def test_context_packet_leaf_route_binds_the_leaf_base(tmp_path: Path) -> None:
@@ -292,6 +255,7 @@ def test_context_packet_leaf_route_binds_the_leaf_base(tmp_path: Path) -> None:
         code=code,
         memory=memory,
         code_commit=git(code, "rev-parse", "HEAD"),
+        memory_commit=real,
     )
 
     tooled = drift_check_tool(config, repo_id=REPO_ID, contract_path=contract.as_posix())
@@ -325,8 +289,8 @@ def test_context_packet_agrees_with_the_summary_on_carried_anchors(tmp_path: Pat
     scratch = tmp_path / "chain"
     scratch.mkdir()
     code = code_repository(scratch / "code")
-    memory_repository(scratch / "memory", code)
     memory = scratch / "memory"
+    memory_commit = memory_repository(memory, code)
     outcome = convert_memory(
         memory_from_directory(memory, label="memory"),
         CodeObjects(code.root),
@@ -340,7 +304,11 @@ def test_context_packet_agrees_with_the_summary_on_carried_anchors(tmp_path: Pat
     config = load_config(settings)
     memory_init_tool(config, repo_id=REPO_ID, initial_branch="main")
     contract = _leaf_contract(
-        config.coordination_root, code=code.root, memory=memory, code_commit=code.first
+        config.coordination_root,
+        code=code.root,
+        memory=memory,
+        code_commit=code.first,
+        memory_commit=memory_commit,
     )
     tooled = drift_check_tool(config, repo_id=REPO_ID, contract_path=contract.as_posix())
     scope = resolve_memory_scope(config, repo_id=REPO_ID, contract_path=contract.as_posix())

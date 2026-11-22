@@ -16,9 +16,16 @@ Rule references below are MIK-R108@v1 rules.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Container, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
+
+from agents_remember.models.tools.tool_answer_short_fields import (
+    TOOL_ANSWER_OVERFLOW_MAX_TOKENS,
+    ShortFormField,
+    fit_declared_short_fields,
+    leading_declared_fields,
+)
 
 # Rule 4: one constant bounds every answer, counted with the product's counter
 # (``models/tokens.py``).
@@ -43,11 +50,6 @@ TOOL_ANSWER_SHORT_STRING_MAX = 200
 # at a word boundary in the answer; the full sentence stays in the whole
 # result the log records.
 TOOL_ANSWER_REASON_MAX_CHARS = 200
-# Rule 4: the short form of the guard has a bound of its own, for every tool
-# and every row, an interim row included. A row with a lower bound does not
-# lower it: the short form is what a caller gets in place of an answer that
-# failed its row.
-TOOL_ANSWER_OVERFLOW_MAX_TOKENS = 400
 # Rule 4: steps 1 and 2 of the short form (the fixed part and the location)
 # are within this many tokens, whatever the log folder is.
 TOOL_ANSWER_OVERFLOW_FIXED_MAX_TOKENS = 250
@@ -452,15 +454,23 @@ def _fixed_short_part(
     return short
 
 
-def _fit_location(short: dict[str, Any], log: str | None) -> None:
-    """Preserve the exact log location whenever the result was recorded.
+@dataclass(frozen=True)
+class ShortFormLocation:
+    log: str | None = None
+    log_error: str | None = None
 
-    The answer sheds other fields first so a reader can still find the whole result after
-    the answer is cut.
-    """
-    if log is None:
-        return
-    short["log"] = log
+
+_NO_SHORT_FORM_LOCATION = ShortFormLocation()
+
+
+def _set_short_location(short: dict[str, Any], location: ShortFormLocation) -> None:
+    """Keep the full result's precise location and any reported logging failure."""
+    if location.log is not None:
+        short["log"] = location.log
+    if location.log_error is not None:
+        short["logError"] = location.log_error
+    if location.log is None:
+        short["resultKept"] = False
 
 
 def _cut_hint(log: str | None, log_error: str | None) -> dict[str, Any]:
@@ -523,7 +533,7 @@ def _fit_error(
 
 
 def _eligible_short_scalars(
-    answer: Mapping[str, Any], reserved: Mapping[str, Any]
+    answer: Mapping[str, Any], reserved: Container[str]
 ) -> Iterator[tuple[str, Any]]:
     """Yield the short-form scalar candidates in answer order (rule 4)."""
     for key, value in answer.items():
@@ -574,32 +584,31 @@ def short_form(
     answer: Mapping[str, Any],
     *,
     answer_tokens: int,
-    log: str | None = None,
-    log_error: str | None = None,
+    location: ShortFormLocation = _NO_SHORT_FORM_LOCATION,
     count: Callable[[Mapping[str, Any]], int] = lambda _payload: 0,
+    declared_fields: tuple[ShortFormField, ...] = (),
 ) -> tuple[dict[str, Any], int, bool]:
     """Build the overflow short form for an answer over its bound (rule 4).
 
-    The guard builds the short form in this order and measures what it
-    built, against ``TOOL_ANSWER_OVERFLOW_MAX_TOKENS``:
+    The guard first reserves the required envelope and measures the selected
+    fields against ``TOOL_ANSWER_OVERFLOW_MAX_TOKENS``:
 
     1. The fixed part: ``ok``, ``code`` where present, ``overflow: true``
        and ``answerTokens``. It is never reduced. A valid ``code`` is never
        dropped and never cut; a longer or non-ASCII one is a defect of the
        tool that made it, and the answer carries ``code: "invalid-code"``.
-    2. The location: ``log``, when the form with it is within
-       ``TOOL_ANSWER_OVERFLOW_FIXED_MAX_TOKENS``. A location that does not
-       fit is not shortened and not replaced by another path: the answer
-       carries the fixed no-path ``logError`` and no ``log``, while the
-       detail file is written all the same. When the detail file could not
-       be written, the answer carries the caller's ``logError`` and
-       ``resultKept: false``.
-    3. ``error`` where present. It is cut to at most
+    2. The exact location where the complete result was recorded. If there
+       is no recording, the answer carries ``resultKept: false`` and says why
+       in its cut hint.
+    3. The tool's declared whole fields, in priority order. A fitting omission
+       reserves space before the next field is considered. Delivered outcomes
+       and next actions appear before the locator.
+    4. ``error`` where present. It is cut to at most
        ``TOOL_ANSWER_ERROR_MAX_CHARS`` characters and then further, from its
        end, until the measured form is within the bound.
        ``errorCut: true`` says that it was cut, and the detail file holds it
        whole.
-    4. The top-level fields that are numbers, booleans or strings of up to
+    5. The other top-level fields that are numbers, booleans or strings of up to
        200 characters, in the order of the answer, each only while the form
        stays within its bound.
 
@@ -613,37 +622,50 @@ def short_form(
     ``count`` measures tokens with the product's counter (``models/tokens.py``);
     the module stays pure by taking it as an argument.
     """
-    short = _fixed_short_part(answer, answer_tokens=answer_tokens)
-    prior_dropped = answer.get("droppedFields")
-    prior_dropped_count = (
-        prior_dropped if isinstance(prior_dropped, int) and prior_dropped > 0 else 0
-    )
+    fixed = _fixed_short_part(answer, answer_tokens=answer_tokens)
+    short = fixed.copy()
+    prior_dropped_count = _prior_dropped_fields(answer, declared_fields)
     prior_error_cut = answer.get("errorCut") is True
-    if log is None:
-        if log_error is not None:
-            short["logError"] = log_error
-        short["resultKept"] = False
-    elif log_error is not None:
-        short["log"] = log
-        short["logError"] = log_error
-    else:
-        _fit_location(short, log)
+    _set_short_location(short, location)
     if (notice := _document_notice(answer)) is not None:
         short["staleDocuments"] = notice
+    hint = _cut_hint(location.log, location.log_error)
+    dropped_budget = prior_dropped_count + len(answer) + len(declared_fields)
+    declared_dropped = fit_declared_short_fields(
+        short,
+        declared_fields,
+        hint,
+        count,
+        dropped_budget,
+    )
     error_cut = prior_error_cut
     if "error" in answer:
         error_cut = _fit_error(short, answer["error"], count) or prior_error_cut
-    dropped, kept = _fit_scalars(short, _eligible_short_scalars(answer, short), count)
+    reserved = set(short).union(field.root for field in declared_fields)
+    dropped, kept = _fit_scalars(short, _eligible_short_scalars(answer, reserved), count)
     # Measure the form with its complete final hint; scalars and then the error make room
     # for it rather than displacing it.
-    hint = _cut_hint(log, log_error)
-
-    dropped += prior_dropped_count
+    dropped += prior_dropped_count + declared_dropped
     dropped, error_cut = _fit_the_cut_hint(
         short, _CutFitting(kept, dropped, hint, count, error_cut)
     )
     short["cut"] = hint
-    return short, dropped, error_cut
+    # Token accounting uses key-sorted JSON. Put fitted outcome and action
+    # fields ahead of the reserved location for the actual transport order.
+    return fixed | leading_declared_fields(short, declared_fields) | short, dropped, error_cut
+
+
+def _prior_dropped_fields(
+    answer: Mapping[str, Any], declared_fields: tuple[ShortFormField, ...]
+) -> int:
+    dropped = answer.get("droppedFields")
+    if not isinstance(dropped, int) or dropped <= 0:
+        return 0
+    if "cut" in answer:
+        # A late logging failure re-fits the declared fields from the whole
+        # result, including those the previous pass counted as dropped.
+        dropped -= sum(field.root not in answer for field in declared_fields)
+    return max(0, dropped)
 
 
 @dataclass(frozen=True)
