@@ -69,7 +69,7 @@ export class DaemonClient {
   async close() { this.state = { status: 'disposed' } }
   getConnectionState() { return this.state }
   getLastServerInfoMessage() { return { serverId: scenario.serverId, version: this.config.appVersion } }
-  // The pinned shape (0.12.0 to 0.15.4): {requestId, reports}, and the SDK's own selector refusal.
+  // The pinned shape (0.12.0 to 0.16.2): {requestId, reports}, and the SDK's own selector refusal.
   async listUsageReports(options = {}) {
     record({ via: 'listUsageReports', options })
     if (options.agentId !== undefined && options.reportIds !== undefined) {

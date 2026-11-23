@@ -74,7 +74,7 @@ def prove_cancellable_git(
         LifecycleCancellationEvidence(
             operationKind=record.operationKind,
             generation=record.generation,
-            workerExitProven=record.workerPid is None,
+            workerExitProven=True,
             expected=facts,
             observed=facts,
             provenAt=datetime.now(UTC).replace(microsecond=0).isoformat(),

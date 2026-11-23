@@ -43,10 +43,11 @@ computation did not read at all is not (:func:`moved_inputs`).
 When the lookup runs and finds no claimant it records all opened documents and its JSON listing;
 this is evidence of absence, not a computation that never performed the lookup.
 
-**Bounds.** At most :data:`CAPACITY` views are kept, least recently used first out. A kept view
-is reused while every read behind it re-observes identical, at any age; only size evicts. The memo lives in the process that serves the reviewer: a
-restart empties it, nothing is written to disk for it (MIK-R25 forbids review copies), and it is
-not the gate's memo, whose key and rules are unchanged. It is a working surface, never a record.
+**Bounds.** The memo keeps up to :data:`CAPACITY` views and :data:`MEMO_BYTES` bytes of keys,
+view parts and their read witnesses. It evicts the least recently used entry first. A kept view
+is reused at any age while every read behind it re-observes identical. The memo lives in the
+process serving the reviewer, stores no copies on disk, and empties on restart. The gate uses
+its own memo and keys.
 
 **What it does not replace.** Every read of an open leaf still captures both worktrees before it
 looks here (MIK-R23 rule 5), so an edit is a new tree and therefore a new key. No composed review
@@ -93,6 +94,7 @@ __all__ = [
 ]
 
 CAPACITY: Final = 4
+MEMO_BYTES: Final = 8 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -126,7 +128,9 @@ class _Kept:
         return not changed_observations(dict(self.reads))
 
 
-LEAF_VIEW_MEMO: Final[BoundedMemo[LeafViewKey, _Kept]] = BoundedMemo(CAPACITY)
+LEAF_VIEW_MEMO: Final = BoundedMemo[LeafViewKey, _Kept].by_retained_bytes(
+    MEMO_BYTES, max_entries=CAPACITY
+)
 """The kept views of the process that serves the reviewer."""
 
 

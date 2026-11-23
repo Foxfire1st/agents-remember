@@ -169,8 +169,10 @@ keeps the durable attempt records readable and publishes through the confined fr
   `review-presenter` is no role. `settings_role_launch` in
   `cli/paseo_catalog.py` resolves the harness or the default harness, `model`, `effort`,
   `serviceTier`, `mode`, `featureValues` and `notes`. A setting that the host (Paseo) cannot honour refuses
-  the launch as `explainer-seat-config`, and an explainer that the host started on other values
-  refuses as `explainer-seat-config-unapplied` (`cli/paseo_explainer_host.py`).
+  the launch as `explainer-seat-config`, and an explainer that the host started on another provider,
+  model, effort or feature values refuses as `explainer-seat-config-unapplied`
+  (`cli/paseo_explainer_host.py`). The mode is not part of that refusal: the launch records the mode
+  the host reports for the seat.
 - **design guidance** comes from `trees/memory/system/design-guidelines.md` in the explainer's
   workspace, the memory that the workspace checks out at its binding, and from the files it routes
   to. The file is optional: the user keeps it in the memory repository, and nothing falls back to the example
@@ -180,9 +182,18 @@ keeps the durable attempt records readable and publishes through the confined fr
   isolation, the explainer does not follow them and records that it did not.
 - **capability text** is canonical `canvas/review-presenter.md`, with a byte-identical copy in the
   package data (`package_data/canvas/review-presenter.md`). The loader in
-  `cli/role_instructions.py` reads the packaged copy and enforces the registered budget of 1,100
-  words and the required wording; the authoring attempt records baseline, addition or replacement provenance
-  and the delivered digest.
+  `cli/role_instructions.py` reads the packaged copy and enforces the registered budget of 1,500
+  words and the required wording; the authoring attempt records baseline, addition or replacement
+  provenance and the delivered digest. The text works in stages and each stage leaves a file in
+  the workspace's `stages/` folder: reading, the chosen changes, the chosen parts, the
+  self-contained explanations, the essay, and the visual plan. A planned binding follows the same
+  stages.
+- **the workspace's inputs** are the task document and the requirement packets it names, copied
+  into `inputs/`. The `reports.md` manifest lists the source path and SHA-256 digest of each
+  readable report for the selected leaf. Read the reports in place. The empty notice names the
+  report root. `stages/` and `inputs/` are outside `drafts/`, so neither is published, rendered or
+  checked as page content. The text carries the content; a visual is made only where it helps a
+  part of the essay, and the page reads in full without its animations.
 - **the authoring attempt** (`canvas/presenter_store.py`), the durable record of one authoring run
   through `Presenter`, records caller, comparison binding, evidence
   digest, design identity, instruction composition, launch provenance, execution, session and
@@ -210,7 +221,11 @@ keeps the durable attempt records readable and publishes through the confined fr
   without a model. Each run writes its own folder `renders/run-NNN/` in the explainer's
   workspace, with `report.json`, `page.png` and `interactions/`; the reply names the folder and
   carries no picture. The load answers `loaded`, `failed` or `unavailable`, and only `loaded`
-  lets a revision become ready. The node script of the load imports the Playwright module that
+  lets a revision become ready. Before publication the static readiness check refuses an
+  autoplaying or looping `audio`/`video` element and one without controls; the frame store admits
+  `.webm` and `.mp4` assets as `video/webm` and `video/mp4`, and the page's figures rules apply to
+  a video as to any other figure: it plays on the reader's act, never loops, and reduced motion
+  shows its still frame with its steps listed. The node script of the load imports the Playwright module that
   `AR_PLAYWRIGHT` names, and the load runs on the Node the product installs for the host. The
   module and its Chromium are the product's own (`canvas/explainer_browser.py`): when either is
   missing at that first load, the load fetches both into `<data>/agents-remember/explainer-browser`

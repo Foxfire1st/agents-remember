@@ -26,9 +26,9 @@ Architect, Orchestrator, Manager, Worker, Curator, Reviewer, Investigator: A rol
 
 Architect, Orchestrator, Manager: Start each role once, with the exact task selection and request identifier. If the result is uncertain, reconcile it with that same identifier. Report a refusal without switching to another tool.
 
-Architect, Orchestrator, Manager: Use the harness, model and effort from settings unless they are overridden. A start carries no mode.
+Architect, Orchestrator, Manager: Use the harness, model and effort from settings unless they are overridden. `role_start` names no mode.
 
-Architect, Orchestrator, Manager: After a start with overrides, immediately check and set the role agent's mode and features. Record the product defect rather than removing the overrides.
+Architect, Orchestrator, Manager: After a start with overrides, immediately check and set the role agent's features. Record the product defect rather than removing the overrides.
 
 Architect, Orchestrator, Manager, Worker, Investigator, Reviewer, Curator: During provider degradation, continue valid native reads and report blockers. Start no providers. Leave state changes to the owning Worker under explicit authorization.
 

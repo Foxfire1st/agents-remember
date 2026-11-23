@@ -22,7 +22,7 @@ capture, exactly as before.
 threads and processes. Under the lock, while the worktree's status witness still proves the last
 capture -- the same real index, every captured path at its recorded stat, the same eligible
 untracked names and ``HEAD`` (:func:`~.capture_baseline.baseline_still_captures`) -- the last
-tree is the answer and no Git command writes. Only size evicts a held witness.
+tree is the answer and no Git command writes. Tool calls hold witnesses for the request lifetime.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ from tempfile import TemporaryDirectory
 from typing import Final
 
 from agents_remember.kernel.file_lock import exclusive_file_lock
+from agents_remember.kernel.request_memo import request_owner
 from agents_remember.worktrees.modules import capture_index
 from agents_remember.worktrees.modules.capture_baseline import (
     WorktreeCaptureBaseline,
@@ -55,6 +56,11 @@ HELD_CAPACITY: Final = 64
 
 _HELD: OrderedDict[str, WorktreeCaptureBaseline] = OrderedDict()
 _HELD_GUARD = threading.Lock()
+
+
+def _held_witnesses() -> OrderedDict[str, WorktreeCaptureBaseline]:
+    request = request_owner(_held_witnesses, OrderedDict[str, WorktreeCaptureBaseline])
+    return _HELD if request is None else request
 
 
 def kept_candidate_tree(
@@ -79,13 +85,14 @@ def kept_candidate_tree(
     )
     directory.mkdir(parents=True, exist_ok=True)
     index = directory / "index"
+    witnesses = _held_witnesses()
     with exclusive_file_lock(directory / "capture", "kept capture index"):
-        held = _held(key)
+        held = _held(witnesses, key)
         if held is not None and index.is_file() and baseline_still_captures(repo, held):
             if captured is not None:
                 captured(index)
             return held.tree
-        _forget(key)
+        _forget(witnesses, key)
         before = bracket_real_index(repo)
         tree = _kept_tree(repo, directory, head)
         if tree is None:
@@ -95,7 +102,7 @@ def kept_candidate_tree(
             captured(index)
         baseline = admitted_baseline(repo, tree=tree, entries=entries, before=before, head=head)
         if baseline is not None:
-            _hold(key, baseline)
+            _hold(witnesses, key, baseline)
         return tree
 
 
@@ -169,22 +176,28 @@ def _kept_head(path: Path) -> str | None:
     return head if isinstance(head, str) else None
 
 
-def _held(key: str) -> WorktreeCaptureBaseline | None:
+def _held(
+    witnesses: OrderedDict[str, WorktreeCaptureBaseline], key: str
+) -> WorktreeCaptureBaseline | None:
     with _HELD_GUARD:
-        held = _HELD.get(key)
+        held = witnesses.get(key)
         if held is not None:
-            _HELD.move_to_end(key)
+            witnesses.move_to_end(key)
         return held
 
 
-def _hold(key: str, baseline: WorktreeCaptureBaseline) -> None:
+def _hold(
+    witnesses: OrderedDict[str, WorktreeCaptureBaseline],
+    key: str,
+    baseline: WorktreeCaptureBaseline,
+) -> None:
     with _HELD_GUARD:
-        _HELD[key] = baseline
-        _HELD.move_to_end(key)
-        while len(_HELD) > HELD_CAPACITY:
-            _HELD.popitem(last=False)
+        witnesses[key] = baseline
+        witnesses.move_to_end(key)
+        while len(witnesses) > HELD_CAPACITY:
+            witnesses.popitem(last=False)
 
 
-def _forget(key: str) -> None:
+def _forget(witnesses: OrderedDict[str, WorktreeCaptureBaseline], key: str) -> None:
     with _HELD_GUARD:
-        _HELD.pop(key, None)
+        witnesses.pop(key, None)

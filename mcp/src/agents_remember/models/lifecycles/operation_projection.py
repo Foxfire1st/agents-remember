@@ -29,12 +29,6 @@ if TYPE_CHECKING:
 
 _DIGEST = r"^[0-9a-f]{64}$"
 
-LifecycleProjectionWorkerState = Literal[
-    "live",
-    "termination-requested",
-    "termination-required",
-    "exited",
-]
 LifecycleProjectionResultClass = Literal[
     "none",
     "progress",
@@ -107,7 +101,6 @@ _INPUT_REQUIRED_PHASES: frozenset[LifecycleOperationPhase] = frozenset(
 @dataclass(frozen=True)
 class LifecycleProjectionStateRule:
     phases: frozenset[LifecycleOperationPhase]
-    workerStates: frozenset[LifecycleProjectionWorkerState]
     resultClasses: frozenset[LifecycleProjectionResultClass]
     controlActions: frozenset[LifecycleProjectionControlAction]
 
@@ -115,43 +108,36 @@ class LifecycleProjectionStateRule:
 STATE_MATRIX: dict[LifecycleOperationStatus, LifecycleProjectionStateRule] = {
     "queued": LifecycleProjectionStateRule(
         frozenset({"queued", "recovering-after-claim", "recovering-private-preparation"}),
-        frozenset({"live", "exited"}),
         frozenset({"none", "progress", "recovery", "developer-decision"}),
         frozenset({"recover", "resume", "cancel", "supersede"}),
     ),
     "running": LifecycleProjectionStateRule(
         _RUNNING_PHASES,
-        frozenset({"live", "exited"}),
         frozenset({"none", "progress", "recovery", "developer-decision"}),
         frozenset({"recover", "resume", "cancel", "supersede"}),
     ),
     "input-required": LifecycleProjectionStateRule(
         _INPUT_REQUIRED_PHASES,
-        frozenset({"live", "exited"}),
         frozenset({"recovery", "developer-decision"}),
         frozenset({"retry", "recover", "resume", "cancel", "supersede"}),
     ),
     "termination-required": LifecycleProjectionStateRule(
         frozenset({"termination-required"}),
-        frozenset({"termination-requested", "termination-required", "exited"}),
         frozenset({"termination"}),
         frozenset({"cancel"}),
     ),
     "completed": LifecycleProjectionStateRule(
         frozenset({"completed"}),
-        frozenset({"live", "exited"}),
         frozenset({"none", "developer-decision", "terminal"}),
         frozenset({"recover", "retire", "supersede", "integrate", "direct-landing"}),
     ),
     "failed": LifecycleProjectionStateRule(
         frozenset({"failed"}),
-        frozenset({"live", "exited"}),
         frozenset({"none", "recovery", "developer-decision", "terminal"}),
         frozenset({"retry", "recover", "resume", "cancel", "supersede"}),
     ),
     "cancelled": LifecycleProjectionStateRule(
         frozenset({"cancelled"}),
-        frozenset({"exited"}),
         frozenset({"none", "recovery", "developer-decision", "terminal"}),
         frozenset({"cancel", "resume", "integrate", "direct-landing"}),
     ),
@@ -195,16 +181,15 @@ def classify_result(
 def validate_projection_state(
     record: LifecycleOperationRecord,
     *,
-    worker_state: LifecycleProjectionWorkerState,
     result: dict[str, Any] | None,
     legal_controls: list[dict[str, Any]],
 ) -> None:
     """Reject every status/phase/liveness/result/control cell not declared by v1."""
 
     _validate_projection_cell(
+        kind=record.operationKind,
         status=record.status,
         phase=record.phase,
-        worker_state=worker_state,
         result=result,
         legal_controls=legal_controls,
     )
@@ -217,35 +202,38 @@ def validate_projection_state(
 
 def _validate_projection_cell(
     *,
+    kind: LifecycleOperationKind,
     status: LifecycleOperationStatus,
     phase: LifecycleOperationPhase,
-    worker_state: LifecycleProjectionWorkerState,
     result: dict[str, Any] | None,
     legal_controls: list[dict[str, Any]],
 ) -> None:
     """Validate the public subset again after projection-owned composition."""
 
     rule = STATE_MATRIX[status]
+    if kind != "direct-landing":
+        # Retired generations expose stored outcomes as audit, with no executable controls.
+        if phase not in rule.phases or legal_controls:
+            raise LifecycleProjectionIncoherence(
+                {"phases": sorted(rule.phases), "controlActions": []},
+                {"phase": phase, "controlActions": [item.get("action") for item in legal_controls]},
+            )
+        return
+
     result_class = classify_result(status, result)
     observed = {
         "status": status,
         "phase": phase,
-        "workerState": worker_state,
         "resultClass": result_class,
         "controlActions": [str(item.get("action", "")) for item in legal_controls],
     }
     expected = {
         "stateMatrixVersion": STATE_MATRIX_VERSION,
         "phases": sorted(rule.phases),
-        "workerStates": sorted(rule.workerStates),
         "resultClasses": sorted(rule.resultClasses),
         "controlActions": sorted(rule.controlActions),
     }
-    if (
-        phase not in rule.phases
-        or worker_state not in rule.workerStates
-        or result_class not in rule.resultClasses
-    ):
+    if phase not in rule.phases or result_class not in rule.resultClasses:
         raise LifecycleProjectionIncoherence(expected, observed)
     actions = observed["controlActions"]
     if (
@@ -263,13 +251,9 @@ def validate_state_matrix_is_exhaustive() -> None:
 
     statuses = frozenset(get_args(LifecycleOperationStatus))
     phases = frozenset(get_args(LifecycleOperationPhase))
-    worker_states = frozenset(get_args(LifecycleProjectionWorkerState))
     result_classes = frozenset(get_args(LifecycleProjectionResultClass))
     control_actions = frozenset(get_args(LifecycleProjectionControlAction))
     declared_phases = frozenset(phase for rule in STATE_MATRIX.values() for phase in rule.phases)
-    declared_workers = frozenset(
-        state for rule in STATE_MATRIX.values() for state in rule.workerStates
-    )
     declared_results = frozenset(
         result for rule in STATE_MATRIX.values() for result in rule.resultClasses
     )
@@ -279,7 +263,6 @@ def validate_state_matrix_is_exhaustive() -> None:
     if (
         frozenset(STATE_MATRIX) != statuses
         or declared_phases != phases
-        or declared_workers != worker_states
         or declared_results != result_classes
         or declared_controls != control_actions
     ):
@@ -306,19 +289,8 @@ class LifecycleProjectionComponentBindings(StrictResponseModel):
 
     result: str | None = Field(default=None, pattern=_DIGEST)
     approval: str | None = Field(default=None, pattern=_DIGEST)
-    worker: str | None = Field(default=None, pattern=_DIGEST)
     recommendedAction: str | None = Field(default=None, pattern=_DIGEST)
     legalControls: list[str] = Field(default_factory=list, max_length=32)
-
-
-class LifecycleWorkerObservation(StrictResponseModel):
-    """Public liveness class without exposing process or lease authority."""
-
-    state: Literal["live", "termination-requested", "termination-required", "exited"]
-    identityRetained: bool
-    workerIdentitySha256: str | None = Field(default=None, pattern=_DIGEST)
-    observedAt: str | None = None
-    detail: str = Field(max_length=1024)
 
 
 class LifecycleApprovalObservation(StrictResponseModel):
@@ -361,7 +333,6 @@ class LifecycleOperationProjection(StrictResponseModel):
     result: dict[str, Any] | None = None
     failure: str | None = None
     guidance: str | None = None
-    worker: LifecycleWorkerObservation | None = None
     approval: LifecycleApprovalObservation | None = None
     recommendedAction: LifecycleRecommendedAction | None = None
     cancellable: bool = False
@@ -430,7 +401,6 @@ def _require_component_bindings_match_envelope(
     expected = {
         "result": digest if projection.result is not None else None,
         "approval": digest if projection.approval is not None else None,
-        "worker": digest if projection.worker is not None else None,
         "recommendedAction": digest if projection.recommendedAction is not None else None,
     }
     observed = component_bindings.model_dump(mode="python", exclude={"legalControls"})
@@ -447,14 +417,11 @@ def _require_coherent_projection_components(
     if status in {"unreadable", "incoherent"}:
         raise ValueError("coherent component validation requires a lifecycle status")
     coherent_status = cast(LifecycleOperationStatus, status)
-    worker = projection.worker
-    if worker is None:
-        raise ValueError("coherent projection requires an explicit worker observation")
     try:
         _validate_projection_cell(
+            kind=projection.kind,
             status=coherent_status,
             phase=projection.phase,
-            worker_state=worker.state,
             result=projection.result,
             legal_controls=projection.legalControls,
         )
@@ -470,15 +437,8 @@ def _require_coherent_projection_components(
 
 def _require_recommendation_coherence(projection: LifecycleOperationProjection) -> None:
     recommendation = projection.recommendedAction
-    worker = projection.worker
-    if recommendation is None or worker is None:
+    if recommendation is None:
         return
-    if (
-        recommendation.action == "cancel"
-        and worker.state == "live"
-        and projection.status in {"queued", "running"}
-    ):
-        raise ValueError("healthy live work cannot receive required-cancel guidance")
     matching_controls = [
         control
         for control in projection.legalControls

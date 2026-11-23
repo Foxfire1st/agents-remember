@@ -77,35 +77,35 @@ reference](../reference/settings-json.md) shows the two commands that open and c
 settings file is `~/.config/agents-remember/agents-remember-settings.json`.
 
 - **A role agent on Codex can ask before a call of a tool of Agents Remember, and waits until you
-  answer.** Without a mode in the user settings file, Agents Remember starts Codex in the mode
-  `auto`, which the host labels "Default Permissions". The host starts that mode with Codex's
-  approval policy `on-request` and keeps a prompt open until you answer it.
+  answer.** Without a mode in the user settings file, the agent starts in the default mode that the
+  host names for Codex, `auto-review`. Agents Remember picks no mode of its own.
   - Setting: `orchestration.roles.<role>.mode` in the user settings file, for example
     `"auto-review"`. The host offers `auto`, `auto-review` and `full-access` for Codex. In the mode
     `auto-review` the host gives Codex the approval policy `on-request` and names its automatic
     reviewer; an approval that the review does not settle still reaches you as a prompt in the
-    agent's chat.
-  - Who: you state the mode. Agents Remember sends it with the start. You change the mode of a
-    running agent in its chat.
+    agent's chat. In `auto` the host starts Codex with the policy `on-request` too and keeps a
+    prompt open until you answer it.
+  - Who: you state the mode. Agents Remember sends it with the start, and the role launcher's
+    "Role mode override" chooses one for the chat it starts, with the source "start call". You
+    change the mode of a running agent in its chat.
   - Checked: the start mode and the key, in the code of Agents Remember; the modes, the approval
     policy of each and the reviewer each names, in the source of the host this build installs; the
     automatic approval review and its stage, in the feature list of Codex 0.166.0; and a role agent
     in this mode, whose call of an Agents Remember tool waited for an answer from outside.
-- **A call of a tool of Agents Remember can end at 300 seconds.** On this version a preview of a
-  large `knowledge_write` passed 300 seconds, ended with a timeout in the agent's turn, and answered
-  later. A role agent's tool server is the one the host passes at the start, and the host passes no
-  timeout for it; no setting was found that reaches that server. A command of the same build that
-  writes into the object store of the code repository cannot run inside the agent's sandbox while
-  the code repository lies outside the folder the sandbox may write.
-  - Setting: no setting was found that reaches a host-started role agent's tool server. A table
-    named `agents-remember` with `tool_timeout_sec = 1800` leaves such an agent ending at 300
-    seconds. For a command of that kind, run it outside the agent's sandbox.
-  - Who: you, for the command outside the sandbox; the 300-second bound is Codex's own.
-  - Checked: the host's start of a Codex role agent passes its tool server as `command`, `args` and
-    `env` only, read in the host 0.15.4 source this build installs, and passes no timeout; the
-    sandbox's read-only answer outside its working folder and its write inside it, by commands run
-    through `codex sandbox` with `sandbox_mode="workspace-write"` on a scratch home; and the
-    300-second end was measured on this version earlier, not repeated.
+- **Agents Remember tool calls in Codex role seats use Codex's 300-second default.** Paseo 0.16.2
+  passes the seat's standard I/O or HTTP connection settings without a per-server timeout.
+  Codex rejects a table containing only `tool_timeout_sec` in `config.toml` because a server
+  definition requires a `command` or a `url`.
+  - **Checked in source.** The Paseo 0.16.2 MCP protocol schema and Codex adapter's
+    `toCodexMcpConfig` omit the timeout on both transports. Codex 0.170.0 validates the
+    transport in its [MCP configuration parser](https://github.com/openai/codex/blob/29eb79e9866b3262a777fdf8195c1b9e63684c91/codex-rs/config/src/mcp_types.rs#L519-L574).
+  - A standard I/O role-seat measurement reached the default when a large `knowledge_write` preview
+    ran for more than 300 seconds. The call timed out in the agent's turn, and the server answered
+    later. The measurement used a user table named `agents-remember`, while the host supplied the
+    seat's `agents-remember-task` definition.
+  - The agent's sandbox can write to the code repository's object store only when that store is
+    inside a writable folder. A command that needs to write outside those folders must run outside
+    the agent's sandbox.
 - **A Codex agent that the host starts uses another sign-in or another session store than your own
   Codex.** Codex finds both through the variables `CODEX_HOME` and `CODEX_SQLITE_HOME`. A running
   host gives its agents the values of the shell or the program that started it, so the same agent

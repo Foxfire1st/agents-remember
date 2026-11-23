@@ -75,6 +75,7 @@ def test_cross_model_omitted_mode_uses_host_default_without_changing_base(launch
         "role": "worker",
         "agent": "codex",
         "model": "gpt-a",
+        "mode": "auto",
         "stepUp": {"model": "gpt-b"},
     }
     world.replace(
@@ -83,7 +84,7 @@ def test_cross_model_omitted_mode_uses_host_default_without_changing_base(launch
     original = world.request("worker")
     base = world.dispatch(original)[1]
     assert base["sessionOptions"]["mode"] == "auto"
-    assert base["choices"]["mode"]["source"] == "least permissive mode"
+    assert base["choices"]["mode"]["source"] == "our settings"
     world.agent_of(original).update(status="idle")
     request = RoleDispatchRequest.model_validate(
         {**world.request("worker").model_dump(by_alias=True), "stepUp": "Try another approach."}
@@ -95,6 +96,63 @@ def test_cross_model_omitted_mode_uses_host_default_without_changing_base(launch
     assert answer["choices"]["mode"]["source"] == "host default"
     create = [payload for command, payload in world.runtime.calls if command == "agent-create"][-1]
     assert create["modeId"] == "auto-review"
+
+
+def test_same_harness_step_up_without_a_mode_takes_the_host_default(launch_world) -> None:
+    world = launch_world
+    catalog = deepcopy(CATALOG)
+    provider = catalog["providers"][0]
+    provider["modes"] = [{"id": "auto"}, {"id": "auto-review"}]
+    provider["defaultModeId"] = "auto-review"
+    world.replace(world.runtime, "_catalog", return_value=catalog)
+    defaults = {
+        "role": "worker",
+        "agent": "codex",
+        "model": "gpt-a",
+        "mode": "auto",
+        "stepUp": {"effort": "low"},
+    }
+    world.replace(
+        role_launch_preparation, "_role_defaults", return_value=(defaults, ("codex", "eve"))
+    )
+    original = world.request("worker")
+    base = world.dispatch(original)[1]
+    assert base["sessionOptions"]["mode"] == "auto"
+    world.agent_of(original).update(status="idle")
+    request = RoleDispatchRequest.model_validate(
+        {**world.request("worker").model_dump(by_alias=True), "stepUp": "Try another approach."}
+    )
+    answer = world.dispatch(request)[1]
+    assert answer["status"] == "running"
+    # The step-up row names no mode: the role row's mode is not inherited into it.
+    assert answer["sessionOptions"]["mode"] == "auto-review"
+    assert answer["choices"]["mode"]["source"] == "host default"
+    create = [payload for command, payload in world.runtime.calls if command == "agent-create"][-1]
+    assert create["modeId"] == "auto-review"
+
+
+def test_launcher_mode_stands_first_and_reaches_the_create_as_named(launch_world) -> None:
+    world = launch_world
+    catalog = deepcopy(CATALOG)
+    provider = catalog["providers"][0]
+    provider["modes"] = [{"id": "auto"}, {"id": "auto-review"}]
+    provider["defaultModeId"] = "auto-review"
+    world.replace(world.runtime, "_catalog", return_value=catalog)
+    defaults = {"role": "worker", "agent": "codex", "model": "gpt-a", "mode": "auto"}
+    world.replace(
+        role_launch_preparation, "_role_defaults", return_value=(defaults, ("codex", "eve"))
+    )
+    request = world.request("worker", modeId="not-a-listed-mode")
+    answer = world.dispatch(request)[1]
+    assert request.agent_override is not None
+    assert request.agent_override.mode_id == "not-a-listed-mode"
+    assert answer["status"] == "running"
+    # The launcher's mode stands before the settings row, and the host receives it as named.
+    assert answer["choices"]["mode"]["source"] == "start call"
+    assert answer["choices"]["mode"]["value"] == "not-a-listed-mode"
+    assert answer["choices"]["mode"]["observedValue"] == "not-a-listed-mode"
+    create = [payload for command, payload in world.runtime.calls if command == "agent-create"][-1]
+    assert create["modeId"] == "not-a-listed-mode"
 
 
 @pytest.mark.parametrize(

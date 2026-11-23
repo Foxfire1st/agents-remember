@@ -38,7 +38,7 @@ When the requirement's planned structure leaves types, modules or signatures ope
 
 ## Map and record evidence
 
-At intake and at each freeze, map every numbered evidence item to its report file. Name missing evidence openly.
+At intake and at each freeze, map every numbered evidence item the round carries to its report file; map a final check's evidence when it runs. Name missing evidence openly.
 
 ## Use knowledge commands
 
@@ -72,7 +72,7 @@ After implementation changes source code, use `system/code-quality-report-templa
 
 At each freeze, regenerate the scripted Curator list and its binding for the frozen tree, ready for code review to return `PASS`.
 
-Before freezing a product-code removal or rename, prove that the whole test tree collects on the final bytes.
+Before freezing a product-code removal or rename, prove that the whole test tree collects on the frozen tree.
 
 Before writing the freeze report, read the [Requirement Attempt Journal shape]({{detail:templates/turn-report.md}}#shape) for the report fields and the journal records to append for this handoff. Carry the leaf's journal records and their attempt identifiers in the handover.
 
@@ -82,6 +82,8 @@ Before you add an optional walkthrough to your freeze report, read [visual-expla
 <!-- ar:gives producer-list to curator: list-file, freeze-identity, handoff-check-result -->
 
 Before handing over a frozen candidate, follow [Hand over the frozen candidate](../operations/implementation.md#hand-over-the-frozen-candidate) for the Manager stage-start notice, direct Reviewer handover and code-`PASS` Curator handover, each sent with `role_message` on `agents-remember-task`. Preserve the producer data verbatim for that exact freeze.
+
+After the code review passes, follow [Run the final checks after the pass](../operations/implementation.md#run-the-final-checks-after-the-pass) for the requirement's listed checks, the passed tree and the report that carries their results to the Manager and the Reviewer.
 
 Before a command-line run that decides or writes, read [serving-build CLI binding]({{detail:reference/knowledge/serving-build.md}}) for the admitted launch interpreter, package selection and stamp comparison with `server_info` on `agents-remember-task`.
 
@@ -154,4 +156,4 @@ Work step to step and wave to wave in one turn, collecting helper results. End o
 
 When your part is complete, mark its task-document step `done` through `task_doc` on `agents-remember-task`, using `set_step`, the step identifier and a one-line note. If no step names your part, report that and mark nothing. Incomplete, blocked, progress and escalation reports never mark unfinished work done. This covers only your build and evidence steps, not review, curation, task status or acceptance.
 
-Your stage ends when the candidate meets the requirement, the handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of the final bytes, and the report is with the Reviewer.
+Your stage ends when the candidate meets the requirement, the handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of the frozen candidate, the requirement's final checks have run once on the tree that passed review, and the reports are with the Reviewer and the Manager.

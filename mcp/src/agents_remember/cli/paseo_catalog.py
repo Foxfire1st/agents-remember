@@ -6,8 +6,8 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import asdict, dataclass, field
-from typing import Any
+from dataclasses import asdict, dataclass, field, replace
+from typing import Any, Literal
 
 from agents_remember.application.user_settings_init import SettingsInitRefused
 from agents_remember.cli.paseo_bridge import (
@@ -16,7 +16,10 @@ from agents_remember.cli.paseo_bridge import (
     bridge_call,
     require_bridge_runtime,
 )
-from agents_remember.cli.paseo_catalog_features import selected_model_features
+from agents_remember.cli.paseo_catalog_features import (
+    public_model_features,
+    selected_model_features,
+)
 from agents_remember.cli.paseo_catalog_names import (
     canonical_defaults,
     canonical_fields,
@@ -50,7 +53,7 @@ class LauncherCatalog:
     without_tool_servers: frozenset[str] = frozenset()
 
     discovery: dict[str, Any] = field(default_factory=lambda: {"source": "fresh", "readAt": None})
-    mode: str = "full"
+    model_options: Literal["selected", "metadata"] = "selected"
     asked: bool = True
     scope: tuple[str, ...] = ()
     feature_answers: dict[tuple[str, str], dict[str, Any]] = field(
@@ -74,9 +77,20 @@ _OPERATION_CATALOGS: ContextVar[dict[tuple[str, ...], LauncherCatalog] | None] =
 )
 
 
+def paseo_catalog_scope(config: McpRuntimeConfig) -> tuple[str, str, str, str]:
+    """The identity of one Paseo runtime and its saved catalogue."""
+    settings = require_bridge_runtime(config)
+    return (
+        settings.install_prefix.as_posix(),
+        settings.home.as_posix(),
+        settings.listen,
+        settings.version,
+    )
+
+
 @contextmanager
 def launcher_catalog_question() -> Iterator[None]:
-    """Share a start's two questions (metadata, selected features) or a view's one full read."""
+    """Share catalogue metadata and selected answers within one operation."""
     if _OPERATION_CATALOGS.get() is not None:
         yield
         return
@@ -87,24 +101,20 @@ def launcher_catalog_question() -> Iterator[None]:
         _OPERATION_CATALOGS.reset(token)
 
 
-def launcher_catalog(
-    config: McpRuntimeConfig, *, refresh: bool = False, mode: str = "metadata"
-) -> LauncherCatalog:
+def launcher_catalog(config: McpRuntimeConfig, *, refresh: bool = False) -> LauncherCatalog:
     """Ask Paseo now; only unanswered parts use its durable last successful answer."""
     scope = paseo_catalog_scope(config)
     current = _OPERATION_CATALOGS.get()
     if not refresh and current is not None and scope in current:
-        cached = current[scope]
-        if mode != "full" or cached.mode == "full":
-            return cached
-    catalog = _question_catalog(config, scope, refresh=refresh, mode=mode)
+        return current[scope]
+    catalog = _question_catalog(config, scope, refresh=refresh)
     if current is not None:
         current[scope] = catalog
     return catalog
 
 
 def _question_catalog(
-    config: McpRuntimeConfig, scope: tuple[str, ...], *, refresh: bool, mode: str
+    config: McpRuntimeConfig, scope: tuple[str, ...], *, refresh: bool
 ) -> LauncherCatalog:
     runtime = require_bridge_runtime(config)
     error = None
@@ -115,7 +125,7 @@ def _question_catalog(
             {
                 "cwd": config.workspace_root.as_posix(),
                 **({"refresh": True} if refresh else {}),
-                **({"mode": mode} if mode != "full" else {}),
+                "mode": "metadata",
             },
         )
     except PaseoBridgeFailure as failure:
@@ -126,7 +136,6 @@ def _question_catalog(
         agents=_agents_from_reply(merged),
         without_tool_servers=_providers_without_tool_servers(merged),
         discovery=merged["catalogDiscovery"],
-        mode=mode,
         scope=scope,
     )
 
@@ -164,18 +173,6 @@ def runnable_harnesses(config: McpRuntimeConfig) -> list[dict[str, str]] | None:
     return [{"id": agent["id"], "label": agent["label"]} for agent in catalog.agents]
 
 
-def paseo_catalog_scope(config: McpRuntimeConfig) -> tuple[str, str, str, str]:
-    """The identity of one Paseo runtime: its install, daemon home, listen address and version."""
-
-    settings = require_bridge_runtime(config)
-    return (
-        settings.install_prefix.as_posix(),
-        settings.home.as_posix(),
-        settings.listen,
-        settings.version,
-    )
-
-
 def read_host_role(config: McpRuntimeConfig, role: str) -> dict[str, Any]:
     """Read matching host profiles; record an unavailable read and use role settings."""
     try:
@@ -203,7 +200,7 @@ def launcher_options(
     *,
     refresh: bool = False,
 ) -> dict[str, Any]:
-    catalog = launcher_catalog(config, refresh=refresh, mode="full")
+    catalog = replace(launcher_catalog(config, refresh=refresh), model_options="metadata")
     try:
         agent_id, options = resolve_agent_selection(
             config, defaults, harness_order, None, catalog=catalog
@@ -349,6 +346,7 @@ def resolve_agent_selection(
     mode = pick(
         "mode",
         [
+            (call.get("modeId"), "start call"),
             (profile.get("modeId") if host_agent == agent_id else None, "host role"),
             (
                 _setting_value(defaults, "mode", (agent_id, None), ignored_settings)
@@ -358,12 +356,9 @@ def resolve_agent_selection(
             ),
         ],
     )
-    mode, choices["mode"] = _resolve_mode(
-        mode,
-        choices["mode"],
-        agent,
-        defaults.get("role"),
-        host_default=defaults.get("useHostDefaultMode", False),
+    mode, choices["mode"], choices["rowMode"] = (
+        *_resolve_mode(mode, choices["mode"], agent),
+        _row_mode_choice(defaults, settings_agent, ignored_settings),
     )
     model = _model_with_features(config, catalog, agent, (agent_id, model_id))
     call_features = _canonical_features(call_features, model)
@@ -515,39 +510,44 @@ def _choice_source(choice: dict[str, Any], key: str, role: str | None) -> str:
     return f"{key} from {source}"
 
 
+def _row_mode_choice(
+    defaults: dict[str, Any], settings_agent: str | None, ignored_settings: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """The settings row's own harness and mode, for a launcher that shows a default elsewhere.
+
+    It states the same rule the start applies: the row's mode holds on the row's own harness.
+    """
+
+    selection = (settings_agent or "", None)
+    return {
+        "harness": settings_agent,
+        "value": _setting_value(defaults, "mode", selection, ignored_settings),
+        "source": "our settings",
+    }
+
+
 def _resolve_mode(
     mode: str | None,
     choice: dict[str, Any],
     agent: dict[str, Any],
-    role: str | None,
-    *,
-    host_default: bool = False,
 ) -> tuple[str | None, dict[str, Any]]:
+    """The mode this start sends: a named one as named, else the host's own default.
+
+    The host is the authority on the modes of its own harness. A mode the host does not
+    list is sent as named, and a mode the host applies differently is reported by its own
+    answer and recorded on the receipt; the product refuses and replaces neither.
+    """
+
     if agent.get("modesKnown") is False:
         return mode, choice
     modes = agent["modes"]
-    if mode is None and host_default:
+    if mode is None:
         mode = agent.get("defaultModeId")
         choice = {"value": mode, "source": "host default"}
-    elif mode is None:
-        safe = {"claude": "default", "codex": "auto"}.get(agent["id"])
-        mode = safe if any(row["id"] == safe for row in modes) else None
-        choice = {
-            "value": mode,
-            "source": "least permissive mode" if mode else "none",
-            "reason": "least permissive supported mode for this agent kind"
-            if mode
-            else "no named least working mode offered for this agent kind",
-        }
     matched = _named(modes, mode) if mode is not None else None
     if matched is not None:
         mode = matched["id"]
         choice = {**choice, "value": mode}
-    if mode is not None and matched is None:
-        raise LaunchSelectionRefused(
-            "mode_not_offered",
-            f"Role {role}: {_choice_source(choice, 'mode', role)}={mode!r} is not offered for {agent['id']}; offered: {[row['id'] for row in modes]}",
-        )
     return mode, choice
 
 
@@ -771,10 +771,7 @@ def _model_row(model: Any) -> dict[str, Any]:
         "efforts": [_effort_row(effort) for effort in efforts],
         "discovery": model.get("discovery", {}),
         "serviceTiers": [_effort_row(tier) for tier in tiers],
-        "features": [
-            {**feature, "permissionBearing": feature["id"] not in NON_PERMISSION_FEATURES}
-            for feature in model.get("features", [])
-        ],
+        "features": public_model_features(model.get("features", [])),
         **({"featureError": model["featureError"]} if _is_text(model.get("featureError")) else {}),
         **(
             {"serviceTierError": model["serviceTierError"]}
@@ -830,7 +827,6 @@ def settings_role_launch(
         "hostRole": read_host_role(config, role),
         "settingsSources": [str(path) for path in settings.sources],
         "fieldOrigins": {key: asdict(value) for key, value in knobs.origins.items()},
-        "useHostDefaultMode": True,
     }
     return resolve_agent_selection(config, defaults, settings.harness_ids, None)
 

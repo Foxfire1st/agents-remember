@@ -138,6 +138,8 @@ _MEDIA_BY_SUFFIX: dict[str, str] = {
     ".md": "text/markdown",
     ".png": "image/png",
     ".woff2": "font/woff2",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
 }
 
 

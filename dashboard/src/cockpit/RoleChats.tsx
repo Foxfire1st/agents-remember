@@ -123,6 +123,7 @@ export function RoleChatsPane({
       selectionComplete={selectionComplete}
       controls={controls}
       options={loader}
+      optionReads={{ catalogRefresh, optionsRefresh, waitForLaunch }}
       activeRequests={controls.activeRequestsRef.current}
       report={report}
       onCloseReport={onCloseReport}

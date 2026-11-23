@@ -226,10 +226,15 @@ def _request_fingerprint(payload: Mapping[str, Any]) -> str:
 
 
 def _require_applied(reply: dict[str, Any], create: dict[str, Any]) -> dict[str, Any]:
-    """Refuse a seat the host launched on values other than the ones the settings chose."""
+    """Refuse a seat the host launched on values other than the ones the settings chose.
+
+    The permission mode is not checked: a start either names one the host applies or leaves
+    the choice to the host, and the host's own answer, recorded with the launch, says which
+    mode the seat runs. Refusing on it would claim a rule the product does not own.
+    """
 
     requested_keys = [
-        key for key in ("model", "thinkingOptionId", "modeId", "featureValues") if create.get(key)
+        key for key in ("model", "thinkingOptionId", "featureValues") if create.get(key)
     ]
     agent = reply.get("agent") if isinstance(reply, dict) else None
     if not isinstance(agent, dict):
@@ -250,7 +255,7 @@ def _require_applied(reply: dict[str, Any], create: dict[str, Any]) -> dict[str,
             f"the host launched the seat with provider {stated['provider']!r}, "
             f"not {create['provider']!r}",
         )
-    for key in ("model", "thinkingOptionId", "modeId"):
+    for key in ("model", "thinkingOptionId"):
         wanted = create.get(key)
         got = stated.get(key)
         if not wanted:
@@ -502,11 +507,18 @@ class PaseoExplainerHost:
             ),
             "model": stated.get("model") or options.get("model"),
             "effort": stated.get("thinkingOptionId") or options.get("effort"),
-            "mode": stated.get("modeId") or options.get("mode"),
+            # The mode is the host's report alone: a host that names none leaves this absent
+            # while choices.mode keeps what the settings asked for and where it came from.
+            "mode": stated.get("modeId"),
             "featureValues": dict(
                 stated.get("featureValues") or options.get("featureValues") or {}
             ),
             "choices": dict(options.get("choices") or {}),
+            # The host's own observation, kept apart from the requested choices above: a host
+            # that reports a different mode, or none, is recorded as it answered.
+            "observedChoices": {
+                "mode": {"value": stated.get("modeId"), "source": "host report"},
+            },
             "extraArgs": dict(options.get("extraArgs") or {}),
             "toolServer": {
                 "name": SERVER_NAME,
@@ -574,9 +586,13 @@ class PaseoExplainerHost:
         }
 
     def resume(self, agent_id: str) -> dict[str, Any]:
-        """Open a closed seat again, without a turn, at the settings role's model/effort/mode.
+        """Open a closed seat again, without a turn, at the settings role's model and effort.
 
-        Rule 5: a host restart leaves the same seat. The settings role's choices are applied at
+        The reopen sends the same field names a start sends, and the host resumes the saved
+        timeline: the call's mode is a statement of intent, the seat keeps the mode it already
+        runs, and the record keeps the mode the host reports rather than one this call restates.
+
+        Rule 5: a host restart leaves the same seat. The settings role's choices are sent at
         resume as at create (MIK-R105 v3), so the host call carries them under the same names and
         the host's own statement of the resumed seat is checked; a seat the host reports pending a
         permission decision answers that truthfully instead of claiming a resume that did not

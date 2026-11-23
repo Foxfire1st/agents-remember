@@ -212,6 +212,7 @@ async def handle_build(
             scope,
             request_id=named.request_id,
             message=named.message,
+            history=named.history,
         )
     except read_model._ComparisonMoved as error:
         return read_model._refusal(

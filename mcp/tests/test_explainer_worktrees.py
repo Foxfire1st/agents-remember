@@ -6,13 +6,30 @@ snapshot batching/read-only/old-generation cases rather than adding parallel cov
 
 from __future__ import annotations
 
+import os
+import stat
+import subprocess
+import sys
+from collections.abc import Iterator
+from contextlib import ExitStack
 from pathlib import Path
+from tempfile import TemporaryFile
+from typing import BinaryIO
 
 import pytest
+from agents_remember.canvas import explainer_target
 from agents_remember.canvas.explainer_state import ExplainerRefused
+from agents_remember.canvas.explainer_target import ExplainerTargetReads
 from agents_remember.canvas.explainer_worktrees import checkout_tree, remove_checkout
 from agents_remember.canvas.paths import PathRefused
+from agents_remember.kernel import git_command
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.read_cancellation import ReadCancelled, cancellable_read
+from agents_remember.models.knowledge.review_frame import FrameBinding
+from agents_remember.models.knowledge.review_trees import (
+    ReviewTreeComparisonRecord,
+    ReviewTreeSide,
+)
 
 pytestmark = pytest.mark.evidence_unit
 
@@ -43,6 +60,121 @@ def _destination(base: Path) -> tuple[Path, Path]:
     root = base / "environment"
     root.mkdir()
     return root, root / "trees" / "code"
+
+
+def _comparison_reads(repository: Path, tree: str) -> ExplainerTargetReads:
+    side = ReviewTreeSide(repository=repository.as_posix(), tree=tree)
+    record = ReviewTreeComparisonRecord(
+        task_id="TEST",
+        leaf_id="TEST-L1",
+        number=1,
+        code_base=side,
+        code_candidate=side,
+        memory_base=side,
+        memory_candidate=side,
+        recorded_at="2026-01-01T00:00:00Z",
+    )
+    binding = FrameBinding.from_record(
+        record, comparison_owner="recorded", comparison_reference="review-comparison:TEST/TEST-L1/1"
+    )
+    return ExplainerTargetReads(binding=binding)
+
+
+@pytest.fixture
+def comparison_spools(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[BinaryIO]]:
+    spools: list[BinaryIO] = []
+
+    with ExitStack() as cleanup:
+
+        def create() -> BinaryIO:
+            spool = cleanup.enter_context(TemporaryFile())
+            spools.append(spool)
+            metadata = os.fstat(spool.fileno())
+            assert stat.S_IMODE(metadata.st_mode) == 0o600
+            assert metadata.st_nlink == 0
+            return spool
+
+        monkeypatch.setattr(explainer_target, "TemporaryFile", create, raising=False)
+        yield spools
+
+
+def test_comparison_blob_spools_exact_bytes_and_memoizes_success_and_absence(
+    tmp_path: Path, comparison_spools: list[BinaryIO]
+) -> None:
+    repository = _repository(tmp_path)
+    binary = b"\r\nfirst\x00\xff\rsecond\n"
+    (repository / "binary").write_bytes(binary)
+    (repository / "empty").touch()
+    _git(repository, "add", "binary", "empty")
+    tree = _git(repository, "write-tree")
+    reads = _comparison_reads(repository, tree)
+    invalid_repo = tmp_path / "not-a-repository"
+    invalid_repo.mkdir()
+
+    assert reads._blob(repository, tree, "binary") == binary
+    assert reads._blob(repository, tree, "empty") == b""
+    assert reads._blob(repository, tree, "missing") is None
+    assert reads._blob(invalid_repo, tree, "binary") is None
+
+    assert reads._blob(repository, tree, "binary") == binary
+    assert reads._blob(repository, tree, "missing") is None
+    assert len(comparison_spools) == 4
+    assert all(spool.closed for spool in comparison_spools)
+
+
+class _ChildStarted:
+    def __init__(self, marker: Path) -> None:
+        self.marker = marker
+
+    def is_set(self) -> bool:
+        return self.marker.exists()
+
+
+def test_comparison_blob_closes_its_spool_on_git_launch_error_timeout_and_cancellation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    comparison_spools: list[BinaryIO],
+    subtests: pytest.Subtests,
+) -> None:
+    repository = _repository(tmp_path)
+    tree = _git(repository, "rev-parse", "HEAD^{tree}")
+    reads = _comparison_reads(repository, tree)
+    missing_executable = tmp_path / "git-missing"
+    started = tmp_path / "child-started"
+    blocking_process = [
+        sys.executable,
+        "-c",
+        "import os, pathlib, sys, threading\n"
+        "os.write(2, b'git stderr\\n')\n"
+        "pathlib.Path(sys.argv[1]).touch()\n"
+        "threading.Event().wait(30)",
+        str(started),
+    ]
+
+    with subtests.test(outcome="launch-error"):
+        monkeypatch.setattr(git_command, "_git_argv", lambda *_: [str(missing_executable)])
+        with pytest.raises(FileNotFoundError) as launch_error:
+            reads._blob(repository, tree, "ordinary.txt")
+        assert launch_error.value.filename == str(missing_executable)
+        assert len(comparison_spools) == 1 and comparison_spools[-1].closed
+
+    with subtests.test(outcome="timeout"):
+        monkeypatch.setattr(git_command, "_git_argv", lambda *_: blocking_process)
+        monkeypatch.setattr(explainer_target, "GIT_METADATA_TIMEOUT_SECONDS", 2)
+        with pytest.raises(subprocess.TimeoutExpired) as timeout:
+            reads._blob(repository, tree, "ordinary.txt")
+        assert timeout.value.cmd == blocking_process
+        assert timeout.value.timeout == 2
+        assert timeout.value.stderr == b"git stderr\n"
+        assert len(comparison_spools) == 2 and comparison_spools[-1].closed
+
+    with subtests.test(outcome="read-cancellation"):
+        started.unlink(missing_ok=True)
+        monkeypatch.setattr(explainer_target, "GIT_METADATA_TIMEOUT_SECONDS", 5)
+        with cancellable_read(_ChildStarted(started)), pytest.raises(ReadCancelled):
+            reads._blob(repository, tree, "ordinary.txt")
+        assert started.exists()
+        assert len(comparison_spools) == 3 and comparison_spools[-1].closed
 
 
 def test_commit_checkout_is_detached_exact_and_ordinary_writable(tmp_path: Path) -> None:

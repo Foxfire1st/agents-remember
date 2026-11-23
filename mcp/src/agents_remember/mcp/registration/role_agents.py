@@ -22,6 +22,7 @@ from agents_remember.models.role_agents import (
 from agents_remember.models.role_launcher import LauncherRole
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
+from ..thread_workers import run_in_request_thread
 from .lazy import tools
 
 _SEAT_OVERRIDE_KEYS = frozenset({"agent", "model", "effort", "featureValues", "feature_values"})
@@ -116,7 +117,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
             step_up=step_up,
             caller_harness=caller_harness_name(),
         )
-        return await asyncio.to_thread(tools.role_start_payload, config, call)
+        return await run_in_request_thread(tools.role_start_payload, config, call)
 
     @server.tool()
     async def role_start_set(
@@ -156,7 +157,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
                 "nextAction": "Fix the seat override named in detail and call again.",
                 "requestId": str(request_id),
             }
-        return await asyncio.to_thread(tools.role_start_set_payload, config, call)
+        return await run_in_request_thread(tools.role_start_set_payload, config, call)
 
     @server.tool()
     async def user_settings_init(

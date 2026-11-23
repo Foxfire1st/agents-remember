@@ -98,7 +98,7 @@ them. A key that the loader does not know is refused, and the refusal names the 
 | `effort` | the thinking option of that model | both |
 | `serviceTier` | the speed selection of the model: the value of the feature `service_tier` | both |
 | `featureValues` | values for features of the model. The host's catalog lists the features of each model; a feature is a toggle, which takes `true` or `false` (for example `fast_mode`), or a selection, which takes one of its option ids (for example `service_tier`) | `service_tier` and `fast_mode` in both; every other feature in the user settings file only |
-| `mode` | the [permission mode](../concepts.md#permission-mode) of the agent | user settings file only |
+| `mode` | the [permission mode](../concepts.md#permission-mode) of the agent, on the harness its row names | user settings file only |
 | `notes` | your own instruction text for the role. The product adds it to the role's [role capsule](../concepts.md#role-capsule); a text whose first line is `<overwrite>` replaces the capsule. The `notes` of the [host profile](../concepts.md#host-profile) of the role, when they are not empty, take the place of this text. | user settings file only |
 | `extraArgs` | extra command-line arguments for the harness; accepted for `claude` only | user settings file only |
 | `stepUp` | a second set of choices for the role; see [Step-up](#step-up) | user settings file only |
@@ -141,7 +141,7 @@ A start takes each choice from the first source that names it:
 | Choice | Order, strongest first |
 | --- | --- |
 | harness, model, effort | the start (`agent`, `model`, `effort` of `role_start`, or the selectors "Role agent override", "Role model override" and "Role effort override" of the role launcher); the host profile of the role; the role settings; the host's default |
-| permission mode | the host profile of the role; the role settings; the least permissive mode that the product knows for the harness: `default` for `claude`, `auto` for `codex` |
+| permission mode | the start (the role launcher's "Role mode override"); the host profile of the role; the role settings, on the harness its row names; the host's own default mode for the harness; when the host names none, the start sends no mode |
 | feature values | the role settings; over them the host profile of the role; over that the start |
 | notes | the host profile of the role, when its `notes` are not empty; else the role settings |
 
@@ -151,8 +151,8 @@ Four rules complete the table:
   name; see [Host profiles](../host.md#host-profiles).
 - A model or an effort from a lower source counts only for the harness it was written for. When
   the start names another harness, the model and the effort of the role settings do not apply.
-- A start cannot set the permission mode. A start may set the features `service_tier` and
-  `fast_mode` and no other feature.
+- `role_start` names no permission mode; the role launcher's "Role mode override" does, for the
+  chat it starts. A start may set the features `service_tier` and `fast_mode` and no other feature.
 - A `model` or an `effort` on `role_start` without `agent` is refused, except for `bootstrap`.
 
 ### Defaults
@@ -163,7 +163,7 @@ Without a user settings file and without a repository file, these values hold:
 | --- | --- |
 | harness | `orchestration.spawn.harness`; without it, the first of the [harness ids](#the-harness-ids-of-the-role-settings) `claude`, `codex`, `pi`, `eve` and the added ids for which the host has a host provider |
 | model, effort | the host's default for the harness |
-| permission mode | `default` for `claude` and `auto` for `codex`, when the host offers that mode; for another harness the product names none |
+| permission mode | the host's own default mode for the harness, when the host names one; otherwise the start sends no mode |
 | `orchestration.roleMessageLimit` | 1,000 characters |
 | `orchestration.loops.defaults.maxRounds` | 5 review rounds |
 
@@ -180,9 +180,10 @@ A step-up is a second set of choices for a role, for work that the first set did
 `featureValues` and `notes`. It accepts no `extraArgs` and no step-up of its own, and the loader
 refuses a step-up whose choices equal those of the role.
 
-A start with the step-up reads no host profile. When the step-up names another harness or another
-model, the start takes no choice of the role's own row that the step-up does not name, and
-without a `mode` in the step-up it takes the host's default mode for that harness.
+A start with the step-up reads no host profile. The step-up never inherits the role row's mode:
+without a `mode` in the step-up, the seat starts in the host's default mode for its harness. When
+the step-up names another harness or another model, the start takes no choice of the role's own
+row that the step-up does not name.
 
 A step-up is taken in two ways:
 

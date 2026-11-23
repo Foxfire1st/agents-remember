@@ -202,11 +202,7 @@ def run(args: argparse.Namespace) -> int:
         config = load_config(args.config)
         differing = _differing_roots(request, _held_roots(config, identity.repo_id))
         if differing:
-            return _reply(
-                ROOTS_DIFFER,
-                f"{args.config} now names other roots than the backend that asked for this "
-                f"start holds ({differing}); nothing was started.",
-            )
+            return _reply(ROOTS_DIFFER, _root_mismatch_message(args.config, differing))
         # Nothing the start prints may reach standard output: it carries the one reply.
         # Context variables do not cross exec: scope this launch-only recovery here,
         # after root validation, without changing public worktree/task readers.
@@ -247,12 +243,14 @@ def _identity(request: Any) -> TaskIdentity:
     )
 
 
-def _differing_roots(request: dict[str, Any], loaded: dict[str, str | None] | None) -> str:
-    """Which roots of the request are not the ones this process loaded; empty when all agree."""
+def _differing_roots(
+    request: dict[str, Any], loaded: dict[str, str | None] | None
+) -> dict[str, str]:
+    """Name each mismatch separately so its label can survive long path details."""
 
     if loaded is None:
-        return f"no repository {request.get('repoId')!r}"
-    differing = []
+        return {"repoId": f"{request.get('repoId')!r} is absent from the loaded settings"}
+    differing = {}
     for name, here in loaded.items():
         asked = request.get(name)
         same = (
@@ -261,8 +259,26 @@ def _differing_roots(request: dict[str, Any], loaded: dict[str, str | None] | No
             else isinstance(asked, str) and Path(asked).resolve() == Path(here).resolve()
         )
         if not same:
-            differing.append(f"{name}: {here} instead of {asked}")
-    return "; ".join(differing)
+            differing[name] = f"{here} instead of {asked}"
+    return differing
+
+
+def _root_mismatch_message(settings_path: str, differing: dict[str, str]) -> str:
+    prefix = (
+        "AR refused the leaf enclosure request, so nothing was started. "
+        "The loaded settings do not match the backend that requested the start. "
+    )
+    labels = "; ".join(f"{name}: " for name in differing)
+    value_budget = _TEXT_LIMIT - len(prefix) - len(labels)
+    if sum(map(len, differing.values())) > value_budget:
+        # Share the space left after the labels so one path cannot hide another mismatch.
+        share = value_budget // len(differing)
+        differing = {
+            name: f"{value[: share - 1]}…" if len(value) > share else value
+            for name, value in differing.items()
+        }
+    details = "; ".join(f"{name}: {value}" for name, value in differing.items())
+    return f"{prefix}{details}. Settings file: {settings_path}."
 
 
 def _reply(code: str, message: str, recovery: dict[str, Any] | None = None) -> int:

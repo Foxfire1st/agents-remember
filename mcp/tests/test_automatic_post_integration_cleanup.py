@@ -90,7 +90,12 @@ def bound_worktree_services():
 
 def _landed_leaf(tmp_path: Path) -> WorktreeContract:
     fixture = _authority_fixture(tmp_path, external_memory=True)
-    return _closed_external_leaf_worktrees(fixture, tmp_path, publish_closeout_evidence=True)
+    closed = _closed_external_leaf_worktrees(fixture, tmp_path, publish_closeout_evidence=True)
+    # Reclamation has an existing report to preserve through integration and preview.
+    reports = closed.worktree_group / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    (reports / "review.md").write_text("# Review evidence\n", encoding="utf-8")
+    return closed
 
 
 def _local_branch_exists(repo: Path, branch: str) -> bool:

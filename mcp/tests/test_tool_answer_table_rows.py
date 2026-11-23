@@ -11,6 +11,7 @@ from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import (
     TOOL_ANSWER_EXCEPTION_MAX_TOKENS,
     TOOL_ANSWER_OVERFLOW_MAX_TOKENS,
+    ShortFormLocation,
     fields_outside_row,
     interim_leaf_for,
     is_valid_tool_code,
@@ -158,8 +159,7 @@ class ToolAnswerRowGateTests(unittest.TestCase):
         short, _dropped, _cut = short_form(
             whole,
             answer_tokens=10,
-            log=None,
-            log_error=None,
+            location=ShortFormLocation(log=None, log_error=None),
             count=count_response_tokens,
         )
         self.assertEqual(short["code"], "invalid-code")
@@ -171,8 +171,7 @@ class ToolAnswerRowGateTests(unittest.TestCase):
         short, _dropped, _cut = short_form(
             big,
             answer_tokens=tokens,
-            log=None,
-            log_error=None,
+            location=ShortFormLocation(log=None, log_error=None),
             count=count_response_tokens,
         )
         self.assertTrue(short["overflow"])

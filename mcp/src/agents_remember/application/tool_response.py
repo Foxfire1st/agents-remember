@@ -43,12 +43,14 @@ from agents_remember.models.base import NextStep, ResponseEnvelope
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import (
     TOOL_ANSWER_OVERFLOW_MAX_TOKENS,
+    ShortFormLocation,
     bound_for,
     next_from_next_step,
     short_form,
     strip_envelope,
     truncate_lists,
 )
+from agents_remember.models.tools.tool_answer_short_fields import declared_short_fields
 from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.observer.tool_events import record_tool_completed
 
@@ -203,9 +205,9 @@ def _apply_answer_guard(
     answer: dict[str, Any],
     *,
     final_tokens: int,
+    record: ToolCallRecord,
     bound: int,
-    log: str | None,
-    log_error: str | None,
+    location: ShortFormLocation,
 ) -> tuple[dict[str, Any], bool, int]:
     """Run the guard on the final mapping the caller would get.
 
@@ -214,15 +216,14 @@ def _apply_answer_guard(
     log/logError change: attaching the location can itself take an
     exact-edge answer over its bound.
     """
-    guard_cut = final_tokens > bound
-    if not guard_cut:
+    if final_tokens <= bound:
         return answer, False, final_tokens
     short, _dropped_fields, _error_cut = short_form(
         answer,
         answer_tokens=final_tokens,
-        log=log,
-        log_error=log_error,
+        location=location,
         count=count_response_tokens,
+        declared_fields=declared_short_fields(record.tool_name, answer, record.whole_result),
     )
     return short, True, count_response_tokens(short)
 
@@ -284,12 +285,16 @@ def _write_delivered_line(
         )
     if "cut" in answer:
         answer["cut"] = answer.pop("cut")
+    location = ShortFormLocation(
+        log=logged.log,
+        log_error=answer.get("logError") if isinstance(answer.get("logError"), str) else None,
+    )
     guarded, cut_now, delivered_tokens = _apply_answer_guard(
         answer,
         final_tokens=count_response_tokens(answer),
+        record=record,
         bound=bound,
-        log=logged.log,
-        log_error=answer.get("logError") if isinstance(answer.get("logError"), str) else None,
+        location=location,
     )
     answer = guarded
     guard_cut = guard_cut or cut_now
@@ -303,9 +308,9 @@ def _write_delivered_line(
         guarded, cut_now, delivered_tokens = _apply_answer_guard(
             answer,
             final_tokens=count_response_tokens(answer),
+            record=record,
             bound=bound,
-            log=logged.log,
-            log_error=answer.get("logError") if isinstance(answer.get("logError"), str) else None,
+            location=location,
         )
         answer = guarded
         guard_cut = guard_cut or cut_now
@@ -506,9 +511,12 @@ def complete_tool_response(
     # every log/logError change: attaching the location can itself take an
     # exact-edge answer over its bound.
     answer = _attach_log_outcome(tool_name, answer, log, log_error, diff_report)
-    final_tokens = count_response_tokens(answer)
     answer, guard_cut, delivered_tokens = _apply_answer_guard(
-        answer, final_tokens=final_tokens, bound=bound, log=log, log_error=log_error
+        answer,
+        final_tokens=count_response_tokens(answer),
+        record=record,
+        bound=bound,
+        location=ShortFormLocation(log=log, log_error=log_error),
     )
     if logged is not None:
         lined = replace(record, answer_tokens=delivered_tokens, guard_cut=guard_cut)

@@ -16,6 +16,7 @@ import shutil
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final
+from unittest.mock import patch
 
 import pytest
 from agents_remember.application.knowledge_currentness.observe import (
@@ -25,11 +26,14 @@ from agents_remember.application.knowledge_currentness.observe import (
     open_code_tree,
 )
 from agents_remember.cli.__main__ import main as cli_main
+from agents_remember.kernel.request_memo import request_memo_scope
+from agents_remember.memory.conversion import base as base_conversion
 from agents_remember.memory.conversion import convert as convert_module
 from agents_remember.memory.conversion.cards import EVIDENCE_HEADING
 from agents_remember.memory.conversion.citations import ANCHOR_NOTE_LABEL, unbound_anchor_text
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.conversion.convert import (
+    CONVERSION_FORMAT_VERSION,
     ConversionRefused,
     ConversionVersionError,
     convert_memory,
@@ -41,6 +45,7 @@ from agents_remember.memory_quality.knowledge_validator.report import (
     ValidationReport,
     Violation,
 )
+from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTree
 from agents_remember.memory_quality.style.citations import model
 from agents_remember.memory_quality.style.document_shape import inline_scan
 from agents_remember.models.knowledge_files.anchor_content import content_identity, range_bytes
@@ -61,6 +66,39 @@ from knowledge_conversion_test_support import (
 )
 
 APP_SIDECAR = f"onboarding/{APP}.json"
+
+
+def test_converted_base_reuse_follows_each_tool_request(
+    repositories: tuple[CodeFixture, Path],
+) -> None:
+    code, memory = repositories
+    commit = git(memory, "rev-parse", "HEAD")
+
+    def read_base() -> KnowledgeTree:
+        return base_conversion.converted_base(
+            memory,
+            commit,
+            code_repository=code.root,
+            code_commit=code.first,
+            version=CONVERSION_FORMAT_VERSION,
+        )
+
+    resident = read_base()
+    with (
+        patch.object(
+            base_conversion, "convert_memory", wraps=base_conversion.convert_memory
+        ) as run,
+        request_memo_scope(),
+    ):
+        outer = read_base()
+        with request_memo_scope():
+            inner = read_base()
+            assert read_base() is inner
+        assert read_base() is outer
+        assert run.call_count == 2
+    assert outer is not inner and outer is not resident
+    assert outer.files == inner.files == resident.files
+    assert read_base() is resident
 
 
 @pytest.mark.parametrize("test_first", [False, True])

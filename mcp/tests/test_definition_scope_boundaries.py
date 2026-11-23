@@ -1,10 +1,11 @@
-"""Real dispatch and worker boundaries own separate definition lifetimes."""
+"""Real dispatch and worker boundaries own separate computation lifetimes."""
 
 import asyncio
 import json
 import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
@@ -13,15 +14,22 @@ import uvicorn
 from agents_remember.application.memory_quality import runs
 from agents_remember.application.memory_scope import MemoryScopeIdentity
 from agents_remember.cli import __main__ as cli
+from agents_remember.kernel.request_memo import request_memo_scope
 from agents_remember.mcp import server as mcp_server
-from agents_remember.memory_quality.style.citations import extents
+from agents_remember.memory_quality.style.citations import extents, grammars
+from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
+    LifecycleOperationStore,
+)
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+from httpx import ASGITransport, AsyncClient
 from mcp.types import ToolAnnotations
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 from test_definition_scope import count_parses
+from test_stored_operation_record_seat_fields import _integrate_record
 
 pytestmark = pytest.mark.integration
 LINES = ["def answer():", "    return 42"]
@@ -31,6 +39,34 @@ def twice() -> int:
     for _ in range(2):
         assert "answer" in extents.definitions("answer.py", LINES)
     return 0
+
+
+def _locate_anchors_twice(name: str) -> None:
+    for _ in range(2):
+        assert grammars.typescript_anchor_identifier(f"{name}<T>(value)") == name
+        assert grammars.typescript_anchor_identifier(f"object.{name}()") is None
+
+
+def _anchor_parses(calls: list[bytes], name: str) -> list[bytes]:
+    return [source for source in calls if name.encode() in source]
+
+
+@pytest.fixture
+def operation_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[LifecycleOperationStore, list[Path]]:
+    journal = tmp_path / "operation.json"
+    journal.write_text(_integrate_record(tmp_path).model_dump_json(), encoding="utf-8")
+    reads: list[Path] = []
+    read_uncached = LifecycleOperationStore._read_uncached
+
+    def count_read(store: LifecycleOperationStore) -> LifecycleOperationRecord | None:
+        reads.append(store.path)
+        return read_uncached(store)
+
+    monkeypatch.setattr(LifecycleOperationStore, "_read_uncached", count_read)
+    return LifecycleOperationStore(journal), reads
 
 
 def test_common_mcp_boundary_shares_sync_handler_context_and_discards_between_calls(
@@ -43,16 +79,62 @@ def test_common_mcp_boundary_shares_sync_handler_context_and_discards_between_ca
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def locate() -> int:
+        _locate_anchors_twice("nativeAnchorProbe")
         return twice()
 
     async def invoke() -> None:
         await server.call_tool("locate", {})
-        assert len(calls) == 1
+        first_anchor_parses = _anchor_parses(calls, "nativeAnchorProbe")
+        assert len(first_anchor_parses) == len(set(first_anchor_parses)) >= 2
+        assert len(calls) - len(first_anchor_parses) == 1
         await server.call_tool("locate", {})
-        assert len(calls) == 2
+        assert _anchor_parses(calls, "nativeAnchorProbe") == first_anchor_parses * 2
+        assert len(calls) - 2 * len(first_anchor_parses) == 2
 
     asyncio.run(invoke())
     assert extents._definitions_in_call.get() is None
+
+
+def test_native_journal_reuse_owns_copies_and_reobserves_each_file_witness(
+    monkeypatch: pytest.MonkeyPatch,
+    operation_record: tuple[LifecycleOperationStore, list[Path]],
+) -> None:
+    store, reads = operation_record
+    warm = store.read()
+    assert warm is not None
+    monkeypatch.setattr(mcp_server.server_startup, "start_after_discovery", lambda _config: None)
+    mcp_server._complete_fastmcp_settings()
+    server = mcp_server.AgentsRememberMCP("journal boundary test")
+
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    def observe(replace_journal: bool = False) -> int:
+        first = store.read()
+        assert first is not None and first.recordRevision == warm.recordRevision
+        assert first.result is not None
+        first.result["extra"] = "caller-owned"
+        first.recordRevision += 1
+        again = store.read()
+        assert again is not None and again.recordRevision == warm.recordRevision
+        assert again.result is not None and "extra" not in again.result
+        if replace_journal:
+            successor = store.path.with_suffix(".next")
+            successor.write_text(first.model_dump_json(), encoding="utf-8")
+            successor.replace(store.path)
+            current = store.read()
+            assert current is not None and current.recordRevision == first.recordRevision
+            assert current.result is not None and current.result["extra"] == "caller-owned"
+        return again.recordRevision
+
+    async def invoke() -> None:
+        await server.call_tool("observe", {})
+        assert reads == [store.path] * 2
+        await server.call_tool("observe", {"replace_journal": True})
+        assert reads == [store.path] * 4
+
+    asyncio.run(invoke())
+    assert (current := store.read()) is not None
+    assert current.recordRevision == warm.recordRevision + 1
+    assert reads == [store.path] * 5
 
 
 @pytest.mark.parametrize(
@@ -148,6 +230,41 @@ def test_dashboard_cli_serves_requests_without_a_process_definition_scope(
     assert extents._definitions_in_call.get() is None
 
 
+def test_dashboard_requests_reuse_the_process_anchor_and_journal_owners(
+    monkeypatch: pytest.MonkeyPatch,
+    operation_record: tuple[LifecycleOperationStore, list[Path]],
+) -> None:
+    calls = count_parses(monkeypatch)
+    store, reads = operation_record
+
+    def endpoint(_request: Request) -> JSONResponse:
+        _locate_anchors_twice("dashboardAnchorProbe")
+        record = store.read()
+        assert record is not None
+        return JSONResponse({"revision": record.recordRevision})
+
+    app = Starlette(routes=[Route("/", endpoint)])
+
+    async def request_twice() -> None:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://asgi") as client:
+            first = await client.get("/")
+            assert first.status_code == 200
+            parsed = len(_anchor_parses(calls, "dashboardAnchorProbe"))
+            assert parsed >= 2
+            assert reads == [store.path]
+            second = await client.get("/")
+            assert second.status_code == 200 and second.json() == first.json()
+            assert len(_anchor_parses(calls, "dashboardAnchorProbe")) == parsed
+            assert reads == [store.path]
+
+    def serve(_args: object) -> int:
+        asyncio.run(request_twice())
+        return 0
+
+    monkeypatch.setattr(cli.dashboard, "run", serve)
+    assert cli.main(["dashboard"]) == 0
+
+
 def test_background_worker_gets_isolated_scope_without_inheriting_starting_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -178,11 +295,17 @@ def test_background_worker_gets_isolated_scope_without_inheriting_starting_call(
 
     def work() -> dict[str, object]:
         twice()
+        _locate_anchors_twice("detachedAnchorProbe")
         completed.set()
         return {"parsed": True}
 
-    with extents.definition_scope():
+    _locate_anchors_twice("detachedAnchorProbe")
+    warm_anchor_parses = _anchor_parses(calls, "detachedAnchorProbe")
+    assert len(warm_anchor_parses) == len(set(warm_anchor_parses)) >= 2
+    with extents.definition_scope(), request_memo_scope():
         twice()
+        _locate_anchors_twice("detachedAnchorProbe")
+        assert _anchor_parses(calls, "detachedAnchorProbe") == warm_anchor_parses * 2
         admission = runs.start_quality_run(identity, work)
         assert admission.state == "started"
         assert completed.wait(HANG_GUARD_SECONDS)
@@ -190,7 +313,8 @@ def test_background_worker_gets_isolated_scope_without_inheriting_starting_call(
     for thread in threads:
         thread.join(HANG_GUARD_SECONDS)
         assert not thread.is_alive()
-    assert len(calls) == 2
+    assert _anchor_parses(calls, "detachedAnchorProbe") == warm_anchor_parses * 3
+    assert len(calls) - 3 * len(warm_anchor_parses) == 2
     assert admission.run_id is not None
     snapshot = runs.poll_quality_run(identity.repo_id, admission.run_id)
     assert snapshot is not None and snapshot.status == "completed"

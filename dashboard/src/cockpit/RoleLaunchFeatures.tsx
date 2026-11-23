@@ -144,26 +144,6 @@ export function RoleLaunchFeatures({ features, defaults, override, disabled, onC
     disabled={disabled} onChange={(value) => onChange(withFeatureValue(override, feature.id, value))} />);
 }
 
-// The applied mode as one chip: the resolved mode on the role's own agent, else a pointer
-// that the mode resolves for the selected agent at start.
-function ModeChip({ defaults, onRoleAgent, modeLabel, modeDescription }: {
-  defaults: RoleDefaults;
-  onRoleAgent: boolean;
-  modeLabel?: string;
-  modeDescription?: string;
-}) {
-  if (!onRoleAgent) {
-    return (
-      <span className={launcherChip} title="The mode is resolved for the selected agent at start.">At start</span>
-    );
-  }
-  const modeSource = defaults.choices?.mode?.source ?? "user settings";
-  const modeTitle = modeDescription ? `${modeSource} · ${modeDescription}` : modeSource;
-  return (
-    <span className={launcherChip} title={modeTitle}>{modeLabel ?? defaults.mode ?? "none stated"}</span>
-  );
-}
-
 // The user-instructions chip, present only when the defaults carry instructions.
 function InstructionsChip({ defaults }: { defaults: RoleDefaults }) {
   const notes = defaults.choices?.notes;
@@ -178,14 +158,12 @@ function InstructionsChip({ defaults }: { defaults: RoleDefaults }) {
   );
 }
 
-// What the row said in words lives on: the applied mode is one chip whose
-// hover text says where the mode comes from and holds the host's description,
-// and an instruction text is one chip whose hover text names its source.
-export function RoleLaunchDefaults({ defaults, selectedAgentId, modeLabel, modeDescription, ready, basePreview = false }: {
+// What the row said in words lives on: an instruction text is one chip whose hover text
+// names its source. The permission mode is a selector beside agent, model and effort.
+export function RoleLaunchDefaults({ defaults, selectedAgentId, modeLabel, ready, basePreview = false }: {
   defaults: RoleDefaults;
   selectedAgentId: string;
   modeLabel?: string;
-  modeDescription?: string;
   ready: boolean;
   basePreview?: boolean;
 }) {
@@ -199,15 +177,5 @@ export function RoleLaunchDefaults({ defaults, selectedAgentId, modeLabel, modeD
         title="Base user instructions preview; not applied here as a claim about the stepped-up execution.">Base · Instructions</span> : null}
     </>
   );
-  return (
-    <>
-      <ModeChip
-        defaults={defaults}
-        onRoleAgent={selectedAgentId === defaults.agent}
-        modeLabel={modeLabel}
-        modeDescription={modeDescription}
-      />
-      <InstructionsChip defaults={defaults} />
-    </>
-  );
+  return <InstructionsChip defaults={defaults} />;
 }

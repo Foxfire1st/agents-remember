@@ -347,12 +347,6 @@ const VOCABULARIES: Record<
     'integrate',
     'direct-landing',
   ],
-  'projection.enclosures[].lifecycleOperation.worker.state': [
-    'live',
-    'termination-requested',
-    'termination-required',
-    'exited',
-  ],
   'projection.enclosures[].lifecycleOperation.approval.state': ['claimed', 'unclaimed'],
   'projection.enclosures[].lifecycleOperation.phase': [
     'queued',
@@ -446,12 +440,6 @@ const VOCABULARIES: Record<
     'closeout',
     'integrate',
     'direct-landing',
-  ],
-  'projection.tasks[].worktrees[].lifecycleOperation.worker.state': [
-    'live',
-    'termination-requested',
-    'termination-required',
-    'exited',
   ],
   'projection.tasks[].worktrees[].lifecycleOperation.approval.state': ['claimed', 'unclaimed'],
   'projection.tasks[].worktrees[].lifecycleOperation.phase': [

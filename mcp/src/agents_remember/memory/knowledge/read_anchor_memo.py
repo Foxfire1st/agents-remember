@@ -32,8 +32,10 @@ from __future__ import annotations
 import re
 import threading
 from collections import OrderedDict
-from collections.abc import Callable, Hashable, Mapping
+from collections.abc import Callable, Hashable, Iterable, Mapping
+from typing import Self
 
+from agents_remember.kernel.memory_graph import retained_graph_bytes
 from agents_remember.models.knowledge.base import GIT_OBJECT_PATTERN
 
 __all__ = [
@@ -62,17 +64,42 @@ class BoundedMemo[K: Hashable, V]:
     """A least-recently-used table whose entries' total weight never exceeds ``capacity``.
 
     ``weigh`` prices one value; the default prices every entry at one, which makes ``capacity`` an
-    entry count. A value heavier than the whole capacity is not stored at all rather than evicting
+    entry count. A separate entry ceiling can apply alongside the weight bound. A value heavier than the whole capacity is not stored at all rather than evicting
     everything else to make room for it.
     """
 
-    def __init__(self, capacity: int, weigh: Callable[[V], int] = _unit) -> None:
+    def __init__(
+        self,
+        capacity: int,
+        weigh: Callable[[V], int] = _unit,
+        *,
+        max_entries: int | None = None,
+        weigh_entry: Callable[[K, V], int] | None = None,
+    ) -> None:
         self._capacity = capacity
+        self._max_entries = max_entries
         self._weigh = weigh
+        self._weigh_entry = weigh_entry
         self._entries: OrderedDict[K, tuple[V, int]] = OrderedDict()
         self._weight = 0
         self._changes = 0
         self._lock = threading.Lock()
+
+    @classmethod
+    def by_retained_bytes(cls, capacity: int, *, max_entries: int) -> Self:
+        """Limit the combined Python data of each key and value and the number of entries."""
+
+        def weigh_entry(key: K, value: V) -> int:
+            return retained_graph_bytes((key, value), ceiling=capacity)
+
+        return cls(capacity, max_entries=max_entries, weigh_entry=weigh_entry)
+
+    def weight_of(self, key: K, value: V) -> int:
+        """What keeping this entry would charge, or an amount over the bound."""
+
+        if self._weigh_entry is not None:
+            return self._weigh_entry(key, value)
+        return self._weigh(value)
 
     def get(self, key: K) -> tuple[V] | None:
         """The remembered value as a one-tuple, or ``None`` on a miss.
@@ -91,7 +118,7 @@ class BoundedMemo[K: Hashable, V]:
     def put(self, key: K, value: V) -> None:
         """Remember ``value`` for ``key``, evicting the least recently used entries past the bound."""
 
-        weight = self._weigh(value)
+        weight = self.weight_of(key, value)
         if weight > self._capacity:
             return
         with self._lock:
@@ -101,7 +128,9 @@ class BoundedMemo[K: Hashable, V]:
             self._entries[key] = (value, weight)
             self._weight += weight
             self._changes += 1
-            while self._weight > self._capacity:
+            while self._weight > self._capacity or (
+                self._max_entries is not None and len(self._entries) > self._max_entries
+            ):
                 _evicted, (_value, evicted_weight) = self._entries.popitem(last=False)
                 self._weight -= evicted_weight
 
@@ -118,6 +147,25 @@ class BoundedMemo[K: Hashable, V]:
 
         with self._lock:
             return [(key, held[0]) for key, held in self._entries.items()]
+
+    def replayed_items(self, entries: Iterable[tuple[K, V]]) -> list[tuple[K, V]]:
+        """What a new memo with this policy keeps when it receives the entries in order."""
+
+        replay: BoundedMemo[K, V] = BoundedMemo(
+            self._capacity,
+            self._weigh,
+            max_entries=self._max_entries,
+            weigh_entry=self._weigh_entry,
+        )
+        for key, value in entries:
+            replay.put(key, value)
+        return replay.items()
+
+    @property
+    def max_entries(self) -> int | None:
+        """The separate entry ceiling, when one is configured."""
+
+        return self._max_entries
 
     @property
     def capacity(self) -> int:

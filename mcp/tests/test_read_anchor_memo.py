@@ -17,17 +17,20 @@ repository rather than a stub:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
 import threading
 from collections.abc import Callable, Iterator
+from contextvars import copy_context
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from agents_remember.kernel.request_memo import request_memo_scope, request_owner
 from agents_remember.memory.knowledge import read_anchors
 from agents_remember.memory.knowledge.read_anchor_memo import (
     BLOB_DEFINITIONS,
@@ -325,6 +328,61 @@ def test_the_memo_evicts_the_least_recently_used_past_its_weight_bound() -> None
         assert scaled.weight == sum(key % 3 + 1 for key in held) <= 64, inserted
         assert held == list(range(inserted - len(held), inserted)), "the newest entries remain"
         assert scaled.weight > 64 - 3, "eviction stops as soon as the next entry fits"
+
+
+def test_byte_memo_limits_each_entry_and_replays_its_combined_lru_policy() -> None:
+    memo: BoundedMemo[str, bytes] = BoundedMemo.by_retained_bytes(1600, max_entries=2)
+    small = b"short"
+    first_large = b"a" * 1024
+    second_large = b"b" * 1024
+    oversize = b"x" * 2048
+    entries = [
+        ("first", small),
+        ("second", small),
+        ("third", small),
+        ("large-1", first_large),
+        ("large-2", second_large),
+        ("large-2", oversize),
+    ]
+
+    for key, value in entries[:3]:
+        memo.put(key, value)
+    assert memo.items() == entries[1:3]
+    assert memo.weight < memo.capacity
+    for key, value in entries[3:]:
+        memo.put(key, value)
+    assert memo.items() == [entries[4]]
+    assert memo.weight == memo.weight_of(*entries[4]) < memo.capacity
+    assert memo.weight_of("long" * 64, small) > memo.weight_of("long", small)
+
+    before = memo.changes
+    assert memo.replayed_items(entries) == [entries[4]]
+    assert memo.replayed_items(entries[:3]) == entries[1:3]
+    assert memo.items() == [entries[4]] and memo.changes == before
+
+
+def test_request_memo_owners_share_only_their_call_and_clear_on_exit() -> None:
+    key = object()
+
+    async def get_two() -> tuple[list[int], list[int]]:
+        with request_memo_scope():
+            owner = request_owner(key, list[int])
+            assert owner is not None
+            observed = await asyncio.to_thread(request_owner, key, list[int])
+            assert observed is owner
+            captured = copy_context()
+
+        released = captured.run(request_owner, key, list[int])
+        assert released is not None and released is not owner
+        return owner, released
+
+    async def check() -> None:
+        first, second = await asyncio.gather(get_two(), get_two())
+        assert first[0] is not second[0]
+        assert first[1] is not second[1]
+        assert request_owner(key, list[int]) is None
+
+    asyncio.run(check())
 
 
 def test_concurrent_readers_share_answers_and_the_bound_holds(tree: _Tree) -> None:

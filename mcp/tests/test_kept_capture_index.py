@@ -21,6 +21,7 @@ from unittest import mock
 import pytest
 from agents_remember.kernel import git_command
 from agents_remember.kernel.git_command import run_git_with_index
+from agents_remember.kernel.request_memo import request_memo_scope
 from agents_remember.worktrees.modules import kept_capture
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.modules.kept_capture import kept_candidate_tree
@@ -229,3 +230,29 @@ def test_concurrent_captures_of_one_worktree_take_turns_and_name_one_tree(
     for thread in threads:
         thread.join(timeout=30)
     assert trees == [reference(repo)] * 6
+
+
+def test_tool_requests_reuse_the_settled_index_and_their_own_capture_witnesses(
+    repo: Path, tmp_path: Path
+) -> None:
+    coordination = tmp_path / "coordination"
+    (repo / "a.txt").write_text("alpha two\n", encoding="utf-8")
+    settled(repo)
+    expected = kept(repo, coordination)
+    backdated(repo)
+    before = store_files(repo)
+
+    for _ in range(2):
+        with request_memo_scope():
+            with verbs() as disk:
+                assert kept(repo, coordination, held=True) == expected
+            assert disk["add"] == disk["write-tree"] == 1
+            with verbs() as witness:
+                assert kept(repo, coordination, held=True) == expected
+            assert witness["add"] == witness["write-tree"] == 0
+    assert store_files(repo) == before
+
+    with verbs() as resident:
+        assert kept(repo, coordination, held=True) == expected
+    assert resident["add"] == resident["write-tree"] == 0
+    assert reference(repo) == expected

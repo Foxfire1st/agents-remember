@@ -672,8 +672,8 @@ INLINE_RULE_CLAUSES = (
         "roles/worker.md",
         "## Map and record evidence",
         (
-            "At intake and at each freeze, map every numbered evidence item to its report file. Name "
-            "missing evidence openly.",
+            "At intake and at each freeze, map every numbered evidence item the round carries to its report "
+            "file; map a final check's evidence when it runs. Name missing evidence openly.",
         ),
     ),
     (
@@ -684,7 +684,7 @@ INLINE_RULE_CLAUSES = (
             "At each freeze, regenerate the scripted Curator list and its binding for the frozen tree, "
             "ready for code review to return `PASS`.",
             "Before freezing a product-code removal or rename, prove that the whole test tree collects on "
-            "the final bytes.",
+            "the frozen tree.",
         ),
     ),
     (
@@ -1013,9 +1013,9 @@ GROUPED_DETAIL_CLAUSES = (
         "reference/review-baseline.md",
         "Before preparing a baseline review, read",
         " for route partitioning, baseline evidence checks, sealing and focused-test selection. Review "
-        "the Worker's targeted checks and regressions against the past for the requested scope. Full "
-        "suites and drift reporting on `agents-remember-task` run only on an explicit developer "
-        "request.",
+        "the Worker's targeted checks and past regressions for the scope. Full suites and drift "
+        "reporting on `agents-remember-task` run only on an explicit developer request, or as a "
+        "requirement's listed final checks.",
         (
             "Organise the route work yourself, using sub-agents if your harness offers them. No "
             "particular harness arrangement is required.",

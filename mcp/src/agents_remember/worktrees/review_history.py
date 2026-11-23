@@ -8,8 +8,15 @@ from typing import Any
 from pydantic import ValidationError
 
 from agents_remember.kernel._agentic_settings_core import DEFAULT_LOOP_MAX_ROUNDS
-from agents_remember.tasks import ReviewApproval, ReviewFinding, ReviewState, TaskDocument
-from agents_remember.tasks.route_review import ReviewRound
+from agents_remember.tasks import (
+    AddedFinding,
+    AddedFindingRound,
+    ReviewApproval,
+    ReviewFinding,
+    ReviewState,
+    TaskDocument,
+)
+from agents_remember.tasks.route_review import AddedFindingRef, ReviewRound
 
 _CANDIDATE_TREE_PATTERN = re.compile(r"^[0-9a-f]{40,64}$")
 
@@ -128,7 +135,10 @@ def record_task_review(
         state = state.model_copy(update={"limit": settings_limit + state.additionalRounds})
     candidate = _parse_candidate_tree(payload)
     _validate_publication_fields(payload)
-    if state.round == 1 and not state.baselineFindings and state.pending:
+    amended = "addedFindings" in payload
+    if amended:
+        updated = _record_added_findings(state, payload)
+    elif state.round == 1 and not state.baselineFindings and state.pending:
         updated = _record_baseline(state, payload)
     elif state.pending:
         updated = _record_successor(state, payload)
@@ -149,7 +159,8 @@ def record_task_review(
         updated = updated.model_copy(update={"candidateTree": candidate})
     if actual_candidate is not None:
         updated = updated.model_copy(update={"candidateIdentity": actual_candidate})
-    updated = _with_recorded_round(state, updated, payload)
+    if not amended:
+        updated = _with_recorded_round(state, updated, payload)
     return document.model_copy(update={lane: updated})
 
 
@@ -297,6 +308,7 @@ def _validate_publication_fields(payload: dict[str, Any]) -> None:
         "verdict",
         "findings",
         "remainingFindingIds",
+        "addedFindings",
         "verdictRef",
         "candidateTree",
         "reviewKind",
@@ -395,6 +407,84 @@ def _parse_approval_shape(raw: Any) -> ReviewApproval:
             "approval.text must be the nonblank recorded words of the approval",
         )
     return ReviewApproval(by=raw["by"], text=text.strip())
+
+
+def _record_added_findings(state: ReviewState, payload: dict[str, Any]) -> ReviewState:
+    """Record the findings a sanctioned route adds after the list was sealed.
+
+    The review texts admit three routes: a Curator code finding, an advisory
+    review's finding, and a final check that fails on the tree the code review
+    passed. Each added finding carries the route that added it.
+
+    The addition spends no review round and no failed Worker try: it amends the
+    verdict of a round already recorded, so the repair that follows is reviewed
+    in the next begun round and counts there, under the settings limit and its
+    existing approval. The still-open findings stay open: the remaining set is
+    their union with the added ones, so a second sanctioned addition cannot
+    erase the first.
+    """
+
+    if payload.get("findings") or "remainingFindingIds" in payload:
+        raise ReviewHistoryError(
+            "review-publication-invalid",
+            "a result records addedFindings alone; findings and remainingFindingIds "
+            "belong to the baseline and successor routes",
+        )
+    raw = payload.get("addedFindings")
+    if not isinstance(raw, list) or not raw:
+        raise ReviewHistoryError(
+            "review-publication-invalid", "addedFindings must name at least one finding"
+        )
+    try:
+        added = [AddedFinding.model_validate(item) for item in raw]
+    except (TypeError, ValidationError) as exc:
+        raise ReviewHistoryError("review-publication-invalid", str(exc)) from exc
+    if payload.get("verdict") != "block":
+        raise ReviewHistoryError(
+            "review-unresolved-findings",
+            "a result that adds a finding must remain blocking",
+        )
+    if not state.recordedRounds:
+        raise ReviewHistoryError(
+            "review-added-findings-invalid",
+            "a sanctioned route adds a finding to a recorded verdict; record the "
+            "first review result before adding one",
+        )
+    if state.pending:
+        raise ReviewHistoryError(
+            "review-added-findings-invalid",
+            "an open round has no verdict to reopen; record the open round's "
+            "result before adding a finding to it",
+        )
+    ids = [item.findingId for item in added]
+    if len(ids) != len(set(ids)):
+        raise ReviewHistoryError(
+            "review-added-findings-invalid", "added finding IDs must be unique"
+        )
+    if {item.findingId for item in state.baselineFindings}.intersection(ids):
+        raise ReviewHistoryError(
+            "review-added-findings-invalid",
+            "an added finding needs its own identifier; this one is already sealed",
+        )
+    sealed = [
+        ReviewFinding(findingId=item.findingId, description=item.description) for item in added
+    ]
+    references = [AddedFindingRef(findingId=item.findingId, route=item.route) for item in added]
+    return state.model_copy(
+        update={
+            "baselineFindings": [*state.baselineFindings, *sealed],
+            "remainingFindingIds": [*state.remainingFindingIds, *ids],
+            "addedFindings": [*state.addedFindings, *references],
+            "addedFindingRounds": [
+                *state.addedFindingRounds,
+                AddedFindingRound(
+                    round=state.round,
+                    verdictRef=payload.get("verdictRef"),
+                    findingIds=ids,
+                ),
+            ],
+        }
+    )
 
 
 def _record_baseline(state: ReviewState, payload: dict[str, Any]) -> ReviewState:

@@ -4,9 +4,10 @@ One environment per leaf, outside every worktree, memory repository and task fol
 of it inside one folder, so removing it is one folder delete plus the Git worktree prune (D605):
 
 ``<coordination>/explainer/<repository>/<task>/<leaf>/``
-    the workspace: ``binding.json``, ``state/``, ``instructions/``, ``reference/``, ``kit/``,
-    ``revisions/<n>/``, ``trees/code/``, ``trees/memory/``, ``drafts/assets/``, ``renders/`` and
-    ``scratch/``. Nothing of the leaf lies beside the folder;
+    the workspace: ``binding.json``, ``state/``, ``instructions/``, ``reference/``, ``inputs/``,
+    ``planned/`` (a planned binding), ``kit/``, ``revisions/<n>/``, ``trees/code/``,
+    ``trees/memory/``, ``drafts/assets/``, ``stages/``, ``renders/`` and ``scratch/``. Nothing of
+    the leaf lies beside the folder;
 
 ``<leaf>/state/``
     the side files: the request ledger, the seat attempts and the leaf's one lock. Grades, the
@@ -51,6 +52,7 @@ __all__ = [
     "EXPLAINER_DIRECTORY",
     "EXPLAINER_FRAME",
     "GENERATION_SUFFIX",
+    "INPUTS_DIRECTORY",
     "INSTRUCTIONS_DIRECTORY",
     "KIT_DIRECTORY",
     "LOCK_NAME",
@@ -62,6 +64,7 @@ __all__ = [
     "REVISIONS_DIRECTORY",
     "SCRATCH_DIRECTORY",
     "SEAT_COUNTER_NAME",
+    "STAGES_DIRECTORY",
     "STATE_DIRECTORY",
     "binding_path",
     "cleanup_workspace_tree",
@@ -106,6 +109,12 @@ BINDING_NAME = "binding.json"
 INSTRUCTIONS_DIRECTORY = "instructions"
 SCRATCH_DIRECTORY = "scratch"
 DRAFTS_DIRECTORY = "drafts"
+#: The explainer's staged work: reading, chosen changes, chosen parts, explanations, essay, visuals.
+#: Beside ``scratch/`` and outside ``drafts/``, so no publication or render check reads it.
+STAGES_DIRECTORY = "stages"
+#: The task document and requirement packets copied in for the reading stage; reports are read in
+#: place through the manifest this folder also carries.
+INPUTS_DIRECTORY = "inputs"
 #: MIK-R211 v5 rule 12's layout (D605): everything of one explained leaf lives inside its folder.
 STATE_DIRECTORY = "state"
 REFERENCE_DIRECTORY = "reference"
@@ -413,7 +422,14 @@ def ensure_leaf_workspace(
     guard_explainer_path(workspace, root=config.coordination_root, label="explainer workspace")
     workspace.mkdir(exist_ok=True)
     guard_explainer_path(workspace, root=config.coordination_root, label="explainer workspace")
-    for name in (STATE_DIRECTORY, INSTRUCTIONS_DIRECTORY, SCRATCH_DIRECTORY, DRAFTS_DIRECTORY):
+    for name in (
+        STATE_DIRECTORY,
+        INSTRUCTIONS_DIRECTORY,
+        SCRATCH_DIRECTORY,
+        DRAFTS_DIRECTORY,
+        STAGES_DIRECTORY,
+        INPUTS_DIRECTORY,
+    ):
         folder = workspace / name
         guard_explainer_path(folder, root=config.coordination_root, label=f"explainer {name}")
         folder.mkdir(exist_ok=True)

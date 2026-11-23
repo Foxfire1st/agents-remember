@@ -6,7 +6,16 @@ import unittest
 from unittest.mock import patch
 
 from agents_remember.cli import paseo_bridge
-from test_paseo_bridge_agents import FAKE_CLIENT_ROOT, AgentCommandScriptTests
+from test_paseo_bridge_agents import AGENT_ID, FAKE_CLIENT_ROOT, AgentCommandScriptTests
+
+_MODEL_COUNTS = {
+    "hermes": 232,
+    "opencode": 44,
+    "antigravity": 23,
+    "antigravity-acp": 23,
+    "claude": 18,
+    "codex": 10,
+}
 
 _PROVIDER_STUB = """    providers: {
       waitForReady: async () => ({ entries: scenario.entries ?? [] }),
@@ -44,6 +53,16 @@ def _model(name: str = "gpt") -> dict[str, object]:
     return {"id": name, "thinkingOptions": []}
 
 
+def _six_provider_scenario() -> dict[str, object]:
+    return {
+        "entries": [_provider(provider) for provider in _MODEL_COUNTS],
+        "modelReplies": {
+            provider: {"models": [_model(f"{provider}-{index}") for index in range(count)]}
+            for provider, count in _MODEL_COUNTS.items()
+        },
+    }
+
+
 class CatalogFreshnessBridgeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.fixture = AgentCommandScriptTests()
@@ -76,11 +95,8 @@ class CatalogFreshnessBridgeTests(unittest.TestCase):
             entries=[_provider("failed-models"), _provider("partial", modes=None)],
             modelReplies={
                 "failed-models": {"error": "provider failed"},
-                "partial": {
-                    "models": [{"id": "unknown-effort"}, _model("empty"), _model("failed")]
-                },
+                "partial": {"models": [{"id": "unknown-effort"}, _model("known-effort")]},
             },
-            featureReplies={"partial/failed": {"error": "features unavailable"}},
             configError="configuration unavailable",
         )
         failed, partial = reply["providers"]
@@ -89,14 +105,10 @@ class CatalogFreshnessBridgeTests(unittest.TestCase):
         self.assertEqual(failed["modes"], [])
         self.assertNotIn("modes", partial)
         self.assertIn("modeError", partial)
-        unknown, empty, unavailable = partial["models"]
+        unknown, known = partial["models"]
         self.assertNotIn("efforts", unknown)
         self.assertIn("effortError", unknown)
-        self.assertEqual(empty["features"], [])
-        self.assertEqual(empty["serviceTiers"], [])
-        self.assertNotIn("features", unavailable)
-        self.assertNotIn("serviceTiers", unavailable)
-        self.assertEqual(unavailable["featureError"], "features unavailable")
+        self.assertEqual(known["efforts"], [])
         for provider in reply["providers"]:
             self.assertNotIn("acceptsToolServers", provider)
             self.assertEqual(provider["toolServerError"], "configuration unavailable")
@@ -118,7 +130,7 @@ class CatalogFreshnessBridgeTests(unittest.TestCase):
         self.assertEqual(partial["providers"][0]["models"], [])
         # Snapshot answered with a ready provider, so the subsequent empty listModels is valid.
 
-    def test_model_and_feature_timeouts_do_not_claim_empty_offerings(self) -> None:
+    def test_model_timeout_leaves_other_providers_available(self) -> None:
         with patch.object(paseo_bridge, "_SCRIPT_DEADLINE_MS", 1000):
             reply = self.fixture.call(
                 "catalog",
@@ -126,21 +138,14 @@ class CatalogFreshnessBridgeTests(unittest.TestCase):
                 entries=[_provider("slow-models"), _provider("codex")],
                 hangConfig=True,
                 hangModels=["slow-models"],
-                hangFeatures=["codex/slow"],
-                modelReplies={"codex": {"models": [_model("slow"), _model("fast")]}},
+                modelReplies={"codex": {"models": [_model("gpt")]}},
             )
         slow_models, codex = reply["providers"]
         self.assertNotIn("acceptsToolServers", codex)
         self.assertIn("timed out", codex["toolServerError"])
         self.assertNotIn("models", slow_models)
         self.assertIn("listingError", slow_models)
-        slow, fast = codex["models"]
-        self.assertNotIn("features", slow)
-        self.assertNotIn("serviceTiers", slow)
-        self.assertIn("timed out", slow["featureError"])
-        self.assertEqual(slow["efforts"], [])
-        self.assertEqual(fast["features"], [])
-        self.assertEqual(fast["serviceTiers"], [])
+        self.assertEqual([(row["id"], row["efforts"]) for row in codex["models"]], [("gpt", [])])
 
     def test_metadata_reads_no_model_features(self) -> None:
         reply = self.fixture.call(
@@ -160,6 +165,77 @@ class CatalogFreshnessBridgeTests(unittest.TestCase):
                 self.assertNotIn("serviceTiers", model)
                 self.assertNotIn("featureError", model)
                 self.assertEqual(model["efforts"], [])
+
+    def test_default_catalog_and_refresh_list_all_350_models_without_feature_queries(self) -> None:
+        for request, first_calls in (
+            ({}, ["providers"]),
+            ({"refresh": True}, ["refresh", "providers"]),
+        ):
+            with self.subTest(request=request):
+                reply = self.fixture.call("catalog", request, **_six_provider_scenario())
+                counts = {row["id"]: len(row["models"]) for row in reply["providers"]}
+                self.assertEqual(counts, _MODEL_COUNTS)
+                calls = self.fixture.recorded()
+                self.assertEqual(
+                    [call["via"] for call in calls],
+                    first_calls + ["models"] * len(_MODEL_COUNTS),
+                )
+                self.assertCountEqual(
+                    (call["provider"] for call in calls if call["via"] == "models"),
+                    _MODEL_COUNTS.keys(),
+                )
+
+    def test_selected_creation_keeps_other_models_out_of_feature_discovery(self) -> None:
+        scenario = _six_provider_scenario()
+        provider, model = "codex", "codex-9"
+        features = [
+            {
+                "id": "service_tier",
+                "type": "select",
+                "options": [{"id": "priority", "label": "Fast"}],
+            }
+        ]
+        selected = {"mode": "selected", "selectedProvider": provider, "selectedModel": model}
+        catalog = self.fixture.call(
+            "catalog",
+            selected,
+            **scenario,
+            featureReplies={f"{provider}/{model}": {"features": features}},
+        )
+        self.assertEqual(catalog["selectedFeatures"]["features"], features)
+        self.assertEqual(
+            self.fixture.recorded(), [{"via": "features", "provider": f"{provider}/{model}"}]
+        )
+
+        launched = self.fixture.call(
+            "agent-create",
+            {
+                "agentId": AGENT_ID,
+                "idempotencyKey": "ar-role-launch:chosen-model",
+                "workspaceId": "wks_fake",
+                "provider": provider,
+                "model": model,
+                "title": "Worker",
+                "labels": {},
+                "featureValues": {"service_tier": "Fast"},
+            },
+            **scenario,
+            features=features,
+        )
+        feature_request, creation = self.fixture.recorded()
+        self.assertEqual(
+            feature_request,
+            {
+                "via": "features",
+                "options": {"provider": provider, "model": model, "cwd": "/work/folder"},
+            },
+        )
+        self.assertEqual(creation["via"], "public")
+        self.assertEqual(creation["options"]["config"]["provider"], f"{provider}/{model}")
+        self.assertEqual(
+            creation["options"]["config"]["featureValues"], {"service_tier": "priority"}
+        )
+        self.assertEqual(launched["agent"]["id"], AGENT_ID)
 
     def test_selected_reads_only_target_features_even_when_metadata_is_unavailable(self) -> None:
         request = {"mode": "selected", "selectedProvider": "codex", "selectedModel": "chosen"}
@@ -188,6 +264,8 @@ class CatalogFreshnessBridgeTests(unittest.TestCase):
             },
         )
         self.assertEqual(self.fixture.recorded(), [{"via": "features", "provider": "codex/chosen"}])
+        empty = self.fixture.call("catalog", request)["selectedFeatures"]
+        self.assertEqual((empty["features"], empty["serviceTiers"]), ([], []))
         for scenario in (
             {"featureReplies": {"codex/chosen": {"error": "unavailable"}}},
             {"hangFeatures": ["codex/chosen"]},

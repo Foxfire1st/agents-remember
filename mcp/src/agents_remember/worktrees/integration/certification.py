@@ -119,8 +119,7 @@ def _current(request: IntegrationCertificationRequest) -> LifecycleOperationReco
     if current is None or (
         current.operationKind != "integrate"
         or current.contractPath != request.contract.contract_path.as_posix()
-        or (current.operationKey, current.generation, current.workerLease, current.workerPid)
-        != (prior.operationKey, prior.generation, prior.workerLease, prior.workerPid)
+        or (current.operationKey, current.generation) != (prior.operationKey, prior.generation)
         or current.status != "running"
         or current.cancelRequested
         or current.integrationAuthority != prior.integrationAuthority

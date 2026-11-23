@@ -615,10 +615,17 @@ from the running host, and Agents Remember never writes it.
 
 ### Permission mode
 
-The permission mode is the mode in which the harness of a role agent asks for permissions. The
-host profile of the role names it, or else the key `mode` of the role row in the user settings
-file; a start cannot set it. Where neither names one, the product takes the least permissive mode
-that it knows for the harness: `default` for Claude Code and `auto` for Codex.
+The permission mode is the mode in which the harness of a role agent asks for permissions, and the
+agent is in it before its first turn: no step of the product switches a role agent's mode after
+its start. The host profile of the role names it, or else the key `mode` of the role row in the
+user settings file, but that key holds only on the harness its row names. Everywhere else — on
+another harness than the row names, or on a row that names no mode — the agent starts in the
+default mode the host names for that harness. Where the host names no default, the start sends no
+mode and the host decides. The role launcher's mode selector names one for the chat it starts; it
+stands before the host profile, and its first option is the mode these rules give, with the source
+of that choice. The product keeps no list of allowed modes and no refusal of its own: a named mode
+goes to the host as named, and the start's answer and the launch receipt record the mode the host
+reports for the agent, with the source of the choice.
 
 ### Task document
 
@@ -847,6 +854,14 @@ it; one heading of the dashboard calls it the explainer's environment. The **bin
 explainer is the comparison that the explainer's workspace was built for. The button "Retire chat"
 retires the explainer: the host archives its chat, and the workspace is deleted.
 
+The workspace holds the task document and the requirement packets it names in `inputs/`.
+The `reports.md` manifest lists the source paths and SHA-256 digests of the selected leaf's
+reports, which the explainer reads in place. The staged work in `stages/` records what the
+explainer read, the chosen changes, their parts, one self-contained explanation per part,
+the essay and the visual plan. The page is built from the essay; a visual is made only where it
+helps a part of the essay, and the page reads in full without its animations. Neither `inputs/` nor
+`stages/` is published with the page.
+
 ### Canvas host
 
 The canvas host is the part of the dashboard's server that serves the page an explainer publishes,
@@ -864,7 +879,9 @@ A revision is one saved page of the explainer's explanation. Each time the expla
 the task keeps a new numbered revision. The revisions of a task share a size limit of 512 MiB: a
 publication beyond it is refused until the user removes old revisions. The revision that the user
 agreed to before work started is marked "agreed" and cannot be removed. A retained revision is one
-that the user has not removed.
+that the user has not removed. A revision's assets may include a video rendered from code (`.webm`
+or `.mp4`); it plays only on the reader's act, has controls, never loops or autoplays, and with
+reduced motion shows a still frame with its steps listed.
 
 ### Grade
 

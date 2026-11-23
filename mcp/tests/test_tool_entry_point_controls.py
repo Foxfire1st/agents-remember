@@ -14,6 +14,8 @@ stay there. Three classes:
 
 from __future__ import annotations
 
+import errno
+import socket
 import unittest
 from typing import Any
 from unittest import mock
@@ -97,6 +99,19 @@ class ChokePointControlTests(unittest.TestCase):
             classify("server_info", ("RETURNED", corrupted))[0],
             "the choke point validated but the sweep's classifier did not notice",
         )
+
+    def test_a_call_answers_when_the_loop_never_hears_from_the_tools_thread(self) -> None:
+        def refused(_socket: socket.socket, _data: bytes) -> int:
+            raise PermissionError(errno.EPERM, "sendto refused by the sandbox")
+
+        with (
+            mock.patch.object(socket.socket, "send", refused),
+            mock.patch("tool_entry_point_world.SESSION_WAIT_SECONDS", 10),
+            mock.patch("tool_entry_point_world.TOOL_RESPONSE_WAIT_SECONDS", 10),
+        ):
+            answer = self.world.call("server_info", {})
+
+        self.assertEqual("payload", classify("server_info", answer)[0])
 
     def test_a_raising_entry_point_is_classified_as_losing_the_envelope(self) -> None:
         self.assertEqual("error", classify("server_info", ("RAISED ToolError", None))[0])

@@ -202,6 +202,7 @@ class LeafEnclosureStartCommandTests(unittest.TestCase):
 
     def test_the_command_starts_nothing_when_its_settings_name_other_roots(self) -> None:
         asked = request_of(self.loaded)
+        identity_only = {key: asked[key] for key in leaf_enclosure_start._IDENTITY_FIELDS}
         elsewhere = (self.root / "another-sandbox").as_posix()
         differing: dict[str, tuple[dict[str, Any], str]] = {
             "another coordination root": (
@@ -215,7 +216,7 @@ class LeafEnclosureStartCommandTests(unittest.TestCase):
                 "memoryRoot: ",
             ),
             "no roots in the request": (
-                {key: asked[key] for key in leaf_enclosure_start._IDENTITY_FIELDS},
+                identity_only,
                 "coordinationRoot: ",
             ),
         }
@@ -228,11 +229,42 @@ class LeafEnclosureStartCommandTests(unittest.TestCase):
                 self.assertIn(named, reply["error"]["message"])
                 self.assertIn("nothing was started", reply["error"]["message"])
                 self.assertNotIn("worktree start", order)
+        with self.subTest("long roots keep the refusal outcome"):
+            long_root = Path("/leaf-start-fixture", "a" * 100, "b" * 100)
+            self.loaded = backend_config(long_root)
+            status, output, order = self.run_command(
+                identity_only, AssertionError("must not start")
+            )
+            reply = json.loads(output)
+            self.assertEqual((status, reply["ok"]), (1, False))
+            self.assertEqual(reply["error"]["code"], "leaf_enclosure_roots_differ")
+            message = reply["error"]["message"]
+            self.assertEqual(len(message), leaf_enclosure_start._TEXT_LIMIT)
+            self.assertIn("nothing was started", message)
+            for name in ("coordinationRoot", "codeRoot", "memoryRoot"):
+                self.assertIn(f"{name}: ", message)
+            self.assertNotIn("worktree start", order)
         with self.subTest("the settings no longer name the repository"):
             self.loaded = backend_config(self.root, repository=False)
             status, output, order = self.run_command(asked, AssertionError("must not start"))
             self.assertEqual(json.loads(output)["error"]["code"], "leaf_enclosure_roots_differ")
             self.assertNotIn("worktree start", order)
+
+    def test_the_refusal_keeps_every_label_for_long_loaded_and_requested_roots(self) -> None:
+        self.loaded = backend_config(Path("/leaf-start-loaded", "a" * 95, "b" * 95))
+        requested = backend_config(Path("/leaf-start-asked", "x" * 95, "y" * 95))
+        status, output, order = self.run_command(
+            request_of(requested), AssertionError("must not start")
+        )
+        reply = json.loads(output)
+        self.assertEqual((status, reply["ok"]), (1, False))
+        self.assertEqual(reply["error"]["code"], "leaf_enclosure_roots_differ")
+        message = reply["error"]["message"]
+        self.assertEqual(len(message), 800)
+        self.assertIn("nothing was started", message)
+        for name in ("coordinationRoot", "codeRoot", "memoryRoot"):
+            self.assertIn(f"{name}: ", message)
+        self.assertNotIn("worktree start", order)
 
     def test_the_command_is_in_no_help_and_no_public_sub_command(self) -> None:
         self.assertNotIn(leaf_enclosure_start.COMMAND, build_parser().format_help())

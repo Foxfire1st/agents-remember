@@ -12,6 +12,7 @@ import {
   viewTabButton,
 } from '../grammar/viewTabLook';
 import { RoleChatsPane } from './RoleChats';
+import { launcherModelReply } from './roleChatModelOptions.test-utils';
 import { taskEntry, taskSummary } from '../test/fixtures/wire';
 import modeBarSrc from '../grammar/ModeBar.tsx?raw';
 import roleLauncherSrc from './role-launcher/RoleLauncher.tsx?raw';
@@ -81,9 +82,25 @@ const AGENTS: RoleAgentChoice[] = [
       {
         id: 'auto',
         label: 'Default Permissions',
-        description: "The host's least permissive mode.",
+        description: "The harness's own default permissions.",
+      },
+      {
+        id: 'full-access',
+        label: 'Full Access',
+        description: "The harness's unrestricted mode.",
       },
     ],
+    defaultModeId: 'auto',
+  },
+  {
+    id: 'claude',
+    label: 'Claude',
+    models: [],
+    modes: [
+      { id: 'default', label: 'Always Ask' },
+      { id: 'auto', label: 'Auto' },
+    ],
+    defaultModeId: 'auto',
   },
   { id: 'eve', label: 'Eve', models: [] },
 ];
@@ -96,7 +113,7 @@ function roleDefaultsFixture(extra: Record<string, unknown> = {}) {
     available: true,
     mode: 'auto',
     choices: {
-      mode: { source: 'least permissive mode' },
+      mode: { source: 'our settings' },
       agent: { value: 'codex', source: 'our settings' },
       model: { value: 'gpt-a', source: 'our settings' },
       effort: { value: 'high', source: 'our settings' },
@@ -128,7 +145,8 @@ function stubOptions(roleDefaults: Record<string, unknown>) {
         return new Response(JSON.stringify({ available: false, frameUrl: null }), { status: 503 });
       }
       const reply = optionsReplies.length > 1 ? optionsReplies.shift() : optionsReplies[0];
-      void init;
+      const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (request.modelId) return launcherModelReply(request, reply?.body);
       return new Response(JSON.stringify(reply?.body), { status: reply?.status ?? 500 });
     }),
   );
@@ -179,6 +197,7 @@ describe('the row holds controls only', () => {
       'Role agent override',
       'Role model override',
       'Role effort override',
+      'Role mode override',
       'Speed override',
     ]) {
       const select = view.getByLabelText(name) as HTMLSelectElement;
@@ -202,29 +221,100 @@ describe('the row holds controls only', () => {
   });
 });
 
-describe('the mode is one chip', () => {
-  it.each(['our settings', 'host profile', 'least permissive mode'])(
-    'says a %s mode with the host label and description in hover',
+describe('the mode default follows the start rule', () => {
+  it("shows the settings row's own mode once that row's harness is chosen", async () => {
+    const defaults = roleDefaultsFixture();
+    (defaults as unknown as Record<string, unknown>).agent = 'claude';
+    (defaults.choices as unknown as Record<string, unknown>).rowMode = {
+      harness: 'codex',
+      value: 'full-access',
+      source: 'our settings',
+    };
+    stubOptions(defaults);
+    const view = renderArchitectRow();
+    await waitFor(() => expect(view.getByLabelText('Role mode override')).toBeTruthy());
+    fireEvent.change(view.getByLabelText('Role agent override'), { target: { value: 'codex' } });
+    const select = (await view.findByLabelText('Role mode override')) as HTMLSelectElement;
+    expect(select.options[0]?.textContent).toBe('Full Access · our settings');
+  });
+
+  it('keeps a chosen mode on screen when a refresh stops listing it', async () => {
+    stubOptions(roleDefaultsFixture());
+    const view = renderArchitectRow();
+    await waitFor(() => expect(view.getByLabelText('Role mode override')).toBeTruthy());
+    fireEvent.change(view.getByLabelText('Role mode override'), {
+      target: { value: 'full-access' },
+    });
+    await waitFor(() =>
+      expect((view.getByLabelText('Role mode override') as HTMLSelectElement).value).toBe(
+        'full-access',
+      ),
+    );
+    expect(view.getByLabelText('Role mode override').textContent).toContain('Full Access');
+  });
+});
+
+describe('the host role stands before the settings row', () => {
+  it('shows the host profile mode where both name the same harness', async () => {
+    const defaults = roleDefaultsFixture();
+    (defaults as unknown as Record<string, unknown>).agent = 'codex';
+    (defaults as unknown as Record<string, unknown>).mode = 'auto';
+    (defaults.choices as unknown as Record<string, unknown>).mode = { value: 'auto', source: 'host role' };
+    (defaults.choices as unknown as Record<string, unknown>).rowMode = {
+      harness: 'codex',
+      value: 'full-access',
+      source: 'our settings',
+    };
+    stubOptions(defaults);
+    const view = renderArchitectRow();
+    await waitFor(() => expect(view.getByLabelText('Role mode override')).toBeTruthy());
+    const select = view.getByLabelText('Role mode override') as HTMLSelectElement;
+    expect(select.options[0]?.textContent).toBe('Default Permissions · host role');
+  });
+});
+
+describe('the mode is one selector', () => {
+  it.each(['our settings', 'host role', 'host default'])(
+    'lists the harness modes and names a %s default with its source',
     async (source) => {
       const defaults = roleDefaultsFixture();
       (defaults.choices as unknown as Record<string, Record<string, string>>).mode = { source };
       stubOptions(defaults);
       const view = renderArchitectRow();
-      await waitFor(() => expect(view.getByText('Default Permissions')).toBeTruthy());
-      const chip = view.getByText('Default Permissions');
-      expect(chip.getAttribute('title')).toContain(source);
-      expect(chip.getAttribute('title')).toContain("The host's least permissive mode.");
+      await waitFor(() => expect(view.getByLabelText('Role mode override')).toBeTruthy());
+      const select = view.getByLabelText('Role mode override') as HTMLSelectElement;
+      expect(select.options[0]?.textContent).toBe(`Default Permissions · ${source}`);
+      expect(Array.from(select.options).map((option) => option.value)).toEqual([
+        '',
+        'auto',
+        'full-access',
+      ]);
+      expect(select.getAttribute('title')).toContain(`Default Permissions · ${source}`);
     },
   );
 
-  it("says a foreign agent's mode in two words with the sentence in hover", async () => {
+  it("offers a foreign agent the host's own default and returns to it when the agent changes", async () => {
     stubOptions(roleDefaultsFixture());
     const view = renderArchitectRow();
-    await waitFor(() => expect(view.getByText('Default Permissions')).toBeTruthy());
-    fireEvent.change(view.getByLabelText('Role agent override'), { target: { value: 'eve' } });
-    const chip = await view.findByText('At start');
-    expect(chip.textContent!.split(' ').filter(Boolean)).toHaveLength(2);
-    expect(chip.getAttribute('title')).toContain('resolved for the selected agent at start');
+    await waitFor(() => expect(view.getByLabelText('Role mode override')).toBeTruthy());
+    fireEvent.change(view.getByLabelText('Role agent override'), { target: { value: 'claude' } });
+    const foreign = (await view.findByLabelText('Role mode override')) as HTMLSelectElement;
+    expect(foreign.options[0]?.textContent).toBe('Auto · host default');
+    expect(Array.from(foreign.options).map((option) => option.value)).toEqual([
+      '',
+      'default',
+      'auto',
+    ]);
+    fireEvent.change(foreign, { target: { value: 'default' } });
+    await waitFor(() =>
+      expect((view.getByLabelText('Role mode override') as HTMLSelectElement).value).toBe(
+        'default',
+      ),
+    );
+    fireEvent.change(view.getByLabelText('Role agent override'), { target: { value: 'codex' } });
+    await waitFor(() =>
+      expect((view.getByLabelText('Role mode override') as HTMLSelectElement).value).toBe(''),
+    );
   });
 });
 
@@ -242,7 +332,7 @@ describe('where a default comes from is hover text', () => {
     expect(
       (view.getByLabelText('Role effort override') as HTMLElement).getAttribute('title'),
     ).toContain('effort: high · our settings');
-    expect((view.getByLabelText('Speed override') as HTMLElement).getAttribute('title')).toContain(
+    expect((await view.findByLabelText('Speed override')).getAttribute('title')).toContain(
       'service_tier: default · host role',
     );
   });
@@ -265,7 +355,7 @@ describe('where a default comes from is hover text', () => {
     expect(
       (view.getByLabelText('Role effort override') as HTMLElement).getAttribute('title'),
     ).toContain('High · default');
-    expect((view.getByLabelText('Speed override') as HTMLElement).getAttribute('title')).toContain(
+    expect((await view.findByLabelText('Speed override')).getAttribute('title')).toContain(
       'Speed · default',
     );
     expect(
@@ -414,17 +504,19 @@ describe('an overfull row wraps whole', () => {
     ];
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string) => {
+      vi.fn(async (url: string, init?: RequestInit) => {
         if (String(url) !== '/api/role-launch/options') {
           return new Response(JSON.stringify({ available: false, frameUrl: null }), {
             status: 503,
           });
         }
+        const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        if (request.modelId) return launcherModelReply(request, optionsReplies[0]?.body);
         return new Response(JSON.stringify(optionsReplies[0]?.body), { status: 200 });
       }),
     );
     const view = renderArchitectRow();
-    await waitFor(() => expect(view.getByTestId('role-launcher')).toBeTruthy());
+    await view.findByLabelText('Speed 0 override');
     const launcher = view.getByTestId('role-launcher');
     for (const feature of many) {
       if (feature.permissionBearing) {
@@ -443,7 +535,7 @@ describe('tabs and launcher share one definition', () => {
   it('styles both from the same module and keeps no copy beside it', async () => {
     stubOptions(roleDefaultsFixture());
     const view = renderArchitectRow();
-    await waitFor(() => expect(view.getByText('Default Permissions')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Role mode override')).toBeTruthy());
     const tabs = render(
       <ModeBar
         items={[{ id: 'chats', label: 'Chats' }]}
@@ -463,7 +555,7 @@ describe('tabs and launcher share one definition', () => {
     expect(view.getByRole('button', { name: 'Refresh role agents' }).className).toBe(
       launcherButton({ selected: false }),
     );
-    expect(view.getByText('Default Permissions').className).toBe(launcherChip);
+    expect(view.getByText('Instructions').className).toBe(launcherChip);
     expect(modeBarSrc).toContain('viewTabLook');
     expect(modeBarSrc).not.toContain('0.72rem');
     expect(roleLauncherSrc).toContain('viewTabLook');

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RoleChatsPane } from "./RoleChats";
+import { launcherModelReply } from "./roleChatModelOptions.test-utils";
 import { readTasklessActiveRequests, tasklessRequestStorageKey, type LauncherRole } from "./roleLaunchModel";
 import { stepUpOptions, stepUpReceipt } from "./stepUp.test-utils";
 
@@ -94,12 +95,42 @@ it.each(["  Saved reason.  ", "", "   ", 7, null, { reason: "not a string" }])("
   expect(readTasklessActiveRequests().architect?.retryPayload).toEqual({ role: "architect", ...expected });
 });
 
+it('names the mode a receipt reports and holds the unreported case', async () => {
+  // The receipt observes at its top level, and the observation differs from what was asked for.
+  const withMode = {
+    ...stepUpReceipt('mode-reported'),
+    choices: { mode: { value: 'full-access', source: 'our settings', observedValue: 'auto-review' } },
+  };
+  vi.mocked(fetch).mockImplementation(async (url) =>
+    url === '/api/role-launch/options'
+      ? Response.json({ ...stepUpOptions, executions: [withMode] })
+      : Response.json({ available: false, frameUrl: null }, { status: 503 }),
+  );
+  const reported = pane('architect');
+  await reported.findByText('Stepped-up · claude-observed');
+  expect(reported.queryByText('Mode · auto-review')).toBeTruthy();
+  expect(reported.queryByText('Mode/features unreported')).toBeNull();
+  reported.unmount();
+  const plain = stepUpReceipt('mode-omitted');
+  vi.mocked(fetch).mockImplementation(async (url) =>
+    url === '/api/role-launch/options'
+      ? Response.json({ ...stepUpOptions, executions: [plain] })
+      : Response.json({ available: false, frameUrl: null }, { status: 503 }),
+  );
+  const unreported = pane('architect');
+  await unreported.findByText('Stepped-up · claude-observed');
+  expect(unreported.getByText('Mode/features unreported')).toBeTruthy();
+});
+
 it("marks the real row's base choices non-applied after a cross-harness step-up receipt", async () => {
   vi.spyOn(window, "prompt").mockReturnValue("Use the configured alternative.");
   let receipt: ReturnType<typeof stepUpReceipt> | undefined;
   vi.mocked(fetch).mockImplementation(async (url, init) => {
     const body = JSON.parse(String(init?.body ?? "{}"));
-    if (url === "/api/role-launch/options") return Response.json({ ...stepUpOptions, executions: receipt ? [receipt] : [] });
+    if (url === "/api/role-launch/options") {
+      if (body.modelId) return launcherModelReply(body, stepUpOptions);
+      return Response.json({ ...stepUpOptions, executions: receipt ? [receipt] : [] });
+    }
     if (url === "/api/role-launch/dispatch") {
       dispatches.push(body);
       receipt = stepUpReceipt(body.requestId);
@@ -110,7 +141,7 @@ it("marks the real row's base choices non-applied after a cross-harness step-up 
   });
   const view = pane("architect");
   await view.findByText("Codex Auto");
-  expect(view.getByText("Plan mode On").getAttribute("title")).toContain("user's settings");
+  expect((await view.findByText("Plan mode On")).getAttribute("title")).toContain("user's settings");
   expect(view.queryByLabelText("Plan mode override")).toBeNull();
   fireEvent.change(view.getByLabelText("Speed override"), { target: { value: "priority" } });
   fireEvent.click(view.getByRole("button", { name: "Step up role" }));
@@ -124,7 +155,10 @@ it("marks the real row's base choices non-applied after a cross-harness step-up 
   expect(view.getByText("Mode/features unreported").getAttribute("title")).toContain("receipt");
   expect(view.getByText("Base · Speed Fast").getAttribute("title")).toContain("not applied");
   expect(view.queryByLabelText("Speed override")).toBeNull();
-  expect(view.queryByText("Codex Auto")).toBeNull();
+  // The harness's own modes still fill the mode selector; the applied mode is not repeated as a chip.
+  expect(
+    view.queryAllByText("Codex Auto").filter((node) => node.tagName !== "OPTION"),
+  ).toHaveLength(0);
   expect(view.queryByText("Plan mode On")).toBeNull();
   expect(view.queryByLabelText("Auto accept override")).toBeNull();
   expect(dispatches).toEqual([{ role: "architect", action: "start", requestId: expect.any(String), stepUp: "Use the configured alternative." }]);

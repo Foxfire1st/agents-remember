@@ -27,8 +27,9 @@ identities during one evaluation makes the verdict unkeepable.
 Actual locator/root selections are checked first, before following a byte locator whose target
 may have changed since the computation.
 
-**Bounds.** At most :data:`CAPACITY` verdicts are kept, least recently used first out. A kept
-verdict is reused while every read behind it re-observes identical, at any age; only size evicts.
+**Bounds.** The memo keeps up to :data:`CAPACITY` verdicts and :data:`MEMO_BYTES` bytes of
+keys, verdicts and their read witnesses. It evicts the least recently used entry first. A kept
+verdict is reused at any age while every read behind it re-observes identical.
 
 **What is never kept.** A verdict that carries an unreadable input or a run that failed (any
 ``incomplete`` finding, an unreadable validator input, or a worklist that is not ``complete``) is
@@ -63,6 +64,7 @@ if TYPE_CHECKING:
 __all__ = ["CAPACITY", "GATE_MEMO", "GateMemoKey", "memo_key", "remember"]
 
 CAPACITY: Final = 16
+MEMO_BYTES: Final = 8 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -89,7 +91,9 @@ class _Kept:
         return not changed_observations(dict(self.reads))
 
 
-GATE_MEMO: Final[BoundedMemo[GateMemoKey, _Kept]] = BoundedMemo(CAPACITY)
+GATE_MEMO: Final = BoundedMemo[GateMemoKey, _Kept].by_retained_bytes(
+    MEMO_BYTES, max_entries=CAPACITY
+)
 """The kept verdicts."""
 
 

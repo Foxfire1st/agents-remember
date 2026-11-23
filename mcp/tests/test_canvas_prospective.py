@@ -320,6 +320,14 @@ def test_the_shipped_runner_is_a_package_resource(monkeypatch) -> None:
     assert script.is_file(), f"the shipped runner is missing at {script}"
 
 
+def test_the_shipped_runner_serves_the_same_admitted_video_types() -> None:
+    """The prospective response and the published manifest use the same two video media types."""
+
+    text = default_load_script().read_text(encoding="utf-8")
+    assert '".webm": "video/webm"' in text
+    assert '".mp4": "video/mp4"' in text
+
+
 @pytest.mark.skipif(os.name == "nt", reason="the fake node relies on a POSIX shebang")
 def test_the_child_receives_the_exact_staged_assets_and_cleans_up(tmp_path: Path) -> None:
     """The child sees the exact prospective bytes at the path it was given, and that tree is gone."""

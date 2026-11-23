@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from agents_remember.application.agent_binding import AgentBinding
+from agents_remember.application.agent_binding import (
+    AGENT_ID_VARIABLE,
+    REQUEST_ID_VARIABLE,
+    AgentBinding,
+)
 from agents_remember.application.role_launch_context import RoleLaunchContext, selection_binding
 from agents_remember.cli import (
     paseo_catalog,
@@ -73,6 +77,19 @@ ROLE_REFS: dict[str, dict[str, TaskDocumentRef]] = {
     },
 }
 ROLE_DEFAULTS = ({"agent": "codex", "model": "gpt-a", "effort": "low"}, ("codex", "eve"))
+ANTIGRAVITY_CATALOG = {
+    **CATALOG,
+    "providers": [
+        *CATALOG["providers"],
+        {"id": "antigravity", "label": "Antigravity", "models": [], "acceptsToolServers": True},
+        {
+            "id": "antigravity-acp",
+            "label": "Antigravity ACP",
+            "models": [],
+            "acceptsToolServers": True,
+        },
+    ],
+}
 
 
 def test_role_tool_definition_carries_product_xdg_homes_without_starting(tmp_path, monkeypatch):
@@ -395,6 +412,39 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
 
 
 class LaunchRefusalTests(PaseoLaunchTestCase):
+    def test_native_antigravity_refuses_before_preparing_a_role(self) -> None:
+        self.replace(self.runtime, "_catalog", return_value=ANTIGRAVITY_CATALOG)
+        self.replace(
+            role_launch_preparation,
+            "_role_defaults",
+            return_value=(
+                {"agent": "antigravity", "model": None, "effort": None},
+                ("antigravity",),
+            ),
+        )
+        for request in (self.request("worker"), self.request("reviewer", agentId="Antigravity")):
+            with self.subTest(override=request.agent_override):
+                error = self.refused(request)
+                self.assertEqual(error.status_code, 409)
+                self.assertIn("drops the per-seat agents-remember-task server", str(error.detail))
+                self.assertIn("Choose antigravity-acp", str(error.detail))
+                self.assertEqual(self.enclosures.start_calls, [])
+                self.assertEqual(self.runtime.launch_calls(), [])
+                self.assertEqual(self.receipt_files(), [])
+
+    def test_antigravity_acp_starts_with_its_own_task_server(self) -> None:
+        self.replace(self.runtime, "_catalog", return_value=ANTIGRAVITY_CATALOG)
+        request = self.request("worker", agentId="antigravity-acp")
+        status, launched = self.dispatch(request)
+        self.assertEqual((status, launched["status"]), (200, "running"))
+        created = next(call for kind, call in self.runtime.launch_calls() if kind == "agent-create")
+        self.assertEqual(created["provider"], "antigravity-acp")
+        self.assertEqual(set(created["mcpServers"]), {"agents-remember-task"})
+        definition = created["mcpServers"]["agents-remember-task"]
+        self.assertEqual(definition["type"], "stdio")
+        self.assertEqual(definition["env"][AGENT_ID_VARIABLE], created["agentId"])
+        self.assertEqual(definition["env"][REQUEST_ID_VARIABLE], str(request.request_id))
+
     def test_a_launch_that_cannot_start_refuses_before_any_runtime_call_or_receipt(self) -> None:
         with self.subTest("no Paseo runtime configured"):
             error = self.refused(

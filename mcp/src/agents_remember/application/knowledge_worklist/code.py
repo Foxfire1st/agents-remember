@@ -114,20 +114,23 @@ _BINARY_MARKER: Final = "Binary files "
 LineRange = tuple[int, int]
 
 
-BLOB_HUNKS: BoundedMemo[tuple[str, str, str], tuple[Hunk, ...] | None] = BoundedMemo(65_536)
+BLOB_HUNKS: BoundedMemo[tuple[str, str, str], tuple[Hunk, ...] | None] = (
+    BoundedMemo.by_retained_bytes(16 * 1024 * 1024, max_entries=65_536)
+)
 """``(repository, old blob, new blob)`` -> their zero-context hunks (``None`` for a binary pair)."""
 
-TREE_GREPS: BoundedMemo[tuple[str, str, str], tuple[str, ...]] = BoundedMemo(16_384)
+TREE_GREPS: BoundedMemo[tuple[str, str, str], tuple[str, ...]] = BoundedMemo.by_retained_bytes(
+    32 * 1024 * 1024, max_entries=16_384
+)
 """``(repository, tree, text)`` -> the sorted paths ``git grep -l -F`` lists for the tree."""
 
 LATEST_GREPS: BoundedMemo[tuple[str, str], str] = BoundedMemo(16_384)
 """``(repository, text)`` -> the tree most recently searched for it, the next listing's origin."""
 
-_TREE_CHANGES: BoundedMemo[tuple[str, str, str], tuple[bytes, ...]] = BoundedMemo(
-    262_144, weigh=lambda paths: len(paths) + 1
+_TREE_CHANGES: BoundedMemo[tuple[str, str, str], tuple[bytes, ...]] = BoundedMemo.by_retained_bytes(
+    32 * 1024 * 1024, max_entries=262_144
 )
-"""``(repository, tree, tree)`` -> the exact paths whose entry differs, as ``git diff-tree`` names
-them (weighed by their number)."""
+"""``(repository, tree, tree)`` -> the exact paths whose entries differ, as ``git diff-tree`` names them."""
 
 
 class CodeReadError(ValueError):

@@ -1645,17 +1645,6 @@
             }
           ],
           "default": null
-        },
-        "worker": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LifecycleWorkerObservation"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         }
       },
       "required": [
@@ -1718,19 +1707,6 @@
           ],
           "default": null,
           "title": "Result"
-        },
-        "worker": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Worker"
         }
       },
       "title": "LifecycleProjectionComponentBindings",
@@ -1846,63 +1822,6 @@
         "summary"
       ],
       "title": "LifecycleRecommendedAction",
-      "type": "object"
-    },
-    "LifecycleWorkerObservation": {
-      "additionalProperties": false,
-      "description": "Public liveness class without exposing process or lease authority.",
-      "properties": {
-        "detail": {
-          "maxLength": 1024,
-          "title": "Detail",
-          "type": "string"
-        },
-        "identityRetained": {
-          "title": "Identityretained",
-          "type": "boolean"
-        },
-        "observedAt": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Observedat"
-        },
-        "state": {
-          "enum": [
-            "live",
-            "termination-requested",
-            "termination-required",
-            "exited"
-          ],
-          "title": "State",
-          "type": "string"
-        },
-        "workerIdentitySha256": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Workeridentitysha256"
-        }
-      },
-      "required": [
-        "state",
-        "identityRetained",
-        "detail"
-      ],
-      "title": "LifecycleWorkerObservation",
       "type": "object"
     },
     "LimitedSeat": {

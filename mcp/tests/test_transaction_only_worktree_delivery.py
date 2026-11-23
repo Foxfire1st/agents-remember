@@ -20,7 +20,6 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
 from agents_remember.worktrees import git_worktree_manager
-from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
 from agents_remember.worktrees.modules import closeout_external
 from agents_remember.worktrees.modules import git as git_owner
 from agents_remember.worktrees.modules.args import WorktreeArgs
@@ -400,9 +399,6 @@ def test_closeout_recovery_attributes_the_memory_commit_it_still_owed(tmp_path, 
         for patcher in _forbid_acceptance_tools():
             stack.enter_context(patcher)
         stack.enter_context(
-            mock.patch.object(lifecycle_operations, "require_first_ready_generation")
-        )
-        stack.enter_context(
             mock.patch.object(
                 closeout_external,
                 "_refresh_external_memory",
@@ -424,9 +420,6 @@ def test_closeout_recovery_attributes_the_memory_commit_it_still_owed(tmp_path, 
     with ExitStack() as stack:
         for patcher in _forbid_acceptance_tools():
             stack.enter_context(patcher)
-        stack.enter_context(
-            mock.patch.object(lifecycle_operations, "require_first_ready_generation")
-        )
         resume_args = WorktreeArgs(
             contract_path=contract.contract_path,
             closeout_input=worktree_tools._normalize_worktree_closeout(

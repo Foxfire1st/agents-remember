@@ -52,6 +52,18 @@ ALLOWED_IDENTIFIERS: dict[str, tuple[str, ...]] = {
     # words, not a host name. Keep the upstream bytes and kit manifest unchanged.
     "_anchorCache": (SRC + "package_data/canvas/kit/shiki/4.5.0/shiki-kit.js",),
     "_buildAnchorCache": (SRC + "package_data/canvas/kit/shiki/4.5.0/shiki-kit.js",),
+    # Upstream bytes of the Paseo 0.16 fixture, claude agent.js: the letters cross the two
+    # words Descriptor and Cache, not a host name. Keep the upstream bytes unchanged.
+    "importDescriptorCache": (
+        SRC + "package_data/paseo_plugin/server/fixtures/paseo-0-16/@getpaseo/server/dist/server/"
+        "server/agent/providers/claude/agent.js",
+    ),
+    # Upstream bytes of the Paseo 0.16 fixture, cursor-acp-agent.js: the letters cross the two
+    # words Cursor and Catalog, not a host name. Keep the upstream bytes unchanged.
+    "resolveCursorCatalogModels": (
+        SRC + "package_data/paseo_plugin/server/fixtures/paseo-0-16/@getpaseo/server/dist/server/"
+        "server/agent/providers/cursor-acp-agent.js",
+    ),
     "_CuratorCandidateInputs": (
         SRC + "application/memory_quality/controller.py",
         "mcp/tests/test_memory_quality_runs.py",

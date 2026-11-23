@@ -31,9 +31,12 @@ from agents_remember.application.review_candidate_resolution import (
     recorded_leaf_contract,
 )
 from agents_remember.application.review_closure_proofs import (
+    RESIDENT_CLOSURES,
     ClosureProofStore,
     ProvenClosure,
+    closure_memos,
     layout_digest,
+    remember_closure,
     witnesses_digest,
 )
 from agents_remember.application.review_comparison_generation import leaf_generation_root
@@ -61,7 +64,6 @@ from agents_remember.kernel.recorded_reads import (
     replay_reads,
 )
 from agents_remember.memory.knowledge.logical import dataset_identity
-from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge_index.cache import default_cache_directory
 from agents_remember.models.knowledge.review import (
@@ -208,18 +210,7 @@ def _recorded_sides(
     return tuple(dict.fromkeys(sides))
 
 
-@dataclass(frozen=True)
-class _ClosureProof:
-    layout: RepositoryLayout
-    objects: tuple[str, ...]
-    witnesses: tuple[str, ...]
-    references: str
-
-
-_CLOSURE_PROOFS: BoundedMemo[tuple[Path, tuple[str, ...]], _ClosureProof] = BoundedMemo(64)
-# Each repository's most recently proven closure: a later comparison shares most of its objects,
-# and a body consumed under a witness that still agrees need not be consumed again.
-_LATEST_PROOF: BoundedMemo[Path, _ClosureProof] = BoundedMemo(16)
+_CLOSURE_PROOFS, _LATEST_PROOF = RESIDENT_CLOSURES
 _PROVING: SharedFlights[tuple[Path, tuple[str, ...]], bool] = SharedFlights()
 
 
@@ -272,7 +263,8 @@ def _held_closure_holds(
     but some of whose object witnesses moved is witnessed again (:func:`_rewitnessed_closure`):
     the closure's roots name the same objects, so only the bodies whose witness moved are read.
     """
-    previous = _CLOSURE_PROOFS.get((repository, trees))
+    exact, _ = closure_memos()
+    previous = exact.get((repository, trees))
     if previous is None:
         return False, None
     proof = previous[0]
@@ -292,7 +284,7 @@ def _held_closure_holds(
 def _rewitnessed_closure(
     repository: Path,
     trees: tuple[str, ...],
-    proof: _ClosureProof,
+    proof: ProvenClosure,
     witnesses: tuple[str, ...],
     proofs: ClosureProofStore | None,
 ) -> bool:
@@ -319,13 +311,9 @@ def _rewitnessed_closure(
         and layout.current()
     ):
         return False
-    renewed = _ClosureProof(layout, proof.objects, witnesses, proof.references)
-    _CLOSURE_PROOFS.put((repository, trees), renewed)
-    _LATEST_PROOF.put(repository, renewed)
-    if proofs is not None:
-        proofs.save(
-            repository, trees, ProvenClosure(proof.objects, witnesses, proof.references, layout)
-        )
+    remember_closure(
+        repository, trees, ProvenClosure(proof.objects, witnesses, proof.references, layout), proofs
+    )
     return True
 
 
@@ -361,11 +349,9 @@ def _prove_closure(
             return False
         after = layout.objects_presence(objects)
         if before == after and references == layout.references(()) and layout.current():
-            proven = _ClosureProof(layout, objects, after, references)
-            _CLOSURE_PROOFS.put((repository, trees), proven)
-            _LATEST_PROOF.put(repository, proven)
-            if proofs is not None:
-                proofs.save(repository, trees, ProvenClosure(objects, after, references, layout))
+            remember_closure(
+                repository, trees, ProvenClosure(objects, after, references, layout), proofs
+            )
     except OSError:
         return False
     return True
@@ -390,9 +376,8 @@ def _stored_closure_holds(
             return False
     except OSError:
         return False  # The Git validation owns the refusal, never a stored success.
-    taken = _ClosureProof(fresh, stored.objects, witnesses, stored.references)
-    _CLOSURE_PROOFS.put((repository, trees), taken)
-    _LATEST_PROOF.put(repository, taken)
+    taken = ProvenClosure(stored.objects, witnesses, stored.references, fresh)
+    remember_closure(repository, trees, taken, None)
     return True
 
 
@@ -409,7 +394,8 @@ def _bodies_not_yet_consumed(
     while that witness still agrees, under the same Git layout and replace references. Any other
     object -- new, moved, rewritten in place, or under a changed layout -- is consumed again.
     """
-    latest = _LATEST_PROOF.get(repository)
+    _, by_repository = closure_memos()
+    latest = by_repository.get(repository)
     if latest is None:
         return list(objects)
     proof = latest[0]

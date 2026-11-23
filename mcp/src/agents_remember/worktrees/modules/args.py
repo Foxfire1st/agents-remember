@@ -86,8 +86,8 @@ class WorktreeArgs:
     # Gate enforcement policy
     gate_policy: GatePolicy = DEFAULT_GATE_POLICY
 
-    # Plane-owned lifecycle execution. Never populated from an agent/CLI namespace:
-    # the detached worker injects these after resolving the task-bound operation record.
+    # Plane-owned lifecycle execution. Never populated from an agent/CLI namespace: the
+    # direct landing injects these from the generation it holds.
     operation_key: str = ""
     operation_generation: int = 0
     candidate_tree: str | None = None
@@ -116,6 +116,6 @@ class WorktreeArgs:
 
 
 def report_operation_progress(args: WorktreeArgs, phase: str, **evidence: object) -> None:
-    """Advance the plane-owned operation when this call runs under its detached worker."""
+    """Advance the plane-owned operation when this call carries one."""
     if args.operation_progress is not None:
         args.operation_progress(phase, evidence)

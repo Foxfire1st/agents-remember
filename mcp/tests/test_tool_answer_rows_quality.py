@@ -16,7 +16,6 @@ import json
 import time
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any
 from unittest.mock import patch
 
@@ -54,6 +53,7 @@ from agents_remember.models.memory import (
 )
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import bound_for
+from agents_remember_test_support.testing.tool_answer_fixtures import fixed_width_row_case_root
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from test_knowledge_worklist_leaf import invariant
 from test_worktree_support import git, open_external_contract_fixture
@@ -196,8 +196,8 @@ class QualityProductionTests(unittest.TestCase):
         self.addCleanup(_registry.clear)
 
     def test_mounted_sync_and_completed_poll_keep_computed_proof_counts(self) -> None:
-        with TemporaryDirectory() as temporary:
-            contract, configured, scoped = _scoped_pair(Path(temporary))
+        with fixed_width_row_case_root() as root:
+            contract, configured, scoped = _scoped_pair(root)
             memory = contract.memory_worktree
             _write_converted_layout(memory)
             (memory / "onboarding").mkdir(exist_ok=True)
@@ -257,8 +257,7 @@ class QualityProductionTests(unittest.TestCase):
         instead of being promised to the fixer.
         """
 
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
+        with fixed_width_row_case_root() as root:
             contract, configured, scoped = _scoped_pair(root)
             _write_missing_anchor_sidecars(contract.memory_worktree / "onboarding", 25)
             _write_converted_layout(contract.memory_worktree)
@@ -310,8 +309,7 @@ class QualityProductionTests(unittest.TestCase):
     def test_clean_sync_takes_over_the_missing_parent(self) -> None:
         """A real sync on a clean parentless leaf answers the take-over."""
 
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
+        with fixed_width_row_case_root() as root:
             contract, configured, scoped = _scoped_pair(root)
             onboarding = contract.memory_worktree / "onboarding"
             onboarding.mkdir(parents=True, exist_ok=True)
@@ -338,8 +336,7 @@ class QualityProductionTests(unittest.TestCase):
     ) -> None:
         """Real start admits a run, real polls answer running then completed."""
 
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
+        with fixed_width_row_case_root() as root:
             contract, configured, scoped = _scoped_pair(root)
             onboarding = contract.memory_worktree / "onboarding"
             onboarding.mkdir(parents=True, exist_ok=True)

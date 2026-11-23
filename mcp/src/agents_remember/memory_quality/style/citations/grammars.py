@@ -36,6 +36,7 @@ from pathlib import PurePosixPath
 from tree_sitter import Language, Node, Parser, Tree
 
 from agents_remember.errors import GrammarUnavailableError
+from agents_remember.kernel.request_memo import request_owner
 from agents_remember.memory_quality.style.citations import test_case_ranges, test_cases
 
 PYTHON = "python"
@@ -204,9 +205,24 @@ def parsed(path: str) -> bool:
     return grammar_of(path) is not None
 
 
-@cache
+@dataclass
+class _TypeScriptAnchorInputs:
+    values: dict[str, str | None] = dataclass_field(default_factory=dict)
+    lock: threading.Lock = dataclass_field(default_factory=threading.Lock)
+
+
 def typescript_anchor_identifier(text: str) -> str | None:
     """The direct identifier rooted by a complete TS call or generic type spelling."""
+    memo = request_owner(_TypeScriptAnchorInputs, _TypeScriptAnchorInputs)
+    if memo is None:
+        return _process_typescript_anchor_identifier(text)
+    with memo.lock:
+        if text not in memo.values:
+            memo.values[text] = _parse_typescript_anchor_identifier(text)
+        return memo.values[text]
+
+
+def _parse_typescript_anchor_identifier(text: str) -> str | None:
     signature = f"function {text} {{}}"
     signature_tree = Parser(language(TYPESCRIPT)).parse(signature.encode("utf-8"))
     if not signature_tree.root_node.has_error:
@@ -246,6 +262,11 @@ def typescript_anchor_identifier(text: str) -> str | None:
             if root is not None and root.type in {"identifier", "type_identifier"}:
                 return "" if root.text is None else root.text.decode("utf-8")
     return None
+
+
+@cache
+def _process_typescript_anchor_identifier(text: str) -> str | None:
+    return _parse_typescript_anchor_identifier(text)
 
 
 @cache

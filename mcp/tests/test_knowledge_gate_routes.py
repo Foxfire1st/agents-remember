@@ -530,14 +530,13 @@ def test_an_exact_retry_of_an_in_flight_generation_reaches_it_before_the_gate(
 
 
 def _cancel(series: Any) -> Any:
-    """``cancel_operation`` on the series' current generation; worker, proof and publish stubbed."""
+    """Cancel the current generation with Git proof, publication and projection stubbed."""
 
     store = direct_landing_store(series)
     record = store.read()
     assert record is not None
     cancelled = record.model_copy(update={"status": "cancelled", "phase": "cancelled"})
     with (
-        mock.patch.object(cancellation, "_terminate_worker", return_value=record),
         mock.patch.object(cancellation, "prove_cancellable_git", return_value=(None, record)),
         mock.patch.object(
             cancellation, "_publish_cancelled_outcome", return_value=(cancelled, series)
@@ -640,9 +639,9 @@ def test_an_unreadable_closing_receipt_is_a_named_refusal_at_apply_and_at_cancel
     store = direct_landing_store(series)
     record = store.read()
     assert record is not None
-    untouched = mock.Mock(side_effect=AssertionError("the worker was terminated"))
+    untouched = mock.Mock(side_effect=AssertionError("Git cancellability proof ran"))
     with (
-        mock.patch.object(cancellation, "_terminate_worker", untouched),
+        mock.patch.object(cancellation, "prove_cancellable_git", untouched),
         pytest.raises(cancellation.LifecycleControlError) as cancel,
     ):
         cancellation.cancel_operation(series, store, record, dry_run=False)

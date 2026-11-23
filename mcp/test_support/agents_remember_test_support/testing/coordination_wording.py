@@ -271,7 +271,7 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "Decide leaf order, agent starts and replacements, operational "
         "problems, ordinary requirement interpretation within the intended "
         "promise, and checks before and after landing.",
-        "Inspect the complete changed-file diff and both verdicts before deciding the gate.",
+        "Inspect the complete changed-file diff, both verdicts and the Worker's report of the requirement's listed final checks before deciding the gate.",
         "Reviews supply evidence; you decide the gate and retain closeout, "
         "integration, status, acceptance writes and landing order.",
         # P5-07 OP-113 (look 1 F1): the Manager's one home of the relay limit.

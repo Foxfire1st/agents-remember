@@ -90,7 +90,11 @@ from agents_remember.models.knowledge_files.records import (
 from agents_remember.models.knowledge_files.shapes import ONE_SENTENCE_MAX
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.knowledge_responses import KnowledgeWriteResponse
-from agents_remember.models.tools.tool_answer import TOOL_ANSWER_LIST_MAX, short_form
+from agents_remember.models.tools.tool_answer import (
+    TOOL_ANSWER_LIST_MAX,
+    ShortFormLocation,
+    short_form,
+)
 from agents_remember.worktrees.knowledge_gate import landing_document_answer, landing_gate_refusal
 from agents_remember.worktrees.modules.onboarding import (
     OnboardingTraceInputs,
@@ -1520,7 +1524,7 @@ def test_the_answer_projection_keeps_the_document_field_on_every_landing_route()
         short, _, _ = short_form(
             whole,
             answer_tokens=count_response_tokens(whole),
-            log="/sandbox/landing.json",
+            location=ShortFormLocation(log="/sandbox/landing.json"),
             count=count_response_tokens,
         )
         assert short["staleDocuments"] == {

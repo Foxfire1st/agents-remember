@@ -4,6 +4,7 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RoleChatsPane } from './RoleChats';
+import { launcherModelReply } from './roleChatModelOptions.test-utils';
 import { forgetRememberedRoleDefaults } from './launcherDefaultsMemory';
 import {
   launchChoiceProblem,
@@ -42,6 +43,7 @@ type Reply = { status: number; body: unknown };
 let optionsReplies: Reply[] = [];
 let optionsRequests: Record<string, unknown>[] = [];
 let optionsBarrier: Promise<void> | null = null;
+let lastOptions: unknown;
 let savedCatalogReply: Reply | null = null;
 
 function optionsReply(roleDefaults: Record<string, unknown>): Reply {
@@ -59,6 +61,7 @@ beforeEach(() => {
   optionsReplies = [];
   optionsRequests = [];
   optionsBarrier = null;
+  lastOptions = undefined;
   savedCatalogReply = null;
   sessionStorage.clear();
   forgetRememberedRoleDefaults();
@@ -68,9 +71,12 @@ beforeEach(() => {
       if (url === '/api/role-launch/saved-catalog') return new Response(JSON.stringify(savedCatalogReply?.body ?? {}), { status: savedCatalogReply?.status ?? 503 });
       if (url !== '/api/role-launch/options')
         return new Response(JSON.stringify({ available: false, frameUrl: null }), { status: 503 });
-      optionsRequests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (body.modelId) return launcherModelReply(body, lastOptions);
+      optionsRequests.push(body);
       if (optionsBarrier) await optionsBarrier;
       const reply = optionsReplies.length > 1 ? optionsReplies.shift() : optionsReplies[0];
+      if (reply?.status === 200) lastOptions = reply.body;
       return new Response(JSON.stringify(reply?.body), { status: reply?.status ?? 500 });
     }),
   );
@@ -86,11 +92,17 @@ describe('launcher bar and the host catalog', () => {
   it('keeps a speed override when choosing model or effort and names the resolved agent', () => {
     const values = { service_tier: 'priority' };
     const defaults = { agent: 'codex', model: 'gpt-a' };
-    expect(roleAgentOverrideFor('codex', 'gpt-a', 'high', defaults, values)?.featureValues).toEqual(
-      values,
-    );
     expect(
-      roleAgentOverrideFor('codex', 'gpt-a', undefined, defaults, values)?.featureValues,
+      roleAgentOverrideFor(
+        { agentId: 'codex', modelId: 'gpt-a', effortId: 'high', featureValues: values },
+        defaults,
+      )?.featureValues,
+    ).toEqual(values);
+    expect(
+      roleAgentOverrideFor(
+        { agentId: 'codex', modelId: 'gpt-a', featureValues: values },
+        defaults,
+      )?.featureValues,
     ).toEqual(values);
     expect(launchChoiceProblem({ agent: 'missing' }, AGENTS, { featureValues: values })).toContain(
       'Agent missing',
@@ -106,16 +118,16 @@ describe('launcher bar and the host catalog', () => {
         available: true,
       }),
     ];
-    const { getByRole, getByLabelText, getByTestId, queryByTestId } = renderLauncher();
+    const { getByRole, getByLabelText, getByTestId, findByTestId, queryByTestId } = renderLauncher();
     const start = getByRole('button', { name: 'Start role' }) as HTMLButtonElement;
     await waitFor(() => expect(start.disabled).toBe(false));
     expect(getByTestId('role-service-tier').textContent).toBe('Speed: Fast');
     expect(getByTestId('role-service-tier').getAttribute('title')).toContain('default agent');
     fireEvent.change(getByLabelText('Role model override'), { target: { value: 'gpt-b' } });
-    await waitFor(() => expect(start.disabled).toBe(true));
-    expect(getByTestId('role-choice-problem').textContent).toContain(
+    expect((await findByTestId('role-choice-problem')).textContent).toContain(
       'Service tier fast is not offered',
     );
+    expect(start.disabled).toBe(true);
     fireEvent.change(getByLabelText('Role agent override'), { target: { value: 'eve' } });
     await waitFor(() => expect(start.disabled).toBe(false));
     expect(getByTestId('role-service-tier').textContent).toBe('Speed: provider default');
@@ -304,9 +316,13 @@ describe('launchChoiceProblem', () => {
 });
 
 describe('R71 speed feature choices', () => {
-  it('submits only an explicit speed feature and shows permission choices as settings owned', async () => {
+  it('submits only an explicit speed feature and offers the mode beside it', async () => {
     const offered = structuredClone(AGENTS);
-    offered[0].modes = [{ id: 'auto', label: 'Default Permissions' }];
+    offered[0].modes = [
+      { id: 'auto', label: 'Default Permissions' },
+      { id: 'full-access', label: 'Full Access' },
+    ];
+    offered[0].defaultModeId = 'auto';
     offered[0].models[0].features = [
       {
         id: 'service_tier',
@@ -334,7 +350,7 @@ describe('R71 speed feature choices', () => {
             available: true,
             mode: 'auto',
             choices: {
-              mode: { source: 'least permissive mode' },
+              mode: { source: 'our settings' },
               featureValues: { service_tier: { value: 'default', source: 'host role' } },
               notes: { present: true, baselineReplaced: true, source: 'host role' },
             },
@@ -367,9 +383,10 @@ describe('R71 speed feature choices', () => {
       }),
     );
     const view = renderLauncher();
-    await waitFor(() => expect(view.getByText('Default Permissions')).toBeTruthy());
-    const modeChip = view.getByText('Default Permissions');
-    expect(modeChip.getAttribute('title')).toContain('least permissive mode');
+    await waitFor(() => expect(view.getByLabelText('Role mode override')).toBeTruthy());
+    const modeSelect = view.getByLabelText('Role mode override') as HTMLSelectElement;
+    expect(modeSelect.options[0]?.textContent).toBe('Default Permissions · our settings');
+    expect(modeSelect.getAttribute('title')).toContain('Default Permissions · our settings');
     expect(view.queryByTestId('role-default-sources')).toBeNull();
     expect(view.queryByText(/Features:/)).toBeNull();
     expect(view.queryByText(/Role defaults:/)).toBeNull();
@@ -377,8 +394,7 @@ describe('R71 speed feature choices', () => {
     expect(instructions.getAttribute('title')).toContain('host role');
     expect(instructions.getAttribute('title')).toContain('baseline replaced');
     expect(view.queryByLabelText('Plan mode override')).toBeNull();
-    expect(view.queryByLabelText('Mode override')).toBeNull();
-    fireEvent.change(view.getByLabelText('Speed feature override'), {
+    fireEvent.change(await view.findByLabelText('Speed feature override'), {
       target: { value: 'priority' },
     });
     fireEvent.click(view.getByRole('button', { name: 'Start role' }));
@@ -401,6 +417,83 @@ describe('R71 speed feature choices', () => {
     await waitFor(() => expect(requests).toHaveLength(2));
     expect((requests[1].agentOverride as { featureValues: unknown }).featureValues).toEqual({
       service_tier: 'priority',
+    });
+  });
+});
+
+
+describe('the launcher mode', () => {
+  it('carries the chosen mode in its override and keeps it across a model change', async () => {
+    const offered = structuredClone(AGENTS);
+    offered[0].modes = [
+      { id: 'auto', label: 'Default Permissions' },
+      { id: 'full-access', label: 'Full Access' },
+    ];
+    offered[0].defaultModeId = 'auto';
+    optionsReplies = [
+      {
+        status: 200,
+        body: {
+          roleDefaults: {
+            agent: 'codex',
+            model: 'gpt-a',
+            available: true,
+            mode: 'auto',
+            choices: { mode: { value: 'auto', source: 'our settings' } },
+          },
+          agents: offered,
+          catalogOrigin: 'bug-r11',
+          executions: [],
+        },
+      },
+    ];
+    const requests: Record<string, unknown>[] = [];
+    const optionsFetch = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/api/role-launch/dispatch') {
+          requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return new Response(
+            JSON.stringify({
+              requestId: requests.at(-1)?.requestId,
+              status: 'rejected',
+              detail: 'fixture',
+              canStart: true,
+              canRevive: false,
+            }),
+            { status: 200 },
+          );
+        }
+        return optionsFetch(url, init);
+      }),
+    );
+    const view = renderLauncher();
+    await waitFor(() => expect(view.getByLabelText('Role mode override')).toBeTruthy());
+    const start = view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement;
+    await waitFor(() => expect(start.disabled).toBe(false));
+    fireEvent.change(view.getByLabelText('Role mode override'), {
+      target: { value: 'full-access' },
+    });
+    // The agent id joins the options scope, so the launcher rereads them before it can start.
+    await waitFor(() => expect(start.disabled).toBe(false));
+    fireEvent.click(start);
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0].agentOverride).toEqual({ agentId: 'codex', modeId: 'full-access' });
+    // A model change keeps the launcher's mode; only a change of agent returns to the default.
+    fireEvent.change(view.getByLabelText('Role model override'), { target: { value: 'gpt-b' } });
+    await waitFor(() =>
+      expect((view.getByLabelText('Role mode override') as HTMLSelectElement).value).toBe(
+        'full-access',
+      ),
+    );
+    await waitFor(() => expect(start.disabled).toBe(false));
+    fireEvent.click(start);
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1].agentOverride).toEqual({
+      agentId: 'codex',
+      modelId: 'gpt-b',
+      modeId: 'full-access',
     });
   });
 });
@@ -523,7 +616,9 @@ describe('R215 the launcher speaks only of real errors', () => {
     for (const label of ['Role', 'Role agent override', 'Role model override', 'Role effort override']) {
       expect((view.getByLabelText(label) as HTMLSelectElement).disabled, label).toBe(false);
     }
-    expect(optionLabels(view.getByLabelText('Role model override'))).toEqual(settledModels);
+    const model = view.getByLabelText('Role model override');
+    expect(model.getAttribute('aria-busy')).toBe('true');
+    expect(optionLabels(model)).toEqual([`${settledModels[0]} · options pending`, ...settledModels.slice(1)]);
     expect(optionLabels(view.getByLabelText('Role effort override'))).toEqual(['Low · default', 'Low', 'High']);
     expect(start.disabled).toBe(false);
     expect(launcherLayout(view)).toEqual(settled);

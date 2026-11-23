@@ -292,7 +292,8 @@ def test_manager_curation_does_not_receive_curators_card_or_writer_steps() -> No
     )
     assert "transaction steps remain with the Manager." in text
     assert (
-        "Inspect the complete changed-file diff and both verdicts before deciding the gate." in text
+        "Inspect the complete changed-file diff, both verdicts and the Worker's report of the requirement's listed final checks before deciding the gate."
+        in text
     )
 
 

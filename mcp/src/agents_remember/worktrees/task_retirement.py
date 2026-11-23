@@ -387,7 +387,7 @@ def _survey_operations(survey: _Survey, contract: WorktreeContract, path: Path) 
                 f"master {scope.task_root.name!r} enclosure {path} locator {locator.path} is "
                 f"{locator.state}: {locator.detail or 'lifecycle authority remains open'}; "
                 "complete worktree_cleanup or worktree_abandon for that enclosure, or resolve "
-                "its operation with worktree_operation_control."
+                "its direct-landing generation with worktree_operation_control."
             )
         elif locator.state == "unreadable":
             survey.open_work.append(
@@ -401,14 +401,22 @@ def _survey_operations(survey: _Survey, contract: WorktreeContract, path: Path) 
         entries = terminal_operation_evidence(group)
     except (LifecycleOperationLocationError, OSError, RuntimeError, ValueError) as error:
         record = _refused_record(error)
-        action = (
-            "resolve the named generation through worktree_operation_control or restore its "
-            "admitted evidence"
-            if tools_can_act
-            else _by_hand(
+        if tools_can_act:
+            kind = record.name.partition("-operation.")[0] if record is not None else ""
+            replacement = {
+                "closeout": "worktree_closeout_apply",
+                "integrate": "worktree_integrate",
+            }.get(kind)
+            remedy = (
+                f"run the operation again with {replacement}"
+                if replacement is not None
+                else "resolve the named generation through worktree_operation_control"
+            )
+            action = f"{remedy} or restore its admitted evidence"
+        else:
+            action = _by_hand(
                 "restore the record's admitted bytes, or give the operation up", record, group
             )
-        )
         survey.open_work.append(
             f"master {key} contract {path}: retained operation evidence refused: {error}; {action}."
         )

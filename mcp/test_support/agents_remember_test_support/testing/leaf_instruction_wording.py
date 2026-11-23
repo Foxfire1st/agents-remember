@@ -539,23 +539,23 @@ REVIEW_CLAUSES = {
     ),
     "reopen or refute answer": (
         (
-            "Two routes may add a finding after the list is sealed:\n"
+            "Three routes may add a finding after the list is sealed:\n"
             "\n"
             "- a valid code finding from the Curator;\n"
             "- a valid finding from an advisory review the Architect commissioned and "
-            "forwarded in its questions file.\n"
+            "forwarded in its questions file;\n"
+            "- a failed final check on the passed tree.\n"
             "\n"
-            "For both routes, add a new sealed finding with its own identifier and reopen "
-            "the verdict for that point only. Earlier sealed findings stay as they are. "
-            "Give the reason for an invalid finding. The Worker repairs an accepted finding"
-            " in a successor.\n"
+            "For all three, add a sealed finding with its own identifier and "
+            "reopen only that point. Give the reason for an invalid finding. The Worker "
+            "repairs an accepted finding in a successor.\n"
             "\n"
-            "A repair round for a Curator finding counts under the settings limit. Beyond "
-            "it, send the extra-round question to the instructed reporting recipient where "
-            "your role has one; otherwise send it through your parent, or ask in your own "
-            "chat when you have no parent. An extra round for advisory findings is the "
-            "Architect's grant. Every other new observation follows your role's "
-            "developer-question route."
+            "A repair round for a Curator or final-check finding counts under the settings "
+            "limit. Beyond it, send the extra-round question to the instructed reporting "
+            "recipient where your role has one; otherwise send it through your parent, or "
+            "ask in your own chat when you have no parent. An extra round for advisory "
+            "findings is the Architect's grant. Every other new observation follows your "
+            "role's developer-question route."
         ),
     ),
     "upward notice recovery": (

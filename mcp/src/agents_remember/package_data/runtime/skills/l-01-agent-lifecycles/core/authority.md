@@ -40,7 +40,7 @@ Sessions that the dashboard does not own follow their host harness's ordinary ru
 
 Start another role with `role_start` once, naming the role, a chosen request identifier and its exact required task references. To reconcile an uncertain result, use the same identifier and selection for the same start. `role_start_set` is not the stage-start route.
 
-Keep the per-start override route. After a start with overrides, the starter checks and sets the seat's mode and features. If the seat differs from the resolved choices, record a product issue rather than remove the overrides.
+Keep the per-start override route. After a start with overrides, the starter checks and sets the seat's features. If the seat differs from the resolved choices, record a product issue rather than remove the overrides.
 
 The agent that started a seat retires the agent in it with `retire_child`; the tool refuses any other caller.
 
@@ -117,7 +117,7 @@ Change doctrine and instruction text only through a task. A seat never rewrites 
 
 The architecture seat that compiled a requirement owns it. Diagnose and propose a correction to a contradiction or overconstraint; never approve or silently rewrite it yourself.
 
-Authorized closeout and integration publish only their approved code and prepared memory pair. Run the focused checks the change touches and report failed and unrun checks truthfully. Full code quality and full-suite tests require an explicit task or developer request. Curation still runs complete memory quality, and closeout carries that result without rerunning it.
+Authorized closeout and integration publish only their approved code and prepared memory pair. Run the focused checks the change touches and report failed and unrun checks truthfully. Full code quality and full-suite tests require an explicit task or developer request; a requirement's `## Final checks` section is that request for the runs it lists, which run once after the code pass. Curation still runs complete memory quality, and closeout carries that result without rerunning it.
 
 Pushing to the sprint line, opening pull requests and releasing belong to the developer unless explicitly delegated. Never force a refused push. Using `--no-verify` requires the developer's word for that occasion. Send the failure through your parent to the developer.
 

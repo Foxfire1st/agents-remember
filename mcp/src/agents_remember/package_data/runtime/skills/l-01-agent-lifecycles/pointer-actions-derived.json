@@ -608,6 +608,18 @@
         "wording": "when the master line moves, run the supported sync of your own leaf yourself"
       }
     ],
+    "implementation-before-running-the-final-checks-after-the-pass-51cc91bc41": [
+      {
+        "source": "operations/review.md",
+        "fragment": "run-the-final-checks-after-the-pass",
+        "wording": "a round carries none of the requirement's listed final checks; they run once on the tree your pass leaves, as"
+      },
+      {
+        "source": "roles/worker.md",
+        "fragment": "run-the-final-checks-after-the-pass",
+        "wording": "after the code review passes, follow"
+      }
+    ],
     "orientation-before-acting-on-a-denied-or-unanswered-harness-request-1482ca975f": [
       {
         "source": "operations/coordination.md",
@@ -785,7 +797,7 @@
       {
         "source": "roles/reviewer.md",
         "fragment": "boundaries",
-        "wording": "before handling findings received after sealing, including those arriving after code PASS, or sending the ready-for-closeout notice"
+        "wording": "before handling findings received after sealing, or sending the ready-for-closeout notice"
       }
     ],
     "review-before-inspecting-the-assigned-packet-or-candidate-5a94ae7ca5": [
@@ -1291,7 +1303,7 @@
       {
         "source": "roles/reviewer.md",
         "fragment": "report-problems-without-expanding-review",
-        "wording": "in `fix-verification`, reuse the sealed evidence and verify only listed identifiers, subject to the sanctioned routes under"
+        "wording": "in `fix-verification`, reuse the sealed evidence and verify only listed identifiers under"
       }
     ],
     "worker-before-handing-over-or-attempting-a-role-start-acceptance-or-publica-491deada88": [

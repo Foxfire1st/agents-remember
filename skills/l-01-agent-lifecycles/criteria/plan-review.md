@@ -4,7 +4,7 @@ The Reviewer uses this catalog to examine the sprint plan before it reaches the 
 
 Use the retained read-only naming tools: `read_ar_files`, `knowledge_read` and `knowledge_diff`. Re-derive mechanical claims through the tools, then open the named files with the harness's file tools.
 
-Before starting a baseline or fix-verification, read the [shared catalog review rules](code-seam.md#shared-catalog-review-rules). They define standing checks, baseline exploration, fixed-list verification and criterion promotion, demotion and automation. Fix-verification retains only the sealed evidence needed for outstanding plan-issue identifiers, subject to that section's two sanctioned routes for adding findings after sealing.
+Before starting a baseline or fix-verification, read the [shared catalog review rules](code-seam.md#shared-catalog-review-rules). They define standing checks, baseline exploration, fixed-list verification and criterion promotion, demotion and automation. Fix-verification retains only the sealed evidence needed for outstanding plan-issue identifiers, subject to that section's sanctioned routes for adding findings after sealing.
 
 ## Standing criteria
 

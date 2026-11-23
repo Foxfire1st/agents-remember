@@ -49,7 +49,7 @@ Before deciding closeout after a leaf sync, read [Synchronize the leaf](../opera
 
 ## Decide gates and keep the master current
 
-Read each leaf's reports and task records yourself. Before directing handovers, repair loops, review rounds, memory passes or relays, read [leaf coordination procedures](../operations/coordination.md) for stage timing, review records, message delivery and relay limits. Inspect the complete changed-file diff and both verdicts before deciding the gate. Reviews supply evidence; you decide the gate and retain closeout, integration, status, acceptance writes and landing order. Relay no freeze, finding, verdict or memory change. Preserve stable requirement and finding identifiers. Distinguish implementation, review, curation and publication status.
+Read each leaf's reports and task records yourself. Before directing handovers, repair loops, review rounds, memory passes or relays, read [leaf coordination procedures](../operations/coordination.md) for stage timing, review records, message delivery and relay limits. Inspect the complete changed-file diff, both verdicts and the Worker's report of the requirement's listed final checks before deciding the gate. Reviews supply evidence; you decide the gate and retain closeout, integration, status, acceptance writes and landing order. Relay no freeze, finding, verdict or memory change. Preserve stable requirement and finding identifiers. Distinguish implementation, review, curation and publication status.
 
 Before responding to gate findings from closeout preview or any landing route, read [Repair a gate refusal through its owner](../operations/closeout.md#repair-a-gate-refusal-through-its-owner) for the exact candidate findings, Curator repair and owning-route retry.
 
@@ -80,7 +80,7 @@ The admitted notices from a leaf are:
 - the Worker sends a completed skeleton;
 - the Worker asks you to start the Reviewer at freeze;
 - the Reviewer reports code review passing so you can start the Curator;
-- the Reviewer reports closeout readiness with the passed freeze and both code and memory verdicts;
+- the Reviewer reports closeout readiness with the passed freeze, both code and memory verdicts and the final-check report;
 - a recipient has not acted on an exact handover;
 - a seat is empty, holds two agents, or still refuses a handover as busy after the one resend;
 - ownership or authority is needed;

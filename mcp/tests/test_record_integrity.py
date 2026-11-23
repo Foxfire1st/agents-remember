@@ -992,9 +992,13 @@ class DeclaredFigureCurrencyTests:
             claim.measured()
 
     def test_a_source_outside_any_git_tree_refuses_when_a_base_is_declared(
-        self, tmp_path: pathlib.Path
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        source = tmp_path / "source.py"
+        # Confine Git discovery to this specimen even when pytest's temp root is in a checkout.
+        monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        source = plain / "source.py"
         source.write_text("x = 1\n", encoding="utf-8")
         claim = integrity.FigureClaim(
             source=source,
@@ -1013,6 +1017,50 @@ class DeclaredFigureCurrencyTests:
 
 
 class RecordIntegrityReportTests:
+    def test_owned_worktree_fixture_matches_both_leaf_id_forms(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        world = tmp_path / "worktrees" / "coordination"
+        root = world / "tasks" / "repo" / "fixture"
+        root.mkdir(parents=True)
+        expected = {}
+        for document_id, contract_id, rule in (
+            ("FIXTURE-L1", "FIXTURE-L1", integrity.RULE_LEAF_CONTRACT),
+            ("FIXTURE-L2", "fixture-l2", integrity.RULE_LEAF_CONTRACT_KEYED),
+        ):
+            document = root / f"{document_id}.json"
+            document.write_text(
+                json.dumps(
+                    {"schema": "ar-task-document/v1", "id": document_id, "status": "Completed"}
+                ),
+                encoding="utf-8",
+            )
+            contract = root / "enclosures" / contract_id / "series-contract.md"
+            contract.parent.mkdir(parents=True)
+            contract.write_text(
+                f"---\nleaf_id: {contract_id}\ncloseout:\n  status: not-started\n---\n",
+                encoding="utf-8",
+            )
+            expected[str(document)] = (str(contract), rule)
+        decoy_bytes = (root / "FIXTURE-L1.json").read_bytes()
+        for directory in ("enclosures", "worktrees"):
+            decoy = root / directory / "decoy.json"
+            decoy.parent.mkdir(exist_ok=True)
+            decoy.write_bytes(decoy_bytes)
+
+        assert {str(path) for path in integrity.leaf_documents(root)} == expected.keys()
+        result = integrity.check_leaf_document_against_contract(world)
+        assert (result.subjects, result.authority, result.disagreements) == (2, 2, 2)
+        assert {
+            finding.subject: (finding.authority, finding.rule) for finding in result.findings
+        } == expected
+        assert result in integrity.run_all(world)
+        exit_code = integrity.main(
+            ["--coordination-root", str(world), "--check", result.check, "--format", "json"]
+        )
+        assert exit_code == 1
+        assert json.loads(capsys.readouterr().out) == [result.to_dict()]
+
     def test_every_comparison_states_its_two_populations(self, tmp_path: pathlib.Path) -> None:
         """A zero is admissible only with the population it was drawn from; that is requirement 3."""
         world = _control_world(tmp_path, HISTORICAL_MASTER)

@@ -41,6 +41,10 @@ from agents_remember.application.knowledge_currentness.observe import (
     open_code_tree,
 )
 from agents_remember.application.knowledge_gate import memo
+from agents_remember.application.knowledge_gate.candidate_parses import (
+    _CANDIDATE_PARSES,
+    remember_candidate_parse,
+)
 from agents_remember.application.knowledge_gate.predicates import (
     INVARIANT_KINDS,
     GateContext,
@@ -77,7 +81,6 @@ from agents_remember.kernel.git_command import (
 )
 from agents_remember.kernel.recorded_reads import recorded_reads, replay_reads
 from agents_remember.memory.conversion.base import pinned_version
-from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge_index import MemoryTreeError, git_tree_snapshot
 from agents_remember.memory_quality.knowledge_validator import (
     KnowledgeTree,
@@ -119,7 +122,6 @@ ITEM_OPEN: Final = "knowledge-item-open"
 RUN_INCOMPLETE: Final = "knowledge-worklist-incomplete"
 VALIDATOR: Final = "knowledge-validator"
 _REFUSAL_LINES: Final = 40
-_CANDIDATE_PARSES: BoundedMemo[tuple[str, str], KnowledgeSide] = BoundedMemo(8)
 
 
 @dataclass(frozen=True)
@@ -469,7 +471,7 @@ def _candidate(
             candidate = deepcopy(held[0])
         else:
             candidate = KnowledgeSide.from_snapshot("K_C", snapshot)
-            _CANDIDATE_PARSES.put(key, deepcopy(candidate))
+            remember_candidate_parse(key, candidate)
     except (KnowledgeSideUnreadable, MemoryTreeError, OSError, ValueError) as error:
         return _unreadable("K_C", error)
     except subprocess.SubprocessError as error:

@@ -11,13 +11,17 @@ import hashlib
 import os
 import shutil
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
+from agents_remember.cli.role_handover_file import HANDOVER_FILE_SUFFIX
+from agents_remember.cli.role_instruction_links import relative_destinations
 from agents_remember.cli.role_message_files import MESSAGES_LINK
-from agents_remember.errors import AgentsRememberError
+from agents_remember.errors import AgentsRememberError, AuthorityError
 from agents_remember.kernel.atomic_write import atomic_replace
+from agents_remember.kernel.sidecar_pairing import confine_non_symlink_rel
+from agents_remember.memory_quality.style.citations.model import code_span_texts
 from agents_remember.worktrees.role_handover_locator import (
     locator_directory,
     locator_root,
@@ -204,6 +208,78 @@ def collect_execution_reports(receipt: dict[str, Any]) -> dict[str, Any]:
         receipt.pop("reportCollectionFiles", None)
     receipt["reportCollection"] = result
     return result
+
+
+def canonical_execution_reports(receipt: Mapping[str, Any], reports_root: Path) -> Iterator[Path]:
+    """Read the role's canonical report collection after local folders and caches are gone."""
+
+    workspace = receipt.get("workspace")
+    canonical = workspace.get("taskReportRoot") if isinstance(workspace, dict) else None
+    if not isinstance(canonical, str):
+        return
+    try:
+        relative = Path(canonical).relative_to(reports_root).as_posix()
+        root = reports_root / confine_non_symlink_rel(reports_root, relative)
+    except (AuthorityError, OSError, ValueError):
+        return
+
+    report = receipt.get("report")
+    primary = report.get("canonicalPath") if isinstance(report, dict) else None
+    launch_report = Path(primary) if isinstance(primary, str) else None
+    measurements: set[Path] = set()
+    citations: set[Path] = set()
+    for path in _report_candidates(root, launch_report):
+        if path.suffix.lower() == ".json":
+            measurements.add(path)
+        else:
+            yield path
+            citations.update(_measurement_citations(path, root))
+    yield from measurements & citations
+
+
+def _report_candidates(root: Path, launch_report: Path | None) -> Iterator[Path]:
+    """Select report text and possible structured measurements inside the collection."""
+
+    for path in root.rglob("*", recurse_symlinks=False):
+        if path.suffix.lower() not in {".md", ".txt", ".json"}:
+            continue
+        if path.is_symlink() or not path.is_file() or _launch_carrier(path, launch_report):
+            continue
+        yield path
+
+
+def _launch_carrier(path: Path, launch_report: Path | None) -> bool:
+    if launch_report is None or path.parent != launch_report.parent:
+        return False
+    return (
+        path == launch_report.with_suffix(".handover.txt")
+        or path == launch_report.with_suffix(HANDOVER_FILE_SUFFIX)
+        or path.name.startswith(f"{launch_report.stem}.detail-")
+    )
+
+
+def _measurement_citations(report: Path, root: Path) -> Iterator[Path]:
+    """Read explicit JSON references and let the selected collection supply their bytes."""
+
+    try:
+        with report.open(encoding="utf-8") as stream:
+            for line in stream:
+                if ".json" in line.lower():
+                    yield from _line_measurement_citations(line, report.parent, root)
+    except (OSError, UnicodeError):
+        return
+
+
+def _line_measurement_citations(line: str, directory: Path, root: Path) -> Iterator[Path]:
+    for span in code_span_texts(line):
+        if Path(span).suffix.lower() == ".json":
+            # Worker notes use request-relative paths, and nested reports also cite neighboring files.
+            yield Path(os.path.normpath(root / span))
+            yield Path(os.path.normpath(directory / span))
+    for start, end in relative_destinations(line):
+        target = line[start:end]
+        if Path(target).suffix.lower() == ".json":
+            yield Path(os.path.normpath(directory / target))
 
 
 def collect_group_reports(contract: WorktreeContract, *, dry_run: bool) -> dict[str, Any]:

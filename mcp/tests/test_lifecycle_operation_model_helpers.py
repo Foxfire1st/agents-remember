@@ -64,53 +64,6 @@ def test_recovery_commits_cannot_contradict_commit_proof() -> None:
         operation._require_recovered_leg(commits, "codeCommit", proof)
 
 
-def test_worker_binding_and_termination_evidence_are_one_authority() -> None:
-    none_binding = (None, None, None)
-    full_binding = (123, "a" * 64, "b" * 64)
-    operation._require_complete_worker_binding(none_binding)
-    operation._require_complete_worker_binding(full_binding)
-    assert not operation._binding_present(none_binding)
-    assert operation._binding_present(full_binding)
-    with pytest.raises(ValueError, match="one authority"):
-        operation._require_complete_worker_binding((123, None, None))
-
-    normal = _value(status="running", terminationReturnStatus=None, terminationReturnPhase=None)
-    requested = _value(
-        status="termination-required",
-        terminationReturnStatus="running",
-        terminationReturnPhase="source-merge",
-    )
-    operation._require_termination_return_identity(normal)
-    operation._require_termination_return_identity(requested)
-    with pytest.raises(ValueError, match="return status"):
-        operation._require_termination_return_identity(
-            _value(
-                status="termination-required",
-                terminationReturnStatus="running",
-                terminationReturnPhase=None,
-            )
-        )
-
-    operation._require_no_termination_return(normal)
-    with pytest.raises(ValueError, match="durable termination"):
-        operation._require_no_termination_return(requested)
-
-    live_record = _value(workerPid=123, workerLease="a" * 64)
-    live = _value(state="requested", pid=123, lease="a" * 64)
-    exited = _value(state="exited", pid=123, lease="a" * 64)
-    operation._require_live_termination_identity(live_record, live)
-    operation._require_live_termination_identity(live_record, exited)
-    with pytest.raises(ValueError, match="exact pid and lease"):
-        operation._require_live_termination_identity(
-            live_record, _value(state="requested", pid=456, lease="a" * 64)
-        )
-
-    operation._require_exited_worker_release(live, full_binding)
-    operation._require_exited_worker_release(exited, none_binding)
-    with pytest.raises(ValueError, match="release pid"):
-        operation._require_exited_worker_release(exited, full_binding)
-
-
 def _object_reference(kind: CertificateObjectKind, token: str) -> CertificateObjectReference:
     digest = token * 64
     return CertificateObjectReference(

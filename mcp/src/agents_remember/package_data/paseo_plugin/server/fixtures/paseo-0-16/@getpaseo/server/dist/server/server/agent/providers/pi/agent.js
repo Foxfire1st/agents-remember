@@ -1,0 +1,2391 @@
+import { mapCustomMessageToToolCall } from "../custom-message.js";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, join, resolve as resolvePath } from "node:path";
+import stripAnsi from "strip-ansi";
+import { z } from "zod";
+import { importSessionFromPersistence } from "../../provider-session-import.js";
+import { runProviderRefreshActivity } from "../../provider-refresh-deadline.js";
+import { runProviderTurn } from "../provider-runner.js";
+import { checkProviderLaunchAvailable, resolveProviderLaunch, } from "../../provider-launch-config.js";
+import { renderPromptAttachmentAsText } from "../../prompt-attachments.js";
+import { composeSystemPromptParts } from "../../system-prompt.js";
+import { buildBinaryDiagnosticRows, buildCommandResolutionDiagnosticRows, formatProviderDiagnostic, formatProviderDiagnosticError, toDiagnosticErrorMessage, } from "../diagnostic-utils.js";
+import { getUserMessageText, streamPiHistory, } from "./history-mapper.js";
+import { materializeProviderImage, renderProviderImageOutputAsAssistantMarkdown, } from "../provider-image-output.js";
+import { PiCliRuntime } from "./cli-runtime.js";
+import { createPiExtensionHost, piExtensionRuntimeBridge, } from "./extensions/index.js";
+import { resolveResumeProcessCwd } from "../resume-process-cwd.js";
+import { revertPiConversation } from "./rewind.js";
+import { copyPiSessionFileWithCwd, listPiImportableSessions, readPiImportSessionConfig, } from "./session-descriptor.js";
+import { modelDisplayLabel } from "../model-label.js";
+import { PiUsagePoller } from "./usage-poller.js";
+import { mapToolDetail, parseToolArgs, parseToolResult, splitPiToolResultImages, } from "./tool-call-mapper.js";
+const PI_PROVIDER = "pi";
+const DEFAULT_PI_THINKING_LEVEL = "medium";
+const PI_BINARY_COMMAND = process.env.PI_COMMAND ?? process.env.PI_ACP_PI_COMMAND ?? "pi";
+const PASEO_PI_TREE_EXTENSION_COMMAND = "paseo_tree";
+const PASEO_PI_CAPTURE_EXTENSION_COMMAND = "paseo_capture_entries";
+const PASEO_PI_REWIND_ENTRY_TYPE = "paseo_rewind";
+const PASEO_PI_ENTRY_CAPTURE_MARKER = "PASEO_ENTRY_CAPTURE";
+const PASEO_PI_SUBMITTED_USER_ENTRY_MARKER = "PASEO_SUBMITTED_USER_ENTRY";
+const PASEO_PI_COMMAND_RESULT_MARKER = "PASEO_COMMAND_RESULT";
+const DEFAULT_PI_EXTENSION_RESULT_TIMEOUT_MS = 30000;
+const DEFAULT_PI_RPC_TIMEOUT_MS = 60000;
+const QUESTION_RESPONSE_HEADER = "Response";
+export const PiProviderOptionsSchema = z
+    .object({
+    sessionDir: z.string().min(1).optional(),
+    rpcTimeoutMs: z.number().int().positive().default(DEFAULT_PI_RPC_TIMEOUT_MS),
+    extensionTimeoutMs: z.number().int().positive().default(DEFAULT_PI_EXTENSION_RESULT_TIMEOUT_MS),
+})
+    .strict();
+const PI_HANDLED_BUILTIN_SLASH_COMMANDS = [
+    {
+        name: "compact",
+        description: "Manually compact the session context",
+        argumentHint: "[instructions]",
+        kind: "command",
+    },
+    {
+        name: "autocompact",
+        description: "Toggle automatic context compaction",
+        argumentHint: "[on|off|toggle]",
+        kind: "command",
+    },
+];
+function mapPiCommandKind(source) {
+    if (source === "skill") {
+        return "skill";
+    }
+    return "command";
+}
+function mapPiSlashCommands(commands, handledCommands = PI_HANDLED_BUILTIN_SLASH_COMMANDS) {
+    const mappedCommands = new Map(handledCommands.map((command) => [command.name, { ...command }]));
+    for (const command of commands) {
+        const knownCommand = mappedCommands.get(command.name);
+        mappedCommands.set(command.name, {
+            name: command.name,
+            description: command.description ?? command.source,
+            argumentHint: knownCommand?.argumentHint ?? "",
+            kind: mapPiCommandKind(command.source),
+        });
+    }
+    return [...mappedCommands.values()];
+}
+const PI_CAPABILITIES = {
+    supportsStreaming: true,
+    supportsSessionPersistence: true,
+    supportsSessionListing: true,
+    supportsDynamicModes: true,
+    supportsMcpServers: false,
+    supportsReasoningStream: true,
+    supportsToolInvocations: true,
+    supportsRewindConversation: true,
+    supportsRewindFiles: false,
+    supportsRewindBoth: false,
+};
+const PI_THINKING_OPTIONS = [
+    { id: "off", label: "Off", description: "No extra reasoning" },
+    { id: "minimal", label: "Minimal", description: "Light reasoning" },
+    { id: "low", label: "Low", description: "Faster reasoning" },
+    { id: "medium", label: "Medium", description: "Balanced reasoning" },
+    { id: "high", label: "High", description: "Deeper reasoning" },
+    { id: "xhigh", label: "XHigh", description: "Very deep reasoning" },
+    { id: "max", label: "Max", description: "Extreme reasoning" },
+];
+function capabilitiesForClient() {
+    return withPiCapabilities(false);
+}
+function capabilitiesForSession(hasMcpConfig) {
+    return withPiCapabilities(hasMcpConfig);
+}
+// COMPAT(piSteerFallback): added in v0.5.0, remove after 2027-03-01 once the pi floor
+// supports the steer RPC. Older binaries answer with "Unknown command: steer".
+function isPiDefinitiveSteerRejection(error) {
+    return toDiagnosticErrorMessage(error) === "Unknown command: steer";
+}
+function isPiMissingClearQueueRpc(error) {
+    return toDiagnosticErrorMessage(error) === "Unknown command: clear_queue";
+}
+function isPiThinkingLevel(value) {
+    return (value === "off" ||
+        value === "minimal" ||
+        value === "low" ||
+        value === "medium" ||
+        value === "high" ||
+        value === "xhigh" ||
+        value === "max");
+}
+function normalizePiThinkingOption(value) {
+    if (!value) {
+        return null;
+    }
+    return isPiThinkingLevel(value) ? value : null;
+}
+function parseAutoCompactMode(value) {
+    const mode = (value ?? "toggle").trim().toLowerCase();
+    if (mode === "on" || mode === "true" || mode === "enable" || mode === "enabled") {
+        return true;
+    }
+    if (mode === "off" || mode === "false" || mode === "disable" || mode === "disabled") {
+        return false;
+    }
+    if (mode === "toggle") {
+        return "toggle";
+    }
+    return "unknown";
+}
+function piModelSupportsImageInput(model) {
+    return model?.input?.includes("image") === true;
+}
+async function renderTextOnlyImageHint(image) {
+    try {
+        const materialized = await materializeProviderImage({
+            data: image.data,
+            mimeType: image.mimeType,
+        });
+        return `[Image available at: ${materialized.path}]`;
+    }
+    catch (error) {
+        return `[Image attachment omitted: failed to write local file (${toDiagnosticErrorMessage(error)})]`;
+    }
+}
+async function convertPromptInput(prompt, options) {
+    if (typeof prompt === "string") {
+        return { text: prompt };
+    }
+    const textParts = [];
+    const images = [];
+    const forwardImages = piModelSupportsImageInput(options.model);
+    for (const block of prompt) {
+        if (block.type === "text") {
+            textParts.push(block.text);
+            continue;
+        }
+        if (block.type === "image") {
+            if (forwardImages) {
+                images.push({
+                    type: "image",
+                    data: block.data,
+                    mimeType: block.mimeType,
+                });
+            }
+            else {
+                textParts.push(await renderTextOnlyImageHint(block));
+            }
+            continue;
+        }
+        textParts.push(renderPromptAttachmentAsText(block));
+    }
+    const payload = {
+        text: textParts.join("\n\n"),
+    };
+    if (images.length > 0) {
+        payload.images = images;
+    }
+    return payload;
+}
+function parseModelReference(modelId) {
+    if (!modelId) {
+        return null;
+    }
+    if (modelId.includes("/")) {
+        const [provider, ...rest] = modelId.split("/");
+        const id = rest.join("/");
+        if (provider && id) {
+            return { provider, id };
+        }
+    }
+    if (modelId.includes(":")) {
+        const [provider, ...rest] = modelId.split(":");
+        const id = rest.join(":");
+        if (provider && id) {
+            return { provider, id };
+        }
+    }
+    return { id: modelId };
+}
+function parsePersistenceMetadata(metadata) {
+    if (!metadata) {
+        return {};
+    }
+    return {
+        ...(typeof metadata.cwd === "string" ? { cwd: metadata.cwd } : {}),
+        ...(typeof metadata.model === "string" ? { model: metadata.model } : {}),
+        ...(typeof metadata.thinkingOptionId === "string"
+            ? { thinkingOptionId: metadata.thinkingOptionId }
+            : {}),
+        ...(typeof metadata.modeId === "string" ? { modeId: metadata.modeId } : {}),
+        ...(typeof metadata.systemPrompt === "string" ? { systemPrompt: metadata.systemPrompt } : {}),
+    };
+}
+function buildResumeConfig(metadata, overrides, provider) {
+    const overrideConfig = overrides ?? {};
+    const cwd = overrideConfig.cwd ?? metadata.cwd ?? process.cwd();
+    const model = overrideConfig.model ?? metadata.model;
+    const thinkingOptionId = overrideConfig.thinkingOptionId ?? metadata.thinkingOptionId;
+    const modeId = overrideConfig.modeId ?? metadata.modeId;
+    return {
+        cwd,
+        model,
+        thinkingOptionId,
+        modeId,
+        config: {
+            ...overrideConfig,
+            provider,
+            cwd,
+            model,
+            thinkingOptionId,
+            modeId,
+            systemPrompt: overrideConfig.systemPrompt ?? metadata.systemPrompt,
+        },
+    };
+}
+function buildResumeStartInput(input) {
+    return {
+        cwd: input.processCwd,
+        env: input.launchContext?.env,
+        session: input.sessionFile,
+        thinkingOptionId: normalizePiThinkingOption(input.resumeConfig.thinkingOptionId) ?? undefined,
+        mcpConfigPath: input.mcpConfigFile?.path,
+        extensionPaths: input.paseoExtension ? [input.paseoExtension.path] : undefined,
+    };
+}
+function toPiMcpConfig(config) {
+    if (config.type === "stdio") {
+        return {
+            command: config.command,
+            ...(config.args ? { args: config.args } : {}),
+            ...(config.env ? { env: config.env } : {}),
+        };
+    }
+    return {
+        url: config.url,
+        ...(config.headers ? { headers: config.headers } : {}),
+    };
+}
+function toPiMcpAdapterConfig(config) {
+    const piConfig = toPiMcpConfig(config);
+    return config.type === "stdio" ? piConfig : { ...piConfig, auth: false, oauth: false };
+}
+function toPiBuiltinMcpServers(servers) {
+    const piServers = {};
+    for (const [name, config] of Object.entries(servers)) {
+        if (!/^[A-Za-z0-9_-]+$/.test(name)) {
+            throw new Error(`Pi's built-in MCP cannot register server "${name}": names may only contain letters, digits, "_", and "-".`);
+        }
+        if (config.type === "sse") {
+            throw new Error(`Pi's built-in MCP cannot register SSE server "${name}": use streamable HTTP or load pi-mcp-adapter.`);
+        }
+        piServers[name] = toPiMcpConfig(config);
+    }
+    return piServers;
+}
+function resolvePiAgentDir(env) {
+    const configured = env?.PI_CODING_AGENT_DIR?.trim() || process.env.PI_CODING_AGENT_DIR?.trim();
+    if (!configured) {
+        return join(homedir(), ".pi", "agent");
+    }
+    if (configured === "~") {
+        return homedir();
+    }
+    if (configured.startsWith("~/")) {
+        return resolvePath(homedir(), configured.slice(2));
+    }
+    return resolvePath(configured);
+}
+function readPiGlobalMcpConfig(env) {
+    const globalConfigPath = join(resolvePiAgentDir(env), "mcp.json");
+    if (!existsSync(globalConfigPath)) {
+        return {};
+    }
+    let globalConfig;
+    try {
+        globalConfig = JSON.parse(readFileSync(globalConfigPath, "utf8"));
+    }
+    catch (error) {
+        if (error instanceof SyntaxError) {
+            throw new Error(`Failed to parse Pi MCP config: ${globalConfigPath}`, { cause: error });
+        }
+        throw error;
+    }
+    if (!isRecord(globalConfig)) {
+        throw new Error(`Pi MCP config must contain a JSON object: ${globalConfigPath}`);
+    }
+    return globalConfig;
+}
+function createPiMcpConfigFile(servers, options) {
+    const globalConfig = options?.piGlobalConfigEnv
+        ? readPiGlobalMcpConfig(options.piGlobalConfigEnv)
+        : {};
+    let configuredServers = {};
+    if (isRecord(globalConfig.mcpServers)) {
+        configuredServers = globalConfig.mcpServers;
+    }
+    else if (isRecord(globalConfig["mcp-servers"])) {
+        configuredServers = globalConfig["mcp-servers"];
+    }
+    const mcpServers = { ...configuredServers };
+    for (const [name, serverConfig] of Object.entries(servers)) {
+        mcpServers[name] = toPiMcpAdapterConfig(serverConfig);
+    }
+    const dir = mkdtempSync(join(tmpdir(), "paseo-pi-mcp-"));
+    const filePath = join(dir, "mcp.json");
+    const mergedConfig = { ...globalConfig, mcpServers };
+    delete mergedConfig["mcp-servers"];
+    writeFileSync(filePath, `${JSON.stringify(mergedConfig, null, 2)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+    });
+    return {
+        path: filePath,
+        cleanup: () => rmSync(dir, { recursive: true, force: true }),
+    };
+}
+async function createPiSessionCopy(sessionFile, cwd) {
+    const dir = mkdtempSync(join(tmpdir(), "paseo-pi-session-"));
+    const cleanup = () => rmSync(dir, { recursive: true, force: true });
+    const filePath = join(dir, basename(sessionFile));
+    try {
+        await copyPiSessionFileWithCwd({ sourceFile: sessionFile, targetFile: filePath, cwd });
+    }
+    catch (error) {
+        cleanup();
+        throw error;
+    }
+    return { path: filePath, cleanup };
+}
+function createPiPaseoExtensionFile({ systemPrompt, mcpServers = {}, }) {
+    const dir = mkdtempSync(join(tmpdir(), "paseo-pi-extension-"));
+    const filePath = join(dir, "paseo-integration.mjs");
+    writeFileSync(filePath, `
+	function decodePayload(encoded) {
+	  return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+	}
+
+	function readTextContent(content) {
+	  if (typeof content === "string") {
+	    return content;
+	  }
+	  if (!Array.isArray(content)) {
+	    return "";
+	  }
+	  return content
+	    .filter((part) => part && part.type === "text" && typeof part.text === "string")
+	    .map((part) => part.text)
+	    .join("\\n\\n");
+	}
+
+	function toCapturedUserEntries(entries) {
+	  return entries
+	    .filter((entry) => entry.type === "message" && entry.message?.role === "user")
+	    .map(toCapturedUserEntry);
+	}
+
+	function toCapturedUserEntry(entry) {
+	  return {
+	      id: entry.id,
+	      parentId: entry.parentId ?? null,
+	      text: readTextContent(entry.message.content),
+	    };
+	}
+
+	function emitEntryCapture(ctx, reason, requestId) {
+	  ctx.ui.notify(
+	    "${PASEO_PI_ENTRY_CAPTURE_MARKER} " +
+	      JSON.stringify({
+	        reason,
+	        requestId,
+	        // Rewind targets: rows can still show entries that a rewind or compaction left off the branch.
+	        treeEntries: toCapturedUserEntries(ctx.sessionManager.getEntries()),
+	      }),
+	    "info",
+	  );
+	}
+
+	function emitCommandResult(ctx, requestId, result) {
+	  ctx.ui.notify(
+	    "${PASEO_PI_COMMAND_RESULT_MARKER} " + JSON.stringify({ requestId, ...result }),
+	    result.ok ? "info" : "error",
+	  );
+	}
+
+	export default function paseoIntegration(pi) {
+	  for (const [name, config] of Object.entries(${JSON.stringify(mcpServers)})) {
+	    pi.registerMcpServer(name, config);
+	  }
+	  const submittedUserMessages = [];
+	  ${piExtensionRuntimeBridge}
+
+	  function emitSubmittedUserEntries(ctx) {
+	    const entries = ctx.sessionManager.getEntries();
+	    for (let index = 0; index < submittedUserMessages.length; index += 1) {
+	      const message = submittedUserMessages[index];
+	      // Pi assigns the entry ID after message_end, then persists this same message object.
+	      // Reference equality preserves the exact association even when another extension edits it.
+	      const entry = entries.find(
+	        (candidate) => candidate.type === "message" && candidate.message === message,
+	      );
+	      if (!entry) {
+	        continue;
+	      }
+	      submittedUserMessages.splice(index, 1);
+	      index -= 1;
+	      ctx.ui.notify(
+	        "${PASEO_PI_SUBMITTED_USER_ENTRY_MARKER} " +
+	          JSON.stringify({ entry: toCapturedUserEntry(entry) }),
+	        "info",
+	      );
+	    }
+	  }
+
+	  ${systemPrompt
+        ? `pi.on("before_agent_start", async (event) => ({
+	    systemPrompt: event.systemPrompt + "\\n\\n" + ${JSON.stringify(systemPrompt)},
+	  }));`
+        : ""}
+
+	  pi.on("session_start", async (_event, ctx) => {
+	    emitEntryCapture(ctx, "session_start");
+	  });
+
+	  pi.on("message_end", async (event) => {
+	    if (event.message?.role === "user") {
+	      submittedUserMessages.push(event.message);
+	    }
+	  });
+
+	  pi.on("message_start", async (event, ctx) => {
+	    if (event.message?.role === "assistant") {
+	      emitSubmittedUserEntries(ctx);
+	    }
+	  });
+
+	  pi.on("turn_end", async (_event, ctx) => {
+	    emitSubmittedUserEntries(ctx);
+	    emitEntryCapture(ctx, "turn_end");
+	  });
+
+	  pi.registerCommand("${PASEO_PI_CAPTURE_EXTENSION_COMMAND}", {
+	    description: "Internal Paseo entry capture bridge",
+	    handler: async (args, ctx) => {
+	      const payload = decodePayload(args.trim());
+	      emitEntryCapture(ctx, "command", payload.requestId);
+	    },
+	  });
+
+	  pi.registerCommand("${PASEO_PI_TREE_EXTENSION_COMMAND}", {
+	    description: "Internal Paseo tree navigation bridge",
+	    handler: async (args, ctx) => {
+	      const payload = decodePayload(args.trim());
+	      try {
+	        const result = await ctx.navigateTree(payload.targetId, { summarize: false });
+	        // Pi reopens a session at its last entry, so record the rewind on the new branch to keep it.
+	        pi.appendEntry("${PASEO_PI_REWIND_ENTRY_TYPE}", { targetId: payload.targetId });
+	        emitEntryCapture(ctx, "tree_navigation");
+	        emitCommandResult(ctx, payload.requestId, { ok: true, result });
+	      } catch (error) {
+	        const message = error instanceof Error ? error.message : String(error);
+	        emitCommandResult(ctx, payload.requestId, { ok: false, error: message });
+	        throw error;
+	      }
+	    },
+	  });
+	}
+`.trimStart(), 
+    // MCP server headers and env can carry credentials.
+    { encoding: "utf8", mode: 0o600 });
+    return {
+        path: filePath,
+        cleanup: () => rmSync(dir, { recursive: true, force: true }),
+    };
+}
+function combineCleanup(cleanups) {
+    const activeCleanups = cleanups.filter((cleanup) => Boolean(cleanup));
+    if (activeCleanups.length === 0) {
+        return undefined;
+    }
+    return () => {
+        for (const cleanup of activeCleanups) {
+            cleanup();
+        }
+    };
+}
+function isPiMcpAdapterCommand(command) {
+    if (command.source !== "extension" || !/^mcp(?::\d+)?$/.test(command.name)) {
+        return false;
+    }
+    if (!command.sourceInfo) {
+        return true;
+    }
+    return JSON.stringify(command.sourceInfo).includes("pi-mcp-adapter");
+}
+function isPiBuiltinMcpCommand(command) {
+    return (command.source === "extension" &&
+        command.name === "mcp" &&
+        command.sourceInfo?.path === "builtin:mcp");
+}
+function withPiCapabilities(supportsMcpServers) {
+    return {
+        ...PI_CAPABILITIES,
+        supportsMcpServers,
+    };
+}
+function isPiRequestAbortError(error) {
+    if (error instanceof Error && error.name === "AbortError") {
+        return true;
+    }
+    return /\brequest was aborted\b|\babort(ed)?\b/i.test(toDiagnosticErrorMessage(error));
+}
+function modelToId(model) {
+    return model?.provider && model.id ? `${model.provider}/${model.id}` : null;
+}
+function piAssistantText(message) {
+    const text = message.content
+        .flatMap((part) => {
+        if (part.type === "text") {
+            return [part.text];
+        }
+        if (part.type === "thinking") {
+            return [part.thinking];
+        }
+        return [];
+    })
+        .join("\n\n")
+        .trim();
+    return text.length > 0 ? text : null;
+}
+function formatPiErrorMessage(message) {
+    const headline = message.errorMessage?.trim() || "Pi turn failed";
+    const details = [
+        message.stopReason ? `stopReason=${message.stopReason}` : null,
+        message.provider && message.model ? `model=${message.provider}/${message.model}` : null,
+        message.responseModel ? `responseModel=${message.responseModel}` : null,
+        message.responseId ? `responseId=${message.responseId}` : null,
+    ].filter((detail) => detail !== null);
+    const partialText = piAssistantText(message);
+    if (partialText) {
+        details.push(`partial=${JSON.stringify(partialText.slice(0, 500))}`);
+    }
+    return details.length > 0 ? `${headline} (${details.join(", ")})` : headline;
+}
+function latestPiErrorMessage(messages) {
+    const latestAssistant = messages.findLast((message) => message.role === "assistant");
+    if (!latestAssistant || !latestAssistant.errorMessage?.trim()) {
+        return null;
+    }
+    return formatPiErrorMessage(latestAssistant);
+}
+function isPiAbortedTerminalResponse(messages) {
+    const latestAssistant = messages.findLast((message) => message.role === "assistant");
+    return latestAssistant?.stopReason?.toLowerCase() === "aborted";
+}
+function isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function optionalString(value) {
+    return typeof value === "string" ? value : undefined;
+}
+function toNotificationLevel(value) {
+    if (value === "info" || value === "warning" || value === "error") {
+        return value;
+    }
+    return "info";
+}
+function parseExtensionMarkerPayload(message, marker) {
+    const prefix = `${marker} `;
+    if (!message.startsWith(prefix)) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(message.slice(prefix.length));
+        return isRecord(parsed) ? parsed : null;
+    }
+    catch {
+        return null;
+    }
+}
+function parseCapturedEntries(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.flatMap((entry) => {
+        if (!isRecord(entry)) {
+            return [];
+        }
+        const id = optionalString(entry.id)?.trim();
+        const text = optionalString(entry.text);
+        if (!id || text === undefined) {
+            return [];
+        }
+        const parentId = entry.parentId === null ? null : optionalString(entry.parentId)?.trim();
+        return [
+            {
+                id,
+                parentId: parentId || null,
+                text,
+            },
+        ];
+    });
+}
+function isOptionalInputPlaceholder(placeholder) {
+    return /\boptional\b|\bskip\b/i.test(placeholder ?? "");
+}
+function getInputQuestionTitle(title, placeholder) {
+    if (!isOptionalInputPlaceholder(placeholder)) {
+        return title ?? "Enter a value";
+    }
+    if (/\bcomment\b/i.test(`${title ?? ""}\n${placeholder ?? ""}`)) {
+        return "Optional comment";
+    }
+    return "Optional response";
+}
+function readStringArray(value) {
+    return Array.isArray(value)
+        ? value.filter((item) => typeof item === "string")
+        : [];
+}
+function mapExtensionUiRequestToPermission(event, options = {}) {
+    const provider = options.provider ?? PI_PROVIDER;
+    const label = options.label ?? "Pi";
+    switch (event.method) {
+        case "select": {
+            const selectOptions = readStringArray(event.options);
+            return buildExtensionUiQuestionPermission(event, {
+                provider,
+                label,
+                question: optionalString(event.title) ?? "Select an option",
+                options: selectOptions,
+                multiSelect: false,
+            });
+        }
+        case "input": {
+            const placeholder = optionalString(event.placeholder);
+            const title = optionalString(event.title);
+            const allowEmpty = isOptionalInputPlaceholder(placeholder);
+            return buildExtensionUiQuestionPermission(event, {
+                provider,
+                label,
+                question: getInputQuestionTitle(title, placeholder),
+                options: [],
+                multiSelect: false,
+                ...(placeholder ? { placeholder } : {}),
+                ...(allowEmpty ? { allowEmpty: true, dismissLabel: "Skip" } : {}),
+            });
+        }
+        case "editor":
+            return buildExtensionUiQuestionPermission(event, {
+                provider,
+                label,
+                question: optionalString(event.title) ?? "Edit text",
+                options: [],
+                multiSelect: false,
+            });
+        case "confirm":
+            return buildExtensionUiQuestionPermission(event, {
+                provider,
+                label,
+                question: [optionalString(event.title), optionalString(event.message)]
+                    .filter(Boolean)
+                    .join("\n\n"),
+                options: ["Yes", "No"],
+                multiSelect: false,
+            });
+        default:
+            return null;
+    }
+}
+function isExtensionUiRequestEvent(event) {
+    return event.type === "extension_ui_request" && typeof event.id === "string";
+}
+function isProcessExitEvent(event) {
+    return event.type === "process_exit" && typeof event.error === "string";
+}
+function isPiAgentSessionEvent(event) {
+    switch (event.type) {
+        case "thinking_level_changed":
+            return typeof event.level === "string" && normalizePiThinkingOption(event.level) !== null;
+        case "agent_start":
+        case "turn_start":
+        case "message_start":
+        case "message_end":
+        case "message_update":
+        case "tool_execution_start":
+        case "tool_execution_update":
+        case "tool_execution_end":
+        case "compaction_start":
+        case "compaction_end":
+        case "agent_end":
+        case "agent_settled":
+        case "auto_retry_start":
+            return true;
+        default:
+            return false;
+    }
+}
+function buildExtensionUiQuestionPermission(event, input) {
+    return {
+        id: event.id,
+        provider: input.provider,
+        name: `${input.label} ${event.method}`,
+        kind: "question",
+        title: input.question,
+        input: {
+            questions: [
+                {
+                    question: input.question,
+                    header: QUESTION_RESPONSE_HEADER,
+                    options: input.options.map((label) => ({ label })),
+                    multiSelect: input.multiSelect,
+                    ...(input.placeholder ? { placeholder: input.placeholder } : {}),
+                    ...(input.allowEmpty ? { allowEmpty: true } : {}),
+                    ...(input.dismissLabel ? { dismissLabel: input.dismissLabel } : {}),
+                },
+            ],
+        },
+        metadata: {
+            extensionUiMethod: event.method,
+            answerHeader: QUESTION_RESPONSE_HEADER,
+        },
+    };
+}
+function firstPermissionAnswer(input) {
+    const answers = isRecord(input?.answers) ? input.answers : null;
+    if (!answers) {
+        return null;
+    }
+    const first = Object.values(answers).find((value) => typeof value === "string");
+    return typeof first === "string" ? first : null;
+}
+function buildExtensionUiResponse(request, response) {
+    if (response.behavior === "deny") {
+        return { cancelled: true };
+    }
+    const method = optionalString(request.metadata?.extensionUiMethod);
+    const answer = firstPermissionAnswer(response.updatedInput);
+    if (answer === null) {
+        return { cancelled: true };
+    }
+    if (method === "confirm") {
+        return { confirmed: /^yes$/i.test(answer.trim()) };
+    }
+    return { value: answer };
+}
+function resolvePiThinkingConfig(model) {
+    if (!model.reasoning) {
+        return { thinkingOptions: undefined, defaultThinkingOptionId: undefined };
+    }
+    const supportedOptions = PI_THINKING_OPTIONS.filter((option) => {
+        const mapped = model.thinkingLevelMap?.[option.id];
+        if (mapped === null) {
+            return false;
+        }
+        if (option.id === "xhigh" || option.id === "max") {
+            return mapped !== undefined;
+        }
+        return true;
+    });
+    const defaultIndex = PI_THINKING_OPTIONS.findIndex((option) => option.id === DEFAULT_PI_THINKING_LEVEL);
+    // Pi clamps upward first, then falls back to the highest remaining lower level.
+    const higherDefault = supportedOptions.find((option) => PI_THINKING_OPTIONS.indexOf(option) >= defaultIndex);
+    const defaultOption = higherDefault ?? supportedOptions.at(-1);
+    const defaultThinkingOptionId = defaultOption?.id ?? "off";
+    return {
+        thinkingOptions: supportedOptions.map((option) => {
+            const mappedOption = {
+                id: option.id,
+                label: option.label,
+                description: option.description,
+            };
+            if (option.id === defaultThinkingOptionId) {
+                mappedOption.isDefault = true;
+            }
+            return mappedOption;
+        }),
+        defaultThinkingOptionId,
+    };
+}
+function mapPiModel(model, provider) {
+    const { thinkingOptions, defaultThinkingOptionId } = resolvePiThinkingConfig(model);
+    return {
+        provider,
+        id: `${model.provider}/${model.id}`,
+        label: modelDisplayLabel(model),
+        description: `${model.provider}/${model.id}`,
+        metadata: {
+            provider: model.provider,
+            modelId: model.id,
+        },
+        thinkingOptions,
+        defaultThinkingOptionId,
+    };
+}
+function createRuntime(logger, runtimeSettings, requestTimeoutMs) {
+    return new PiCliRuntime({
+        logger,
+        runtimeSettings,
+        command: [PI_BINARY_COMMAND],
+        commandsRpcName: "get_commands",
+        requestTimeoutMs,
+    });
+}
+export class PiRpcAgentSession {
+    usageSession() {
+        const env = this.runtimeSession.environment;
+        if (this.closed)
+            return null;
+        return {
+            provider: "pi",
+            model: modelToId(this.state.model) ?? undefined,
+            env,
+            sessionKey: this.usageSessionKey,
+        };
+    }
+    constructor(options) {
+        this.subscribers = new Set();
+        this.activeToolCalls = new Map();
+        this.pendingExtensionUiRequests = new Map();
+        this.activeTurnId = null;
+        this.activeClientMessageId = null;
+        this.activeAssistantMessageId = null;
+        this.activeTurnStarted = false;
+        this.activeTurnStartedEmitted = false;
+        this.pendingSettledMessages = null;
+        this.activeNoTurnPromptText = null;
+        this.pendingNoTurnOutputs = [];
+        this.activePromptRequestId = null;
+        this.pendingPromptResults = new Map();
+        this.pendingSteerSubmissions = [];
+        this.treeUserEntriesById = new Map();
+        this.pendingExtensionResults = new Map();
+        this.compactionPromise = null;
+        this.outOfBandCompactionEmit = null;
+        this.outOfBandCompactionStarted = false;
+        this.outOfBandCompactionCompleted = false;
+        this.commandCache = null;
+        this.closed = false;
+        this.runtimeDead = false;
+        this.closeController = new AbortController();
+        this.pendingExtensionHydrations = new Set();
+        this.pendingOutput = null;
+        // Pi publishes the terminal before acknowledging abort. Autonomous runs have no
+        // turn ID; retain their errors too until the cancellation request settles.
+        this.interruptingTurn = null;
+        this.usageSessionKey = randomUUID();
+        this.runtimeSession = options.runtimeSession;
+        this.config = options.config;
+        this.state = options.initialState;
+        this.config.thinkingOptionId = this.state.thinkingLevel;
+        this.capabilities = options.capabilities;
+        this.provider = PI_PROVIDER;
+        this.currentModeId = options.currentModeId ?? null;
+        this.persistedSessionFile = options.persistedSessionFile;
+        this.cleanup = options.cleanup;
+        this.closeAfterHistory = options.closeAfterHistory ?? false;
+        this.extensionTimeoutMs = options.extensionTimeoutMs ?? DEFAULT_PI_EXTENSION_RESULT_TIMEOUT_MS;
+        this.logger = options.logger;
+        this.extensionHost = createPiExtensionHost(this.logger);
+        this.extensionHost.follow((event) => {
+            if (!this.closeController.signal.aborted)
+                this.emit(event);
+        });
+        this.usagePoller = new PiUsagePoller({
+            scheduler: options.usagePollScheduler,
+            readStats: () => this.runtimeSession.getSessionStats(),
+            onUsage: (usage, turnId) => {
+                this.emit({
+                    type: "usage_updated",
+                    provider: this.provider,
+                    usage,
+                    ...(turnId === undefined ? {} : { turnId }),
+                });
+            },
+            onPollError: (error) => {
+                this.logger.debug({ err: error }, "Pi context usage poll failed");
+            },
+        });
+        this.runtimeSession.onEvent((event) => {
+            this.handleRuntimeEvent(event);
+        });
+    }
+    get id() {
+        return this.state.sessionId;
+    }
+    async run(prompt, options) {
+        return runProviderTurn({
+            prompt,
+            runOptions: options,
+            startTurn: (p, o) => this.startTurn(p, o),
+            subscribe: (callback) => this.subscribe(callback),
+            getSessionId: () => this.state.sessionId,
+            reduceFinalText: ({ current, item }) => item.type === "assistant_message" ? `${current}${item.text}` : current,
+        });
+    }
+    async startTurn(prompt, options) {
+        if (this.runtimeDead) {
+            throw new Error("Pi process exited. Reload agent before sending another message.");
+        }
+        if (this.activeTurnId) {
+            throw new Error("A Pi turn is already active");
+        }
+        const turnId = randomUUID();
+        this.activeTurnId = turnId;
+        this.usagePoller.startTurn();
+        this.activeClientMessageId = options?.clientMessageId ?? null;
+        this.activeAssistantMessageId = null;
+        this.activeTurnStarted = false;
+        this.activeTurnStartedEmitted = false;
+        this.pendingSettledMessages = null;
+        this.activePromptRequestId = null;
+        this.pendingSteerSubmissions.length = 0;
+        this.clearNoTurnBuffers();
+        const payload = await convertPromptInput(prompt, { model: this.state.model });
+        if (this.closed)
+            throw new Error("Pi session is closed");
+        if (this.activeTurnId !== turnId)
+            return { turnId };
+        this.activeNoTurnPromptText = payload.text;
+        const shouldProbeForNoTurnPrompt = this.parseSlashCommandInput(payload.text) !== null;
+        void (async () => {
+            try {
+                if (this.compactionPromise) {
+                    // Pi RPC rejects prompts until the manual compaction request settles.
+                    await this.compactionPromise.catch(() => undefined);
+                    const turnCanceled = this.closed || this.activeTurnId !== turnId || this.interruptingTurn?.turnId === turnId;
+                    if (turnCanceled) {
+                        return;
+                    }
+                }
+                const ack = await this.runtimeSession.prompt(payload.text, payload.images);
+                this.activePromptRequestId = ack.requestId ?? null;
+                const correlatedResult = ack.requestId
+                    ? this.pendingPromptResults.get(ack.requestId)
+                    : undefined;
+                if (ack.requestId) {
+                    this.pendingPromptResults.delete(ack.requestId);
+                }
+                const agentInvoked = correlatedResult ?? ack.agentInvoked;
+                if (agentInvoked === false) {
+                    await this.completeNoTurnPrompt(turnId);
+                    return;
+                }
+                if (agentInvoked === undefined && shouldProbeForNoTurnPrompt) {
+                    await this.completePromptIfHandledWithoutTurn(turnId);
+                }
+            }
+            catch (error) {
+                if (this.activeTurnId !== turnId) {
+                    return;
+                }
+                this.usagePoller.stopTurn();
+                this.activeTurnId = null;
+                this.activeClientMessageId = null;
+                this.activeTurnStarted = false;
+                this.activeTurnStartedEmitted = false;
+                this.pendingSettledMessages = null;
+                this.activeAssistantMessageId = null;
+                this.pendingSteerSubmissions.length = 0;
+                this.clearNoTurnBuffers();
+                if (isPiRequestAbortError(error)) {
+                    this.emit({
+                        type: "turn_canceled",
+                        provider: this.provider,
+                        turnId,
+                        reason: toDiagnosticErrorMessage(error),
+                    });
+                    return;
+                }
+                this.emit({
+                    type: "turn_failed",
+                    provider: this.provider,
+                    turnId,
+                    error: toDiagnosticErrorMessage(error),
+                });
+            }
+        })();
+        return { turnId };
+    }
+    async steerActiveTurn(prompt, options) {
+        if (this.closed || this.activeTurnId !== options.expectedTurnId) {
+            return { status: "unavailable" };
+        }
+        const payload = await convertPromptInput(prompt, { model: this.state.model });
+        if (this.closed || this.activeTurnId !== options.expectedTurnId)
+            return { status: "unavailable" };
+        // Pi rejects steer RPCs that are extension commands, so slash inputs keep the
+        // interrupt-and-replace fallback where they can run directly.
+        if (this.parseSlashCommandInput(payload.text)) {
+            return { status: "unavailable" };
+        }
+        try {
+            await this.runtimeSession.steer(payload.text, payload.images);
+        }
+        catch (error) {
+            if (isPiDefinitiveSteerRejection(error)) {
+                return { status: "unavailable" };
+            }
+            throw error;
+        }
+        // The steer is already queued inside pi; if the turn moved on meanwhile its fate
+        // is ambiguous, so surface it instead of replacing the wrong turn.
+        if (this.closed || this.activeTurnId !== options.expectedTurnId) {
+            return { status: "unavailable" };
+        }
+        this.pendingSteerSubmissions.push({
+            text: payload.text,
+            clientMessageId: options.clientMessageId ?? null,
+        });
+        if (options.clearPendingPermissions) {
+            await this.clearPendingPermissionsForSteer();
+        }
+        return { status: "accepted" };
+    }
+    async clearPendingPermissionsForSteer() {
+        const requestIds = Array.from(this.pendingExtensionUiRequests.keys());
+        for (const requestId of requestIds) {
+            if (!this.pendingExtensionUiRequests.has(requestId))
+                continue;
+            await this.respondToPermission(requestId, {
+                behavior: "deny",
+                message: "The user answered with a message instead of approving. Their message follows.",
+            });
+        }
+    }
+    takePendingSteerSubmission(text) {
+        const index = this.pendingSteerSubmissions.findIndex((submission) => submission.text === text);
+        if (index < 0) {
+            return undefined;
+        }
+        const [submission] = this.pendingSteerSubmissions.splice(index, 1);
+        return submission;
+    }
+    subscribe(callback) {
+        this.subscribers.add(callback);
+        return () => {
+            this.subscribers.delete(callback);
+        };
+    }
+    async *streamHistory() {
+        try {
+            await this.requestEntryCapture("history");
+            const history = await this.runtimeSession.getHistory();
+            yield* streamPiHistory(this.provider, history.messages, history.userEntries, {}, 
+            // At most eight 2 MiB child files per replay; later cards retain their summaries.
+            createPiExtensionHost(this.logger, undefined, 16 * 1024 * 1024), this.closeController.signal);
+        }
+        finally {
+            if (this.closeAfterHistory)
+                await this.close();
+        }
+    }
+    async getRuntimeInfo() {
+        await this.refreshState();
+        return {
+            provider: this.provider,
+            sessionId: this.state.sessionId,
+            model: modelToId(this.state.model),
+            thinkingOptionId: this.state.thinkingLevel,
+            modeId: this.currentModeId,
+        };
+    }
+    async getAvailableModes() {
+        return [];
+    }
+    async getCurrentMode() {
+        return this.currentModeId;
+    }
+    async setMode(_modeId) {
+        throw new Error("Pi does not expose selectable modes");
+    }
+    getPendingPermissions() {
+        return [...this.pendingExtensionUiRequests.values()];
+    }
+    async respondToPermission(requestId, response) {
+        const request = this.pendingExtensionUiRequests.get(requestId);
+        if (!request) {
+            throw new Error(`No pending permission request with id '${requestId}'`);
+        }
+        this.pendingExtensionUiRequests.delete(requestId);
+        const mapped = this.extensionHost.respondToPermission(request, response);
+        for (const reply of mapped?.responses ?? [
+            { id: requestId, response: buildExtensionUiResponse(request, response) },
+        ]) {
+            this.runtimeSession.respondToExtensionUiRequest(reply.id, reply.response);
+        }
+        this.emit({
+            type: "permission_resolved",
+            provider: this.provider,
+            requestId,
+            resolution: response,
+            turnId: this.currentTurnIdForEvent(),
+        });
+    }
+    describePersistence() {
+        return {
+            provider: this.provider,
+            sessionId: this.state.sessionId,
+            nativeHandle: this.persistedSessionFile ?? this.state.sessionFile,
+            metadata: {
+                cwd: this.config.cwd,
+                ...(this.config.model ? { model: this.config.model } : {}),
+                ...(this.config.thinkingOptionId ? { thinkingOptionId: this.config.thinkingOptionId } : {}),
+                ...(this.currentModeId ? { modeId: this.currentModeId } : {}),
+            },
+        };
+    }
+    async interrupt() {
+        const turnId = this.activeTurnId ?? undefined;
+        const interruption = this.activeTurnId || this.activeTurnStarted ? { turnId, error: null } : null;
+        this.interruptingTurn = interruption;
+        try {
+            try {
+                await this.runtimeSession.clearQueue();
+            }
+            catch (error) {
+                // COMPAT(piClearQueueFallback): added in v0.5.0, remove after 2027-03-01 once
+                // the pi floor supports clear_queue (added in pi 0.84.4).
+                if (!isPiMissingClearQueueRpc(error)) {
+                    throw error;
+                }
+            }
+            await this.runtimeSession.abort();
+        }
+        catch (error) {
+            const terminalError = this.interruptingTurn === interruption ? interruption?.error : null;
+            if (this.interruptingTurn === interruption) {
+                this.interruptingTurn = null;
+            }
+            if (terminalError) {
+                this.usagePoller.stopTurn();
+                this.activeTurnId = null;
+                this.activeClientMessageId = null;
+                this.activeTurnStarted = false;
+                this.activeTurnStartedEmitted = false;
+                this.pendingSettledMessages = null;
+                this.activeAssistantMessageId = null;
+                this.pendingSteerSubmissions.length = 0;
+                this.clearNoTurnBuffers();
+                this.emit({
+                    type: "turn_failed",
+                    provider: this.provider,
+                    turnId,
+                    error: terminalError,
+                });
+            }
+            throw error;
+        }
+        if (interruption &&
+            this.interruptingTurn === interruption &&
+            (this.activeTurnId || this.activeTurnStarted) &&
+            (this.activeTurnId ?? undefined) === turnId) {
+            this.usagePoller.stopTurn();
+            this.activeTurnId = null;
+            this.activeClientMessageId = null;
+            this.activeTurnStarted = false;
+            this.activeTurnStartedEmitted = false;
+            this.pendingSettledMessages = null;
+            this.activeAssistantMessageId = null;
+            this.pendingSteerSubmissions.length = 0;
+            this.clearNoTurnBuffers();
+            this.emit({
+                type: "turn_canceled",
+                provider: this.provider,
+                reason: "interrupted",
+                turnId,
+            });
+        }
+        if (this.interruptingTurn === interruption) {
+            this.interruptingTurn = null;
+        }
+    }
+    async revertConversation(input) {
+        if (this.activeTurnId) {
+            throw new Error("Cannot rewind the Pi conversation while a turn is active");
+        }
+        await this.refreshState().catch(() => undefined);
+        await this.requestEntryCapture("rewind");
+        const targetEntry = this.treeUserEntriesById.get(input.messageId);
+        if (!targetEntry) {
+            throw new Error(`Pi rewind target ${input.messageId} was not found in captured tree entries`);
+        }
+        await revertPiConversation({
+            messageId: input.messageId,
+            navigator: {
+                navigateTree: (treeEntryId) => this.runPiTreeExtensionCommand(treeEntryId),
+            },
+        });
+        this.currentLeafOverrideId = targetEntry.parentId;
+        this.activeToolCalls.clear();
+    }
+    async runPiTreeExtensionCommand(targetId) {
+        const requestId = randomUUID();
+        const resultPromise = this.waitForExtensionResult(requestId);
+        const payload = Buffer.from(JSON.stringify({ targetId, requestId })).toString("base64url");
+        await this.runtimeSession.prompt(`/${PASEO_PI_TREE_EXTENSION_COMMAND} ${payload}`);
+        return await resultPromise;
+    }
+    async canStopRuntime() {
+        if (this.closed ||
+            this.activeTurnId ||
+            this.pendingExtensionUiRequests.size ||
+            this.pendingExtensionResults.size ||
+            this.pendingExtensionHydrations.size ||
+            this.pendingOutput ||
+            this.pendingSteerSubmissions.length ||
+            this.pendingNoTurnOutputs.length ||
+            this.interruptingTurn)
+            return false;
+        const state = await this.runtimeSession.getState();
+        return !state.isStreaming && !state.isCompacting && state.pendingMessageCount === 0;
+    }
+    async close() {
+        if (this.closed) {
+            return;
+        }
+        this.closed = true;
+        this.closeController.abort();
+        this.extensionHost.close();
+        this.usagePoller.close();
+        try {
+            await this.runtimeSession.close();
+        }
+        finally {
+            await Promise.all([this.pendingOutput, ...this.pendingExtensionHydrations]);
+            this.rejectAllExtensionResults(new Error("Pi session closed"));
+            this.cleanup?.();
+        }
+    }
+    async listCommands() {
+        if (this.commandCache) {
+            return this.commandCache;
+        }
+        const commands = await this.runtimeSession.getCommands();
+        const mappedCommands = mapPiSlashCommands(commands);
+        return mappedCommands;
+    }
+    tryHandleOutOfBand(prompt) {
+        if (typeof prompt !== "string") {
+            return null;
+        }
+        const parsed = this.parseSlashCommandInput(prompt);
+        if (!parsed) {
+            return null;
+        }
+        const commandName = parsed.commandName.toLowerCase();
+        if (commandName === "compact") {
+            return {
+                run: async ({ emit }) => {
+                    await this.executeCompactCommand(parsed.args, emit);
+                },
+            };
+        }
+        if (commandName === "autocompact") {
+            return {
+                run: async ({ emit }) => {
+                    await this.executeAutoCompactCommand(parsed.args, emit);
+                },
+            };
+        }
+        return null;
+    }
+    async setModel(modelId) {
+        const parsedReference = parseModelReference(modelId);
+        if (!parsedReference) {
+            return { model: modelToId(this.state.model) };
+        }
+        if (!parsedReference.provider) {
+            throw new Error(`Pi model id must include a provider: ${modelId}`);
+        }
+        const model = await this.runtimeSession.setModel(parsedReference.provider, parsedReference.id);
+        await this.refreshState();
+        this.config.model = `${model.provider}/${model.id}`;
+        return { model: modelToId(this.state.model) };
+    }
+    async setThinkingOption(thinkingOptionId) {
+        const thinkingLevel = normalizePiThinkingOption(thinkingOptionId) ?? DEFAULT_PI_THINKING_LEVEL;
+        await this.runtimeSession.setThinkingLevel(thinkingLevel);
+        await this.refreshState();
+    }
+    emit(event) {
+        if (this.pendingOutput) {
+            this.emitAsync(() => Promise.resolve([event]));
+            return;
+        }
+        this.publish(event);
+    }
+    publish(event) {
+        for (const subscriber of this.subscribers)
+            subscriber(event);
+    }
+    // Keep timeline order while images are materialized, without delaying provider state changes.
+    emitAsync(render) {
+        const pending = (this.pendingOutput ?? Promise.resolve())
+            .then(render)
+            .then((events) => {
+            if (!this.closed)
+                for (const event of events)
+                    this.publish(event);
+            return undefined;
+        })
+            .catch((error) => this.logger.error({ err: error }, "Pi output rendering failed"));
+        this.pendingOutput = pending;
+        void pending.then(() => {
+            if (this.pendingOutput === pending)
+                this.pendingOutput = null;
+            return undefined;
+        });
+    }
+    emitExtensionOutput(output, turnId) {
+        if (!output || this.closed)
+            return;
+        for (const event of output.events) {
+            this.emit(event.type === "timeline" ? { ...event, turnId } : event);
+        }
+        const pending = output.hydration
+            .then((events) => {
+            if (this.closeController.signal.aborted)
+                return;
+            for (const event of events)
+                this.emit(event);
+            return undefined;
+        })
+            .catch((error) => {
+            this.logger.warn({ err: error }, "Pi extension hydration failed");
+        });
+        this.pendingExtensionHydrations.add(pending);
+        void pending.then(() => this.pendingExtensionHydrations.delete(pending));
+    }
+    currentTurnIdForEvent() {
+        return this.activeTurnId ?? undefined;
+    }
+    async completeNoTurnPrompt(turnId) {
+        await new Promise((resolve) => {
+            setImmediate(resolve);
+        });
+        if (this.activeTurnId !== turnId || this.activeTurnStarted) {
+            return;
+        }
+        this.emitBufferedNoTurnOutputs(turnId);
+        this.completeTurn(turnId, []);
+    }
+    async completePromptIfHandledWithoutTurn(turnId) {
+        await new Promise((resolve) => {
+            setImmediate(resolve);
+        });
+        let runtimeState;
+        try {
+            runtimeState = await this.runtimeSession.getState();
+        }
+        catch (error) {
+            if (this.activeTurnId === turnId && !this.activeTurnStarted) {
+                throw error;
+            }
+            return;
+        }
+        this.state = runtimeState;
+        if (this.activeTurnId !== turnId || this.activeTurnStarted || runtimeState.isStreaming) {
+            return;
+        }
+        this.emitBufferedNoTurnOutputs(turnId);
+        this.completeTurn(turnId, []);
+    }
+    clearNoTurnBuffers() {
+        this.activeNoTurnPromptText = null;
+        this.activePromptRequestId = null;
+        this.pendingNoTurnOutputs.splice(0, this.pendingNoTurnOutputs.length);
+    }
+    emitBufferedNoTurnOutputs(turnId) {
+        const promptText = this.activeNoTurnPromptText;
+        const outputs = this.pendingNoTurnOutputs.filter((output) => output.turnId === turnId);
+        this.clearNoTurnBuffers();
+        if (promptText) {
+            this.emit({
+                type: "timeline",
+                provider: this.provider,
+                turnId,
+                item: {
+                    type: "user_message",
+                    text: promptText,
+                    ...(this.activeClientMessageId ? { clientMessageId: this.activeClientMessageId } : {}),
+                },
+            });
+        }
+        for (const output of outputs) {
+            this.emit({
+                type: "timeline",
+                provider: this.provider,
+                turnId,
+                item: {
+                    type: "assistant_message",
+                    text: output.message,
+                },
+            });
+        }
+    }
+    bufferNoTurnOutput(message) {
+        if (!this.activeTurnId || this.activeTurnStarted) {
+            return;
+        }
+        this.pendingNoTurnOutputs.push({ turnId: this.activeTurnId, message });
+    }
+    parseSlashCommandInput(text) {
+        const trimmed = text.trim();
+        if (!trimmed.startsWith("/") || trimmed.length <= 1) {
+            return null;
+        }
+        const withoutPrefix = trimmed.slice(1);
+        const firstWhitespaceIdx = withoutPrefix.search(/\s/);
+        const commandName = firstWhitespaceIdx === -1 ? withoutPrefix : withoutPrefix.slice(0, firstWhitespaceIdx);
+        if (!commandName || commandName.includes("/")) {
+            return null;
+        }
+        const rawArgs = firstWhitespaceIdx === -1 ? "" : withoutPrefix.slice(firstWhitespaceIdx + 1).trim();
+        return rawArgs.length > 0 ? { commandName, args: rawArgs } : { commandName };
+    }
+    async executeCompactCommand(customInstructions, emit) {
+        if (this.outOfBandCompactionEmit) {
+            throw new Error("A Pi compact command is already running");
+        }
+        this.outOfBandCompactionEmit = emit;
+        this.outOfBandCompactionStarted = false;
+        this.outOfBandCompactionCompleted = false;
+        try {
+            this.compactionPromise = this.runtimeSession.compact(customInstructions);
+            await this.compactionPromise;
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (this.outOfBandCompactionEmit === emit &&
+                this.outOfBandCompactionStarted &&
+                !this.outOfBandCompactionCompleted) {
+                this.emitCompactionTimeline({
+                    turnId: undefined,
+                    item: {
+                        type: "compaction",
+                        status: "completed",
+                        trigger: "manual",
+                    },
+                });
+            }
+            emit({
+                type: "timeline",
+                provider: this.provider,
+                item: {
+                    type: "assistant_message",
+                    text: `[Error] Failed to compact context: ${message}`,
+                },
+            });
+        }
+        finally {
+            this.compactionPromise = null;
+            if (this.outOfBandCompactionEmit === emit && !this.outOfBandCompactionStarted) {
+                this.outOfBandCompactionEmit = null;
+                this.outOfBandCompactionStarted = false;
+                this.outOfBandCompactionCompleted = false;
+            }
+        }
+    }
+    async executeAutoCompactCommand(mode, emit) {
+        let enabled = parseAutoCompactMode(mode);
+        if (enabled === "unknown") {
+            emit({
+                type: "timeline",
+                provider: this.provider,
+                item: {
+                    type: "assistant_message",
+                    text: "[Error] Usage: /autocompact [on|off|toggle]",
+                },
+            });
+            return;
+        }
+        if (enabled === "toggle") {
+            const state = await this.runtimeSession.getState();
+            if (typeof state.autoCompactionEnabled !== "boolean") {
+                emit({
+                    type: "timeline",
+                    provider: this.provider,
+                    item: {
+                        type: "assistant_message",
+                        text: "[Error] Auto-compaction state is unavailable. Use /autocompact on or /autocompact off.",
+                    },
+                });
+                return;
+            }
+            enabled = !state.autoCompactionEnabled;
+        }
+        try {
+            await this.runtimeSession.setAutoCompaction(enabled);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            emit({
+                type: "timeline",
+                provider: this.provider,
+                item: {
+                    type: "assistant_message",
+                    text: `[Error] Failed to set auto-compaction: ${message}`,
+                },
+            });
+            return;
+        }
+        this.state = {
+            ...this.state,
+            autoCompactionEnabled: enabled,
+        };
+        emit({
+            type: "timeline",
+            provider: this.provider,
+            item: {
+                type: "assistant_message",
+                text: `Auto-compaction ${enabled ? "enabled" : "disabled"}.`,
+            },
+        });
+    }
+    async requestEntryCapture(reason) {
+        const requestId = randomUUID();
+        const resultPromise = this.waitForExtensionResult(requestId);
+        const payload = Buffer.from(JSON.stringify({ requestId, reason })).toString("base64url");
+        await this.runtimeSession.prompt(`/${PASEO_PI_CAPTURE_EXTENSION_COMMAND} ${payload}`);
+        await resultPromise;
+    }
+    waitForExtensionResult(requestId) {
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                this.pendingExtensionResults.delete(requestId);
+                reject(new Error(`Pi extension result timed out for request ${requestId}`));
+            }, this.extensionTimeoutMs);
+            this.pendingExtensionResults.set(requestId, { resolve, reject, timer });
+        });
+    }
+    resolveExtensionResult(requestId, result) {
+        const pending = this.pendingExtensionResults.get(requestId);
+        if (!pending) {
+            return;
+        }
+        clearTimeout(pending.timer);
+        this.pendingExtensionResults.delete(requestId);
+        pending.resolve(result);
+    }
+    rejectExtensionResult(requestId, error) {
+        const pending = this.pendingExtensionResults.get(requestId);
+        if (!pending) {
+            return;
+        }
+        clearTimeout(pending.timer);
+        this.pendingExtensionResults.delete(requestId);
+        pending.reject(error);
+    }
+    rejectAllExtensionResults(error) {
+        for (const requestId of this.pendingExtensionResults.keys()) {
+            this.rejectExtensionResult(requestId, error);
+        }
+    }
+    recordCapturedUserEntries(entries) {
+        this.treeUserEntriesById.clear();
+        for (const entry of entries) {
+            this.treeUserEntriesById.set(entry.id, entry);
+        }
+    }
+    handleSubmittedUserEntryMarker(message) {
+        const payload = parseExtensionMarkerPayload(message, PASEO_PI_SUBMITTED_USER_ENTRY_MARKER);
+        if (!payload) {
+            return false;
+        }
+        const [entry] = parseCapturedEntries([payload.entry]);
+        if (!entry) {
+            return true;
+        }
+        const pendingSteer = this.takePendingSteerSubmission(entry.text);
+        const clientMessageId = pendingSteer
+            ? pendingSteer.clientMessageId
+            : this.activeClientMessageId;
+        this.emit({
+            type: "timeline",
+            provider: this.provider,
+            turnId: this.currentTurnIdForEvent(),
+            item: {
+                type: "user_message",
+                text: entry.text,
+                messageId: entry.id,
+                ...(clientMessageId ? { clientMessageId } : {}),
+            },
+        });
+        return true;
+    }
+    handleEntryCaptureMarker(message) {
+        const payload = parseExtensionMarkerPayload(message, PASEO_PI_ENTRY_CAPTURE_MARKER);
+        if (!payload) {
+            return false;
+        }
+        this.recordCapturedUserEntries(parseCapturedEntries(payload.treeEntries));
+        if (typeof payload.requestId === "string") {
+            this.resolveExtensionResult(payload.requestId, undefined);
+        }
+        return true;
+    }
+    handleCommandResultMarker(message) {
+        const payload = parseExtensionMarkerPayload(message, PASEO_PI_COMMAND_RESULT_MARKER);
+        if (!payload) {
+            return false;
+        }
+        if (typeof payload.requestId !== "string") {
+            return true;
+        }
+        if (payload.ok === true) {
+            this.resolveExtensionResult(payload.requestId, payload.result);
+            return true;
+        }
+        const error = typeof payload.error === "string" ? payload.error : "Pi extension command failed";
+        this.rejectExtensionResult(payload.requestId, new Error(error));
+        return true;
+    }
+    handleExtensionUiRequest(event) {
+        const message = optionalString(event.message);
+        if (event.method === "notify" && message) {
+            const extensionMapping = this.extensionHost.mapRuntimeNotification(message);
+            if (extensionMapping) {
+                this.emitExtensionOutput(extensionMapping, this.currentTurnIdForEvent());
+                return;
+            }
+            if (this.handleSubmittedUserEntryMarker(message) ||
+                this.handleEntryCaptureMarker(message) ||
+                this.handleCommandResultMarker(message)) {
+                return;
+            }
+            this.emit({
+                type: "timeline",
+                provider: this.provider,
+                turnId: this.currentTurnIdForEvent(),
+                item: {
+                    type: "notification",
+                    level: toNotificationLevel(event.notifyType),
+                    message,
+                },
+            });
+            return;
+        }
+        const mapped = this.extensionHost.mapDialog(event, this.provider);
+        if (mapped?.type === "response") {
+            this.runtimeSession.respondToExtensionUiRequest(event.id, mapped.response);
+            return;
+        }
+        if (mapped?.type === "deferred")
+            return;
+        const request = mapped?.type === "permission"
+            ? mapped.request
+            : mapExtensionUiRequestToPermission(event, { provider: this.provider, label: "Pi" });
+        if (!request) {
+            return;
+        }
+        this.pendingExtensionUiRequests.set(request.id, request);
+        this.emit({
+            type: "permission_requested",
+            provider: this.provider,
+            request,
+            turnId: this.currentTurnIdForEvent(),
+        });
+    }
+    handleCommandOutput(textValue) {
+        if (!this.activeTurnId) {
+            return;
+        }
+        const text = stripAnsi(optionalString(textValue) ?? "").trim();
+        if (!text) {
+            return;
+        }
+        if (!this.activeTurnStarted) {
+            this.bufferNoTurnOutput(text);
+            return;
+        }
+        this.emit({
+            type: "timeline",
+            provider: this.provider,
+            turnId: this.currentTurnIdForEvent(),
+            item: { type: "assistant_message", text },
+        });
+    }
+    handleRuntimeEvent(event) {
+        if (isExtensionUiRequestEvent(event)) {
+            this.handleExtensionUiRequest(event);
+            return;
+        }
+        if (isProcessExitEvent(event)) {
+            this.handleProcessExit(event.error);
+            return;
+        }
+        if (event.type === "command_output") {
+            this.handleCommandOutput(event.text);
+            return;
+        }
+        if (event.type === "prompt_result") {
+            const requestId = optionalString("id" in event ? event.id : undefined);
+            const agentInvoked = "agentInvoked" in event && typeof event.agentInvoked === "boolean"
+                ? event.agentInvoked
+                : undefined;
+            if (requestId && agentInvoked !== undefined) {
+                if (requestId === this.activePromptRequestId &&
+                    agentInvoked === false &&
+                    this.activeTurnId) {
+                    void this.completeNoTurnPrompt(this.activeTurnId);
+                }
+                else if (this.activePromptRequestId === null) {
+                    this.pendingPromptResults.set(requestId, agentInvoked);
+                }
+            }
+            return;
+        }
+        if (isPiAgentSessionEvent(event)) {
+            this.handleSessionEvent(event);
+            return;
+        }
+    }
+    handleProcessExit(error) {
+        this.runtimeDead = true;
+        this.rejectAllExtensionResults(new Error(error));
+        this.interruptingTurn = null;
+        if (!this.activeTurnId && !this.activeTurnStarted) {
+            return;
+        }
+        const turnId = this.activeTurnId ?? undefined;
+        this.usagePoller.stopTurn();
+        this.activeTurnId = null;
+        this.activeClientMessageId = null;
+        this.activeTurnStarted = false;
+        this.activeTurnStartedEmitted = false;
+        this.pendingSettledMessages = null;
+        this.pendingSteerSubmissions.length = 0;
+        this.clearNoTurnBuffers();
+        this.emit({
+            type: "turn_failed",
+            provider: this.provider,
+            turnId,
+            error,
+        });
+    }
+    handleSessionEvent(event) {
+        const turnId = this.currentTurnIdForEvent();
+        if (event.type === "agent_end" || event.type === "agent_settled") {
+            this.handleTurnBoundaryEvent({ event, turnId });
+            return;
+        }
+        switch (event.type) {
+            case "thinking_level_changed":
+                this.state = { ...this.state, thinkingLevel: event.level };
+                this.config.thinkingOptionId = event.level;
+                this.emit({
+                    type: "thinking_option_changed",
+                    provider: this.provider,
+                    thinkingOptionId: event.level,
+                });
+                return;
+            case "agent_start":
+                this.activeTurnStarted = true;
+                this.clearNoTurnBuffers();
+                this.emit({
+                    type: "thread_started",
+                    provider: this.provider,
+                    sessionId: this.state.sessionId,
+                });
+                return;
+            case "turn_start":
+                this.activeTurnStarted = true;
+                this.clearNoTurnBuffers();
+                if (this.activeTurnStartedEmitted) {
+                    return;
+                }
+                this.activeTurnStartedEmitted = true;
+                this.emit({
+                    type: "turn_started",
+                    provider: this.provider,
+                    turnId,
+                });
+                return;
+            case "message_start":
+                this.handleMessageStart(event);
+                return;
+            case "message_end":
+                this.handleMessageEnd(event, turnId);
+                return;
+            case "message_update":
+                this.handleMessageUpdate(event, turnId);
+                return;
+            case "tool_execution_start": {
+                const toolCall = parseToolArgs(event.toolName, event.args);
+                this.activeToolCalls.set(event.toolCallId, toolCall);
+                const request = this.extensionHost.onToolStart({
+                    callId: event.toolCallId,
+                    toolName: event.toolName,
+                    args: toolCall.args,
+                    status: "running",
+                    result: null,
+                }, this.provider);
+                if (request) {
+                    this.pendingExtensionUiRequests.set(request.id, request);
+                    this.emit({
+                        type: "permission_requested",
+                        provider: this.provider,
+                        request,
+                        turnId: this.currentTurnIdForEvent(),
+                    });
+                }
+                this.emitToolCallEvent(event.toolCallId, toolCall, "running", null, null);
+                return;
+            }
+            case "tool_execution_update": {
+                const toolCall = this.activeToolCalls.get(event.toolCallId);
+                if (!toolCall) {
+                    return;
+                }
+                const partialResult = parseToolResult(event.partialResult);
+                this.emitToolCallEvent(event.toolCallId, toolCall, "running", partialResult, null);
+                return;
+            }
+            case "tool_execution_end": {
+                this.handleToolExecutionEnd(event);
+                return;
+            }
+            case "compaction_start":
+                this.emitCompactionTimeline({
+                    turnId,
+                    item: {
+                        type: "compaction",
+                        status: "loading",
+                        trigger: event.reason === "manual" ? "manual" : "auto",
+                    },
+                });
+                return;
+            case "compaction_end":
+                this.emitCompactionTimeline({
+                    turnId,
+                    item: {
+                        type: "compaction",
+                        status: "completed",
+                        trigger: event.reason === "manual" ? "manual" : "auto",
+                    },
+                });
+                return;
+            case "auto_retry_start":
+                this.emit({
+                    type: "timeline",
+                    provider: this.provider,
+                    turnId,
+                    item: {
+                        type: "error",
+                        message: `Provider retry (attempt ${event.attempt}): ${event.errorMessage}`,
+                    },
+                });
+                return;
+            default:
+                return;
+        }
+    }
+    handleTurnBoundaryEvent({ event, turnId, }) {
+        if (!this.activeTurnId && !this.activeTurnStarted) {
+            return;
+        }
+        if (event.type === "agent_end") {
+            // COMPAT(piAgentSettled): added in v0.5.0, remove after 2027-02-21 once the Pi
+            // floor emits agent_settled and willRetry.
+            if (event.willRetry === undefined) {
+                this.completeTurn(turnId, event.messages ?? []);
+                return;
+            }
+            this.pendingSettledMessages = event.messages ?? [];
+            return;
+        }
+        this.completeTurn(turnId, this.pendingSettledMessages ?? []);
+    }
+    handleToolExecutionEnd(event) {
+        const toolCall = this.activeToolCalls.get(event.toolCallId) ?? parseToolArgs(event.toolName, null);
+        this.activeToolCalls.delete(event.toolCallId);
+        // Pull image blocks out of the result so base64 never reaches the tool output, then render
+        // each one as an assistant_message markdown image after the tool_call (mirroring the Claude
+        // provider, upstream #1717).
+        const { images, result } = splitPiToolResultImages(parseToolResult(event.result));
+        const error = event.isError ? result : null;
+        const status = event.isError ? "failed" : "completed";
+        this.extensionHost.onToolEnd({
+            callId: event.toolCallId,
+            toolName: toolCall.toolName,
+            args: toolCall.args,
+            status,
+            result,
+        });
+        this.emitToolCallEvent(event.toolCallId, toolCall, status, result, error);
+        if (images.length === 0)
+            return;
+        const turnId = this.currentTurnIdForEvent();
+        this.emitAsync(() => this.renderToolResultImages(images, turnId));
+    }
+    async renderToolResultImages(images, turnId) {
+        const events = [];
+        for (const image of images) {
+            const imageItem = await renderProviderImageOutputAsAssistantMarkdown(image, {
+                materialize: materializeProviderImage,
+            });
+            if (imageItem && !this.closed) {
+                events.push({
+                    type: "timeline",
+                    provider: this.provider,
+                    turnId,
+                    item: imageItem,
+                });
+            }
+        }
+        return events;
+    }
+    emitCompactionTimeline(input) {
+        const emitOutOfBand = this.outOfBandCompactionEmit;
+        if (emitOutOfBand && input.item.type === "compaction") {
+            if (input.item.status === "loading") {
+                this.outOfBandCompactionStarted = true;
+            }
+            if (input.item.status === "completed") {
+                this.outOfBandCompactionCompleted = true;
+            }
+        }
+        const event = {
+            type: "timeline",
+            provider: this.provider,
+            ...(emitOutOfBand ? {} : { turnId: input.turnId }),
+            item: input.item,
+        };
+        if (emitOutOfBand) {
+            emitOutOfBand(event);
+            if (input.item.type === "compaction" && input.item.status === "completed") {
+                this.outOfBandCompactionEmit = null;
+                this.outOfBandCompactionStarted = false;
+                this.outOfBandCompactionCompleted = false;
+            }
+            return;
+        }
+        this.emit(event);
+    }
+    handleMessageUpdate(event, turnId) {
+        if (event.message && event.message.role !== "assistant") {
+            return;
+        }
+        if (event.assistantMessageEvent.type === "text_delta") {
+            // Pi-compatible runtimes may emit updates without a preceding message_start.
+            this.activeAssistantMessageId ?? (this.activeAssistantMessageId = event.message?.responseId || randomUUID());
+            this.emit({
+                type: "timeline",
+                provider: this.provider,
+                turnId,
+                item: {
+                    type: "assistant_message",
+                    text: event.assistantMessageEvent.delta ?? "",
+                    messageId: this.activeAssistantMessageId,
+                },
+            });
+            return;
+        }
+        if (event.assistantMessageEvent.type === "thinking_delta") {
+            this.emit({
+                type: "timeline",
+                provider: this.provider,
+                turnId,
+                item: {
+                    type: "reasoning",
+                    text: event.assistantMessageEvent.delta ?? "",
+                },
+            });
+        }
+    }
+    handleMessageStart(event) {
+        if (event.message.role === "assistant") {
+            this.activeAssistantMessageId = event.message.responseId || null;
+        }
+    }
+    handleMessageEnd(event, turnId) {
+        if (event.message.role === "assistant") {
+            this.activeAssistantMessageId = null;
+            return;
+        }
+        if (event.message.role === "custom") {
+            const customMapping = this.extensionHost.mapCustomMessage(event.message);
+            this.emitExtensionOutput(customMapping, turnId);
+            const text = getUserMessageText(event.message.content);
+            if (event.message.display !== false && text) {
+                this.emit({
+                    type: "timeline",
+                    provider: this.provider,
+                    turnId,
+                    item: mapCustomMessageToToolCall(event.message, text, `${this.provider}-custom-${randomUUID()}`),
+                });
+            }
+            if (!this.activeTurnStarted) {
+                this.completeTurn(turnId, []);
+            }
+            return;
+        }
+    }
+    emitToolCallEvent(toolCallId, toolCall, status, result, error) {
+        const turnId = this.currentTurnIdForEvent();
+        const mapping = this.extensionHost.mapToolCall({
+            callId: toolCallId,
+            toolName: toolCall.toolName,
+            args: toolCall.args,
+            status,
+            result,
+        });
+        const detail = mapping?.detail ?? mapToolDetail(toolCall, result);
+        if (!detail) {
+            return false;
+        }
+        const baseItem = {
+            type: "tool_call",
+            callId: toolCallId,
+            name: mapping?.name ?? toolCall.toolName,
+            detail,
+        };
+        const item = status === "failed" ? { ...baseItem, status, error } : { ...baseItem, status, error: null };
+        this.emit({
+            type: "timeline",
+            provider: this.provider,
+            turnId,
+            item,
+        });
+        this.emitExtensionOutput(mapping, turnId);
+        return true;
+    }
+    completeTurn(turnId, messages) {
+        const errorMessage = latestPiErrorMessage(messages);
+        if (this.interruptingTurn &&
+            this.interruptingTurn.turnId === turnId &&
+            (errorMessage || isPiAbortedTerminalResponse(messages))) {
+            this.interruptingTurn.error = errorMessage ?? "Pi turn failed";
+            return;
+        }
+        this.interruptingTurn = null;
+        this.activeTurnId = null;
+        this.activeClientMessageId = null;
+        this.activeAssistantMessageId = null;
+        this.activeTurnStarted = false;
+        this.activeTurnStartedEmitted = false;
+        this.pendingSettledMessages = null;
+        this.pendingSteerSubmissions.length = 0;
+        this.clearNoTurnBuffers();
+        if (typeof errorMessage === "string" && errorMessage.length > 0) {
+            this.usagePoller.stopTurn();
+            this.emit({
+                type: "turn_failed",
+                provider: this.provider,
+                turnId,
+                error: errorMessage,
+            });
+            return;
+        }
+        const finalUsage = this.usagePoller.completeTurn(turnId);
+        this.emit({
+            type: "turn_completed",
+            provider: this.provider,
+            turnId,
+        });
+        void this.refreshAfterTurn(finalUsage);
+    }
+    async refreshState() {
+        this.state = await this.runtimeSession.getState();
+        this.config.thinkingOptionId = this.state.thinkingLevel;
+    }
+    async refreshAfterTurn(finalUsage) {
+        await Promise.all([this.refreshState().catch(() => undefined), finalUsage]);
+    }
+}
+export class PiRpcAgentClient {
+    constructor(options) {
+        this.provider = PI_PROVIDER;
+        this.capabilities = capabilitiesForClient();
+        this.logger = options.logger;
+        this.runtimeSettings = options.runtimeSettings;
+        this.runtime = options.runtime;
+        this.usagePollScheduler = options.usagePollScheduler;
+    }
+    async createSession(config, launchContext) {
+        const providerOptions = PiProviderOptionsSchema.parse(config.providerOptions ?? {});
+        const runtime = this.resolveRuntime(providerOptions.rpcTimeoutMs);
+        const mcpEnv = {
+            ...this.runtimeSettings?.env,
+            ...launchContext?.env,
+        };
+        const mcp = await this.prepareMcpInjection(config.cwd, config.mcpServers, mcpEnv, runtime);
+        const mcpConfigFile = mcp?.kind === "adapter" ? mcp.configFile : null;
+        const paseoExtension = createPiPaseoExtensionFile({
+            systemPrompt: composeSystemPromptParts(config.systemPrompt, config.daemonAppendSystemPrompt),
+            mcpServers: mcp?.kind === "builtin" ? mcp.servers : undefined,
+        });
+        let runtimeSession;
+        try {
+            runtimeSession = await runtime.startSession({
+                cwd: config.cwd,
+                model: config.model,
+                thinkingOptionId: normalizePiThinkingOption(config.thinkingOptionId) ?? undefined,
+                noSession: config.internal === true,
+                env: launchContext?.env,
+                mcpConfigPath: mcpConfigFile?.path,
+                extensionPaths: paseoExtension ? [paseoExtension.path] : undefined,
+            });
+        }
+        catch (error) {
+            mcpConfigFile?.cleanup();
+            paseoExtension?.cleanup();
+            throw error;
+        }
+        try {
+            return new PiRpcAgentSession({
+                runtimeSession,
+                config,
+                initialState: await runtimeSession.getState(),
+                capabilities: capabilitiesForSession(mcp !== null),
+                cleanup: combineCleanup([mcpConfigFile?.cleanup, paseoExtension?.cleanup]),
+                extensionTimeoutMs: providerOptions.extensionTimeoutMs,
+                logger: this.logger,
+                usagePollScheduler: this.usagePollScheduler,
+            });
+        }
+        catch (error) {
+            await runtimeSession.close().catch(() => undefined);
+            mcpConfigFile?.cleanup();
+            paseoExtension?.cleanup();
+            throw error;
+        }
+    }
+    async resumeSession(handle, overrides, launchContext, options) {
+        const sessionFile = handle.nativeHandle;
+        if (!sessionFile) {
+            throw new Error("Pi resume requires a native session file handle");
+        }
+        const persistenceMetadata = parsePersistenceMetadata(handle.metadata);
+        const resumeConfig = buildResumeConfig(persistenceMetadata, overrides, this.provider);
+        const processCwd = await resolveResumeProcessCwd(resumeConfig.cwd, options?.purpose);
+        const providerOptions = PiProviderOptionsSchema.parse(resumeConfig.config.providerOptions ?? {});
+        const runtime = this.resolveRuntime(providerOptions.rpcTimeoutMs);
+        const mcpEnv = {
+            ...this.runtimeSettings?.env,
+            ...launchContext?.env,
+        };
+        const mcp = await this.prepareMcpInjection(processCwd, resumeConfig.config.mcpServers, mcpEnv, runtime);
+        const mcpConfigFile = mcp?.kind === "adapter" ? mcp.configFile : null;
+        const paseoExtension = createPiPaseoExtensionFile({
+            systemPrompt: composeSystemPromptParts(resumeConfig.config.systemPrompt, resumeConfig.config.daemonAppendSystemPrompt),
+            mcpServers: mcp?.kind === "builtin" ? mcp.servers : undefined,
+        });
+        const tempFiles = mcpConfigFile ? [mcpConfigFile, paseoExtension] : [paseoExtension];
+        const cleanupTempFiles = () => {
+            for (const tempFile of tempFiles)
+                tempFile.cleanup();
+        };
+        let sessionCopy = null;
+        let runtimeSession;
+        try {
+            if (processCwd !== resumeConfig.cwd) {
+                sessionCopy = await createPiSessionCopy(sessionFile, processCwd);
+                tempFiles.push(sessionCopy);
+            }
+            runtimeSession = await runtime.startSession(buildResumeStartInput({
+                resumeConfig,
+                processCwd,
+                sessionFile: sessionCopy?.path ?? sessionFile,
+                launchContext,
+                mcpConfigFile,
+                paseoExtension,
+            }));
+        }
+        catch (error) {
+            cleanupTempFiles();
+            throw error;
+        }
+        try {
+            const initialState = await this.applyResumeModel(runtimeSession, resumeConfig.model);
+            return new PiRpcAgentSession({
+                runtimeSession,
+                config: {
+                    ...resumeConfig.config,
+                    model: modelToId(initialState.model) ?? resumeConfig.config.model,
+                },
+                initialState,
+                capabilities: capabilitiesForSession(mcp !== null),
+                persistedSessionFile: sessionCopy ? sessionFile : undefined,
+                cleanup: cleanupTempFiles,
+                closeAfterHistory: options?.purpose === "history",
+                extensionTimeoutMs: providerOptions.extensionTimeoutMs,
+                logger: this.logger,
+                usagePollScheduler: this.usagePollScheduler,
+            });
+        }
+        catch (error) {
+            await runtimeSession.close().catch(() => undefined);
+            cleanupTempFiles();
+            throw error;
+        }
+    }
+    // Pi resumes a session on the model it recorded, or on its default when that model
+    // is gone. Switching afterwards keeps a removed model from blocking the resume.
+    async applyResumeModel(runtimeSession, requestedModel) {
+        const state = await runtimeSession.getState();
+        const reference = parseModelReference(requestedModel ?? null);
+        if (!reference?.provider) {
+            return state;
+        }
+        const { provider, id } = reference;
+        const isRequested = (model) => model?.provider === provider && model.id === id;
+        if (isRequested(state.model)) {
+            return state;
+        }
+        const availableModels = await runtimeSession.getAvailableModels();
+        if (!availableModels.some(isRequested)) {
+            this.logger.warn({ requestedModel, sessionModel: modelToId(state.model) }, "Pi resumed on the session's model because the requested model is unavailable");
+            return state;
+        }
+        await runtimeSession.setModel(provider, id);
+        return runtimeSession.getState();
+    }
+    async fetchCatalog(options, context) {
+        const providerOptions = PiProviderOptionsSchema.parse(options.providerOptions ?? {});
+        const runtime = this.resolveRuntime(providerOptions.rpcTimeoutMs);
+        let runtimeSession;
+        let closePromise;
+        const closeSession = () => {
+            if (!runtimeSession)
+                return Promise.resolve();
+            closePromise ?? (closePromise = runtimeSession.close());
+            return closePromise;
+        };
+        const handleAbort = () => void closeSession().catch(() => undefined);
+        context?.signal.addEventListener("abort", handleAbort, { once: true });
+        try {
+            await runProviderRefreshActivity(context, "runtime.start", async () => {
+                runtimeSession = await runtime.startSession({
+                    cwd: options.scope === "global" ? homedir() : options.cwd,
+                    signal: context?.signal,
+                });
+                if (context?.signal.aborted)
+                    await closeSession();
+            });
+            if (!runtimeSession)
+                throw new Error("Pi catalog runtime did not start");
+            const catalogSession = runtimeSession;
+            const piModels = await runProviderRefreshActivity(context, "get_available_models", () => catalogSession.getAvailableModels(null));
+            // A fresh Pi session starts on the model Pi resolves from its own settings.
+            const { model: configuredModel } = await runProviderRefreshActivity(context, "get_state", () => catalogSession.getState());
+            const models = piModels.map((model) => {
+                const mapped = mapPiModel(model, PI_PROVIDER);
+                const isConfigured = model.provider === configuredModel?.provider && model.id === configuredModel?.id;
+                if (isConfigured)
+                    mapped.isDefault = true;
+                return mapped;
+            });
+            return { models, modes: [] };
+        }
+        finally {
+            context?.signal.removeEventListener("abort", handleAbort);
+            await closeSession();
+        }
+    }
+    async listControls(config) {
+        return { controls: [], options: config.providerOptions ?? {} };
+    }
+    async listImportableSessions(options) {
+        return await listPiImportableSessions({
+            ...options,
+            sessionDir: PiProviderOptionsSchema.parse(options?.providerOptions ?? {}).sessionDir,
+            runtimeSettings: this.runtimeSettings,
+        });
+    }
+    async importSession(input, context) {
+        const importConfig = await readPiImportSessionConfig(input.providerHandleId);
+        return importSessionFromPersistence({
+            provider: this.provider,
+            request: input,
+            context,
+            resumeSession: this.resumeSession.bind(this),
+            config: importConfig,
+        });
+    }
+    async isAvailable() {
+        try {
+            const launch = await this.resolvePiLaunch();
+            const availability = await checkProviderLaunchAvailable(launch);
+            return availability.available;
+        }
+        catch {
+            return false;
+        }
+    }
+    async getDiagnostic() {
+        try {
+            const launch = await this.resolvePiLaunch();
+            const availability = await checkProviderLaunchAvailable(launch);
+            const authConfigPath = join(homedir(), ".pi", "agent", "auth.json");
+            return {
+                diagnostic: formatProviderDiagnostic("Pi", [
+                    ...(await buildCommandResolutionDiagnosticRows(launch, {
+                        knownBinaryNames: [launch.command],
+                    })),
+                    ...(await buildBinaryDiagnosticRows(launch, availability)),
+                    {
+                        label: "Auth config (~/.pi/agent/auth.json)",
+                        value: existsSync(authConfigPath) ? "found" : "not found",
+                    },
+                ]),
+            };
+        }
+        catch (error) {
+            this.logger.debug({ err: error }, "Pi diagnostic lookup failed");
+            return {
+                diagnostic: formatProviderDiagnosticError("Pi", error),
+            };
+        }
+    }
+    resolveRuntime(rpcTimeoutMs) {
+        return this.runtime ?? createRuntime(this.logger, this.runtimeSettings, rpcTimeoutMs);
+    }
+    async prepareMcpInjection(cwd, servers, env, runtime) {
+        if (!servers || Object.keys(servers).length === 0) {
+            return null;
+        }
+        const mcpSupport = await this.detectMcpSupport(cwd, env, runtime);
+        if (mcpSupport === "builtin") {
+            return { kind: "builtin", servers: toPiBuiltinMcpServers(servers) };
+        }
+        if (mcpSupport === "adapter") {
+            return {
+                kind: "adapter",
+                configFile: createPiMcpConfigFile(servers, { piGlobalConfigEnv: env }),
+            };
+        }
+        return null;
+    }
+    async detectMcpSupport(cwd, env, runtime) {
+        const runtimeSession = await runtime.startSession({ cwd, env }).catch((error) => {
+            this.logger.debug({ err: error, cwd }, "Pi MCP probe failed to start");
+            return null;
+        });
+        if (!runtimeSession) {
+            return null;
+        }
+        try {
+            const commands = await runtimeSession.getCommands();
+            if (commands.some(isPiMcpAdapterCommand)) {
+                return "adapter";
+            }
+            return commands.some(isPiBuiltinMcpCommand) ? "builtin" : null;
+        }
+        catch (error) {
+            this.logger.debug({ err: error, cwd }, "Pi MCP probe failed");
+            return null;
+        }
+        finally {
+            await runtimeSession.close().catch(() => undefined);
+        }
+    }
+    async resolvePiLaunch() {
+        return resolveProviderLaunch({
+            commandConfig: this.runtimeSettings?.command,
+            defaultBinary: PI_BINARY_COMMAND,
+        });
+    }
+}
+//# sourceMappingURL=agent.js.map

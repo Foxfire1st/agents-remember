@@ -2,10 +2,10 @@
 // the "⊕ add" offer on highlighted chat text and its pick, copy on highlight, the one notice for an
 // unreadable chat page, the message box's rectangle — its vertical edge and its horizontal extent in
 // a split layout — and the tray's reserved height, which pads the chat's own scroll root. Its source
-// is client/pick.ts beside client/bridge.ts; the DOM below is the pinned Paseo 0.11.1 web build's
-// (index-32cec38dd4de4493a1d5392537c1e464.js): the scroll root `agent-chat-scroll`, the rows'
+// is client/pick.ts beside client/bridge.ts; the DOM below is the pinned Paseo 0.16.2 web build's
+// (index-3d51f4c450eeff5bd838a646e9c611f2.js): the scroll root `agent-chat-scroll`, the rows'
 // `data-history-row-id` and `data-message-id`, the message nodes' test ids and
-// `message-input-root`; and each row's own record, the stream item React DOM 19.1.0 keeps in the
+// `message-input-root`; and each row's own record, the stream item React DOM 19.2.3 keeps in the
 // row element's props, with the time the host's timeline gave it.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -53,7 +53,7 @@ const ITEMS: Record<string, Record<string, unknown>> = {
   msg_7f2: { kind: "assistant_message", id: "msg_7f2", messageId: "msg_7f2", text: SAID, timestamp: new Date("2026-10-19T12:05:00.000Z"), timelineCursor: { epoch: "ep_1", seq: 1840 } },
   cm_new: { kind: "user_message", id: "cm_new", clientMessageId: "cm_new", text: SENDING, timestamp: new Date("2026-10-19T12:06:00.000Z") },
 };
-/** React DOM 19.1.0 keeps a host element's props under `__reactProps$` and a random suffix. */
+/** React DOM 19.2.3 keeps a host element's props under `__reactProps$` and a random suffix. */
 const REACT_PROPS = "__reactProps$k3x9q2";
 
 /** The row element's props as React draws the row: its attributes, and its row component with the stream item. */

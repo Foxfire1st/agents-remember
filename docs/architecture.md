@@ -264,8 +264,10 @@ delegates them.
 
 A read is a tool that only reads, a `GET` route of the dashboard, `worktree_status`, and every
 preview and dry run. A read changes no branch, no tag and no `HEAD`. It changes no file of a
-working tree, no Git index, no task document and no requirement packet. A read writes in four
-places only:
+working tree, no Git index, no task document and no requirement packet. A read can use
+private temporary storage for intermediate data. Batched Git blob reads, changed-history
+reads for Explainer evidence, and Explainer grade refresh use private Git output spools.
+A read's persistent writes are limited to four cases:
 
 - It writes cache files under `<coordination-root>/runtime/`.
 - When the review page records a [comparison](concepts.md#comparison) of a task's change, the
