@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from agents_remember.application.memory_scope import MemoryScopeIdentity
+from agents_remember.kernel.request_memo import request_memo_scope
 from agents_remember.memory_quality.style.citations.extents import definition_scope
 
 MAX_QUALITY_RUNS = 8
@@ -133,7 +134,7 @@ def _complete_quality_run(
     fn: Callable[[], dict[str, object]],
 ) -> None:
     try:
-        with definition_scope():
+        with request_memo_scope(), definition_scope():
             result = fn()
     except Exception as exc:  # the retained run translates arbitrary worker failure
         with _lock:

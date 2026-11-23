@@ -29,8 +29,8 @@ stored answer per memo, keyed ``("review-memo", <memo>)``, under
 ``<coordination root>/runtime/review-memos`` beside the review answers. Its digest, identity and
 size checks apply unchanged, and an unreadable, invalid or foreign store is **absent**: the memo
 starts empty and everything is computed as it would have been. No age is read or written into a
-decision. Only size evicts: a memo keeps at most its own capacity of entries, and a stored memo at
-most :data:`STORED_BYTES` of them, most recently used kept.
+decision. Only size evicts: the stored rows first replay the memo's resident retention policy.
+The most recently used rows then fill at most :data:`STORED_BYTES`.
 
 A process **restores** the memos once per store (:func:`restore_review_memos`), before its first
 computation, and **saves** each memo that changed since (:func:`save_review_memos`), after the
@@ -374,11 +374,7 @@ def _entry(stored: _Stored, repository: str, row: list[Any]) -> _Entry | None:
 def _newest(stored: _Stored, entries: Iterable[_Entry]) -> list[_Entry]:
     """``entries`` as the memo would hold them after putting each in order (only size evicts)."""
 
-    ordered: dict[Any, Any] = {}
-    for key, value in entries:
-        ordered.pop(key, None)
-        ordered[key] = value
-    return list(ordered.items())[-stored.memo.capacity :]
+    return stored.memo.replayed_items(entries)
 
 
 def _rows(stored: _Stored, entries: list[_Entry]) -> _Rows:

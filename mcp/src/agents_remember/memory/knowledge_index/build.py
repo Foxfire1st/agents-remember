@@ -136,7 +136,9 @@ class BuildReport:
     history_row_count: int
 
 
-DOCUMENT_PARSES: BoundedMemo[bytes, FileModel] = BoundedMemo(65_536)
+DOCUMENT_PARSES: BoundedMemo[bytes, FileModel] = BoundedMemo.by_retained_bytes(
+    256 * 1024 * 1024, max_entries=65_536
+)
 """A document's bytes' SHA-256 -> its parsed, frozen model (used in :func:`kept_document_parses`)."""
 
 _KEEPING: ContextVar[bool] = ContextVar("kept_document_parses", default=False)

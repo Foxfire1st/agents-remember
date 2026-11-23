@@ -112,6 +112,30 @@ class ToolAnswerGuardTests(unittest.TestCase):
         self.assertEqual(short["droppedFields"], dropped)
         self.assertLessEqual(count_response_tokens(short), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
 
+    def test_short_form_measures_the_current_drop_count_after_shedding_a_scalar(self) -> None:
+        answer = {
+            "ok": True,
+            "count": 7,
+            "reference": "alpha beta gamma delta " * 5,
+            "summary": "review before continuing. " * 6,
+            "body": ["whole result"] * 900,
+        }
+        log = "/coord" + "/proof-segment" * 40 + "/detail.json"
+        short, dropped, _error_cut = short_form(
+            answer,
+            answer_tokens=count_response_tokens(answer),
+            location=ShortFormLocation(log=log),
+            count=count_response_tokens,
+        )
+
+        self.assertLessEqual(count_response_tokens(short), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
+        self.assertEqual(short["droppedFields"], dropped)
+        self.assertEqual(dropped, 2)
+        self.assertEqual(short["count"], 7)
+        self.assertEqual(short["cut"]["log"], log)
+        self.assertNotIn("summary", short)
+        self.assertNotIn("reference", short)
+
     def test_short_form_is_measured_fifty_thousand_char_error(self) -> None:
         # Rule 4, E2: a 50,000-character error is cut to 600 with errorCut,
         # the code is exact, and the form is within 400 tokens.

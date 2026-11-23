@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Iterator, Mapping
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -269,6 +270,23 @@ def test_a_changed_name_holding_a_carriage_return_searches_the_whole_tree(
     assert listed == CodeTrees.open(repository, first, second)._grep("needle", ())
 
 
+def test_an_oversized_grep_answer_is_recomputed_and_returned_in_full(
+    tmp_path: Path, git_calls: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = tuple(f"pkg/{number}/{'source/' * 22}module.py" for number in range(8))
+    repository = _repository(tmp_path / "code", dict.fromkeys(paths, "needle = 1\n"))
+    tree = git(repository, "rev-parse", "HEAD^{tree}")
+    memo = BoundedMemo[tuple[str, str, str], tuple[str, ...]].by_retained_bytes(
+        1024, max_entries=16
+    )
+    monkeypatch.setattr(worklist_code, "TREE_GREPS", memo)
+
+    for _ in range(2):
+        assert CodeTrees.open(repository, tree, tree)._holding("needle") == paths
+    assert memo.get((str(repository), tree, "needle")) is None
+    assert _searched_paths(git_calls, tree) == [["<whole tree>"], ["<whole tree>"]]
+
+
 # -- parsed documents and route chains -----------------------------------------------------------------
 
 
@@ -489,6 +507,37 @@ def test_a_cold_process_restores_each_persisted_answer(tmp_path: Path, cold_memo
 
     assert {key: answered[key] for key in expected} == expected
     assert "diff" not in answered["asked"] and "grep" not in answered["asked"]  # nor a parse
+
+
+@pytest.mark.usefixtures("cold_memos")
+def test_persisted_greps_replay_lru_with_the_resident_byte_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    memo = BoundedMemo[tuple[str, str, str], tuple[str, ...]].by_retained_bytes(1800, max_entries=4)
+    stored = replace(
+        next(row for row in review_memo_store.STORED if row.name == "tree-greps"), memo=memo
+    )
+    monkeypatch.setattr(review_memo_store, "STORED", (stored,))
+    older = (("code", "1" * 40, "needle"), ("early/" * 120 + "one.py",))
+    smaller = (("code", "2" * 40, "needle"), ("short.py",))
+    newer = (("code", "3" * 40, "needle"), ("later/" * 136 + "two.py",))
+    oversized = (older[0], ("large/" * 325 + "three.py",))
+
+    assert review_memo_store._newest(stored, (older, smaller, older, oversized)) == [smaller, older]
+    review_memo_store.restore_review_memos(tmp_path, SOURCE)
+    for batch in ((older, smaller), (newer,)):
+        memo.clear()
+        for key, value in batch:
+            memo.put(key, value)
+        review_memo_store.save_review_memos()
+        ANSWER_WRITES.drain()
+
+    (path,) = _store_files(tmp_path)
+    rows = [stored.row(key, value) for key, value in (smaller, newer)]
+    assert json.loads(path.read_bytes())["answer"] == {"repositories": {"code": rows}}
+    _forget()
+    review_memo_store.restore_review_memos(tmp_path, SOURCE)
+    assert memo.items() == [smaller, newer]
 
 
 @pytest.mark.parametrize("damage", ["corrupt", "unreadable", "another-build"])

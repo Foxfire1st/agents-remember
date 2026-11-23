@@ -30,14 +30,17 @@ Nothing here writes, starts a process of the compared repository, runs a test or
 from __future__ import annotations
 
 import contextlib
+import os
 import posixpath
 import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from tempfile import TemporaryFile
+from typing import Any, BinaryIO
 
 from agents_remember.application.review_evidence_packet import comparison_reference
+from agents_remember.kernel.git_blob_frames import read_blob_body
 from agents_remember.kernel.git_command import git_environment, run_git
 from agents_remember.models.knowledge.review_evidence_read import (
     EVIDENCE_SIDES,
@@ -51,10 +54,6 @@ __all__ = [
     "read_whole_source",
     "side_operand",
 ]
-
-# How much of the blob stream one pipe read takes. It is the stream's granularity, not a bound: a
-# read takes as many of these as the object holds.
-_CHUNK = 64 * 1024
 
 _SUBMODULE_MODE = "160000"
 _SYMLINK_MODE = "120000"
@@ -430,31 +429,41 @@ def _fetch_blob(repository: Path, object_id: str) -> bytes | str:
     """One blob's every byte through ``git cat-file --batch``, or why it could not be read."""
 
     try:
+        with TemporaryFile() as output:
+            return _read_blob_via_spool(repository, object_id, output)
+    except OSError as failure:
+        return f"the blob stream failed ({failure})"
+
+
+def _read_blob_via_spool(repository: Path, object_id: str, output: BinaryIO) -> bytes | str:
+    """Let Git write the frame directly to the private spool."""
+
+    try:
         process = subprocess.Popen(
             ["git", "cat-file", "--batch"],
             cwd=repository,
             stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
+            stdout=output,
             stderr=subprocess.DEVNULL,
             env=git_environment(),
         )
     except OSError as failure:
         return f"Git could not be run for object {object_id} ({failure})"
     try:
-        return _stream_blob(process, object_id)
-    except OSError as failure:
-        return f"the blob stream failed ({failure})"
+        assert process.stdin is not None
+        process.stdin.write(f"{object_id}\n".encode())
+        process.stdin.close()
+        process.wait()
+        output.seek(0)
+        return _read_spooled_blob(output, object_id)
     finally:
         _dispose(process)
 
 
-def _stream_blob(process: subprocess.Popen[bytes], object_id: str) -> bytes | str:
-    """Ask the stream for one object and take its bytes in ``_CHUNK`` steps until its end."""
+def _read_spooled_blob(output: BinaryIO, object_id: str) -> bytes | str:
+    """Read one spooled frame and retain the evidence reader's failure details."""
 
-    assert process.stdin is not None and process.stdout is not None
-    process.stdin.write(f"{object_id}\n".encode())
-    process.stdin.flush()
-    header = process.stdout.readline()
+    header = output.readline()
     fields = header.split()
     if len(fields) != 3 or fields[1] != b"blob":
         return (
@@ -465,19 +474,14 @@ def _stream_blob(process: subprocess.Popen[bytes], object_id: str) -> bytes | st
         size = int(fields[2])
     except ValueError:
         return f"the object {object_id} reported no readable size"
-    chunks: list[bytes] = []
-    taken = 0
-    while taken < size:
-        chunk = process.stdout.read(min(_CHUNK, size - taken))
-        if not chunk:
-            return f"the blob stream for {object_id} ended after {taken} of its {size} byte(s)"
-        chunks.append(chunk)
-        taken += len(chunk)
-    return b"".join(chunks)
+    body = read_blob_body(output, max(0, size), end=os.fstat(output.fileno()).st_size)
+    if isinstance(body, int):
+        return f"the blob stream for {object_id} ended after {body} of its {size} byte(s)"
+    return body
 
 
 def _dispose(process: subprocess.Popen[bytes]) -> None:
-    """Stop one ``cat-file`` child and close the pipes this read opened."""
+    """Stop one ``cat-file`` child and close its input."""
 
     process.terminate()
     try:
@@ -485,10 +489,9 @@ def _dispose(process: subprocess.Popen[bytes]) -> None:
     except subprocess.TimeoutExpired:  # pragma: no cover - defensive
         process.kill()
         process.wait(timeout=5)
-    for stream in (process.stdin, process.stdout):
-        if stream is not None:
-            with contextlib.suppress(OSError):  # a pipe the child already closed
-                stream.close()
+    if process.stdin is not None:
+        with contextlib.suppress(OSError):  # a pipe the child already closed
+            process.stdin.close()
 
 
 # --- entry states -------------------------------------------------------------------------------

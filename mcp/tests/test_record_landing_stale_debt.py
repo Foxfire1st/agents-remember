@@ -12,6 +12,7 @@ import sys
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import anyio
@@ -20,12 +21,19 @@ import pytest
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.application import tool_response
 from agents_remember.application.tool_answer_log import tool_call_context
-from agents_remember.application.tool_response import complete_tool_response
 from agents_remember.application.worktree_tools import LandedCommits
-from agents_remember.kernel.primitives.runtime_config import load_config
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.mcp.server import create_server
 from agents_remember.mcp.tools.worktree import worktree_record_landing_payload
+from agents_remember.models.tokens import count_response_tokens
+from agents_remember.models.tools.tool_answer import (
+    TOOL_ANSWER_LIST_MAX,
+    TOOL_ANSWER_OVERFLOW_MAX_TOKENS,
+    bound_for,
+    next_from_next_step,
+)
 from agents_remember.worktrees.modules import record_landing as record_owner
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.record_landing import (
@@ -149,31 +157,177 @@ def test_the_record_landing_tool_names_the_entries_it_keeps(tmp_path: Path, dry_
         mock.patch.object(record_owner, "_record_preconditions", side_effect=with_debt),
         tool_call_context("worktree_record_landing", arguments, config=config),
     ):
-        payload = worktree_record_landing_payload(
+        answer = worktree_record_landing_payload(
             config,
             str(contract.contract_path),
             landed=LandedCommits(landed, landed_memory),
             dry_run=dry_run,
         )
-        answer = complete_tool_response("worktree_record_landing", payload, config=config)
 
-    assert answer["state"] == ("would-record" if dry_run else "recorded"), answer
-    entries = answer["staleEntries"]
-    assert isinstance(entries, dict)
-    assert entries["count"] == 1
-    assert entries["record"] == ["base.txt#RLZ-A00001"]
-    assert len(entries["entries"]) == 1
-    assert (
-        "base.txt: [knowledge-stale-at-landing] RLZ-A00001 of INV-AAAAAA" in entries["entries"][0]
+    saved = json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
+    state = "would-record" if dry_run else "recorded"
+    assert saved["state"] == state
+    assert saved["staleEntries"] == _stale_answer(debt)
+    assert saved["nextStep"]["nextTool"] == (
+        "worktree_status" if dry_run else "lifecycle_finalize_task"
     )
-    assert "knowledge-maintenance leaf" in entries["remedy"]
-    saved = json.loads(Path(str(answer["log"])).read_text(encoding="utf-8"))
-    assert saved["staleEntries"] == entries == payload["staleEntries"]
+    _assert_delivered_landing_fields(answer, saved)
+    keys = [_stale_key(entry) for entry in debt]
+    assert keys == ["base.txt#RLZ-A00001"]
     stored = load_contract(contract.contract_path)
-    expected = () if dry_run else ("base.txt#RLZ-A00001",)
-    assert stored.stale_entries == expected
+    assert stored.stale_entries == (() if dry_run else tuple(keys))
+    assert stored.integrated_code_commit == ("" if dry_run else landed)
     if dry_run:
         assert contract.contract_path.read_bytes() == before
+
+
+def _assert_delivered_landing_fields(answer: dict[str, Any], whole: dict[str, Any]) -> None:
+    assert answer["state"] == whole["state"]
+    is_cut = "cut" in answer
+    if is_cut:
+        assert answer["cut"]["log"] == answer["log"]
+    if "next" in answer:
+        step = whole["nextStep"]
+        assert answer["next"]["summary"] == step["summary"]
+        assert answer["next"]["tool"] == step["nextTool"]
+        if "args" in answer["next"]:
+            assert answer["next"]["args"] == step["nextArgs"]
+    expected_debt = whole["staleEntries"]
+    for field, observed in answer.get("staleEntries", {}).items():
+        expected = expected_debt[field]
+        if field == "record" and is_cut:
+            expected = expected[:TOOL_ANSWER_LIST_MAX]
+        assert observed == expected
+
+
+@pytest.mark.parametrize("state", ["would-record", "recorded"])
+@pytest.mark.parametrize("delivery", ["whole", "ids", "named-omission", "count-only", "no-next"])
+def test_record_landing_answer_shapes_fit_the_controlled_locator(state: str, delivery: str) -> None:
+    debt = _stale_answer(_findings_for_delivery(delivery))
+    whole = {
+        "ok": True,
+        "state": state,
+        "nextStep": _next_step_for_state(state),
+        "staleEntries": debt,
+    }
+    locator = _locator_for_delivery(state, delivery)
+    answer = _complete_with_locator(whole, locator)
+
+    assert answer["ok"] is True
+    assert answer["log"] == locator
+    _assert_delivered_landing_fields(answer, whole)
+    _assert_next_delivery(answer, whole["nextStep"], delivery)
+    assert answer["staleEntries"]["count"] == debt["count"]
+    assert bound_for("worktree_record_landing") == 700
+    assert TOOL_ANSWER_OVERFLOW_MAX_TOKENS == 400
+    if delivery == "whole":
+        assert "cut" not in answer
+        assert "overflow" not in answer
+        assert answer["staleEntries"] == debt
+        assert count_response_tokens(answer) <= 700
+        return
+
+    assert answer["overflow"] is True
+    assert answer["answerTokens"] > 700
+    assert count_response_tokens(answer) <= TOOL_ANSWER_OVERFLOW_MAX_TOKENS
+    _assert_id_delivery(answer, debt, delivery)
+
+
+def _findings_for_delivery(delivery: str) -> list[str]:
+    if delivery == "whole":
+        return [FIRST]
+    if delivery == "ids":
+        # A long finding forces a cut without enlarging its ID.
+        return [FIRST + " different source lines;" * 250]
+    findings = [FIRST]
+    for index in range(TOOL_ANSWER_LIST_MAX + 1):
+        path = f"{index}-" + "1234567890" * 16 + ".txt"
+        findings.append(FIRST.replace("pkg/a.py", path, 1))
+    return findings
+
+
+def _next_step_for_state(state: str) -> dict[str, str]:
+    if state == "would-record":
+        return {
+            "summary": (
+                "Worktrees are ready; continue the wrapped workflow and satisfy the applicable "
+                "closeout prerequisites before the next lifecycle transition."
+            ),
+            "nextTool": "worktree_status",
+        }
+    return {
+        "summary": (
+            "The landing is complete; the remaining move is finalizing the task edge, which "
+            "reclaims the code and memory worktrees and reconciles the leaf document and its master row."
+        ),
+        "nextTool": "lifecycle_finalize_task",
+    }
+
+
+def _locator_for_delivery(state: str, delivery: str) -> str:
+    if delivery == "count-only":
+        # Leave room for the next step and count, with too little for a named omission.
+        segments = 67 if state == "recorded" else 71
+        return "/coordination" + "/qz" * segments + "/detail.json"
+    if delivery == "no-next":
+        # Match the width of a real 421-character locator with expensive path components.
+        folder = "/coordination/" + "qz/" * 69
+        suffix = "/detail.json"
+        return folder + "x" * (421 - len(folder) - len(suffix)) + suffix
+    return "/coordination/logs/mcp/detail.json"
+
+
+def _complete_with_locator(whole: dict[str, Any], locator: str) -> dict[str, Any]:
+    # Control the locator at the log I/O boundary. The shaper and tokenizer run unchanged.
+    directory = Path(locator).parent
+    recorded = tool_response._LoggedAnswer(locator, None, None, 0, directory)
+    config = McpRuntimeConfig(
+        config_path=directory / "settings.json",
+        coordination_root=directory,
+        workspace_root=directory,
+        transcript_root=directory / "logs" / "mcp",
+    )
+    with (
+        mock.patch.object(tool_response, "_record_answer_log", return_value=recorded),
+        mock.patch.object(tool_response, "_append_answer_line", return_value=None),
+    ):
+        return tool_response.complete_tool_response("worktree_record_landing", whole, config=config)
+
+
+def _assert_next_delivery(answer: dict[str, Any], step: dict[str, str], delivery: str) -> None:
+    if delivery != "no-next":
+        assert answer["next"] == next_from_next_step(step)
+        return
+    assert "next" not in answer
+    assert len(answer["log"]) == 421
+    without_debt = {
+        key: answer[key] for key in ("ok", "overflow", "answerTokens", "state", "log", "cut")
+    }
+    assert "omittedFields" not in without_debt["cut"]
+    assert (
+        count_response_tokens({**without_debt, "next": next_from_next_step(step)})
+        > TOOL_ANSWER_OVERFLOW_MAX_TOKENS
+    )
+
+
+def _assert_id_delivery(answer: dict[str, Any], debt: dict[str, Any], delivery: str) -> None:
+    ids = answer["staleEntries"]
+    if delivery == "ids":
+        assert ids == {"count": debt["count"], "record": debt["record"]}
+        assert "omittedFields" not in answer["cut"]
+        return
+    assert ids == {"count": debt["count"]}
+    assert answer["droppedFields"] >= 1
+    capped_size = count_response_tokens(
+        {"staleEntries": {"record": debt["record"][:TOOL_ANSWER_LIST_MAX]}}
+    )
+    omission = [{"field": "staleEntries.record", "sizeTokens": capped_size}]
+    if delivery == "named-omission":
+        assert answer["cut"]["omittedFields"] == omission
+    elif delivery == "count-only":
+        assert "omittedFields" not in answer["cut"]
+        with_name = {**answer, "cut": {**answer["cut"], "omittedFields": omission}}
+        assert count_response_tokens(with_name) > TOOL_ANSWER_OVERFLOW_MAX_TOKENS
 
 
 @pytest.mark.integration

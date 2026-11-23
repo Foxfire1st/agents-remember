@@ -13,7 +13,15 @@ stay where they are; this module imports them.
 
 from __future__ import annotations
 
-from agents_remember.application.review_evidence_read import read_bound_source
+import tracemalloc
+from tempfile import TemporaryFile
+
+from agents_remember.application.review_evidence_read import (
+    _fetch_blob,
+    _read_spooled_blob,
+    read_bound_source,
+    read_whole_source,
+)
 from agents_remember.application.review_tree_comparison import write_files_tree
 from agents_remember.models.knowledge.review_trees import ReviewTreeSide
 from test_review_evidence_packet import world
@@ -80,3 +88,50 @@ def test_f03_r182_a_start_line_one_past_the_object_end_is_a_measured_absence(wor
     assert receipt.text is None and receipt.returned_range is None
     assert receipt.continuation is None
     assert "2 line(s)" in receipt.detail and "measured range absence" in receipt.detail
+
+
+def test_whole_blob_transport_allocates_one_payload_copy(world) -> None:
+    for size in (3 * 1024 * 1024, 12 * 1024 * 1024):
+        text = f"é\r\n{'x' * size}\r\n"
+        body = text.encode("utf-8")
+        tree = write_files_tree(world["code"], {"wide.txt": body})
+        record = world["record"].model_copy(
+            update={"code_candidate": ReviewTreeSide(repository=str(world["code"]), tree=tree)}
+        )
+        receipt = read_whole_source(record, "code-candidate", "wide.txt")
+        assert receipt.state == "present", receipt.detail
+        assert receipt.text == text
+        assert receipt.object_lines == 2
+        assert receipt.examined_bytes == len(body)
+        assert receipt.object_id is not None
+
+        tracemalloc.start()
+        try:
+            answer = _fetch_blob(world["code"], receipt.object_id)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+        assert answer == body
+        assert peak < len(body) * 3 // 2, (len(body), peak)
+
+
+def test_spooled_evidence_keeps_the_blob_reader_failure_details() -> None:
+    object_id = "1" * 40
+    unreadable = f"the object {object_id} is not a blob this repository can read"
+    frames = (
+        ("", f"{unreadable} (no header)"),
+        (f"{object_id} missing\n", f"{unreadable} ({object_id} missing)"),
+        (f"{object_id} tree 0\n\n", f"{unreadable} ({object_id} tree 0)"),
+        (f"{object_id} blob size\n", f"the object {object_id} reported no readable size"),
+        (
+            f"{object_id} blob 1073741824\npartial",
+            f"the blob stream for {object_id} ended after 7 of its 1073741824 byte(s)",
+        ),
+    )
+    for frame, detail in frames:
+        with TemporaryFile() as output:
+            output.write(frame.encode("utf-8"))
+            output.flush()
+            output.seek(0)
+            assert _read_spooled_blob(output, object_id) == detail

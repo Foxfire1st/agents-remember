@@ -21,7 +21,10 @@ from agents_remember.application.master_architect_record import (
     leaf_execution_receipts,
 )
 from agents_remember.kernel import git_reference_files
+from agents_remember.kernel.git_command import GitRunnerOptions, run_git
 from agents_remember.kernel.git_reference_files import packed_references
+from agents_remember.kernel.request_memo import request_memo_scope
+from agents_remember.kernel.witnessed_memo import WitnessedMemo
 from agents_remember.serving import changeset_generation
 from agents_remember.serving.changeset_generation import configuration_identity, repository_layout
 from agents_remember.serving.projections.snapshots_impl import _closeout_queue as queue_module
@@ -158,6 +161,40 @@ def test_unchanged_packed_references_are_not_parsed_again(tmp_path, monkeypatch)
 
     assert again["refs/heads/source"] == first
     assert len(reads) == 1
+
+
+@pytest.mark.parametrize("reference_count", (64, 8192))
+def test_large_native_packed_refs_are_shared_only_inside_each_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reference_count: int
+) -> None:
+    repo, first, _ = _packed_repository(tmp_path)
+    tags = tuple(f"refs/tags/release/{index:05d}" for index in range(reference_count))
+    updated = run_git(
+        repo,
+        ["update-ref", "--stdin"],
+        GitRunnerOptions(input_text="".join(f"create {tag} {first}\n" for tag in tags)),
+    )
+    assert updated.returncode == 0, updated.stderr
+    git(repo, "pack-refs", "--all")
+    layout = repository_layout(repo)
+    reads = _count_calls(monkeypatch, Path, "read_text")
+    dashboard: WitnessedMemo[Path, tuple[int, ...], dict[str, str]] = WitnessedMemo(256)
+    monkeypatch.setattr(git_reference_files, "_parsed", dashboard)
+    packed = layout.common / "packed-refs"
+
+    for expected in (1, 2):
+        with request_memo_scope():
+            assert first in layout.references((tags[-1],))
+            refs = packed_references(layout.common)
+            assert len(refs) >= reference_count and refs.pop(tags[-1]) == first
+            assert packed_references(layout.common)[tags[-1]] == first
+        assert len(dashboard) == 0
+        assert reads.count((packed,)) == expected
+
+    assert first in layout.references((tags[-1],))
+    assert first in layout.references((tags[-1],))
+    assert len(dashboard) == 1
+    assert reads.count((packed,)) == 3
 
 
 def test_a_packed_tip_rewrite_with_restored_mtime_moves_the_live_tip(tmp_path) -> None:

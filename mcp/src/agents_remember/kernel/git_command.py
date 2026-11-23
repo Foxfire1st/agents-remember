@@ -35,9 +35,11 @@ from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryFile
 from threading import Event
 from typing import Any, BinaryIO, Literal, overload
 
+from agents_remember.kernel.git_blob_frames import read_blob_frames
 from agents_remember.kernel.git_object_memo_keys import _memo_cat_file, _memo_rev_parse
 from agents_remember.kernel.git_preparation import (
     _PREPARATION_AUTHORITY,
@@ -739,32 +741,16 @@ def _held_blobs(
 def _batch_blobs(
     root: Path, requested: list[str], *, object_inputs: Path | None = None
 ) -> dict[str, bytes]:
-    result = _run_git(
-        root,
-        ["cat-file", "--batch"],
-        _GitRun(
-            root,
-            "".join(f"{blob}\n" for blob in requested),
-            GIT_LOCAL_TIMEOUT_SECONDS,
-            {**git_environment(), **object_input_environment(object_inputs)},
-        ),
-        raw_output=True,
+    options = GitRunnerOptions(
+        input_text="".join(f"{blob}\n" for blob in requested), object_inputs=object_inputs
     )
-    if result.returncode:
-        raise GitPreparationError(f"exact Git blob observation failed: {result.stderr!r}")
-    output = result.stdout
-    blobs: dict[str, bytes] = {}
-    offset = 0
-    for blob_id in requested:
-        header_end = output.index(b"\n", offset)
-        header = output[offset:header_end].decode("ascii").split(" ")
-        if len(header) != 3 or header[0] != blob_id or header[1] != "blob":
-            raise GitPreparationError(f"{blob_id} is not a readable blob: {header!r}")
-        start = header_end + 1
-        end = start + int(header[2])
-        blobs[blob_id] = output[start:end]
-        offset = end + 1
-    return blobs
+    # Git fills the private spool directly, so Python only allocates each returned blob.
+    with TemporaryFile() as output:
+        result = run_git_into(root, ["cat-file", "--batch"], output, options)
+        if result.returncode:
+            raise GitPreparationError(f"exact Git blob observation failed: {result.stderr!r}")
+        output.seek(0)
+        return read_blob_frames(output, requested)
 
 
 def merge_file_bytes(

@@ -14,7 +14,9 @@ from unittest import mock
 
 import pytest
 from agents_remember.application import review_answer_preparation as recorded_reads
+from agents_remember.application.review_closure_proofs import ClosureProofStore
 from agents_remember.kernel import read_cancellation
+from agents_remember.kernel.request_memo import request_memo_scope
 from agents_remember_test_support.testing.review_git_trees import CODE_FILE, World, git
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, wait_until
 from test_review_git_trees import world as _world_fixture
@@ -150,3 +152,39 @@ def test_an_object_rewritten_in_place_under_a_held_proof_is_refused(world: World
     path.write_bytes(b"?" * len(data))
     os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
     assert not recorded_reads._trees_still_readable(sides)
+
+
+def test_tool_requests_reuse_unchanged_disk_proofs_and_recheck_a_moved_storage_witness(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    blob = _backdated(world)
+    sides = _sides(world)
+    repository, tree = sides[0]
+    store = ClosureProofStore(tmp_path / "proofs", "closure-fixture")
+
+    with request_memo_scope():
+        assert recorded_reads._trees_still_readable(sides, store)
+    assert store.load(repository, (tree,)) is not None
+    assert recorded_reads._CLOSURE_PROOFS.get((repository, (tree,))) is None
+    assert recorded_reads._LATEST_PROOF.get(repository) is None
+    traversed = _traversals(monkeypatch)
+    with mock.patch.object(
+        recorded_reads, "_object_bodies_readable", wraps=recorded_reads._object_bodies_readable
+    ) as bodies:
+        with request_memo_scope():
+            assert recorded_reads._trees_still_readable(sides, store)
+            assert traversed == [] and bodies.call_count == 0
+            _freshen(world, blob)
+            assert recorded_reads._trees_still_readable(sides, store)
+            assert traversed == [] and [call.args[1] for call in bodies.call_args_list] == [[blob]]
+
+        _backdated(world)
+        with request_memo_scope():
+            assert recorded_reads._trees_still_readable(sides, store)
+            assert traversed == [1] and bodies.call_args is not None
+            consumed = bodies.call_args.args[1]
+            assert blob in consumed and len(consumed) > 1
+
+        _loose(repository, blob).unlink()
+        with request_memo_scope():
+            assert not recorded_reads._trees_still_readable(sides, store)

@@ -212,15 +212,24 @@ _active: ContextVar[_Read | None] = ContextVar("changeset_read", default=None)
 
 #: How many repositories' last object census (per tolerance) the process holds.
 OBJECT_HISTORY_CAPACITY = 1024
-# The last object census seen per repository and tolerance, with the revision it maps to: an
+# The last object census identity per repository and tolerance, with its revision: an
 # addition keeps the tolerant revision, a removal or a repack moves both. One history for the
 # process, so every cache names a store's revision alike -- a review open shares one stamp of
 # each input among the reads of all its caches (D569), and an answer kept by one cache is
 # re-observed under another's read.
-_OBJECT_HISTORY: OrderedDict[tuple[Path, bool], tuple[int, int, tuple[str, ...], str]] = (
-    OrderedDict()
-)
+_OBJECT_HISTORY: OrderedDict[tuple[Path, bool], tuple[int, int, bytes, str]] = OrderedDict()
 _OBJECT_HISTORY_LOCK = RLock()
+
+
+def _alternate_fingerprint(alternates: tuple[str, ...]) -> bytes:
+    """Fingerprint the census's sorted alternate paths without keeping their strings."""
+
+    digest = hashlib.sha256()
+    for path in alternates:
+        encoded = path.encode("utf-8", "surrogatepass")
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    return digest.digest()
 
 
 def _file_snapshot(source: ContentRead | DirectoryRead | ListingRead | Path) -> str:
@@ -380,13 +389,14 @@ class ChangesetCache:
         with _OBJECT_HISTORY_LOCK:
             previous = _OBJECT_HISTORY.get(key)
         census = (loose, packed, alternates)
-        unchanged = previous is not None and census == previous[:3]
+        fingerprint = _alternate_fingerprint(alternates)
+        unchanged = previous is not None and (loose, packed, fingerprint) == previous[:3]
         additions_tolerated = (
             tolerate_additions
             and previous is not None
             and loose >= previous[0]
             and packed >= previous[1]
-            and alternates == previous[2]
+            and fingerprint == previous[2]
         )
         if unchanged or additions_tolerated:
             revision = previous[3]  # type: ignore[index]
@@ -395,7 +405,7 @@ class ChangesetCache:
                 repr((str(root), *census, previous[3] if previous else "")).encode()
             ).hexdigest()
         with _OBJECT_HISTORY_LOCK:
-            _OBJECT_HISTORY[key] = (loose, packed, alternates, revision)
+            _OBJECT_HISTORY[key] = (loose, packed, fingerprint, revision)
             _OBJECT_HISTORY.move_to_end(key)
             while len(_OBJECT_HISTORY) > OBJECT_HISTORY_CAPACITY:
                 _OBJECT_HISTORY.popitem(last=False)
