@@ -74,6 +74,7 @@ from agents_remember.application.knowledge_worklist.leaf import (
     worklist_path,
 )
 from agents_remember.application.knowledge_worklist.registry import ITEM_KINDS
+from agents_remember.errors import RecordedMemoryBaseError
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
     GitRunnerOptions,
@@ -336,7 +337,7 @@ def _applies(contract: WorktreeContract, candidate: CandidateTrees) -> bool:
         return False
     try:
         return leaf_gate_applies(contract, candidate)
-    except (subprocess.SubprocessError, LayoutProbeError):
+    except (subprocess.SubprocessError, LayoutProbeError, RecordedMemoryBaseError):
         return True  # a probe Git cannot answer is never taken for unconverted memory
 
 
@@ -369,7 +370,12 @@ def _evaluate(
     persist_worklist: bool = True,
 ) -> GateResult | None:
     memory_repository = contract.memory_repo_path or contract.memory_worktree
-    document = recompute_for_gate(contract, candidate)
+    worklist_candidate = (
+        replace(candidate, memory_commit=lines.leaf_head)
+        if candidate.memory_commit is None and lines.leaf_head is not None
+        else candidate
+    )
+    document = recompute_for_gate(contract, worklist_candidate)
     if document is None or memory_repository is None:
         return None
     path = _persist(contract, document) if persist_worklist else None

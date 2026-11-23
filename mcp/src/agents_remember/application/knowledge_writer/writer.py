@@ -114,10 +114,10 @@ class WriteRequest:
     (MIK-R24 rule 7): a leaf's code base B, the gate's and the worklist's fallback, so all three
     share one cached base. Without it, the code tree's ``HEAD``."""
     memory_base: str | None = None
-    """The leaf's paired memory base commit: the gate's K_B for the onboarding card comparison
-    (MIK-R53 rule 2), so writer and gate agree in preclosed and reopened leaves. A persisted
-    worklist flag never overrides it. Without it the operation's own ``HEAD`` is compared
-    when no persisted worklist names the subject."""
+    """The leaf's recorded memory base commit for the onboarding card comparison.
+
+    When it cannot be read, use the subject's persisted worklist flag or the operation's own base.
+    """
 
 
 def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) -> WriteReport:
@@ -385,8 +385,8 @@ def _unexplained_onboarding_sources(
 def _onboarding_counted(worklist: Mapping[str, Any] | None) -> dict[str, bool]:
     """The persisted worklist's onboarding items' counted change, by subject (MIK-R53 rule 2).
 
-    The worklist is computed against the leaf's paired base, so its ``countedChange`` is the
-    gate's own comparison; the writer follows it instead of the operation's own HEAD.
+    The worklist's ``countedChange`` records the gate's comparison with the leaf's recorded base.
+    The writer uses it when that base is unavailable.
     """
 
     found: dict[str, bool] = {}

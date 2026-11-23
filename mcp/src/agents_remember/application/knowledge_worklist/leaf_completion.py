@@ -24,6 +24,10 @@ from agents_remember.application.knowledge_worklist.onboarding_trace import (
     onboarding_trace_sides,
     worklist_onboarding,
 )
+from agents_remember.application.knowledge_worklist.recorded_base import (
+    RecordedMemoryBaseError,
+    recorded_memory_base,
+)
 from agents_remember.application.knowledge_worklist.unexplained import (
     answering_trace_subjects,
     open_count,
@@ -128,35 +132,30 @@ def leaf_onboarding_trace_sides(
     """A leaf's MIK-R30 gate sides from its contract; ``None`` where today's gate still applies.
 
     Today's gate applies to a non-leaf contract, a leaf without its own memory worktree, and a leaf
-    whose K_B and K_C are both unconverted; that route keeps its existing gate. K_B pairs exactly
-    as the worklist's does. A side that cannot be established is an ``incomplete`` side, which the
-    gate reports as a finding, never a pass.
+    whose K_B and K_C are both unconverted. K_B comes from the leaf's contract. An unestablished
+    side is reported as an ``incomplete`` finding.
     """
 
     # Runtime leaf ownership preserves the composition seam without an import cycle.
     from agents_remember.application.knowledge_worklist import leaf  # noqa: PLC0415
 
-    candidate = memory_tree if memory_tree is not None else contract.memory_worktree
-    if contract.kind != "leaf" or candidate is None:
+    worktree = contract.memory_worktree
+    if contract.kind != "leaf" or worktree is None:
         return None
-    memory_repository = contract.memory_repo_path or contract.memory_worktree
-    if memory_repository is None:
-        return None
+    candidate = memory_tree if memory_tree is not None else worktree
+    memory_repository = contract.memory_repo_path or worktree
     owner = contract.leaf_id or contract.task_name
     try:
-        if not leaf._trace_gate_converted(contract, memory_repository, Path(candidate)):
-            return None  # cheap probe before any read: nothing is converted, today's gate applies
+        memory_base = recorded_memory_base(contract)
+        if not leaf._trace_gate_converted(memory_repository, candidate, memory_base):
+            return None  # both sides are unconverted
     except LayoutProbeError as error:  # never taken for unconverted memory
         return OnboardingTraceSides(owner=owner, incomplete=f"layout marker: {error}")
+    except RecordedMemoryBaseError as error:
+        return OnboardingTraceSides(owner=owner, incomplete=f"K_B: {error}")
     try:
-        memory_base = leaf.paired_memory_commit(
-            memory_repository,
-            contract.memory_source_branch,
-            contract.code_repo_path,
-            contract.code_base_commit,
-        )
         return onboarding_trace_sides(
-            leaf._trace_request(contract, memory_repository, memory_base, Path(candidate))
+            leaf._trace_request(contract, memory_repository, memory_base, candidate)
         )
     except Exception as error:  # an unestablished side is a finding, never a lapsed gate
         return OnboardingTraceSides(owner=owner, incomplete=f"{type(error).__name__}: {error}")

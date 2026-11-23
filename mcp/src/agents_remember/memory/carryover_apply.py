@@ -16,7 +16,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from agents_remember.application.knowledge_worklist.base_cache import converted_base_files
-from agents_remember.application.knowledge_worklist.leaf import leaf_worklist, paired_memory_commit
+from agents_remember.application.knowledge_worklist.leaf import leaf_worklist
+from agents_remember.application.knowledge_worklist.recorded_base import recorded_memory_base
 from agents_remember.application.knowledge_writer.writer import _writer_split
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.route_index import build_route_indexes
@@ -30,7 +31,7 @@ from agents_remember.memory_quality.knowledge_validator import (
 )
 from agents_remember.memory_quality.knowledge_worklist_section import worklist_summary
 from agents_remember.models.knowledge_files.documents import RECORD_DIRECTORIES
-from agents_remember.worktrees.worktree_contract import load_contract
+from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 
 @dataclass(frozen=True)
@@ -134,14 +135,10 @@ def _conflicts(
     return sorted(conflicts)
 
 
-def _base_for(contract: Any, candidate: KnowledgeTree) -> tuple[str, KnowledgeTree]:
+def _base_for(contract: WorktreeContract, candidate: KnowledgeTree) -> tuple[str, KnowledgeTree]:
+    commit = recorded_memory_base(contract)
     repository = contract.memory_repo_path or contract.memory_worktree
-    commit = paired_memory_commit(
-        repository,
-        contract.memory_source_branch,
-        contract.code_repo_path,
-        contract.code_base_commit,
-    )
+    assert repository is not None
     base = knowledge_tree_from_git(repository, commit, label=f"leaf memory base {commit}")
     if not base.converted:
         version = pinned_version(candidate)
@@ -235,6 +232,7 @@ def apply_converted(
             target_edited=_edited_candidates(selected, root, conflicts),
         )
         return _refused(result, root, head, payloads)
+    writing = False
     try:
         contract = load_contract(request.target_contract_path)
         candidate = knowledge_tree_from_directory(root)
@@ -242,6 +240,7 @@ def apply_converted(
         official = str(plan["official_code_head"])
         code = code_tree_from_git(request.code_repository_root, official)
         written = []
+        writing = True
         for relative, data in sorted(payloads.items()):
             if before.files.get(relative, (None, 0))[0] == data:
                 continue
@@ -286,7 +285,8 @@ def apply_converted(
         )
         return result
     except BaseException as error:
-        before.restore(root)
+        if writing:
+            before.restore(root)
         if not isinstance(error, Exception):
             raise
         result.update(reason="carryover-failed", problems=[str(error)])

@@ -970,17 +970,11 @@ def test_a_marker_probe_git_cannot_answer_is_never_unconverted_memory(
         evaluate_leaf_gate(world.contract, unreadable, parent_memory_tip=tip), "layout marker"
     )
 
-    path = world.contract_path()
-    path.write_text(
-        path.read_text().replace(
-            "  source_branch: main\n  work_branch: leaf\n  base_commit: " + world.memory_base,
-            "  source_branch: gone\n  work_branch: leaf\n  base_commit: " + world.memory_base,
-        )
-    )
+    broken_base = replace(world.contract, memory_base_commit="0" * 40)
     bare = world.root / "bare-memory"
     bare.mkdir()
-    sides = leaf_onboarding_trace_sides(load_contract(path), memory_tree=bare)
-    assert sides is not None and str(sides.incomplete).startswith("layout marker")
+    sides = leaf_onboarding_trace_sides(broken_base, memory_tree=bare)
+    assert sides is not None and str(sides.incomplete).startswith("K_B:")
 
     timed_out = subprocess.TimeoutExpired(["git", "ls-tree"], 30)
     with mock.patch.object(knowledge_validation, "run_git", side_effect=timed_out):

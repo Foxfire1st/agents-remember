@@ -141,6 +141,9 @@ def test_an_empty_converted_base_counts_as_completely_inspected_for_absence(
         f"onboarding/{CODE_FILE}.json",
     )
     world.memory_base = commit(world.memory, {}, trailer=world.code_base)
+    # Keep the populated candidate's index and files while advancing its memory HEAD.
+    git(world.memory_worktree, "reset", "--soft", world.memory_base)
+    world.contract()
     result = read_knowledge_review(world.config, world.review())
     assert result.state == "review" and result.payload is not None, result.refusal
     partition = result.payload.source.attribution

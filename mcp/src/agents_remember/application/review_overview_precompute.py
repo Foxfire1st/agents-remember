@@ -13,16 +13,14 @@ Every change source of a leaf ends in one build, off the open:
   instead of computing beside it (D570). A stream open or reopen is not a page open: it captures
   nothing.
 
-A capture whose trees are the leaf's latest recorded comparison mints nothing, and is built unless
-those trees are built, being built or waiting already: another reader may have minted them a moment
-ago and computed nothing -- the page's open, or the detail queue's live review, whose witness
-captures the working views -- and each change is built (D571). Otherwise :class:`OverviewPrecompute` computes the
-leaf-wide worklist for exactly those trees -- the page's own computation
-(:func:`~.review_tree_knowledge._leaf_wide_parts`) in reviewer-worklist children of lowered priority
--- and the page's later comparison of the same trees finds it in the leaf-view memo under the same
+A capture that matches the latest record's four trees and recorded memory-base commit reuses its
+number. It gets a build unless that comparison is built, being built or waiting already. The page
+or the detail queue may have recorded it without building the leaf-wide view. The background build
+computes the page's worklist (:func:`~.review_tree_knowledge._leaf_wide_parts`) in reviewer-worklist
+children of lowered priority. A later live read with the same binding finds it under the same
 key (:func:`~.review_leaf_view_memo.leaf_view_key`, which no comparison number enters). The worker
-returns the view and this process keeps it by the memo's own rule; nothing that owns a stream, a
-watch or a registration runs in the worker. A page that opens while the build runs joins it.
+returns the view and this process keeps it by the memo's own rule. A page that opens while the
+build runs joins it.
 
 **One build at a time, at most one waiting per leaf, the latest wins.** A newer capture of a leaf
 replaces the one waiting and supersedes the one being built. A superseded build is *stale*
@@ -122,7 +120,7 @@ type Details = Callable[
 
 
 def trees_digest(record: ReviewTreeComparisonRecord) -> str:
-    """A short name of a comparison's four trees (and converted base), for the build's log."""
+    """A short identity for a live build's trees and recorded memory-base binding."""
 
     converted = record.converted_base.tree if record.converted_base is not None else ""
     named = "/".join(
@@ -130,6 +128,7 @@ def trees_digest(record: ReviewTreeComparisonRecord) -> str:
             record.code_base.tree,
             record.code_candidate.tree,
             record.memory_base.tree,
+            record.memory_base.commit or "",
             record.memory_candidate.tree,
             converted,
         )
@@ -216,8 +215,7 @@ class OverviewPrecompute:
     def offer(self, selection: LeafSelection, record: ReviewTreeComparisonRecord) -> None:
         """Take one capture of a leaf's trees (a turn end's): mint its number, then build it.
 
-        The number is minted at capture, as the page's open would mint it, so one identity holds;
-        trees the leaf's latest record already holds mint nothing.
+        The page's own recording path reuses the number for a matching live comparison.
         """
 
         minted = self._minted(selection, record)
@@ -380,7 +378,7 @@ class OverviewPrecompute:
         if record is None:
             return
         latest = self._latest(selection) if self._latest is not None else None
-        if latest is not None and latest.same_trees(record):
+        if latest is not None and latest.same_live_comparison(record):
             # The leaf's latest recorded comparison: nothing is minted, and it is built unless it
             # is built, being built or waiting (:meth:`_admit`). Whoever minted it may have computed
             # nothing: the page's open a moment ago, or the detail queue's live review (D571).

@@ -30,7 +30,6 @@ from agents_remember.application.memory_quality.controller import (
 from agents_remember.application.review_tree_comparison import (
     live_review_trees,
     memory_converted,
-    official_line_converted,
 )
 from agents_remember.application.worktree_tool_requests import LandedCommits
 from agents_remember.cli.knowledge_ingest import EXIT_REFUSED
@@ -413,28 +412,19 @@ def test_record_landing_converted_lines_elsewhere_names_sync_and_keeps_the_marke
     assert converted_memory(fixture.memory, converted_tip)
 
 
-def test_unprobable_official_line_is_named_never_collapsed(tmp_path: Path) -> None:
-    """L46-R1-B04: an official line Git cannot answer is named, not unconverted.
-
-    `official_line_converted` answers False only when the probe answers; a dead
-    branch resolves to named error text, which `memory_converted` carries and
-    `live_review_trees` returns as a refusal instead of a silent None.
-    """
-
+def test_unreadable_recorded_base_is_named_even_without_a_candidate_layout(tmp_path: Path) -> None:
     fixture = QueueFixture(tmp_path / "world", memory_mode="external", converted=False)
     leaf = load_contract(fixture.contracts[MASTER_A].contract_path)
-    assert leaf.memory_repo_path is not None
-    assert official_line_converted(leaf.memory_repo_path, leaf.memory_source_branch) is False
-    named = official_line_converted(leaf.memory_repo_path, "ar/does-not-exist")
-    assert isinstance(named, str) and "rev-parse" in named, named
-    assert "never read as" in named, named
-    unknown = replace(leaf, memory_source_branch="ar/does-not-exist")
+    assert memory_converted(leaf) is False
+
+    unknown = replace(leaf, memory_base_commit="1" * 40)
     carried = memory_converted(unknown)
-    assert isinstance(carried, str) and "rev-parse" in carried, carried
+    assert isinstance(carried, str) and unknown.memory_base_commit in carried, carried
     refused = live_review_trees(fixture.coord, unknown, "0" * 40)
-    assert refused is not None, "an unanswered probe is never a silent None"
+    assert refused is not None
     assert getattr(refused, "code", "") == "candidate_unresolved", refused
-    assert "rev-parse" in getattr(refused, "detail", ""), refused
+    assert getattr(refused, "offending_input", "") == "memory base"
+    assert unknown.memory_base_commit in getattr(refused, "detail", "")
 
 
 def test_record_landing_refusal_writes_nothing(tmp_path: Path) -> None:

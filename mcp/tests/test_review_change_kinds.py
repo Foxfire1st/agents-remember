@@ -680,9 +680,11 @@ def test_the_facts_are_derived_and_describe_exactly_the_returned_members(world: 
 
 
 def test_a_dataset_review_carries_no_change_facts(world: World) -> None:
-    for repository in (world.memory, world.memory_worktree):
-        git(repository, "rm", "-q", "-r", "-f", "knowledge")
-        git(repository, "commit", "-q", "-m", "unconverted")
+    git(world.memory, "rm", "-q", "-r", "-f", "knowledge")
+    git(world.memory, "commit", "-q", "-m", "unconverted")
+    world.memory_base = git(world.memory, "rev-parse", "HEAD")
+    git(world.memory_worktree, "reset", "--hard", world.memory_base)
+    world.contract()
     resolved = resolve_review_candidate(world.config, REPO, MASTER, LEAF)
     assert isinstance(resolved, ReviewCandidateResolution) and resolved.trees is None
     review = compose_review(resolved, world.review(selector=_family_seed(FAM1)))

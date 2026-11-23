@@ -203,8 +203,18 @@ def test_the_precompute_computes_through_the_pages_own_leaf_wide_view() -> None:
 
 
 def _view_key(task_root: Path) -> LeafViewKey:
-    gate = GateMemoKey("c" * 40, "m" * 40, "contract@sha256:0", None, None, "sha256:0", "build")
-    return LeafViewKey(gate, "a" * 40, "b" * 40, "d" * 40, task_root.as_posix(), ())
+    gate = GateMemoKey(
+        code_tree="c" * 40,
+        memory_tree="e" * 40,
+        contract="contract@sha256:0",
+        parent_memory_tip=None,
+        leaf_memory_head=None,
+        task_document="sha256:0",
+        build="build",
+        memory_base_commit="f" * 40,
+        memory_candidate_commit=None,
+    )
+    return LeafViewKey(gate, "a" * 40, ("f" * 40, "b" * 40), "d" * 40, task_root.as_posix(), ())
 
 
 def test_a_view_kept_longer_than_fifteen_minutes_is_served_while_its_reads_are_identical(
@@ -465,8 +475,9 @@ def test_the_builds_own_threads_run_at_lowered_priority(
     assert seen[0] >= review_overview_precompute.BUILD_NICENESS
 
 
+@pytest.mark.parametrize("change", ["code tree", "memory base commit"])
 def test_a_newer_capture_supersedes_the_build_in_flight_and_the_latest_wins(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, change: str
 ) -> None:
     started = threading.Event()
     computed: list[int] = []
@@ -483,20 +494,34 @@ def test_a_newer_capture_supersedes_the_build_in_flight_and_the_latest_wins(
 
     monkeypatch.setattr(OverviewPrecompute, "compute", compute)
     owner = OverviewPrecompute(_config(tmp_path), ReviewerWorklistProcesses())
+    original = _record(1, code_candidate="1" * 40)
+    first_record = original.model_copy(
+        update={"memory_base": original.memory_base.model_copy(update={"commit": "a" * 40})}
+    )
+    if change == "code tree":
+        newer = _record(2, code_candidate="2" * 40)
+        second_record = newer.model_copy(update={"memory_base": first_record.memory_base})
+    else:
+        second_record = first_record.model_copy(
+            update={
+                "number": 2,
+                "memory_base": original.memory_base.model_copy(update={"commit": "b" * 40}),
+            }
+        )
     try:
         with caplog.at_level(
             "INFO", logger="agents_remember.application.review_overview_precompute"
         ):
-            owner.offer(_selection(), _record(1, code_candidate="1" * 40))
+            owner.offer(_selection(), first_record)
             assert started.wait(HANG_GUARD_SECONDS)
-            owner.offer(_selection(), _record(2, code_candidate="2" * 40))
+            owner.offer(_selection(), second_record)
             _until(lambda: kept == [2], "the latest capture's build")
     finally:
         owner.shutdown()
     assert computed == [1, 2] and kept == [2], "the superseded build kept something"
     assert owner.superseded == 1
-    first = trees_digest(_record(1, code_candidate="1" * 40))
-    second = trees_digest(_record(2, code_candidate="2" * 40))
+    first = trees_digest(first_record)
+    second = trees_digest(second_record)
     assert f"trees {first} for its newer trees {second}" in caplog.text
     assert f"build of {_selection().leaf_id} trees {first} kept nothing" in caplog.text
 

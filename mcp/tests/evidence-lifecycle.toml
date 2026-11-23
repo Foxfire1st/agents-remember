@@ -604,6 +604,7 @@ consumers = [
   "mcp/tests/test_record_integrity.py",
   "mcp/tests/test_record_landing.py",
   "mcp/tests/test_record_landing_stale_debt.py",
+  "mcp/tests/test_recorded_leaf_memory_base.py",
   "mcp/tests/test_recorded_read_audit.py",
   "mcp/tests/test_reference_anchor_guard.py",
   "mcp/tests/test_reference_anchor_integration_owners.py",
@@ -2999,6 +3000,7 @@ consumers = [
   "mcp/tests/test_record_integrity.py",
   "mcp/tests/test_record_landing.py",
   "mcp/tests/test_record_landing_stale_debt.py",
+  "mcp/tests/test_recorded_leaf_memory_base.py",
   "mcp/tests/test_recorded_read_audit.py",
   "mcp/tests/test_reference_anchor_guard.py",
   "mcp/tests/test_reference_anchor_integration_owners.py",
@@ -4256,6 +4258,7 @@ consumers = [
   "mcp/tests/test_knowledge_read_boundary_controls.py",
   "mcp/tests/test_knowledge_read_boundary_roster.py",
   "mcp/tests/test_master_chain_public_routes.py",
+  "mcp/tests/test_recorded_leaf_memory_base.py",
   "mcp/tests/test_review_validation_reuse.py",
   "mcp/tests/test_terminal_notice_commit_recovery.py",
 ]
