@@ -270,6 +270,32 @@ named above. An entry for `claude`, or one that extends it, is refused when its 
 the [user settings file](concepts.md#user-settings-file), `~/.config/agents-remember/settings.json`.
 The [settings reference](reference/settings-json.md) describes the block in full.
 
+### Antigravity role agents
+
+Choose the ACP provider `antigravity-acp` for an Antigravity role agent. Agents Remember
+refuses to create a role seat on Paseo's native `antigravity` provider because its plug-in drops
+the per-seat `agents-remember-task` server. `prepare_role_handover` refuses a fresh start in
+[role launch preparation](https://github.com/Foxfire1st/agents-remember/blob/main/mcp/src/agents_remember/cli/role_launch_preparation.py).
+For Retry, `agent_create_input` in
+[saved launch replay](https://github.com/Foxfire1st/agents-remember/blob/main/mcp/src/agents_remember/cli/paseo_launch.py)
+limits the call to the recorded agent. `createAgent` in the
+[Paseo bridge](https://github.com/Foxfire1st/agents-remember/blob/main/mcp/src/agents_remember/cli/paseo_bridge.mjs)
+enforces that limit before creation. Paseo 0.16.2's ACP adapter maps the seat's standard I/O
+server definition to `mcpServers` and passes it to the
+[`newSession` call](https://github.com/getpaseo/paseo/blob/v0.16.2/packages/server/src/server/agent/providers/acp-agent.ts#L1864-L1876).
+The [standard I/O mapping](https://github.com/getpaseo/paseo/blob/v0.16.2/packages/server/src/server/agent/providers/acp-agent.ts#L3676-L3691)
+carries the server name, command, arguments and environment.
+
+In a role seat observed on Agents Remember 3.0.3 and Paseo 0.15.4, the seat verified its own
+tool server and sent a role message. In `Default` mode, every tool call asked for permission.
+Five prompts covered two Agents Remember calls and two report edits. The host displayed MCP
+prompts as `other` without the tool name. The Architect denied the first opaque prompt and
+the seat treated the denial as final. The witness completed on the same seat after the
+Architect authorized the named calls.
+
+The host lists `Default`, `Accept edits`, `Auto` and `Plan`. The witness exercised
+`Default`. Behavior in `Auto` was unmeasured.
+
 ### When the dashboard port changes
 
 The `embed` list names the dashboard by its origin. The first Bootstrap call writes the origins

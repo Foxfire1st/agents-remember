@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RoleChatsPane } from "./RoleChats";
+import { launcherModelReply } from "./roleChatModelOptions.test-utils";
 import { readTasklessActiveRequests, tasklessRequestStorageKey, type LauncherRole } from "./roleLaunchModel";
 import { stepUpOptions, stepUpReceipt } from "./stepUp.test-utils";
 
@@ -126,7 +127,10 @@ it("marks the real row's base choices non-applied after a cross-harness step-up 
   let receipt: ReturnType<typeof stepUpReceipt> | undefined;
   vi.mocked(fetch).mockImplementation(async (url, init) => {
     const body = JSON.parse(String(init?.body ?? "{}"));
-    if (url === "/api/role-launch/options") return Response.json({ ...stepUpOptions, executions: receipt ? [receipt] : [] });
+    if (url === "/api/role-launch/options") {
+      if (body.modelId) return launcherModelReply(body, stepUpOptions);
+      return Response.json({ ...stepUpOptions, executions: receipt ? [receipt] : [] });
+    }
     if (url === "/api/role-launch/dispatch") {
       dispatches.push(body);
       receipt = stepUpReceipt(body.requestId);
@@ -137,7 +141,7 @@ it("marks the real row's base choices non-applied after a cross-harness step-up 
   });
   const view = pane("architect");
   await view.findByText("Codex Auto");
-  expect(view.getByText("Plan mode On").getAttribute("title")).toContain("user's settings");
+  expect((await view.findByText("Plan mode On")).getAttribute("title")).toContain("user's settings");
   expect(view.queryByLabelText("Plan mode override")).toBeNull();
   fireEvent.change(view.getByLabelText("Speed override"), { target: { value: "priority" } });
   fireEvent.click(view.getByRole("button", { name: "Step up role" }));

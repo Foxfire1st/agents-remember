@@ -8,7 +8,7 @@ from typing import Any
 from fastapi.responses import JSONResponse
 
 from agents_remember.cli import role_launch_receipts as receipts
-from agents_remember.cli.paseo_launch import LaunchOutcome
+from agents_remember.cli.paseo_launch import NATIVE_ANTIGRAVITY_REPLAY_MISSING, LaunchOutcome
 
 
 def publish_launch_outcome(
@@ -58,8 +58,12 @@ def _refused_outcome(
         receipt["pendingArchiveAgentId"] = outcome.lost_agent_id
     elif not outcome.predecessor_settled:
         receipt["pendingArchiveAgentId"] = launch_call["archiveAgentId"]
+    native_replay_missing = outcome.code == NATIVE_ANTIGRAVITY_REPLAY_MISSING
     retry_step_up = (
-        bool(receipt.get("stepUp")) and not outcome.lost_agent_id and outcome.predecessor_settled
+        bool(receipt.get("stepUp"))
+        and not outcome.lost_agent_id
+        and outcome.predecessor_settled
+        and not native_replay_missing
     )
     detail = (
         "The agent of this launch never got its first message and the Paseo runtime cannot open its session again, so this launch is closed. "
@@ -78,4 +82,6 @@ def _refused_outcome(
     if not retry_step_up:
         receipt.pop("replayRequest", None)
     receipts._write_receipt(path, receipt)
-    return JSONResponse(receipts._public_execution(receipt), status_code=502)
+    return JSONResponse(
+        receipts._public_execution(receipt), status_code=409 if native_replay_missing else 502
+    )

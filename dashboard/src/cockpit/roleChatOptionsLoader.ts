@@ -27,7 +27,12 @@ const LAUNCH_REREAD_MS = 1500;
 
 export interface OptionsFlowState {
   savedCatalogState: { scope: RoleOptionsScope; value: SavedRoleCatalog } | null;
-  optionsState: { scope: RoleOptionsScope; value: RoleLauncherOptions } | null;
+  optionsState: {
+    scope: RoleOptionsScope;
+    value: RoleLauncherOptions;
+    catalogRefresh: number;
+    optionsRefresh: number;
+  } | null;
   optionsLoadingScope: RoleOptionsScope | null;
   optionsErrorState: { scope: RoleOptionsScope; message: string } | null;
 }
@@ -154,8 +159,7 @@ function applyOptionsSuccess(
   boundSelection: RoleLaunchSelection | undefined,
   value: RoleLauncherOptions,
   requestScope: RoleOptionsScope,
-  refreshAgentCatalog: boolean,
-  retryOptions: boolean,
+  refresh: { catalog: number; options: number; requested: boolean; retry: boolean },
 ): void {
   stores.setOptionsErrorState(null);
   // The options answer's execution becomes the failure reference only — never the
@@ -163,9 +167,11 @@ function applyOptionsSuccess(
   // Result receipt leaves that newer receipt in charge.
   if (value.execution) writers.rememberFailureExecution(requestScope, value.execution);
   rememberRoleDefaults(requestScope, value.roleDefaults);
-  stores.setOptionsState({ scope: requestScope, value });
+  stores.setOptionsState({
+    scope: requestScope, value, catalogRefresh: refresh.catalog, optionsRefresh: refresh.options,
+  });
   writers.setExecutionErrorState((current) =>
-    refreshAgentCatalog || retryOptions || !current?.sticky ? null : current,
+    refresh.requested || refresh.retry || !current?.sticky ? null : current,
   );
   if (usesRequestReceipts(requestScope)) {
     adoptRequestExecutionState(writers, activeRequestsRef, boundSelection, requestScope, value.executions ?? []);
@@ -214,7 +220,7 @@ interface OptionsLoadContext {
   selectionComplete: boolean;
   documentScope: RoleDocumentScope;
   optionsScope: RoleOptionsScope;
-  // The refresh generation this load answers; read by the effect's dependency array.
+  // The generations answered by this metadata and receipt load.
   optionsRefresh: number;
   catalogRefresh: number;
   activeRequestsRef: ActiveRequestsRef;
@@ -254,7 +260,6 @@ function runOptionsLoad(ctx: OptionsLoadContext): () => void {
   const retryOptions = ctx.explicitOptionsRefresh.current;
   ctx.explicitOptionsRefresh.current = false;
   const refreshAgentCatalog = ctx.catalogRefresh > ctx.sentCatalogRefresh.current;
-  if (refreshAgentCatalog) ctx.sentCatalogRefresh.current = ctx.catalogRefresh;
   const controller = new AbortController();
   let freshPending = true;
   ctx.setSavedCatalogState(null);
@@ -283,16 +288,22 @@ function runOptionsLoad(ctx: OptionsLoadContext): () => void {
     body: JSON.stringify(body),
     signal: controller.signal,
   }).then(async (response) => {
+    if (controller.signal.aborted) return;
     if (!response.ok) {
-      if (ctx.isCurrentOptionsScope(requestScope)) ctx.setOptionsState(null);
       const value = (await response.json().catch(() => ({}))) as { detail?: unknown; launchInProgress?: unknown };
+      if (controller.signal.aborted) return;
+      if (ctx.isCurrentOptionsScope(requestScope)) ctx.setOptionsState(null);
       applyOptionsRefusal(ctx.setOptionsErrorState, ctx.waitForLaunch, ctx.isCurrentOptionsScope, response, value, requestScope);
       return;
     }
     const value = (await response.json()) as RoleLauncherOptions;
-    if (!ctx.isCurrentOptionsScope(requestScope)) return;
-    applyOptionsSuccess(stores, writers, ctx.activeRequestsRef, ctx.boundSelection, value, requestScope, refreshAgentCatalog, retryOptions);
+    if (controller.signal.aborted || !ctx.isCurrentOptionsScope(requestScope)) return;
+    if (refreshAgentCatalog) ctx.sentCatalogRefresh.current = ctx.catalogRefresh;
+    applyOptionsSuccess(stores, writers, ctx.activeRequestsRef, ctx.boundSelection, value, requestScope, {
+      catalog: ctx.catalogRefresh, options: ctx.optionsRefresh, requested: refreshAgentCatalog, retry: retryOptions,
+    });
   }).catch((reason: unknown) => {
+    if (controller.signal.aborted) return;
     if (!(reason instanceof DOMException && reason.name === "AbortError") && ctx.isCurrentOptionsScope(requestScope)) ctx.setOptionsState(null);
     failOptionsLoad(ctx.setOptionsErrorState, ctx.isCurrentOptionsScope, requestScope, reason);
   }).finally(() => {

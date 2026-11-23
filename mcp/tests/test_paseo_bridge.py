@@ -563,20 +563,13 @@ class BridgeScriptTests(unittest.TestCase):
                         "isDefault": True,
                         "efforts": [{"id": "low", "label": "Low"}, {"id": "high", "label": "high"}],
                         "defaultEffort": "high",
-                        # The catalog keeps every feature the host lists (MIK-R71 rule 3).
-                        "features": [],
-                        "serviceTiers": [],
                     },
                     {
                         "id": "gpt-b",
                         "label": "gpt-b",
                         "effortError": "The runtime supplied no thinking-option listing",
-                        "features": [],
-                        "serviceTiers": [],
                     },
                     {
-                        "features": [],
-                        "serviceTiers": [],
                         "id": "gpt-c",
                         "label": "gpt-c",
                         "efforts": [{"id": "low", "label": "low"}, {"id": "high", "label": "high"}],

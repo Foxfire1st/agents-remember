@@ -19,6 +19,7 @@ export interface ResolvedAgentChoice {
   selectedModel: RoleModelChoice | undefined;
   efforts: RoleEffortChoice[];
   defaultEffort: RoleEffortChoice | undefined;
+  usesRoleEffort: boolean;
   selectedAgentLabel: string | undefined;
 }
 
@@ -34,24 +35,29 @@ function resolveAgent(
 }
 
 function resolveModel(
-  models: RoleModelChoice[],
+  agent: ReturnType<typeof resolveAgent>,
   roleDefaults: RoleDefaults,
   selection: RoleLaunchSelection,
 ): Pick<ResolvedAgentChoice, "defaultModel" | "selectedModelId" | "selectedModel"> {
-  const defaultModel = models.find((model) => matchesChoice(model, roleDefaults.model));
-  const selectedModelId = selection.agentOverride?.modelId ?? defaultModel?.id ?? roleDefaults.model ?? "";
+  const { models, selectedAgent } = agent;
+  const roleModel = selectedAgent && matchesChoice(selectedAgent, roleDefaults.agent) ? roleDefaults.model : undefined;
+  const defaultModel = models.find((model) => matchesChoice(model, roleModel));
+  const nativeDefault = models.find((model) => model.isDefault);
+  const selectedModelId = selection.agentOverride?.modelId ?? defaultModel?.id ?? roleModel ?? nativeDefault?.id ?? "";
   return { defaultModel, selectedModelId, selectedModel: models.find((model) => matchesChoice(model, selectedModelId)) };
 }
 
 function resolveEffort(
-  selectedModel: RoleModelChoice | undefined,
+  { defaultModel, selectedModel }: ReturnType<typeof resolveModel>,
   roleDefaults: RoleDefaults,
-): Pick<ResolvedAgentChoice, "efforts" | "defaultEffort"> {
+): Pick<ResolvedAgentChoice, "efforts" | "defaultEffort" | "usesRoleEffort"> {
   const efforts = selectedModel?.efforts ?? EMPTY_ROLE_EFFORTS;
+  // The configured effort applies only to its role's provider and model.
+  const configuredEffort = defaultModel && defaultModel === selectedModel ? roleDefaults.effort : undefined;
   const defaultEffort = efforts.find(
-    (effort) => matchesChoice(effort, roleDefaults.effort ?? selectedModel?.defaultEffort),
+    (effort) => matchesChoice(effort, configuredEffort ?? selectedModel?.defaultEffort),
   );
-  return { efforts, defaultEffort };
+  return { efforts, defaultEffort, usesRoleEffort: Boolean(configuredEffort) };
 }
 
 // The agent behind the row's override selectors: the chosen agent with its models,
@@ -63,8 +69,8 @@ export function resolveAgentChoice(
   selection: RoleLaunchSelection,
 ): ResolvedAgentChoice {
   const agent = resolveAgent(agents, roleDefaults, selection);
-  const model = resolveModel(agent.models, roleDefaults, selection);
-  const effort = resolveEffort(model.selectedModel, roleDefaults);
+  const model = resolveModel(agent, roleDefaults, selection);
+  const effort = resolveEffort(model, roleDefaults);
   return { ...agent, ...model, ...effort };
 }
 

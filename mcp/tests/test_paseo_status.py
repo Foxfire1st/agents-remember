@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import copy
 import json
+import threading
 import unittest
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import patch, sentinel
 
 from agents_remember.cli import (
     paseo_catalog,
+    paseo_catalog_features,
     paseo_status,
     role_launch_liveness,
+    role_launch_options_receipts,
     role_launch_preparation,
     role_launch_receipts,
     role_launch_routes,
@@ -22,7 +28,9 @@ from agents_remember.models.role_launcher import (
     RoleLauncherOptionsRequest,
     RoleResultRequest,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 from test_paseo_launch import LEAF_REF, ROLE_REFS, PaseoLaunchTestCase, runtime_config
 
 READ_COMMANDS = {"agent-state", "catalog"}
@@ -491,7 +499,7 @@ class RefreshTests(StatusTestCase):
         self.assertEqual(list(self.runtime.agents), [agent_id])
         self.assertLessEqual(set(self.commands()), READ_COMMANDS)
 
-    def test_a_refresh_holds_the_launch_lock_for_one_bridge_call_only(self) -> None:
+    def test_reads_leave_the_launch_lock_free_during_host_calls(self) -> None:
         request = self.launched(status="idle", lastTurn=REPLIED)
         held: list[bool] = []
         read_agent = role_launch_liveness.read_agent
@@ -506,7 +514,7 @@ class RefreshTests(StatusTestCase):
                 {"role": "worker", **ROLE_REFS["worker"]}
             )
             role_launch_routes._role_launch_options_endpoint(self.config, options)
-        self.assertEqual(held, [True, True])
+        self.assertEqual(held, [False, False])
         self.assertEqual(self.commands().count("agent-state"), 2)
         self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
         with self.subTest("the options route loads the catalog before it takes the lock"):
@@ -521,7 +529,7 @@ class RefreshTests(StatusTestCase):
             self.replace(paseo_catalog, "bridge_call", watched)
             self.replace(paseo_status, "bridge_call", watched)
             role_launch_routes._role_launch_options_endpoint(self.config, options)
-            self.assertEqual(during, [("catalog", False), ("agent-state", True)])
+            self.assertEqual(during, [("catalog", False), ("agent-state", False)])
             self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
             # An unanswered catalog uses its saved answer without holding the launch lock.
             self.runtime.fail("catalog", "paseo_daemon_unreachable")
@@ -529,25 +537,30 @@ class RefreshTests(StatusTestCase):
             saved_payload = json.loads(bytes(saved_options.body))
             self.assertEqual(saved_payload["catalogDiscovery"]["source"], "saved")
             self.assertIsNotNone(saved_payload["catalogDiscovery"]["readAt"])
-            self.assertEqual(during[-2:], [("catalog", False), ("agent-state", True)])
+            self.assertEqual(during[-2:], [("catalog", False), ("agent-state", False)])
             self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
-        # While the launch lock is held, a refresh refuses without a bridge call; options
-        # asks its fresh catalog before refusing and never reads the agent under that lock.
-        # Both name launch-in-progress, and a Start remains refused as before.
+        # Neither read contacts the host while a launch holds the lock.
         self.runtime.calls.clear()
         result = RoleResultRequest.model_validate(
             {"role": "worker", "requestId": request.request_id, **ROLE_REFS["worker"]}
         )
-        with role_launch_routes._DISPATCH_LOCK:
+        with (
+            role_launch_routes._DISPATCH_LOCK,
+            patch.object(paseo_catalog_features, "bridge_call") as selected_read,
+        ):
             answers = [
                 role_launch_routes._role_launch_result_endpoint(self.config, result),
                 role_launch_routes._role_launch_options_endpoint(self.config, options),
+                role_launch_routes._role_launch_options_endpoint(
+                    self.config, options.model_copy(update={"agent_id": "codex", "model_id": "gpt"})
+                ),
             ]
             with self.assertRaises(role_launch_routes.LaunchLockBusy):
                 role_launch_routes._role_launch_dispatch_endpoint(
                     self.config, self.request("worker")
                 )
             self.assertTrue(role_launch_routes._DISPATCH_LOCK.locked())
+        selected_read.assert_not_called()
         for answer in answers:
             self.assertEqual(
                 (answer.status_code, json.loads(bytes(answer.body))),
@@ -559,8 +572,193 @@ class RefreshTests(StatusTestCase):
                     },
                 ),
             )
-        self.assertEqual(self.commands(), ["catalog"])
+        self.assertEqual(self.commands(), [])
         self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
+
+    def test_start_reaches_admission_while_receipt_read_is_parked(self) -> None:
+        cases = (
+            ("_read_receipt", {"role": "worker", **ROLE_REFS["worker"]}),
+            ("investigator_listing", {"role": "investigator"}),
+        )
+        for operation, payload in cases:
+            with self.subTest(operation=operation):
+                self.assert_start_during_options_receipt_read(operation, payload)
+
+    def assert_start_during_options_receipt_read(
+        self, operation: str, payload: dict[str, Any]
+    ) -> None:
+        options = RoleLauncherOptionsRequest.model_validate(payload)
+        start = self.request("architect")
+        observed = threading.Event()
+        release = threading.Event()
+        read = getattr(role_launch_options_receipts, operation)
+
+        def read_with_delayed_reply(*args: Any) -> Any:
+            observed.set()
+            self.assertTrue(release.wait(timeout=HANG_GUARD_SECONDS))
+            return read(*args)
+
+        with (
+            patch.object(
+                role_launch_routes, "resolve_role_launch_context", return_value=sentinel.context
+            ),
+            patch.object(role_launch_routes, "_launcher_catalog", return_value={}),
+            patch.object(
+                role_launch_options_receipts, operation, side_effect=read_with_delayed_reply
+            ),
+            patch.object(
+                role_launch_routes, "admit", side_effect=AssertionError("Start entered admission")
+            ),
+            ThreadPoolExecutor(max_workers=1) as pool,
+        ):
+            reading = pool.submit(
+                role_launch_routes._role_launch_options_endpoint, self.config, options
+            )
+            try:
+                self.assertTrue(observed.wait(timeout=HANG_GUARD_SECONDS))
+                with self.assertRaisesRegex(AssertionError, "Start entered admission"):
+                    self.dispatch(start)
+            finally:
+                release.set()
+            self.assertEqual(reading.result(timeout=HANG_GUARD_SECONDS).status_code, 200)
+
+    def test_start_can_replace_the_receipt_while_options_reads_its_agent(self) -> None:
+        previous = self.launched(status="idle", lastTurn=REPLIED)
+        old_agent = self.receipt(previous)["execution"]["agentId"]
+        options = RoleLauncherOptionsRequest.model_validate(
+            {"role": "worker", **ROLE_REFS["worker"]}
+        )
+        payload = self.request("worker").model_dump(mode="json", by_alias=True, exclude_none=True)
+        replacing = RoleDispatchRequest.model_validate({**payload, "replacesAgentId": old_agent})
+        observed = threading.Event()
+        release = threading.Event()
+        start_thread = threading.current_thread()
+        read_agent = role_launch_liveness.read_agent
+
+        def read_with_delayed_reply(config: Any, agent_id: str) -> AgentReading:
+            reading = read_agent(config, agent_id)
+            if threading.current_thread() is not start_thread:
+                self.assertEqual(agent_id, old_agent)
+                observed.set()
+                self.assertTrue(release.wait(timeout=HANG_GUARD_SECONDS))
+            return reading
+
+        with (
+            patch.object(role_launch_liveness, "read_agent", side_effect=read_with_delayed_reply),
+            ThreadPoolExecutor(max_workers=1) as pool,
+        ):
+            reading = pool.submit(
+                role_launch_routes._role_launch_options_endpoint, self.config, options
+            )
+            try:
+                self.assertTrue(observed.wait(timeout=HANG_GUARD_SECONDS))
+                status, started = self.dispatch(replacing)
+                self.assertEqual(status, 200)
+                self.assertNotEqual(started["execution"]["agentId"], old_agent)
+                replacement_receipt = self.saved(replacing)
+            finally:
+                release.set()
+            response = reading.result(timeout=HANG_GUARD_SECONDS)
+        self.assertEqual(response.status_code, 200)
+        returned = json.loads(bytes(response.body))["execution"]
+        self.assertEqual(returned["requestId"], str(replacing.request_id))
+        self.assertEqual(self.saved(replacing), replacement_receipt)
+
+    def test_start_reaches_admission_during_absent_architect_legacy_receipt_read(self) -> None:
+        start = self.request("architect")
+        legacy = role_launch_receipts._legacy_receipt_path(self.config, start)
+        self.assertFalse(legacy.exists())
+        options = RoleLauncherOptionsRequest(role="architect")
+        result = RoleResultRequest(role="architect", requestId=start.request_id)
+        for endpoint, request in (
+            (role_launch_routes._role_launch_options_endpoint, options),
+            (role_launch_routes._role_launch_result_endpoint, result),
+        ):
+            with self.subTest(route=endpoint.__name__):
+                self.assert_start_during_legacy_receipt_read(endpoint, request, start, legacy)
+
+    def assert_start_during_legacy_receipt_read(
+        self,
+        endpoint: Callable[..., JSONResponse],
+        request: RoleLauncherOptionsRequest | RoleResultRequest,
+        start: RoleDispatchRequest,
+        legacy: Path,
+    ) -> None:
+        observed = threading.Event()
+        release = threading.Event()
+        read = role_launch_receipts._read_receipt
+
+        def parked_read(path: Path) -> dict[str, Any] | None:
+            if path == legacy:
+                observed.set()
+                self.assertTrue(release.wait(timeout=HANG_GUARD_SECONDS))
+            return read(path)
+
+        with (
+            patch.object(role_launch_routes, "_launcher_catalog", return_value={}),
+            patch.object(role_launch_receipts, "_read_receipt", side_effect=parked_read),
+            patch.object(
+                role_launch_routes, "admit", side_effect=AssertionError("Start entered admission")
+            ),
+            ThreadPoolExecutor(max_workers=1) as pool,
+        ):
+            reading = pool.submit(endpoint, self.config, request)
+            try:
+                self.assertTrue(observed.wait(timeout=HANG_GUARD_SECONDS))
+                with self.assertRaisesRegex(AssertionError, "Start entered admission"):
+                    self.dispatch(start)
+            finally:
+                release.set()
+            if isinstance(request, RoleResultRequest):
+                with self.assertRaises(HTTPException) as error:
+                    reading.result(timeout=HANG_GUARD_SECONDS)
+                self.assertEqual(error.exception.status_code, 404)
+            else:
+                self.assertEqual(
+                    json.loads(bytes(reading.result(timeout=HANG_GUARD_SECONDS).body)),
+                    {"executions": []},
+                )
+        self.assertFalse(legacy.exists())
+
+    def test_architect_options_uses_a_receipt_moved_during_legacy_discovery(self) -> None:
+        options = RoleLauncherOptionsRequest(role="architect")
+        start = self.launched("architect")
+        legacy = role_launch_receipts._legacy_receipt_path(self.config, options)
+        addressed = role_launch_receipts._receipt_path(self.config, options, start.request_id)
+        addressed.replace(legacy)
+        observed = threading.Event()
+        release = threading.Event()
+        caller = threading.current_thread()
+        read = role_launch_receipts._read_receipt
+
+        def parked_read(path: Path) -> dict[str, Any] | None:
+            current = read(path)
+            if path == legacy and threading.current_thread() is not caller:
+                observed.set()
+                self.assertTrue(release.wait(timeout=HANG_GUARD_SECONDS))
+            return current
+
+        with (
+            patch.object(role_launch_routes, "_launcher_catalog", return_value={}),
+            patch.object(role_launch_receipts, "_read_receipt", side_effect=parked_read),
+            ThreadPoolExecutor(max_workers=1) as pool,
+        ):
+            reading = pool.submit(
+                role_launch_routes._role_launch_options_endpoint, self.config, options
+            )
+            try:
+                self.assertTrue(observed.wait(timeout=HANG_GUARD_SECONDS))
+                with role_launch_routes._receipt_lock():
+                    role_launch_receipts._migrate_taskless_legacy_receipt(self.config, options)
+                moved = addressed.read_bytes()
+            finally:
+                release.set()
+            answer = reading.result(timeout=HANG_GUARD_SECONDS)
+        self.assertEqual(answer.status_code, 200)
+        rows = json.loads(bytes(answer.body))["executions"]
+        self.assertEqual([row["requestId"] for row in rows], [str(start.request_id)])
+        self.assertEqual(addressed.read_bytes(), moved)
+        self.assertFalse(legacy.exists())
 
     def test_a_launch_that_is_unresolved_or_rejected_has_no_agent_to_read(self) -> None:
         with self.subTest("an unresolved launch stays retryable"):

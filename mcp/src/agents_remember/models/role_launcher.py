@@ -79,6 +79,7 @@ class RoleSelection(BaseModel):
 
 class RoleLauncherOptionsRequest(RoleSelection):
     agent_id: str | None = Field(default=None, alias="agentId", max_length=80)
+    model_id: str | None = Field(default=None, alias="modelId")
     refresh_catalog: bool = Field(default=False, alias="refreshCatalog")
 
 

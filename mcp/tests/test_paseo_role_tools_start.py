@@ -61,6 +61,7 @@ from paseo_role_tools_test_support import (
     selection_of,
 )
 from test_paseo_launch import (
+    ANTIGRAVITY_CATALOG,
     CATALOG,
     CLOSING_STATES,
     LEAF_REF,
@@ -214,6 +215,22 @@ class ParentlessChatStartTests(RoleToolsTestCase):
 
 
 class RoleStartTests(RoleToolsTestCase):
+    def test_role_start_reports_the_native_antigravity_refusal(self) -> None:
+        self.replace(self.runtime, "_catalog", return_value=ANTIGRAVITY_CATALOG)
+        for caller, role in ((None, "worker"), (self.architect, "reviewer")):
+            with self.subTest(caller=caller):
+                result = self.refusal(
+                    self.start(caller, role, agent="antigravity"), "launch-refused"
+                )
+                self.assertIn("drops the per-seat agents-remember-task server", result["detail"])
+                self.assertEqual(
+                    result["preparationStatus"], "native-antigravity-task-server-unavailable"
+                )
+                self.assertEqual(result["nextAction"], "Choose antigravity-acp to start this role.")
+                self.assertEqual(self.enclosures.start_calls, [])
+                self.assertEqual(self.runtime.launch_calls(), [])
+                self.assertEqual(self.receipt_files(), [])
+
     def test_r71_worker_instruction_text_is_not_an_input_to_start_permission(self) -> None:
         caller = binding("worker")
         for notes in (

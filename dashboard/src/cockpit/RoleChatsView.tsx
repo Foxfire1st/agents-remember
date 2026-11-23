@@ -21,6 +21,7 @@ import {
 import type { useRoleChatControls } from './roleChatControls';
 import { rememberedRoleDefaults } from './launcherDefaultsMemory';
 import type { OptionsFlowState } from './roleChatOptionsLoader';
+import { useShownModelOptions, withoutModelFeatureValues } from './roleChatModelOptions';
 import {
   resolveBusy,
   resolveExecutionErrorText,
@@ -73,6 +74,7 @@ export interface RoleChatsViewProps {
   selectionComplete: boolean;
   controls: Controls;
   options: OptionsFlowState;
+  optionReads: { catalogRefresh: number; optionsRefresh: number; waitForLaunch: () => void };
   activeRequests: Record<string, RoleTasklessActiveRequest | undefined>;
   report: RoleReportContent | null;
   onCloseReport: () => void;
@@ -132,10 +134,12 @@ function launchActions(
   props: RoleChatsViewProps,
   live: Parameters<Controls['dispatch']>[0],
   optionsLoading: boolean,
+  modelOptionsFresh: boolean,
 ) {
   const { controls, selection, selectionComplete } = props;
   return {
-    onLaunch: (next: RoleLaunchSelection) => controls.dispatch(live, 'start', next),
+    onLaunch: (next: RoleLaunchSelection) =>
+      controls.dispatch(live, 'start', modelOptionsFresh ? next : withoutModelFeatureValues(next)),
     onRevive: (next: RoleLaunchSelection) =>
       controls.dispatch(
         live,
@@ -183,6 +187,16 @@ function useRoleChatsPresentation(props: RoleChatsViewProps) {
     savedCatalog,
     rememberedRoleDefaults(documentScope),
   );
+  const modelOptions = useShownModelOptions({
+    catalog,
+    selection,
+    scope: documentScope,
+    metadataGeneration: display.options && options.optionsState?.optionsRefresh === props.optionReads.optionsRefresh
+      ? options.optionsState.catalogRefresh
+      : undefined,
+    active,
+    ...props.optionReads,
+  });
   const live = {
     active,
     busy: execution.busy,
@@ -199,8 +213,11 @@ function useRoleChatsPresentation(props: RoleChatsViewProps) {
       selection,
       onSelectionChange,
       ...catalog,
+      agents: modelOptions.agents,
+      roleDefaults: modelOptions.roleDefaults,
+      modelOptionsPending: modelOptions.pending,
       ...execution,
-      ...launchActions(props, live, display.optionsLoading),
+      ...launchActions(props, live, display.optionsLoading, modelOptions.fresh),
       progress: execution.busy ? progress : undefined,
       // A fresh answer on its way blocks nothing while the saved choices are on show (MIK-R215).
       optionsLoading: display.optionsLoading && !savedShown,

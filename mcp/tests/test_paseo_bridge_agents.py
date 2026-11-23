@@ -748,6 +748,44 @@ class AgentCommandScriptTests(unittest.TestCase):
             "Provider x is not configured",
         )
 
+    def test_reconciliation_of_a_native_antigravity_role_cannot_create_an_agent(self) -> None:
+        payload = {
+            "agentId": AGENT_ID,
+            "idempotencyKey": "ar-role-launch:request-1",
+            "workspaceId": "wks_fake",
+            "provider": "antigravity",
+            "title": "Worker · 01_LEAF",
+            "labels": {},
+            "prompt": "saved first message",
+            "existingOnly": True,
+        }
+        with self.subTest("absent id"):
+            error = self.failure("agent-create", payload)
+            self.assertEqual(error.code, "paseo_agent_missing_for_replay")
+            self.assertEqual(self.recorded(), [])
+        with self.subTest("lookup failure leaves the result unresolved"):
+            error = self.failure("agent-create", payload, lookupError="lookup unavailable")
+            self.assertEqual(error.code, "paseo_agent_lookup_failed")
+            self.assertEqual(self.recorded(), [])
+        with self.subTest("present id can receive its saved first message"):
+            agent = {"id": AGENT_ID, "provider": "antigravity", "status": "idle"}
+            reply = self.call("agent-create", payload, agents={AGENT_ID: agent})
+            self.assertEqual((reply["existing"], reply["agent"]["id"]), (True, AGENT_ID))
+            self.assertEqual(
+                self.recorded(),
+                [
+                    {
+                        "via": "send",
+                        "id": AGENT_ID,
+                        "options": {"messageId": "ar-role-launch:request-1:first-message"},
+                        "message": {
+                            "bytes": len(b"saved first message"),
+                            "sha256": hashlib.sha256(b"saved first message").hexdigest(),
+                        },
+                    }
+                ],
+            )
+
     def test_the_first_message_follows_the_creation_and_goes_to_an_agent_that_has_none(
         self,
     ) -> None:

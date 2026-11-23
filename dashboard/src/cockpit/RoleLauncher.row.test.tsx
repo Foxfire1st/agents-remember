@@ -12,6 +12,7 @@ import {
   viewTabButton,
 } from '../grammar/viewTabLook';
 import { RoleChatsPane } from './RoleChats';
+import { launcherModelReply } from './roleChatModelOptions.test-utils';
 import { taskEntry, taskSummary } from '../test/fixtures/wire';
 import modeBarSrc from '../grammar/ModeBar.tsx?raw';
 import roleLauncherSrc from './role-launcher/RoleLauncher.tsx?raw';
@@ -144,7 +145,8 @@ function stubOptions(roleDefaults: Record<string, unknown>) {
         return new Response(JSON.stringify({ available: false, frameUrl: null }), { status: 503 });
       }
       const reply = optionsReplies.length > 1 ? optionsReplies.shift() : optionsReplies[0];
-      void init;
+      const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (request.modelId) return launcherModelReply(request, reply?.body);
       return new Response(JSON.stringify(reply?.body), { status: reply?.status ?? 500 });
     }),
   );
@@ -330,7 +332,7 @@ describe('where a default comes from is hover text', () => {
     expect(
       (view.getByLabelText('Role effort override') as HTMLElement).getAttribute('title'),
     ).toContain('effort: high · our settings');
-    expect((view.getByLabelText('Speed override') as HTMLElement).getAttribute('title')).toContain(
+    expect((await view.findByLabelText('Speed override')).getAttribute('title')).toContain(
       'service_tier: default · host role',
     );
   });
@@ -353,7 +355,7 @@ describe('where a default comes from is hover text', () => {
     expect(
       (view.getByLabelText('Role effort override') as HTMLElement).getAttribute('title'),
     ).toContain('High · default');
-    expect((view.getByLabelText('Speed override') as HTMLElement).getAttribute('title')).toContain(
+    expect((await view.findByLabelText('Speed override')).getAttribute('title')).toContain(
       'Speed · default',
     );
     expect(
@@ -502,17 +504,19 @@ describe('an overfull row wraps whole', () => {
     ];
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string) => {
+      vi.fn(async (url: string, init?: RequestInit) => {
         if (String(url) !== '/api/role-launch/options') {
           return new Response(JSON.stringify({ available: false, frameUrl: null }), {
             status: 503,
           });
         }
+        const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        if (request.modelId) return launcherModelReply(request, optionsReplies[0]?.body);
         return new Response(JSON.stringify(optionsReplies[0]?.body), { status: 200 });
       }),
     );
     const view = renderArchitectRow();
-    await waitFor(() => expect(view.getByTestId('role-launcher')).toBeTruthy());
+    await view.findByLabelText('Speed 0 override');
     const launcher = view.getByTestId('role-launcher');
     for (const feature of many) {
       if (feature.permissionBearing) {

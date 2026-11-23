@@ -37,6 +37,7 @@ from agents_remember.models.role_capsules.manifest import parse_composition_mani
 from agents_remember.models.role_launcher import (
     LauncherRole,
     RoleDispatchRequest,
+    RoleLauncherOptionsRequest,
     RoleSelection,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -582,11 +583,14 @@ class TasklessExecutionIdentityTests(unittest.TestCase):
                 receipt(system_id, role="investigator"),
             )
 
-            role_launch_receipts._migrate_taskless_legacy_receipt(config, selection)
-            rows = role_launch_receipts._taskless_execution_receipts(config, selection)
+            options = RoleLauncherOptionsRequest(role="architect")
+            with patch.object(role_launch_routes, "_launcher_catalog", return_value={}):
+                response = role_launch_routes._role_launch_options_endpoint(config, options)
 
+            self.assertEqual(response.status_code, 200)
+            rows = json.loads(bytes(response.body))["executions"]
             self.assertEqual(
-                {row[1]["requestId"] for row in rows}, {str(current_id), str(archived_id)}
+                {row["requestId"] for row in rows}, {str(current_id), str(archived_id)}
             )
             self.assertFalse(legacy.exists())
             self.assertFalse((history / f"{archived_id}.json").exists())

@@ -17,6 +17,7 @@ from agents_remember.models.role_launcher import (
     RoleDispatchRequest,
 )
 from test_paseo_launch import (
+    ANTIGRAVITY_CATALOG,
     NO_ANSWER_CODES,
     PaseoLaunchTestCase,
 )
@@ -134,6 +135,76 @@ class LaunchOutcomeTests(PaseoLaunchTestCase):
 
 
 class RepeatAndConflictTests(PaseoLaunchTestCase):
+    def test_native_antigravity_retry_only_reconciles_an_existing_agent(self) -> None:
+        self.replace(self.runtime, "_catalog", return_value=ANTIGRAVITY_CATALOG)
+        for saved_status, role, host_has_agent in (
+            ("starting", "architect", False),
+            ("unknown", "worker", False),
+            ("unknown", "reviewer", True),
+        ):
+            with self.subTest(saved_status=saved_status, host_has_agent=host_has_agent):
+                request = self.request(role, agentId="antigravity-acp")
+                self.runtime.fail(
+                    "agent-create", "paseo_bridge_timeout", after_effect=host_has_agent
+                )
+                self.assertEqual(self.dispatch(request)[0], 202)
+                saved = self.receipt(request)
+                # Use the receipt the normal path produced, with the provider selection an
+                # earlier build could admit. Keep the minted id and first message.
+                native = self.request(role, request.request_id, agentId="antigravity")
+                saved["requestDigest"] = role_launch_receipts._request_digest(native, native)
+                saved["requestedAgentOverride"] = {"agentId": "antigravity"}
+                saved["status"] = saved_status
+                saved["agent"]["id"] = "antigravity"
+                saved["replayRequest"]["agent"]["provider"] = "antigravity"
+                role_launch_receipts._write_receipt(self.receipt_path(request), saved)
+                agent_id = saved["agentId"]
+                if host_has_agent:
+                    self.runtime.agents[agent_id]["provider"] = "antigravity"
+                retry_payload = {
+                    **self.runtime.launch_calls()[-1][1],
+                    "provider": "antigravity",
+                }
+                agents_before = set(self.runtime.agents)
+
+                status, public = self.dispatch(native)
+
+                expected = (200, "running") if host_has_agent else (409, "rejected")
+                self.assertEqual((status, public["status"]), expected)
+                self.assertEqual(set(self.runtime.agents), agents_before)
+                command, payload = self.runtime.launch_calls()[-1]
+                self.assertEqual(command, "agent-create")
+                self.assertEqual(
+                    {key: value for key, value in payload.items() if key != "existingOnly"},
+                    retry_payload,
+                )
+                result = self.receipt(native)
+                for key in ("agentId", "requestId", "requestDigest", "parentAgentId"):
+                    self.assertEqual(result.get(key), saved.get(key))
+                if host_has_agent:
+                    self.assertEqual(public["execution"]["agentId"], agent_id)
+                else:
+                    self.assertIn("Choose antigravity-acp to start this role.", public["detail"])
+                    self.assertIs(result["hostAgentExists"], False)
+                    self.assertFalse(public["canRetry"])
+                    acp = self.request(role, agentId="antigravity-acp")
+                    self.assertEqual(self.dispatch(acp)[0], 200)
+
+    def test_antigravity_acp_retry_replays_the_exact_launch(self) -> None:
+        self.replace(self.runtime, "_catalog", return_value=ANTIGRAVITY_CATALOG)
+        request = self.request("worker", agentId="antigravity-acp")
+        self.runtime.fail("agent-create", "paseo_bridge_timeout")
+        self.assertEqual(self.dispatch(request)[0], 202)
+        first = self.runtime.launch_calls()[-1][1]
+        self.assertEqual(first["provider"], "antigravity-acp")
+        self.assertEqual(set(first["mcpServers"]), {"agents-remember-task"})
+        self.assertNotIn("existingOnly", first)
+
+        self.assertEqual(self.dispatch(request)[0], 200)
+
+        self.assertEqual(self.runtime.launch_calls()[-1], ("agent-create", first))
+        self.assertEqual(list(self.runtime.agents), [first["agentId"]])
+
     def test_a_repeated_request_converges_on_the_same_agent(self) -> None:
         with self.subTest("the answer was lost after the agent was created"):
             request = self.request("worker")
