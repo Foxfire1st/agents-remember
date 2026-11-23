@@ -2,6 +2,11 @@
 # template literals (for example, indentation in CodeMirror completion snippets).
 mcp/src/agents_remember/package_data/dashboard/assets/*.js whitespace=-blank-at-eol
 
+# The copies of the host's server package that the plugin's tests read are byte-for-byte
+# copies of the published distribution, and a fixture test checks each file's SHA-256. Their
+# whitespace is not ours to change, so Git's whitespace check leaves them out.
+mcp/src/agents_remember/package_data/paseo_plugin/server/fixtures/** -whitespace
+
 # The vendored tiktoken vocabulary is content-addressed: models/tokens.py checks the
 # file's SHA-256 before every load and refuses to start on any copy whose bytes differ. A
 # line-ending conversion on a checkout with core.autocrlf=true is exactly that, so without
