@@ -9,7 +9,7 @@
 // returns a JSON object. Connecting, the deadline, closing and error mapping are shared and live
 // in `main`, `connect` and `failure`.
 //
-//   catalog  {refresh?: boolean, mode?: "full"|"metadata"|"selected",
+//   catalog  {refresh?: boolean, mode?: "metadata"|"selected",
 //             selectedProvider?: string, selectedModel?: string}
 //            -> {runtime: {serverId, version},
 //                providers: [{id, label, models: [{id, label, description?, isDefault?,
@@ -20,8 +20,8 @@
 //            its providers first. Unavailable parts are omitted with a named error; successful
 //            empty arrays remain authoritative empty answers. readAt timestamps this question.
 //            A provider still being discovered keeps its modes and a model-list error.
-//            metadata asks no model features. selected asks only the named provider/model's
-//            features and returns selectedFeatures beside runtime/readAt, without an inventory.
+//            metadata is the default and asks for no model features. selected asks for the
+//            named provider/model's features and returns selectedFeatures beside runtime/readAt.
 //            `acceptsToolServers: false` marks a provider whose entry in the runtime's
 //            configuration declares that it takes no tool servers from its host
 //            (`options.supportsMcpServers: false`); the runtime refuses to create an agent with
@@ -393,19 +393,19 @@ async function readCatalog({ api, daemon, deadline }, input) {
   const remaining = deadline - Date.now()
   const discoveryDeadline = deadline - Math.min(LISTING_RESERVE_MS, remaining / 5)
   const listingDeadline = deadline - Math.min(REPLY_RESERVE_MS, remaining / 20)
-  const mode = input.mode ?? 'full'
-  if (!['full', 'metadata', 'selected'].includes(mode)) {
-    throw failure('invalid_catalog_mode', 'Catalog mode must be full, metadata or selected.')
+  const mode = input.mode ?? 'metadata'
+  if (mode !== 'metadata' && mode !== 'selected') {
+    throw failure('invalid_catalog_mode', 'Catalog mode must be metadata or selected.')
   }
-  const discoveryTimeout = () =>
-    failure('paseo_bridge_timeout', 'The Paseo runtime did not finish provider discovery in time.')
-  if (input.refresh === true) await within(api.providers.refresh(), discoveryDeadline, discoveryTimeout)
   if (mode === 'selected') {
     const provider = requiredText(input, 'selectedProvider')
     const model = requiredText(input, 'selectedModel')
     const selectedFeatures = { provider, model, ...await modelFeatures(api, provider, model, listingDeadline, cwd) }
     return catalogReply(daemon, { selectedFeatures })
   }
+  const discoveryTimeout = () =>
+    failure('paseo_bridge_timeout', 'The Paseo runtime did not finish provider discovery in time.')
+  if (input.refresh === true) await within(api.providers.refresh(), discoveryDeadline, discoveryTimeout)
   // waitForReady answers once no provider is loading. When the discovery time is up first,
   // the available snapshot still supplies provider identities and any known modes.
   const settled = await within(
@@ -428,7 +428,7 @@ async function readCatalog({ api, daemon, deadline }, input) {
   // consume the final reply reserve or discard model answers that already arrived.
   const [providers, support] = await Promise.all([
     Promise.all(enabled.map((entry) =>
-      entry.status === 'ready' ? listProvider(api, entry, listingDeadline, cwd, mode === 'full') : stillLoading(entry)
+      entry.status === 'ready' ? listProvider(api, entry, listingDeadline) : stillLoading(entry)
     )),
     toolServerSupport(api, listingDeadline)
   ])
@@ -499,7 +499,7 @@ function stillLoading(entry) {
   }
 }
 
-async function listProvider(api, entry, deadline, cwd, includeFeatures) {
+async function listProvider(api, entry, deadline) {
   const row = providerRow(entry)
   try {
     const listing = await within(
@@ -510,13 +510,7 @@ async function listProvider(api, entry, deadline, cwd, includeFeatures) {
     if (listing?.error) throw new Error(text(listing.error))
     if (!Array.isArray(listing?.models)) throw new Error('The runtime supplied no model listing')
     if (listing.models.some((model) => !nonEmpty(model?.id))) throw new Error('The runtime supplied an invalid model listing')
-    const models = await Promise.all(listing.models.map(async (model) => {
-      const result = projectModel(model)
-      return includeFeatures
-        ? { ...result, ...await modelFeatures(api, entry.provider, model.id, deadline, cwd) }
-        : result
-    }))
-    return { ...row, models }
+    return { ...row, models: listing.models.map(projectModel) }
   } catch (error) {
     return { ...row, listingError: text(error?.message ?? error) }
   }
@@ -730,6 +724,12 @@ async function createAgent({ api, daemon, deadline }, input) {
   if (present) {
     await sendFirstMessage(api, daemon, present, request)
     return { serverId, existing: true, agent: projectAgent(present) }
+  }
+  if (input.existingOnly === true) {
+    throw failure(
+      'paseo_agent_missing_for_replay',
+      `Agent ${agentId} is absent from the Paseo runtime.`
+    )
   }
   let created
   try {

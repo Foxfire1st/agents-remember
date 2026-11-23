@@ -29,7 +29,6 @@ import {
   type RoleLaunchSelection,
   type LauncherRole,
   type RoleDefaults,
-  type RoleFeatureChoice,
   type RoleModelChoice,
   type RoleScopedExecution,
   type RoleTaskOption,
@@ -558,6 +557,7 @@ function ModelOverrideSelect({
   selectedAgentId,
   optionsReady,
   optionsLoading,
+  modelOptionsPending,
   busy,
   retryLocked,
   onSelectionChange,
@@ -570,17 +570,21 @@ function ModelOverrideSelect({
   selectedAgentId: string;
   optionsReady: boolean;
   optionsLoading: boolean;
+  modelOptionsPending?: boolean;
   busy: boolean;
   retryLocked: boolean;
   onSelectionChange: (selection: RoleLaunchSelection) => void;
 }) {
+  const selectedModelId = selection.agentOverride?.modelId ?? '';
+  const pending = modelOptionsPending ? ' · options pending' : '';
   return (
     <label className={`${roleLauncherField} ${roleLauncherOverrideField}`}>
       <select
         className={launcherSelect}
         aria-label="Role model override"
-        title={`${modelDisplayed} — ${defaultSourceTitle('model', roleDefaults.choices, choice.defaultModel?.label ?? roleDefaults.model ?? 'unset')}`}
-        value={selection.agentOverride?.modelId ?? ''}
+        aria-busy={modelOptionsPending || undefined}
+        title={`${modelDisplayed}${pending} — ${defaultSourceTitle('model', roleDefaults.choices, choice.defaultModel?.label ?? roleDefaults.model ?? 'unset')}`}
+        value={selectedModelId}
         disabled={modelSelectDisabled(choice, optionsReady, optionsLoading, busy, retryLocked)}
         onChange={(event) => {
           const modelId = event.target.value;
@@ -599,10 +603,12 @@ function ModelOverrideSelect({
           });
         }}
       >
-        <option value="">{modelDefaultOptionText(choice, selectedAgentId, selection)}</option>
+        <option value="">{modelDefaultOptionText(choice, selectedAgentId, selection)}
+          {selectedModelId ? '' : pending}
+        </option>
         {choice.models.map((model) => (
           <option key={model.id} value={model.id}>
-            {model.label}
+            {model.label}{selectedModelId === model.id ? pending : ''}
           </option>
         ))}
       </select>
@@ -632,12 +638,17 @@ function EffortOverrideSelect({
   retryLocked: boolean;
   onSelectionChange: (selection: RoleLaunchSelection) => void;
 }) {
+  const effortSource = defaultSourceTitle(
+    'effort',
+    choice.usesRoleEffort ? roleDefaults.choices : undefined,
+    choice.defaultEffort?.label ?? 'unset',
+  );
   return (
     <label className={`${roleLauncherField} ${roleLauncherOverrideField}`}>
       <select
         className={launcherSelect}
         aria-label="Role effort override"
-        title={`${effortDisplayed} — ${defaultSourceTitle('effort', roleDefaults.choices, choice.defaultEffort?.label ?? roleDefaults.effort ?? 'unset')}`}
+        title={`${effortDisplayed} — ${effortSource}`}
         value={selection.agentOverride?.effortId ?? ''}
         disabled={busy || retryLocked}
         onChange={(event) => {
@@ -674,12 +685,6 @@ function EffortOverrideSelect({
   );
 }
 
-// The feature controls behind the selected model: the model's own features, or the
-// default model's while no model is chosen yet.
-function overrideFeatures(choice: ResolvedAgentChoice): RoleFeatureChoice[] {
-  return (choice.selectedModel ?? choice.models.find((model) => model.isDefault))?.features ?? [];
-}
-
 // The defaults the feature controls disclose: the role defaults on the role's own
 // agent, else an empty disclosure for the foreign agent.
 function overrideDefaults(selectedAgentId: string, roleDefaults: RoleDefaults): RoleDefaults {
@@ -705,6 +710,7 @@ type LauncherOverrideProps = {
   effortDisplayed: string;
   optionsReady: boolean;
   optionsLoading: boolean;
+  modelOptionsPending?: boolean;
   busy: boolean;
   retryLocked: boolean;
   onSelectionChange: (selection: RoleLaunchSelection) => void;
@@ -740,7 +746,7 @@ function LauncherOverrideFields(props: LauncherOverrideProps) {
         modeLabel={modeLabel}
       />
       <RoleLaunchFeatures
-        features={overrideFeatures(choice)}
+        features={choice.selectedModel?.features ?? []}
         basePreview={basePreview}
         defaults={overrideDefaults(selectedAgentId, roleDefaults)}
         override={selection.agentOverride}
@@ -1034,6 +1040,7 @@ function LauncherActionBar(props: LauncherActionProps) {
 }
 
 export interface RoleLauncherProps {
+  modelOptionsPending?: boolean;
   tasks: TaskEntry[];
   boundRoles?: LauncherRole[];
   progress?: string;

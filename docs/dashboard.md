@@ -177,26 +177,30 @@ describe the role settings.
 | "Revive" | Resumes a closed role agent as the same agent. No message is sent. | For a run whose agent the host still has, not archived, with its session closed: always when the session closed while a turn was open, otherwise only while no earlier resume of it was refused. |
 | "Result" | Reads the result of the selected role's run and opens its report in the [notes reader](#the-notes-reader). | When the selection is complete and a run exists for it. |
 | "Retry launch options" | Loads the choices again. | After the choices could not be loaded. |
-| "Refresh" | Asks the host for its list of harnesses and models again. | Always. |
+| "Refresh" | Clears the model options held by the panel, renews the host's provider snapshot and model lists, then reads options for the model on show. | Always. |
 
 After a start with a step-up the row shows the chips "Stepped-up · <model>" and "Mode/features
 unreported", and the other chips begin with "Base · ".
 
-"Start" is off while the selection is incomplete, while the choices are not loaded, while a
-start runs, and while the failure line names a problem with a choice. For Worker, Reviewer and
-Curator it is also off while an agent already holds the role for the selected task and while
-"Retry" is offered.
+"Start" is off while the selection is incomplete, while the model list is loading and no saved
+list is available, while a start runs, and while the failure line names a problem with a choice.
+With the model list available, an otherwise eligible start can proceed while the shown model's
+options are loading. For Worker, Reviewer and Curator, "Start" is also off while an agent already
+holds the role for the selected task and while "Retry" is offered.
 
 #### Where the choices come from
 
-The launcher asks the host for its harnesses, models, efforts, modes and features on every change
-of the selection and on "Refresh". While the fresh answer is on its way, the launcher shows the
-choices of the last answer the host gave, which the product saved. A user can select them, and a
-start uses them. The fresh answer replaces them when it arrives.
+The launcher loads the list of available harnesses and models. It asks the host for options only
+for the provider and model on show. The panel keeps each answer until "Refresh" and reuses it when
+you return to that choice or when the panel rereads options after a start.
 
-When the host does not answer, the launcher keeps the saved choices. Where neither a fresh nor a
-saved answer exists, the model selector reads "<configured model> · unchecked" and the launcher
-raises no objection to the choice.
+While the model list is loading or the host cannot answer, the saved list stays selectable.
+If fresh options for the shown model are pending or unavailable, a new "Start" keeps the selection and
+omits explicit feature overrides. The applicable defaults supply those values. "Retry" repeats
+its saved request.
+
+When neither a fresh nor a saved model list is available, the selector reads
+"<configured model> · unchecked" and the launcher raises no objection to the choice.
 
 #### The failure line
 

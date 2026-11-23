@@ -4,6 +4,7 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RoleChatsPane } from './RoleChats';
+import { launcherModelReply } from './roleChatModelOptions.test-utils';
 import { forgetRememberedRoleDefaults } from './launcherDefaultsMemory';
 import {
   launchChoiceProblem,
@@ -42,6 +43,7 @@ type Reply = { status: number; body: unknown };
 let optionsReplies: Reply[] = [];
 let optionsRequests: Record<string, unknown>[] = [];
 let optionsBarrier: Promise<void> | null = null;
+let lastOptions: unknown;
 let savedCatalogReply: Reply | null = null;
 
 function optionsReply(roleDefaults: Record<string, unknown>): Reply {
@@ -59,6 +61,7 @@ beforeEach(() => {
   optionsReplies = [];
   optionsRequests = [];
   optionsBarrier = null;
+  lastOptions = undefined;
   savedCatalogReply = null;
   sessionStorage.clear();
   forgetRememberedRoleDefaults();
@@ -68,9 +71,12 @@ beforeEach(() => {
       if (url === '/api/role-launch/saved-catalog') return new Response(JSON.stringify(savedCatalogReply?.body ?? {}), { status: savedCatalogReply?.status ?? 503 });
       if (url !== '/api/role-launch/options')
         return new Response(JSON.stringify({ available: false, frameUrl: null }), { status: 503 });
-      optionsRequests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (body.modelId) return launcherModelReply(body, lastOptions);
+      optionsRequests.push(body);
       if (optionsBarrier) await optionsBarrier;
       const reply = optionsReplies.length > 1 ? optionsReplies.shift() : optionsReplies[0];
+      if (reply?.status === 200) lastOptions = reply.body;
       return new Response(JSON.stringify(reply?.body), { status: reply?.status ?? 500 });
     }),
   );
@@ -112,16 +118,16 @@ describe('launcher bar and the host catalog', () => {
         available: true,
       }),
     ];
-    const { getByRole, getByLabelText, getByTestId, queryByTestId } = renderLauncher();
+    const { getByRole, getByLabelText, getByTestId, findByTestId, queryByTestId } = renderLauncher();
     const start = getByRole('button', { name: 'Start role' }) as HTMLButtonElement;
     await waitFor(() => expect(start.disabled).toBe(false));
     expect(getByTestId('role-service-tier').textContent).toBe('Speed: Fast');
     expect(getByTestId('role-service-tier').getAttribute('title')).toContain('default agent');
     fireEvent.change(getByLabelText('Role model override'), { target: { value: 'gpt-b' } });
-    await waitFor(() => expect(start.disabled).toBe(true));
-    expect(getByTestId('role-choice-problem').textContent).toContain(
+    expect((await findByTestId('role-choice-problem')).textContent).toContain(
       'Service tier fast is not offered',
     );
+    expect(start.disabled).toBe(true);
     fireEvent.change(getByLabelText('Role agent override'), { target: { value: 'eve' } });
     await waitFor(() => expect(start.disabled).toBe(false));
     expect(getByTestId('role-service-tier').textContent).toBe('Speed: provider default');
@@ -388,7 +394,7 @@ describe('R71 speed feature choices', () => {
     expect(instructions.getAttribute('title')).toContain('host role');
     expect(instructions.getAttribute('title')).toContain('baseline replaced');
     expect(view.queryByLabelText('Plan mode override')).toBeNull();
-    fireEvent.change(view.getByLabelText('Speed feature override'), {
+    fireEvent.change(await view.findByLabelText('Speed feature override'), {
       target: { value: 'priority' },
     });
     fireEvent.click(view.getByRole('button', { name: 'Start role' }));
@@ -610,7 +616,9 @@ describe('R215 the launcher speaks only of real errors', () => {
     for (const label of ['Role', 'Role agent override', 'Role model override', 'Role effort override']) {
       expect((view.getByLabelText(label) as HTMLSelectElement).disabled, label).toBe(false);
     }
-    expect(optionLabels(view.getByLabelText('Role model override'))).toEqual(settledModels);
+    const model = view.getByLabelText('Role model override');
+    expect(model.getAttribute('aria-busy')).toBe('true');
+    expect(optionLabels(model)).toEqual([`${settledModels[0]} · options pending`, ...settledModels.slice(1)]);
     expect(optionLabels(view.getByLabelText('Role effort override'))).toEqual(['Low · default', 'Low', 'High']);
     expect(start.disabled).toBe(false);
     expect(launcherLayout(view)).toEqual(settled);

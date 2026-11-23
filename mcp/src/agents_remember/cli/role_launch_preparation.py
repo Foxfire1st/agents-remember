@@ -37,7 +37,11 @@ from agents_remember.cli.paseo_catalog import (
     read_host_role,
     resolve_agent_selection,
 )
-from agents_remember.cli.paseo_launch import StartingAgent
+from agents_remember.cli.paseo_launch import (
+    NATIVE_ANTIGRAVITY,
+    StartingAgent,
+    native_antigravity_role_start_refusal,
+)
 from agents_remember.cli.role_brief_message import BriefParts, brief_prompt
 from agents_remember.cli.role_instruction_details import compose_launch_instructions
 from agents_remember.cli.role_instructions import (
@@ -232,6 +236,8 @@ def prepare_role_handover(  # noqa: PLR0913 -- chat_started rides the rule-6 lau
     agent_id, session_options = resolve_agent_selection(
         config, defaults, harness_order, agent_override
     )
+    if agent_id == NATIVE_ANTIGRAVITY:
+        raise native_antigravity_role_start_refusal()
     try:
         handover_accepts = provider_accepts_tool_servers(config, agent_id)
     except PaseoBridgeFailure:
@@ -387,7 +393,7 @@ def _launcher_catalog(
     context: RoleLaunchContext,
     request: RoleLauncherOptionsRequest,
 ) -> dict[str, Any]:
-    """Role defaults plus fresh full offers; Refresh also rediscovers the providers."""
+    """Role defaults and model metadata; Refresh first renews the provider snapshot."""
 
     defaults, harness_order = _role_defaults(config, context)
     return launcher_options(config, defaults, harness_order, refresh=request.refresh_catalog)

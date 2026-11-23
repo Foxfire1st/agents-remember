@@ -72,12 +72,10 @@ def digest(value: Any) -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class _TasklessLegacyMigration:
-    config: McpRuntimeConfig
-    selection: RoleSelection
-    legacy: Path
-    expected_selection: dict[str, Any]
-    seen_ids: set[str]
+class _TasklessLegacyReceiptMove:
+    source: Path
+    target: Path
+    receipt: dict[str, Any]
 
 
 def _execute_prepared_launch(
@@ -474,26 +472,37 @@ def _existing_message_binding_projection_matches(path: Path, expected: bytes) ->
 
 
 def _migrate_taskless_legacy_receipt(config: McpRuntimeConfig, selection: RoleSelection) -> None:
-    """Move the bounded old taskless receipt set to request-ID addresses once."""
+    """Move old taskless receipts while Start or Revive owns the dispatch lock."""
+    _move_taskless_legacy_receipts(_plan_taskless_legacy_receipt_moves(config, selection))
+
+
+def _plan_taskless_legacy_receipt_moves(
+    config: McpRuntimeConfig, selection: RoleSelection
+) -> list[_TasklessLegacyReceiptMove]:
+    """Discover legacy receipt sources without writing or checking their destinations."""
     if selection.role != "architect":
-        return
+        return []
     legacy = _legacy_receipt_path(config, selection)
-    sources = _legacy_taskless_receipt_sources(legacy)
     expected_selection = selection_binding(selection)
-    pending: list[tuple[Path, Path]] = []
-    seen_ids: set[str] = set()
-    migration = _TasklessLegacyMigration(
-        config=config,
-        selection=selection,
-        legacy=legacy,
-        expected_selection=expected_selection,
-        seen_ids=seen_ids,
-    )
-    for source in sources:
-        target = _taskless_legacy_migration_target(migration, source)
-        if target is not None:
-            pending.append((source, target))
-    _move_taskless_legacy_receipts(pending)
+    moves = []
+    for source in _legacy_taskless_receipt_sources(legacy):
+        receipt = _read_receipt(source)
+        if receipt is None:
+            continue
+        if receipt.get("role") != selection.role or receipt.get("selection") != expected_selection:
+            if source == legacy:
+                raise HTTPException(
+                    status_code=409,
+                    detail="A legacy taskless receipt does not match this role selection.",
+                )
+            continue
+        request_id = _legacy_taskless_receipt_request_id(receipt)
+        moves.append(
+            _TasklessLegacyReceiptMove(
+                source, _receipt_path(config, selection, request_id), receipt
+            )
+        )
+    return moves
 
 
 def _legacy_taskless_receipt_sources(legacy: Path) -> list[Path]:
@@ -516,41 +525,20 @@ def _legacy_taskless_receipt_sources(legacy: Path) -> list[Path]:
     return sources
 
 
-def _taskless_legacy_migration_target(
-    migration: _TasklessLegacyMigration,
-    source: Path,
-) -> Path | None:
-    receipt = _read_receipt(source)
-    if receipt is None:
-        return None
-    selection_matches = (
-        receipt.get("role") == migration.selection.role
-        and receipt.get("selection") == migration.expected_selection
-    )
-    if source != migration.legacy and not selection_matches:
-        return None
-    if not selection_matches:
-        raise HTTPException(
-            status_code=409, detail="A legacy taskless receipt does not match this role selection."
-        )
+def _legacy_taskless_receipt_request_id(receipt: dict[str, Any]) -> uuid.UUID:
     try:
-        request_id = uuid.UUID(str(receipt.get("requestId")))
+        return uuid.UUID(str(receipt.get("requestId")))
     except (ValueError, TypeError, AttributeError) as error:
         raise HTTPException(
             status_code=409, detail="A legacy taskless receipt has no valid requestId."
         ) from error
-    request_key = str(request_id)
-    if request_key in migration.seen_ids:
-        raise HTTPException(
-            status_code=409,
-            detail="Legacy taskless receipts collide on requestId; no records were moved.",
-        )
-    migration.seen_ids.add(request_key)
-    target = _receipt_path(migration.config, migration.selection, request_id)
+
+
+def _require_taskless_migration_target_available(target: Path) -> None:
     try:
         target.lstat()
     except FileNotFoundError:
-        return target
+        return
     except OSError as error:
         raise HTTPException(
             status_code=409,
@@ -562,12 +550,22 @@ def _taskless_legacy_migration_target(
     )
 
 
-def _move_taskless_legacy_receipts(pending: list[tuple[Path, Path]]) -> None:
-    for source, target in pending:
-        target.parent.mkdir(parents=True, exist_ok=True)
+def _move_taskless_legacy_receipts(moves: list[_TasklessLegacyReceiptMove]) -> None:
+    """Validate all current destinations before linking or removing any source."""
+    targets: set[Path] = set()
+    for move in moves:
+        if move.target in targets:
+            raise HTTPException(
+                status_code=409,
+                detail="Legacy taskless receipts collide on requestId; no records were moved.",
+            )
+        targets.add(move.target)
+        _require_taskless_migration_target_available(move.target)
+    for move in moves:
+        move.target.parent.mkdir(parents=True, exist_ok=True)
         try:
-            os.link(source, target, follow_symlinks=False)
-            source.unlink()
+            os.link(move.source, move.target, follow_symlinks=False)
+            move.source.unlink()
         except FileExistsError as error:
             raise HTTPException(
                 status_code=409,
@@ -769,6 +767,9 @@ def _read_receipt(path: Path) -> dict[str, Any] | None:
         )
     try:
         receipt = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        # Start can archive the receipt between inspection and an unlocked snapshot read.
+        return None
     except (OSError, ValueError, RecursionError) as error:
         # Bytes that are not UTF-8 or not JSON, a number too long to convert (all ValueError),
         # and a nesting beyond the parser's depth are one answer: the record cannot be read.
