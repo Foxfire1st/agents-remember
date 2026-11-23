@@ -21,9 +21,12 @@ from pathlib import Path
 from agents_remember.kernel.git_command import git_environment, run_git
 from agents_remember.kernel.git_reference_files import packed_references
 from agents_remember.kernel.read_cancellation import raise_if_read_cancelled
+from agents_remember.kernel.request_memo import request_owner
 from agents_remember.kernel.witnessed_memo import WitnessedMemo
 
 type Identity = tuple[int, ...]
+type _Census = tuple[int, int, tuple[str, ...]]
+type _CensusMemo = WitnessedMemo[Path, tuple[object, ...], _Census]
 
 # A full object ID names exactly one loose file, ``<2 hex>/<rest>``; any other spelling is stat'ed
 # as given.
@@ -174,25 +177,30 @@ def count_objects(root: Path) -> tuple[int, int, tuple[str, ...]]:
     return count, in_pack, tuple(sorted(alternates))
 
 
-def _census(root: Path) -> tuple[int, int, tuple[str, ...]]:
+def _census(root: Path) -> _Census:
     """Loose and packed counts and the alternates in Git's order, from the gated census."""
 
+    memo = request_owner(_censuses, _new_census_memo)
+    if memo is None:
+        memo = _censuses
     before = _census_witness(root)
-    kept = _censuses.get(root, before) if before is not None else None
+    kept = memo.get(root, before) if before is not None else None
     if kept is not None:
         return kept[0]
     census = _count_objects(root)
     if before is not None and _census_witness(root) == before:
-        _censuses.put(root, before, census)
+        memo.put(root, before, census)
     return census
+
+
+def _new_census_memo() -> _CensusMemo:
+    return WitnessedMemo(1024)
 
 
 #: Git's last census per repository root (alternates in Git's order), with the store witness
 #: it was taken under. One entry per repository or worktree root the dashboard reads (a few
 #: dozen); an evicted root simply runs the census again.
-_censuses: WitnessedMemo[Path, tuple[object, ...], tuple[int, int, tuple[str, ...]]] = (
-    WitnessedMemo(1024)
-)
+_censuses = _new_census_memo()
 
 
 #: How many closure objects are observed between two looks at the read's cancellation (D585).

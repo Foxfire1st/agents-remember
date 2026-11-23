@@ -19,8 +19,9 @@ unreadable history listing -- each makes its basis stale with that reason, never
 A missing *history file* is the one measured absence: it holds no rows, so it answers ``()``, which
 is a stale row rather than an unread file.
 
-**Nothing here writes.** The reads are Git object reads (``cat-file``, ``rev-parse``, ``ls-tree`` and
-a blob diff) through the kernel's runner, which sets ``GIT_OPTIONAL_LOCKS=0``. In particular this
+**Nothing here writes to a repository or to coordination.** The reads are Git object reads
+(``cat-file``, ``rev-parse``, ``ls-tree`` and a blob diff) through the kernel's runner, which sets
+``GIT_OPTIONAL_LOCKS=0``. In particular this
 module does not build a knowledge index: an index is a cache written under the coordination root,
 and a staleness read may not write. A record is read as the file a claim's basis names, which is the
 stronger authority anyway.
@@ -43,6 +44,7 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from tempfile import TemporaryFile
 from typing import Any
 
 from agents_remember.application.knowledge_worklist.code import (
@@ -70,7 +72,7 @@ from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
     GitRunnerOptions,
     run_git,
-    run_git_bytes,
+    run_git_into,
 )
 from agents_remember.memory_quality.style.citations import extents, grammars
 from agents_remember.models.knowledge.review_evidence import (
@@ -163,7 +165,7 @@ class ExplainerTargetReads:
     ``supplemental`` is the target packet's own receipts, or ``None`` when the caller could not read
     that packet; ``task_root`` is the task whose requirements manifest registers packet versions.
     Both are read-only inputs. Every cache is in memory and never outlives the reader: a second call
-    answers the same bytes, and no file and no index is written between them.
+    answers the same bytes. The anonymous blob spool closes before the read returns.
     """
 
     binding: FrameBinding
@@ -359,12 +361,15 @@ class ExplainerTargetReads:
             return None
         key = (repository.as_posix(), target)
         if key not in self._blobs:
-            completed = run_git_bytes(
-                repository,
-                ["cat-file", "blob", target],
-                GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
-            )
-            self._blobs[key] = completed.stdout if completed.returncode == 0 else None
+            with TemporaryFile() as output:
+                completed = run_git_into(
+                    repository,
+                    ["cat-file", "blob", target],
+                    output,
+                    GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+                )
+                output.seek(0)
+                self._blobs[key] = output.read() if completed.returncode == 0 else None
         return self._blobs[key]
 
     def _blob_id(self, repository: Path, tree: str, path: str) -> str | None:

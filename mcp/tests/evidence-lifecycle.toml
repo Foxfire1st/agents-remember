@@ -464,6 +464,7 @@ consumers = [
   "mcp/tests/test_master_retirement_state_machine.py",
   "mcp/tests/test_mcp_build_staleness.py",
   "mcp/tests/test_mcp_dispatch_concurrency.py",
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
   "mcp/tests/test_mcp_stdio_transport.py",
   "mcp/tests/test_memory_attribution_producers.py",
   "mcp/tests/test_memory_backfill.py",
@@ -950,6 +951,7 @@ consumers = [
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_review_source_inventory_boundaries.py",
   "mcp/tests/test_review_subject_catalogue.py",
+  "mcp/tests/test_review_validation_reuse.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_reviewer_worklist_warm.py",
@@ -1232,6 +1234,7 @@ consumers = [
   "mcp/tests/test_master_retirement_state_machine.py",
   "mcp/tests/test_mcp_build_staleness.py",
   "mcp/tests/test_mcp_dispatch_concurrency.py",
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
   "mcp/tests/test_mcp_stdio_transport.py",
   "mcp/tests/test_memory_attribution_producers.py",
   "mcp/tests/test_memory_branch_authority.py",
@@ -2856,6 +2859,7 @@ consumers = [
   "mcp/tests/test_master_retirement_state_machine.py",
   "mcp/tests/test_mcp_build_staleness.py",
   "mcp/tests/test_mcp_dispatch_concurrency.py",
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
   "mcp/tests/test_mcp_stdio_transport.py",
   "mcp/tests/test_memory_attribution_producers.py",
   "mcp/tests/test_memory_backfill.py",
@@ -3600,6 +3604,7 @@ consumers = [
   "mcp/tests/test_review_meaning_effects.py",
   "mcp/tests/test_review_overview_precompute.py",
   "mcp/tests/test_review_read_latency.py",
+  "mcp/tests/test_review_validation_reuse.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_reviewer_worklist_warm.py",
@@ -3730,6 +3735,7 @@ consumers = [
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_review_source_inventory_boundaries.py",
   "mcp/tests/test_review_subject_catalogue.py",
+  "mcp/tests/test_review_validation_reuse.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_reviewer_worklist_warm.py",
@@ -3908,6 +3914,78 @@ consumers = [
   "mcp/tests/test_terminal_notice_recovery.py",
   "mcp/tests/test_terminal_notice_subject.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
+]
+
+[[artifact]]
+path = "mcp/tests/mcp_memory_bounded_corpus.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "native-tool-server-memory-contract"
+category = "stress-durability"
+fidelity = "process-race"
+cadence = "scheduled-release"
+source_version_or_generator = "deterministic generator for canonical synthetic code, cards, and memory graph"
+introduced_by = "261112-BUG-L18"
+lifetime = "permanent"
+permanence_rationale = "The memory guard needs stable fixture pressure and native Git objects."
+replacement_contract = "contract:bounded-native-tool-server-memory"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
+]
+
+[[artifact]]
+path = "mcp/tests/mcp_memory_bounded_fixture.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "native-tool-server-memory-contract"
+category = "stress-durability"
+fidelity = "process-race"
+cadence = "scheduled-release"
+source_version_or_generator = "native disposable Git pair and enclosed MCP settings for the memory stress test"
+introduced_by = "261112-BUG-L18"
+lifetime = "permanent"
+permanence_rationale = "The stress test needs the product leaf, worklist, and capture routes."
+replacement_contract = "contract:bounded-native-tool-server-memory"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
+]
+
+[[artifact]]
+path = "mcp/tests/mcp_memory_bounded_receipts.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "native-tool-server-memory-contract"
+category = "stress-durability"
+fidelity = "process-race"
+cadence = "scheduled-release"
+source_version_or_generator = "matched native stdio replies, saved full results, and Linux memory limits"
+introduced_by = "261112-BUG-L18"
+lifetime = "permanent"
+permanence_rationale = "The numeric guard needs complete tool work and one measured server."
+replacement_contract = "contract:bounded-native-tool-server-memory"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
+]
+
+[[artifact]]
+path = "mcp/tests/mcp_memory_bounded_stdio_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "native-tool-server-memory-contract"
+category = "stress-durability"
+fidelity = "process-race"
+cadence = "scheduled-release"
+source_version_or_generator = "three fixed native workload cycles in one SDK stdio session"
+introduced_by = "261112-BUG-L18"
+lifetime = "permanent"
+permanence_rationale = "The regression needs repeated ordinary calls on a persistent server."
+replacement_contract = "contract:bounded-native-tool-server-memory"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
 ]
 
 [[artifact]]
@@ -4342,6 +4420,7 @@ consumers = [
   "mcp/tests/test_review_intent_summary.py",
   "mcp/tests/test_review_overview_precompute.py",
   "mcp/tests/test_review_read_latency.py",
+  "mcp/tests/test_review_validation_reuse.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_reviewer_worklist_warm.py",
@@ -4367,6 +4446,7 @@ consumers = [
   "mcp/tests/test_review_intent_summary.py",
   "mcp/tests/test_review_overview_precompute.py",
   "mcp/tests/test_review_read_latency.py",
+  "mcp/tests/test_review_validation_reuse.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_reviewer_worklist_warm.py",
@@ -4942,6 +5022,11 @@ consumers = [
 id = "ar-durable-store/1.0-process-race-evidence"
 owner = "mcp/src/agents_remember/controlplane/durable_store.py"
 evidence_node = "mcp/tests/test_provider_store_durability.py::ProviderStoreDurabilityTests::test_no_record_is_lost_when_an_append_races_a_compaction"
+
+[[contract]]
+id = "bounded-native-tool-server-memory"
+owner = "mcp/src/agents_remember/mcp/server.py"
+evidence_node = "mcp/tests/test_mcp_memory_bounded_stdio.py::test_native_stdio_memory_stays_bounded"
 
 [[contract]]
 id = "canvas-host-and-presenter-cases"

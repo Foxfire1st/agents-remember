@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agents_remember.models.tools.tool_answer_short_fields import (
+    TOOL_ANSWER_LIST_MAX,
     TOOL_ANSWER_OVERFLOW_MAX_TOKENS,
     ShortFormField,
     fit_declared_short_fields,
@@ -32,10 +33,6 @@ from agents_remember.models.tools.tool_answer_short_fields import (
 TOOL_ANSWER_MAX_TOKENS = 1500
 # Rule 4: no bound in the exception table is above this.
 TOOL_ANSWER_EXCEPTION_MAX_TOKENS = 4000
-# Rule 2: a list with more entries is cut; the answer keeps the count, the
-# first entries in the order the next step needs, and the location of the
-# whole list (the answer-level ``log`` names the detail file).
-TOOL_ANSWER_LIST_MAX = 20
 # Status-answer ruling: a status answer keeps the default bound of 1,500.
 # The five landed status answers whose full entry lists exceed it carry at
 # most this many entries per list instead -- smaller entries first, then
@@ -664,7 +661,7 @@ def _prior_dropped_fields(
     if "cut" in answer:
         # A late logging failure re-fits the declared fields from the whole
         # result, including those the previous pass counted as dropped.
-        dropped -= sum(field.root not in answer for field in declared_fields)
+        dropped -= sum(not field.present_in(answer) for field in declared_fields)
     return max(0, dropped)
 
 
@@ -695,10 +692,10 @@ def _fit_the_cut_hint(short: dict[str, Any], fitting: _CutFitting) -> tuple[int,
         fitting.error_cut,
     )
 
-    def measured(dropped_now: int = dropped) -> int:
+    def measured() -> int:
         form = {**short, "cut": hint}
-        if dropped_now:
-            form["droppedFields"] = dropped_now
+        if dropped:
+            form["droppedFields"] = dropped
         return count(form)
 
     while kept and measured() > TOOL_ANSWER_OVERFLOW_MAX_TOKENS:

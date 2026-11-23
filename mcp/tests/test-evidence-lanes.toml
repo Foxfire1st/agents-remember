@@ -810,6 +810,7 @@ provider-conformance = [
 ]
 
 stress-durability = [
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
 ]
 
 migration = [

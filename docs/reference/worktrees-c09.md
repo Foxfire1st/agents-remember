@@ -302,9 +302,14 @@ document that this master made stale is still stale, and with `knowledge-worklis
 
 A master's recorded landing is not refused for stale knowledge entries either. When the landing
 chain's own proof passes and the only findings are entries that a changed path left stale, the
-answer of `worktree_record_landing` carries `staleEntries`: the `count`, the entries' own
-sentences, the record of each entry and the one remedy. The worktree contract keeps them as the
-master's debt, and a cleanup that refuses because the integration is incomplete names
+whole answer of `worktree_record_landing` carries the stale-entry count, the findings' sentences,
+their record IDs and the remedy. A cut answer considers the landing state, the next step's
+sentence and tool, `staleEntries.count` and up to 20 IDs in `staleEntries.record` in that order,
+keeping each as it fits. If the IDs do not fit, the answer names `staleEntries.record` in
+`cut.omittedFields` when the omission fits. Otherwise, the omitted field contributes only to
+`droppedFields`. The named detail file keeps the complete stale-entry record. The worktree
+contract keeps the entries as the master's debt, and a cleanup
+that refuses because the integration is incomplete names
 `worktree_record_landing` as its next step. A leaf closeout and an ordinary landing still refuse
 such an entry; see
 [Knowledge System](knowledge-system.md#worklist-validator-and-gate).

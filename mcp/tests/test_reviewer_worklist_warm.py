@@ -18,6 +18,11 @@ import pytest
 from agents_remember.application.review_code_changes import tree_request
 from agents_remember.kernel import reviewer_worklist_process as owner
 from agents_remember.kernel.read_cancellation import ReadCancelled
+from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
+from agents_remember.memory.knowledge_index import MemoryTreeSnapshot
+from agents_remember.memory.knowledge_index import build as index_build
+from agents_remember.models.knowledge_files import canonical_text
+from agents_remember.models.knowledge_files.shapes import FileModel
 from agents_remember_test_support.testing.review_git_trees import CODE_FILE, CODE_V1, World
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, wait_until
 from reviewer_worklist_process_test_support import _wait_gone
@@ -143,6 +148,72 @@ child._run = observed
         assert snapshots[3] == [deadline, 0, deadline, 0, deadline, 0, deadline, 0, deadline]
         assert len(snapshots) == 4
     assert _wait_gone([pid], HANG_GUARD_SECONDS)
+
+
+def _history_snapshot(*lengths: int) -> MemoryTreeSnapshot:
+    path = "knowledge/history/260101-TRV-L2.json"
+    document = {
+        "schema": "ar-history/v1",
+        "leaf": "260101-TRV-L2",
+        "closed": True,
+        "rows": [
+            {
+                "id": "ROW-BA0001",
+                "subject": "onboarding:fixture.py",
+                "disposition": "no_impact",
+                "reason": "Keep the full author-provided marker text.",
+                "items": [],
+                "markers": [str(index) * length for index, length in enumerate(lengths, 1)],
+            }
+        ],
+    }
+    return MemoryTreeSnapshot(
+        key=str(lengths),
+        source="git",
+        location="reviewer-parse-test",
+        files={path: canonical_text(document).encode()},
+    )
+
+
+def test_document_parse_memo_evicts_by_retained_history_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert index_build.DOCUMENT_PARSES.capacity == 256 * 1024 * 1024
+    assert index_build.DOCUMENT_PARSES.max_entries == 65_536
+    memo: BoundedMemo[bytes, FileModel] = BoundedMemo.by_retained_bytes(20 * 1024, max_entries=4)
+    monkeypatch.setattr(index_build, "DOCUMENT_PARSES", memo)
+    small = _history_snapshot(8 * 1024)
+    large = _history_snapshot(13 * 1024)
+    too_large = _history_snapshot(11 * 1024, 12 * 1024)
+    path = next(iter(small.files))
+    with (
+        index_build.kept_document_parses(),
+        mock.patch.object(
+            index_build, "parse_document_text", wraps=index_build.parse_document_text
+        ) as parse,
+    ):
+        first = index_build.parse_tree(small)
+        small_weight = memo.weight
+        assert first.state == "complete" and small_weight > 8 * 1024
+        second = index_build.parse_tree(large)
+        assert second.state == "complete" and len(memo) == 1
+        large_weight = memo.weight
+        assert small_weight < large_weight <= memo.capacity
+        assert index_build.parse_tree(large).history_files[path] is second.history_files[path]
+        assert parse.call_count == 2
+
+        oversized = index_build.parse_tree(too_large)
+        assert oversized.state == "complete"
+        assert oversized.history_files[path].to_document() == json.loads(too_large.files[path])
+        assert (
+            index_build.parse_tree(too_large).history_files[path]
+            is not oversized.history_files[path]
+        )
+        assert parse.call_count == 4 and memo.weight == large_weight
+
+        again = index_build.parse_tree(small)
+        assert again.history_files[path] == first.history_files[path]
+        assert parse.call_count == 5 and memo.weight == small_weight
 
 
 def test_warm_child_fault_is_not_replayed_and_next_request_starts_clean(

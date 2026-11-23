@@ -70,10 +70,10 @@ Spans = tuple[tuple[int, int], ...]
 SymbolKey = tuple[str, str, str, str]
 """The repository, the complete blob id, the path and the name one symbol answer is a function of."""
 
-SYMBOL_SPANS: BoundedMemo[SymbolKey, Spans] = BoundedMemo(65_536)
-"""Each name's extents in one blob, as :func:`extents.qualified_spans` binds them (one answer per
-entry; well above the symbol anchors of several comparisons, so a review does not evict what the
-next comparison is about to reuse)."""
+SYMBOL_SPANS: BoundedMemo[SymbolKey, Spans] = BoundedMemo.by_retained_bytes(
+    32 * 1024 * 1024, max_entries=65_536
+)
+"""Each name's extents in one blob, as :func:`extents.qualified_spans` binds them."""
 
 
 class CodeObjectError(ValueError):

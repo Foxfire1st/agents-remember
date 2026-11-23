@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.canonical_json import sha256_digest
+from agents_remember.kernel.request_memo import request_owner
+from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.serving.changeset_generation import RepositoryLayout
 
 _FORMAT = "ar-review-closure-proof/v1"
@@ -41,6 +43,34 @@ class ProvenClosure:
     witnesses: tuple[str, ...]
     references: str
     layout: RepositoryLayout
+
+
+type _ClosureMemos = tuple[
+    BoundedMemo[tuple[Path, tuple[str, ...]], ProvenClosure], BoundedMemo[Path, ProvenClosure]
+]
+
+
+def _new_closure_memos() -> _ClosureMemos:
+    return BoundedMemo(64), BoundedMemo(16)
+
+
+RESIDENT_CLOSURES = _new_closure_memos()
+
+
+def closure_memos() -> _ClosureMemos:
+    """Return the exact and latest proof tables for this tool call or the process owner."""
+    return request_owner(RESIDENT_CLOSURES, _new_closure_memos) or RESIDENT_CLOSURES
+
+
+def remember_closure(
+    repository: Path, trees: tuple[str, ...], proof: ProvenClosure, store: ClosureProofStore | None
+) -> None:
+    """Keep an observed proof for the exact roots and for overlap with their successor."""
+    exact, latest = closure_memos()
+    exact.put((repository, trees), proof)
+    latest.put(repository, proof)
+    if store is not None:
+        store.save(repository, trees, proof)
 
 
 def witnesses_digest(witnesses: tuple[str, ...]) -> str:

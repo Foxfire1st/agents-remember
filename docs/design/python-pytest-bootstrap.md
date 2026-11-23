@@ -60,8 +60,11 @@ the repository's pre-commit hook on the tree it publishes, and no test.
 
 The certification run, which the command in
 [Certification](https://github.com/Foxfire1st/agents-remember/blob/main/CONTRIBUTING.md#certification)
-starts, runs pytest with `--certify -m ""` and measures branch coverage of the product code,
-including the Python child processes that the tests start. `--certify` loads the evidence
+starts, runs pytest with `--certify -m ""` and measures branch coverage of product code in
+pytest and in Python child processes that receive Coverage's startup configuration. The
+bounded-memory stdio stress test runs its warm-index Python child and measured Python server
+without child coverage. Coverage instrumentation would alter the memory readings the test
+checks. Release certification still selects the regression. `--certify` loads the evidence
 services of that run and refuses outside it. A pytest run on a contributor's machine is a
 development check and certifies nothing, whatever it reports.
 

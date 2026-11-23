@@ -31,6 +31,7 @@ from unittest.mock import patch
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.kernel import git_command
 from agents_remember.kernel.git_command import (
     GIT_REPOSITORY_SELECTOR_ENV,
     GitRunnerOptions,
@@ -130,31 +131,24 @@ class SharedBlobReadTests(unittest.TestCase):
                 run_git(first, ["rev-parse", f"HEAD:{name}"]).stdout.strip()
                 for name in ("a.txt", "b.txt")
             )
-            spawned = []
-            real = subprocess.run
-
-            def counting(argv: list[str], *args: object, **kwargs: object) -> object:
-                spawned.append(argv)
-                return real(argv, *args, **kwargs)  # type: ignore[call-overload]
-
-            with patch("agents_remember.kernel.git_command.subprocess.run", counting):
+            with patch.object(git_command, "run_git_into", wraps=git_command.run_git_into) as run:
                 read_git_blobs_bytes(first, [alpha])
                 read_git_blobs_bytes(first, [alpha])
-                assert len(spawned) == 2  # outside a block every read goes to Git
-                spawned.clear()
+                assert run.call_count == 2  # outside a block every read goes to Git
+                run.reset_mock()
                 with shared_blob_reads():
                     one = read_git_blobs_bytes(first, [alpha, beta])
                     again = read_git_blobs_bytes(first, [beta, alpha])
-                    assert len(spawned) == 1 and one == again
+                    assert run.call_count == 1 and one == again
                     assert list(again) == sorted([alpha, beta])
                     read_git_blobs_bytes(first, [alpha])
-                    assert len(spawned) == 1
+                    assert run.call_count == 1
                     # The same blob ID is not the same object in a repository that lacks it.
                     with self.assertRaises(GitPreparationError):
                         read_git_blobs_bytes(second, [alpha])
-                spawned.clear()
+                run.reset_mock()
                 read_git_blobs_bytes(first, [alpha])
-                assert len(spawned) == 1  # the block's answers did not outlive it
+                assert run.call_count == 1  # the block's answers did not outlive it
 
 
 def _admitted(repo: Path) -> GitMutationSnapshot:
