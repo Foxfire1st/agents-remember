@@ -11,6 +11,9 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -19,7 +22,6 @@ from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.observer.host_activity import (
     HOST_ACTIVITY_FILE,
-    PublishedAgentActivity,
     read_host_activity_publication,
 )
 
@@ -119,21 +121,73 @@ def read_role_agents(home: Path) -> dict[str, dict[str, str]]:
     return facts
 
 
-def _registration_survives_end(
-    record: dict[str, str], boot_id: str, end: PublishedAgentActivity
-) -> bool:
+def _registration_time(record: Mapping[str, str]) -> datetime | None:
     try:
         boundary = json.loads(record.get("registration", "null"))
-        if not isinstance(boundary, list) or len(boundary) != 2 or boundary[0] != boot_id:
-            return False
+        if not isinstance(boundary, list) or len(boundary) != 2:
+            return None
         registered_at = datetime.fromisoformat(boundary[1])
     except (TypeError, ValueError):
+        return None
+    return registered_at if registered_at.tzinfo is not None else None
+
+
+def _archive_follows_registration(record: Mapping[str, str], archived_at: datetime | None) -> bool:
+    if archived_at is None:
         return False
-    # A boot's initial listing has no close time: it describes the session that
-    # existed before this registration. Later native end events carry their time.
-    return registered_at.tzinfo is not None and (
-        end.eventAt is None or end.eventAt <= registered_at
-    )
+    registered_at = _registration_time(record)
+    return registered_at is None or archived_at > registered_at
+
+
+def _registered_role_agent(
+    record: Mapping[str, str], boot_id: str | None, registered_at: datetime
+) -> dict[str, str]:
+    return {**record, "registration": json.dumps([boot_id, registered_at.isoformat()])}
+
+
+def _write_role_agents(
+    path: Path, agents: dict[str, dict[str, str]], updated: dict[str, dict[str, str]]
+) -> bool:
+    if updated == agents:
+        return False
+    atomic_write_text(path, json.dumps({"agents": updated}, indent=2) + "\n")
+    return True
+
+
+@dataclass(frozen=True)
+class RoleAgentReconciliation:
+    """Host facts qualified by the caller against the registry before its reads."""
+
+    baseline: Mapping[str, Mapping[str, str]]
+    recovered: Mapping[str, Mapping[str, str]]
+    absent: AbstractSet[str]
+    archived: Mapping[str, datetime]
+    observed_at: datetime
+
+
+def reconcile_role_agents(home: Path, reconciliation: RoleAgentReconciliation) -> bool:
+    """Apply one host inventory without overwriting registrations made during the reads."""
+    path = role_agents_path(home)
+    try:
+        with exclusive_file_lock(path, "Paseo role-agent facts"):
+            agents = read_role_agents(home)
+            updated = dict(agents)
+            for agent_id, record in agents.items():
+                if record == reconciliation.baseline.get(agent_id) and (
+                    agent_id in reconciliation.absent
+                    or _archive_follows_registration(record, reconciliation.archived.get(agent_id))
+                ):
+                    del updated[agent_id]
+            for agent_id, facts in reconciliation.recovered.items():
+                if agent_id not in reconciliation.baseline and agent_id not in agents:
+                    # A recovery restores the identity seen during the inventory. An archive
+                    # may have happened since, so the later file write must not supersede it.
+                    updated[agent_id] = _registered_role_agent(
+                        facts, None, reconciliation.observed_at
+                    )
+            return _write_role_agents(path, agents, updated)
+    except OSError:
+        return False
 
 
 def publish_role_agent(home: Path, agent_id: str, record: dict[str, str]) -> bool:
@@ -147,27 +201,24 @@ def publish_role_agent(home: Path, agent_id: str, record: dict[str, str]) -> boo
         with exclusive_file_lock(path, "Paseo role-agent facts"):
             agents = read_role_agents(home)
             publication = read_host_activity_publication(path.with_name(HOST_ACTIVITY_FILE))
-            merged = dict(agents)
-            if publication is not None:
-                merged = {
-                    key: value
-                    for key, value in agents.items()
-                    if key not in publication.agents
-                    or publication.agents[key].state != "ended"
-                    or _registration_survives_end(
-                        value, publication.bootId, publication.agents[key]
-                    )
+            archives = (
+                {
+                    key: activity.archivedAt
+                    for key, activity in publication.agents.items()
+                    if activity.state == "ended"
                 }
-            registered = dict(record)
-            if publication is not None:
-                registered["registration"] = json.dumps(
-                    [publication.bootId, datetime.now(UTC).isoformat()]
-                )
-            merged[agent_id] = registered
-            if merged == agents:
-                return False
-            atomic_write_text(path, json.dumps({"agents": merged}, indent=2) + "\n")
-            return True
+                if publication is not None
+                else {}
+            )
+            updated = {
+                key: value
+                for key, value in agents.items()
+                if not _archive_follows_registration(value, archives.get(key))
+            }
+            updated[agent_id] = _registered_role_agent(
+                record, publication.bootId if publication else None, datetime.now(UTC)
+            )
+            return _write_role_agents(path, agents, updated)
     except OSError:
         return False
 

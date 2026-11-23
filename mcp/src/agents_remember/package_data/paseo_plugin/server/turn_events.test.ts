@@ -320,3 +320,111 @@ test("a refetch that throws gives an unreadable last line, not an empty one", as
   assert.doesNotMatch(seat[0].text, /you last said: no text/);
   assert.deepEqual(kinds, ["seat-message"]);
 });
+
+interface ParentLineScenario {
+  readonly closed: "parent" | "seat";
+  readonly held?: boolean;
+  readonly archived?: "event" | "listing";
+  readonly recipient: "parent" | "alternate";
+}
+
+async function assertParentLine(scenario: ParentLineScenario, reopenedRegistry?: Uint8Array): Promise<void> {
+  const home = mkdtempSync(join(tmpdir(), "ar-parent-close-"));
+  const previous = process.env.PASEO_HOME;
+  process.env.PASEO_HOME = home;
+  mkdirSync(join(home, "agents-remember"));
+  writeFileSync(join(home, "agents-remember", "role-agents.json"), reopenedRegistry ?? JSON.stringify({
+    agents: { seat: facts, parent, alternate: { ...parent, reportPath: "/alternate.md" } },
+  }));
+  const handlers = new Map<string, (event: unknown, context: unknown) => Promise<void>>();
+  const server = { addHook(name: string, handler: (event: unknown, context: unknown) => Promise<void>) {
+    handlers.set(name, handler);
+    return () => {};
+  } } as unknown as Pick<PluginLifecycleRegistration, "addHook">;
+  const sent: { id: string; text: string }[] = [];
+  let closed: string | undefined;
+  let pendingParentPermission = false;
+  const context = { paseo: { agents: {
+    ref: (id: string) => ({
+      async send(text: string) { sent.push({ id, text }); },
+      timeline: { async refetch() { return { entries: [] }; } },
+    }),
+    list: async () => ({
+      entries: ["seat", "parent", "alternate"].map((id) => ({
+        agent: {
+          id, labels: {}, activeTurn: null,
+          pendingPermissions: id === "parent" && pendingParentPermission ? [{ id: "permission" }] : [],
+          status: id === closed ? "closed" : "idle",
+          archivedAt: id === closed && scenario.archived ? "2026-11-23T12:00:00Z" : null,
+        },
+      })),
+      pageInfo: { hasMore: false, nextCursor: null },
+    }),
+  } } };
+  const cleanup = registerParentWakeEvents(server, { home });
+  const emit = async (hook: string, id: string): Promise<void> => {
+    await handlers.get(hook)!({
+      agent: { id, parentAgentId: id === "seat" ? "parent" : null },
+      turnId: null,
+      outcome: { kind: "canceled", reason: "fixture" },
+    }, context);
+    await settle();
+  };
+  const close = async (): Promise<void> => {
+    closed = scenario.closed;
+    if (closed === "parent") pendingParentPermission = false;
+    if (scenario.archived === "event") await emit("agent.archive.after", closed);
+    if (scenario.archived !== "listing") await emit("agent.close.after", closed);
+  };
+  try {
+    if (reopenedRegistry !== undefined) {
+      // The close and later registration that produced these bytes already ran.
+      await emit("agent.turn.before", "seat");
+      await emit("agent.turn.after", "seat");
+    } else if (scenario.held) {
+      pendingParentPermission = true;
+      await emit("agent.permission.before", "parent");
+      await emit("agent.turn.after", "seat");
+      assert.deepEqual(sent, [], "the parent's pending permission holds the line");
+      await close();
+      assert.deepEqual(sent, [], "the close hook sends nothing");
+      if (closed === "parent") {
+        // A close clears the parent's permission without a resolution hook.
+        // A subsequent turn end elsewhere is an ordinary held-line flush.
+        await emit("agent.turn.before", "alternate");
+        await emit("agent.turn.after", "alternate");
+      } else {
+        pendingParentPermission = false;
+        await emit("agent.permission.after", "parent");
+      }
+    } else {
+      await close();
+      await emit("agent.turn.after", "seat");
+    }
+    assert.deepEqual(sent.map(({ id }) => id), [scenario.recipient]);
+    assert.match(sent[0].text, /turn ended/);
+  } finally {
+    cleanup();
+    if (previous === undefined) delete process.env.PASEO_HOME;
+    else process.env.PASEO_HOME = previous;
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+test("closing a seat preserves the parent lines owed to it and about it", async (t) => {
+  const cases: readonly (ParentLineScenario & { readonly name: string })[] = [
+    { name: "new line to a closed parent", closed: "parent", recipient: "parent" },
+    { name: "held line to a parent that closes", closed: "parent", held: true, recipient: "parent" },
+    { name: "held line about a seat that closes", closed: "seat", held: true, recipient: "parent" },
+    { name: "new line to an archived parent", closed: "parent", archived: "event", recipient: "alternate" },
+    { name: "archive learned from a host listing", closed: "parent", archived: "listing", recipient: "alternate" },
+  ];
+  for (const scenario of cases) await t.test(scenario.name, () => assertParentLine(scenario));
+});
+
+const reopenedRegistry = process.env.AR_TEST_REOPENED_ROLE_REGISTRY;
+if (reopenedRegistry !== undefined) {
+  test("a reopened child from the product registry sends its parent line", async () => {
+    await assertParentLine({ closed: "seat", recipient: "parent" }, readFileSync(reopenedRegistry));
+  });
+}

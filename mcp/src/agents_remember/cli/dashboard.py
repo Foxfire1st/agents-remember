@@ -33,11 +33,11 @@ from agents_remember.cli.dashboard_daemon import run_daemon_command
 from agents_remember.cli.dashboard_review_summary import review_intent_summary_port
 from agents_remember.cli.developer_messages import register_developer_chat_routes
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
-from agents_remember.cli.paseo_bridge import bridge_call
 from agents_remember.cli.paseo_catalog import launcher_catalog
 from agents_remember.cli.paseo_explainer_host import PaseoExplainerHost
 from agents_remember.cli.role_launch_archive import LeafAgentArchive
 from agents_remember.cli.role_launch_routes import register_role_launch_routes
+from agents_remember.cli.role_registry_recovery import RoleRegistryActivityReader
 from agents_remember.controlplane.durable_store import declare_process_role
 from agents_remember.kernel.primitives.runtime_config import (
     ConfigError,
@@ -396,7 +396,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         explainer_preparation=comparisons.prepare,
         explainer_contract_for=partial(_master_contract, config),
         explainer_stale_answers=recorded_answers.stale,
-        host_activity_reconcile=lambda runtime: bridge_call(runtime, "host-activity-snapshot", {}),
+        host_activity_reconcile=RoleRegistryActivityReader(),
         usage_read=read_usage_for_agents,
         review_memory_root=partial(_review_memory_root, config),
         knowledge_review=review_port,

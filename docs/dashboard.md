@@ -326,9 +326,9 @@ role agents.
 | --- | --- |
 | "planned" | The task document says the task is planned. |
 | "started" | The task is started. The row shows this word alone while the dashboard does not know the activity of the host. |
-| "works" | The task is started and one of its role agents is in a turn, waits for a permission answer, or has a running [helper](concepts.md#helper) and has not ended. |
-| "waiting" | The task is started, none of its agents is in such a state, and an agent declared what it waits for: it ended its turn with a line that begins `WAITING FOR SUBAGENTS:` (its helpers) or `WAITING FOR BACKGROUND:` (a process it started). The word reads "waiting for subagents", "waiting for background" or both. |
-| "paused" | The task is started, none of its agents is in such a state and none declared a wait. |
+| "works" | The task is started and one of its role agents is in a turn, waits for a permission answer, or has an open session with a running [helper](concepts.md#helper). |
+| "waiting" | The task is started, none of its role agents is working, and at least one has an open session with a declared wait and an armed check. The wait counts until one minute after the check is due. An agent declares a wait by ending its turn with a line beginning `WAITING FOR SUBAGENTS:` (its helpers) or `WAITING FOR BACKGROUND:` (a process it started). The word reads "waiting for subagents", "waiting for background" or both. |
+| "paused" | The task is started, the dashboard knows the activity of the host, and none of its role agents is working or waiting. |
 | "rate limited: <time left>" | A paused task whose agent reached the usage limit of its [model provider](concepts.md#model-provider). The time counts down. |
 | "completed" | The task document says the task is completed. |
 | "aborted" | The task document says the task is abandoned. |

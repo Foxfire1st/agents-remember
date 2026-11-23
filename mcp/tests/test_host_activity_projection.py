@@ -7,10 +7,11 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
-from agents_remember.cli import dashboard
+from agents_remember.cli import dashboard, role_registry_recovery
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving import change_watcher as watcher
 from agents_remember.serving.change_watcher import ChangePacer
 from agents_remember.serving.paseo.paseo_plugin_files import publish_role_agent
@@ -50,16 +51,24 @@ def test_supervisor_lease_heartbeat_is_not_a_host_activity_input(
 
 
 def test_dashboard_composition_binds_the_existing_bridge(tmp_path: Path) -> None:
-    config = runtime_config(tmp_path, tmp_path / "host")
+    home = tmp_path / "host"
+    config = runtime_config(tmp_path, home)
+    publish(home, "current")
+    snapshot = {"serverId": "host", "publication": {"bootId": "current"}}
     with patch.object(
-        dashboard, "bridge_call", return_value={"publication": {"bootId": "current"}}
+        role_registry_recovery,
+        "bridge_call",
+        side_effect=[{"serverId": "host", "complete": True, "agents": []}, snapshot],
     ) as bridge:
         collaborators = dashboard.serving_collaborators(config)
         assert collaborators.host_activity_reconcile is not None
-        assert collaborators.host_activity_reconcile(config) == {
-            "publication": {"bootId": "current"}
-        }
-        bridge.assert_called_once_with(config, "host-activity-snapshot", {})
+        answer = collaborators.host_activity_reconcile(config)
+        assert answer["publication"] == snapshot["publication"]
+        assert answer["registryRecovery"]["unjudgedAgents"] == 0
+        assert bridge.call_args_list == [
+            call(config, "role-registry", {}),
+            call(config, "host-activity-snapshot", {}),
+        ]
         assert collaborators.review_trees_shutdown is not None
         collaborators.review_trees_shutdown()
 
@@ -123,29 +132,23 @@ def test_a_new_host_boot_and_a_new_dashboard_each_require_the_whole_read(
 
 
 def test_an_older_reconciliation_answer_cannot_certify_a_boot(tmp_path: Path) -> None:
-    """L184-R1-F08: the reply's own reconciliation number decides, not the order it arrived in.
-
-    A plugin answer names the reconciliation it began. If a later boot's answer is an *earlier*
-    number, that reply lost the race: the file may already hold the newer publication, and the
-    answer must not certify it. Before this repair only the boot id was compared, so an old-first
-    reply consumed the newer answer and the activity was served from a list that never answered it.
-    """
-
     home = tmp_path / "host"
     config = runtime_config(tmp_path, home)
     publish(home, "boot-a")
-    answers = [
-        {"publication": {"bootId": "boot-a", "reconcile": 5}},
-        {"publication": {"bootId": "boot-b", "reconcile": 4}},
-    ]
     intake = host_activity.HostActivityInput(supervisor_armed=lambda: True)
-    with patch.object(intake, "_reconcile", side_effect=answers) as bridge:
+
+    def late_reply(_config: McpRuntimeConfig) -> dict[str, object]:
+        # The next read sees a fresh generation in this boot before the older request answers.
+        publish(home, "boot-a", known={"state": "idle"})
+        with patch.object(
+            intake, "_reconcile", return_value={"publication": {"bootId": "boot-a", "reconcile": 5}}
+        ):
+            assert intake.read(config).known
+        return {"publication": {"bootId": "boot-a", "reconcile": 4}}
+
+    with patch.object(intake, "_reconcile", side_effect=late_reply):
         assert intake.read(config).known
-        assert intake._reconciled_reconcile == 5
-        publish(home, "boot-b")
-        assert not intake.read(config).known
-        assert bridge.call_count == 2
-        assert intake._reconciled_boot is None
+    assert intake._reconciled_reply == ("boot-a", 5)
 
 
 def test_idle_heartbeats_do_not_read_activity_or_launch_another_snapshot(

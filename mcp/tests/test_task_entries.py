@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from agents_remember.observer.host_activity import (
+    DeclaredWait,
     HostActivitySnapshot,
     PublishedAgentActivity,
     TaskAgentActivity,
@@ -531,6 +532,32 @@ def test_waiting_is_counted_on_its_own() -> None:
     entry = TaskEntry(**state.model_dump(), key="k", id="leaf-1", title="Leaf")
     counts = task_counts([entry])
     assert (counts.started, counts.waiting, counts.paused, counts.works) == (1, 1, 0, 0)
+
+
+def test_a_closed_seat_pauses_until_its_next_turn() -> None:
+    key = "repo/master/leaf.json"
+    closed = PublishedAgentActivity(
+        state="closed",
+        eventAt=NOW,
+        declaredWait=DeclaredWait(
+            waitsFor=("background",), since=NOW - timedelta(minutes=1), checkDueAt=NOW
+        ),
+        runningSubagents=1,
+        subagentsSince=NOW - timedelta(minutes=2),
+    )
+    paused = _state_of(TaskAgentActivity(key, closed, agent_id="seat-1"))
+    assert (paused.activity, paused.eventAt, paused.waitingSeats) == (
+        "paused",
+        NOW.isoformat(),
+        None,
+    )
+
+    next_turn = NOW + timedelta(minutes=1)
+    reopened = TaskAgentActivity(
+        key, PublishedAgentActivity(state="in-turn", eventAt=next_turn), agent_id="seat-1"
+    )
+    working = _state_of(reopened, now=next_turn)
+    assert (working.activity, working.eventAt) == ("works", next_turn.isoformat())
 
 
 def test_the_published_wait_is_validated_and_forbids_every_other_key() -> None:

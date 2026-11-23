@@ -7,13 +7,13 @@ import { readRoleAgents } from "./role_agents.ts";
 import type { SubagentTracker } from "./subagents.ts";
 import type { TurnEndedFacts } from "./turn_ended.ts";
 
-export type HostActivityState = "in-turn" | "permission" | "idle" | "ended";
+export type HostActivityState = "in-turn" | "permission" | "idle" | "closed" | "ended";
 
 /**
- * One published agent. `state` and `eventAt` keep their meaning — the agent's
- * turn — and neither the subagent fields nor `permissionPrompts` ever move
- * `eventAt` (MIK-R190 rule 2): `runningSubagents` is absent at 0 and
- * `subagentsSince` is the oldest running subagent's `createdAt`, absent at 0.
+ * One published agent. `state` and `eventAt` describe a turn or session transition.
+ * Neither subagents nor permission prompts move `eventAt`. When subagents are
+ * running, `runningSubagents` is their count and `subagentsSince` is the
+ * earliest `createdAt` among them.
  * `permissionPrompts` is the ids of the native prompts still unanswered — never
  * the prompt's arguments — absent when none are, and bounded by
  * PERMISSION_PROMPTS_LIMIT. An agent the host reports waiting on a prompt it did
@@ -21,13 +21,13 @@ export type HostActivityState = "in-turn" | "permission" | "idle" | "ended";
  * incomplete, so the publication itself is incomplete and the consumer retains
  * the last identity it read. `declaredWait` is the seat's open declared wait —
  * helpers, a background process or both — absent when none is open or the agent
- * ended; like the subagent fields it never moves `eventAt` or `state`, which stay
- * the host's. The product's model admits exactly these six keys and still forbids
- * every other.
+ * closed or ended. It never moves `eventAt` or `state`. Only an archive carries
+ * `archivedAt`, the host timestamp that identifies a real archive.
  */
 export interface PublishedAgentActivity {
   state: HostActivityState;
   eventAt?: string;
+  archivedAt?: string;
   runningSubagents?: number;
   subagentsSince?: string;
   permissionPrompts?: string[];
@@ -86,7 +86,8 @@ interface AgentFacts {
   identityIncomplete: boolean;
   /** Ids this boot saw resolved: an observation must not resurrect them. */
   resolved: Set<string>;
-  ended: boolean;
+  closed: boolean;
+  archivedAt?: string;
   eventAt?: string;
   turnStartedAt?: string;
   revision: number;
@@ -106,7 +107,8 @@ export function hostActivityPath(home: string): string {
 }
 
 function publicationState(facts: AgentFacts): HostActivityState {
-  if (facts.ended) return "ended";
+  if (facts.archivedAt !== undefined) return "ended";
+  if (facts.closed) return "closed";
   if (facts.permissions.size > 0 || facts.unnamed > 0) return "permission";
   return facts.turnActive ? "in-turn" : "idle";
 }
@@ -129,7 +131,7 @@ function emptyFacts(revision: number, eventAt?: string): AgentFacts {
     unnamed: 0,
     identityIncomplete: false,
     resolved: new Set<string>(),
-    ended: false,
+    closed: false,
     ...(eventAt ? { eventAt } : {}),
     revision,
   };
@@ -208,6 +210,10 @@ export class HostActivityPublisher {
       return;
     }
     const previous = this.agents.get(agentId);
+    // A late turn end or permission resolution cannot change the session transition.
+    if ((previous?.closed || previous?.archivedAt !== undefined) &&
+        event !== "agent.turn_started" && event !== "agent.created" &&
+        event !== "agent.archived" && event !== "agent.closed") return;
     const facts: AgentFacts = previous
       ? {
         ...previous,
@@ -236,7 +242,8 @@ export class HostActivityPublisher {
         facts.permissions.clear();
         facts.unnamed = 0;
         facts.identityIncomplete = false;
-        facts.ended = false;
+        facts.closed = false;
+        delete facts.archivedAt;
         // A new turn ends the prompts of the old one: a snapshot read before it
         // must not add them back.
         if (this.listingDepth > 0) this.clearedDuringListing.set(agentId, sequence);
@@ -272,7 +279,8 @@ export class HostActivityPublisher {
         facts.permissions.clear();
         facts.unnamed = 0;
         facts.identityIncomplete = false;
-        facts.ended = true;
+        facts.closed = true;
+        if (event === "agent.archived") facts.archivedAt = eventAt;
         if (this.listingDepth > 0) this.clearedDuringListing.set(agentId, sequence);
         break;
       case "agent.created":
@@ -280,7 +288,8 @@ export class HostActivityPublisher {
         facts.permissions.clear();
         facts.unnamed = 0;
         facts.identityIncomplete = false;
-        facts.ended = false;
+        facts.closed = false;
+        delete facts.archivedAt;
         if (this.listingDepth > 0) this.clearedDuringListing.set(agentId, sequence);
         break;
     }
@@ -500,17 +509,20 @@ export class HostActivityPublisher {
         continue;
       }
       const state = publicationState(facts);
-      const eventAt = state === "in-turn" || state === "permission" ? facts.turnStartedAt : facts.eventAt;
-      const counts = this.subagents?.counts(id);
+      const inactive = state === "closed" || state === "ended";
+      if (inactive) this.waits.delete(id);
+      const eventAt = state === "in-turn" || state === "permission" ? facts.turnStartedAt : facts.archivedAt ?? facts.eventAt;
+      const counts = inactive ? undefined : this.subagents?.counts(id);
       // Only the ids of unanswered native prompts, never their arguments. Sorted so a
       // publication does not depend on event order, and capped so it stays bounded;
       // `permissions.size` alone still decides the state. A prompt the host did not
       // name contributes no id: the publication is incomplete instead.
-      const prompts = [...facts.permissions].sort().slice(0, PERMISSION_PROMPTS_LIMIT);
-      const wait = state === "ended" ? undefined : this.waits.get(id);
+      const prompts = inactive ? [] : [...facts.permissions].sort().slice(0, PERMISSION_PROMPTS_LIMIT);
+      const wait = this.waits.get(id);
       published[id] = {
         state,
         ...(eventAt ? { eventAt } : {}),
+        ...(facts.archivedAt === undefined ? {} : { archivedAt: facts.archivedAt }),
         ...(prompts.length > 0 ? { permissionPrompts: prompts } : {}),
         ...(counts !== undefined && counts.count > 0 ? { runningSubagents: counts.count } : {}),
         ...(counts !== undefined && counts.count > 0 && counts.since !== undefined
@@ -533,21 +545,16 @@ export class HostActivityPublisher {
 }
 
 function snapshotFacts(agent: ActivityAgentSnapshot, revision: number): AgentFacts {
-  const ended = Boolean(agent.archivedAt) || agent.status === "closed";
-  // The host gives a turn's own start, and an archive's own time. It gives no idle
-  // transition time in its listing. Permission waits retain the active turn's start.
-  const eventAt = ended ? agent.archivedAt : agent.activeTurn?.startedAt;
-  const facts: AgentFacts = {
-    turnActive: Boolean(agent.activeTurn),
-    permissions: new Set<string>(),
-    unnamed: 0,
-    identityIncomplete: false,
-    resolved: new Set<string>(),
-    ended,
-    ...(agent.activeTurn?.startedAt ? { turnStartedAt: agent.activeTurn.startedAt } : {}),
-    ...(typeof eventAt === "string" ? { eventAt } : {}),
-    revision,
-  };
+  // A listing carries a turn's start and an archive's time. It carries no close or idle time.
+  const archivedAt = agent.archivedAt || undefined;
+  const closed = agent.status === "closed";
+  const turn = closed || archivedAt ? null : agent.activeTurn;
+  const facts = emptyFacts(revision, turn?.startedAt ?? undefined);
+  facts.closed = closed;
+  facts.turnActive = Boolean(turn);
+  if (archivedAt !== undefined) facts.archivedAt = archivedAt;
+  if (turn?.startedAt) facts.turnStartedAt = turn.startedAt;
+  if (closed || archivedAt) return facts;
   const pending: unknown = agent.pendingPermissions;
   if (!Array.isArray(pending)) {
     // The listing did not describe this agent's prompts, which proves nothing about them.

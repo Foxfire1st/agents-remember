@@ -54,3 +54,70 @@ async function hostStart(daemon) {
     return { startIdentity: null, startDetail: `host process-start identity unavailable: ${error.message ?? error}` }
   }
 }
+
+// History enumerates unarchived agents, including those with unavailable providers.
+// Exact UUID reads supply archive and absence independently of placement.
+export async function readRoleRegistry({ daemon, deadline }, { agentIds }) {
+  const result = agentIds === undefined
+    ? await readRoleHistory(daemon, deadline)
+    : await readExactRoleAgents(daemon, deadline, agentIds)
+  return { ...result, serverId: serverIdOf(daemon) }
+}
+
+async function readRoleHistory(daemon, deadline) {
+  const agents = []
+  const cursors = new Set()
+  let cursor = null
+  while (Date.now() < deadline) {
+    const reply = await daemon.fetchAgentHistory({
+      filter: { includeArchived: false, includeBackground: true },
+      page: { limit: LIVE_PAGE_LIMIT, ...(cursor ? { cursor } : {}) }
+    })
+    if (reply.error || !Array.isArray(reply.entries)) break
+    const rows = reply.entries.map(({ agent }) => registryAgent(agent))
+    if (rows.some((row) => row === null)) break
+    agents.push(...rows)
+    if (reply.pageInfo?.hasMore === false) return { agents, complete: true }
+    const next = nonEmpty(reply.pageInfo?.nextCursor)
+    if (reply.pageInfo?.hasMore !== true || next === null || cursors.has(next)) break
+    cursors.add(next)
+    cursor = next
+  }
+  return { agents, complete: false }
+}
+
+const FULL_AGENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+async function readExactRoleAgents(daemon, deadline, agentIds) {
+  const agents = []
+  const absent = []
+  let exactReads = 0
+  if (!Array.isArray(agentIds) || !agentIds.every((id) => typeof id === 'string' && FULL_AGENT_ID.test(id))) {
+    return { agents, absent, exactReads, complete: false }
+  }
+  for (const id of new Set(agentIds)) {
+    const timeout = deadline - Date.now()
+    if (timeout <= 0) return { agents, absent, exactReads, complete: false }
+    exactReads += 1
+    try {
+      const reply = await daemon.fetchAgent({ agentId: id, timeout })
+      if (reply === null) {
+        absent.push(id)
+        continue
+      }
+      const row = registryAgent(reply?.agent)
+      if (row?.id !== id) return { agents, absent, exactReads, complete: false }
+      agents.push(row)
+    } catch {
+      return { agents, absent, exactReads, complete: false }
+    }
+  }
+  return { agents, absent, exactReads, complete: true }
+}
+
+function registryAgent(agent) {
+  const id = nonEmpty(agent?.id)
+  const archivedAt = agent?.archivedAt ?? null
+  if (id === null || (archivedAt !== null && !nonEmpty(archivedAt))) return null
+  return { id, archivedAt, role: nonEmpty(agent.labels?.['ar.role']) }
+}

@@ -55,11 +55,11 @@ class WaitingSeat(BaseModel):
 class PublishedAgentActivity(BaseModel):
     """One agent as the plugin publishes it.
 
-    ``state`` and ``eventAt`` keep their meaning — the agent's turn. MIK-R190 rule 2
-    adds two optional subagent fields and still forbids every other: the count is
-    absent at 0, and ``subagentsSince`` is the oldest running subagent's start, so
-    an agent that works only by its subagents has an age of its own. A subagent
-    field never moves ``eventAt``.
+    A closed session can reopen on a later prompt. The archive time ``archivedAt``
+    identifies an archive even when a close follows it. ``eventAt`` dates the
+    current activity when known. The subagent count is absent at zero, and
+    ``subagentsSince`` dates the oldest running subagent's start, so an agent that
+    works only by its subagents has an age of its own.
 
     MIK-R200 rule 2 adds the one field a permission wait needs to be an occurrence: the
     plugin publishes the ids of the native prompts that are still unanswered, absent when none
@@ -72,14 +72,20 @@ class PublishedAgentActivity(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    state: Literal["in-turn", "permission", "idle", "ended"]
+    state: Literal["in-turn", "permission", "idle", "closed", "ended"]
     eventAt: datetime | None = None
+    archivedAt: datetime | None = None
     runningSubagents: int | None = Field(default=None, ge=0)
     subagentsSince: datetime | None = None
     permissionPrompts: tuple[str, ...] = ()
     declaredWait: DeclaredWait | None = None
 
-    @field_validator("eventAt", "subagentsSince")
+    @property
+    def has_open_session(self) -> bool:
+        """Whether this seat can have a running helper or an armed declared wait."""
+        return self.state not in {"closed", "ended"}
+
+    @field_validator("eventAt", "archivedAt", "subagentsSince")
     @classmethod
     def _aware_time(cls, value: datetime | None) -> datetime | None:
         if value is not None and value.tzinfo is None:

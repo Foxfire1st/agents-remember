@@ -30,31 +30,41 @@ def publish_role_agent_for_plugin(
         return False
     if runtime is None:
         return False
-    reference = (
-        request.task_document_ref or request.master_document_ref or request.sprint_document_ref
-    )
     try:
-        return publish_role_agent(
-            runtime.home,
-            agent_id,
-            {
-                "role": request.role,
-                "task": reference.key if reference is not None else "Projects",
-                "reportPath": report_path,
-            },
-        )
+        return publish_role_agent(runtime.home, agent_id, _role_agent_facts(request, report_path))
     except Exception:
         return False
 
 
-def publish_receipt_role_agent(config: McpRuntimeConfig, receipt: dict[str, Any]) -> bool:
-    selection = RoleSelection.model_validate(receipt["selection"])
+def _role_agent_facts(selection: RoleSelection, report_path: str) -> dict[str, str]:
+    reference = (
+        selection.task_document_ref
+        or selection.master_document_ref
+        or selection.sprint_document_ref
+    )
+    return {
+        "role": selection.role,
+        "task": reference.key if reference is not None else "Projects",
+        "reportPath": report_path,
+    }
+
+
+def receipt_role_agent(
+    receipt: dict[str, Any],
+) -> tuple[RoleSelection, str, str] | None:
+    """Extract the identity and report path used to publish a launch receipt."""
+    selection = RoleSelection.model_validate(receipt.get("selection"))
     report = receipt.get("report")
     path = report.get("path") if isinstance(report, dict) else None
     agent_id = receipt.get("agentId")
-    if not isinstance(agent_id, str) or not isinstance(path, str):
-        return False
-    return publish_role_agent_for_plugin(config, selection, agent_id, path)
+    if not isinstance(agent_id, str) or not isinstance(path, str) or not path:
+        return None
+    return selection, agent_id, path
+
+
+def publish_receipt_role_agent(config: McpRuntimeConfig, receipt: dict[str, Any]) -> bool:
+    identity = receipt_role_agent(receipt)
+    return identity is not None and publish_role_agent_for_plugin(config, *identity)
 
 
 def resume_role_agent(config: McpRuntimeConfig, receipt: dict[str, Any]) -> ResumeOutcome:

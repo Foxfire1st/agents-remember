@@ -42,8 +42,8 @@ def activity_directory(config: McpRuntimeConfig) -> Path | None:
     return runtime.home / AR_HOME_DIRECTORY if runtime is not None else None
 
 
-# The published states that mean no turn runs: the host writes one when a turn ends.
-_NO_TURN_STATES = frozenset({"idle", "ended"})
+# Held deliveries can recheck the recipient whenever its previous turn is no longer active.
+_NO_TURN_STATES = frozenset({"idle", "closed", "ended"})
 # How many agent stamps one caller keeps between looks; the memory of a reader, bounded.
 _TURN_END_SEEN_LIMIT = 4096
 
@@ -95,11 +95,10 @@ def agent_in_turn(config: McpRuntimeConfig, agent_id: str) -> bool:
 def turn_ended_agents(config: McpRuntimeConfig, seen: dict[str, str]) -> list[str]:
     """The agents whose turn the host's activity record reports ended since the last look.
 
-    This is the driver MIK-R171 rule 1 names: a state of ``idle`` or ``ended`` means no
-    turn runs, and its ``eventAt`` is when the turn ended. ``seen`` carries each agent's
-    stamp between looks, so one turn end is handed over once. The record is read as it
-    is, without the boot reconciliation the projection does: a delivery needs the latest
-    word only, and nothing here is sent or resumed.
+    An idle, closed or ended session lets delivery recheck the recipient. When the
+    publication supplies an ``eventAt``, ``seen`` carries that stamp between looks so
+    one transition is handed over once. This reader takes the latest publication as
+    it is, without the boot reconciliation required to project task activity.
     """
 
     directory = activity_directory(config)
@@ -124,7 +123,7 @@ def new_stamped_ends(config: McpRuntimeConfig, seen: dict[str, str]) -> list[str
     """MIK-R190 rule 7's trigger: the agents whose idle end this plugin boot has not read.
 
     A read of usage follows a **new, stamped** end only: the agent is in the role
-    record, its published state is ``idle`` (not ``ended``), and its ``eventAt`` is
+    record, its published state is ``idle``, and its ``eventAt`` is
     present and differs from the one last read for it. An agent handed over without
     a stamp — an idle agent after a plugin boot — triggers nothing, which keeps the
     tick's cost at zero after every reload. ``seen`` is this reader's own memory;
@@ -240,9 +239,8 @@ class HostActivityInput:
         self._started = False
         self._attempted_generation: tuple[int, int, int, int] | None = None
         self._reconciled_boot: str | None = None
-        # L184-R1-F08: the reconciliation this input last applied. An answer that began earlier
-        # than that one is an older reply arriving late, and it cannot certify a boot.
-        self._reconciled_reconcile: int | None = None
+        # Reconciliation numbers order replies within one plug-in boot.
+        self._reconciled_reply: tuple[str, int] | None = None
 
     def read(self, config: McpRuntimeConfig) -> HostActivitySnapshot:
         directory = activity_directory(config)
@@ -268,25 +266,24 @@ class HostActivityInput:
                 reply = self._reconcile(config)
                 publication = _read_publication(directory / HOST_ACTIVITY_FILE)
                 acknowledged = reply.get("publication")
+                reply_boot = acknowledged.get("bootId") if isinstance(acknowledged, dict) else None
                 answered = acknowledged.get("reconcile") if isinstance(acknowledged, dict) else None
-                # F08: the answer names the reconciliation it began. A number older than the one
-                # already applied is a reply that lost the race, whatever the file now says, so it
-                # does not certify this boot and the next read asks again.
+                last_reply = self._reconciled_reply
                 stale = (
                     isinstance(answered, int)
-                    and self._reconciled_reconcile is not None
-                    and answered < self._reconciled_reconcile
+                    and last_reply is not None
+                    and reply_boot == last_reply[0]
+                    and answered < last_reply[1]
                 )
                 if (
                     publication is not None
-                    and isinstance(acknowledged, dict)
-                    and acknowledged.get("bootId") == publication.bootId
+                    and reply_boot == publication.bootId
                     and publication.complete
                     and not stale
                 ):
                     self._reconciled_boot = publication.bootId
                     if isinstance(answered, int):
-                        self._reconciled_reconcile = answered
+                        self._reconciled_reply = (publication.bootId, answered)
                     self._attempted_generation = generation
             except RuntimeError as error:
                 logger.warning("Host activity is unknown: %s", error)
@@ -335,6 +332,6 @@ def running_subagents(config: McpRuntimeConfig, agent_id: str) -> int:
     if publication is None or not publication.complete:
         return 0
     activity = publication.agents.get(agent_id)
-    if activity is None or activity.state == "ended":
+    if activity is None or not activity.has_open_session:
         return 0
     return activity.runningSubagents or 0
