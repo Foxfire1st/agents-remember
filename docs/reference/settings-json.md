@@ -393,8 +393,8 @@ alone:
 
 Dictation and voice mode are switched off before the first start, so the host downloads no
 speech model. The host's own agent tools are switched off for every agent. Idle runtime cleanup is
-switched off: with it on, the host closes an agent that has been idle for 60 minutes, and Agents
-Remember reads a closed agent as ended.
+switched off to keep idle sessions open past 60 minutes. A session closed for another reason
+keeps its role record and can reopen for its next turn.
 
 `daemon.action` in the report is `started` (the host was not running), `restarted` (it ran
 another version, or a setting that applies only at start changed; `daemon.reasons` says which),

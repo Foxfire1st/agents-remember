@@ -64,10 +64,15 @@ background. The server reads the task documents, the memory repositories and the
 records of tool calls, and it serves the web page with its four tabs. The chat on the page is the
 host's own page in a frame.
 
-The dashboard changes state only when the user acts on it. For example, it starts a role agent
-from the role launcher, sends the tray to a chat, gives or revokes a direct-execution grant, and
-sends the user's requests to the explainer. It keeps its own state and its log under
-`<coordination-root>/logs/dashboard/`. [The dashboard](dashboard.md) describes the page.
+The user directs the dashboard's interactive commands. These include starting a role agent from
+the role launcher, sending the tray to a chat, giving or revoking a direct-execution grant, and
+sending a request to the explainer.
+
+When the dashboard starts or a later host activity publication calls for reconciliation, the
+server checks the role-agent registry automatically. It uses launch receipts to restore missing
+records for unarchived agents and removes eligible records for confirmed archives and absences.
+It keeps its own state and its log under `<coordination-root>/logs/dashboard/`.
+[The dashboard](dashboard.md) describes the page.
 
 ## The host
 

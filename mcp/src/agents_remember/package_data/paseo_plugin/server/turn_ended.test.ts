@@ -32,6 +32,7 @@ import {
   flushHeldLines,
   lastLineOfTurn,
   noteAgentArchived,
+  noteAgentClosed,
   notePermissionRequested,
   notePermissionResolved,
   noteTurnEnded,
@@ -1361,6 +1362,81 @@ test("each end of rule 3 sends nothing to the seat", async (t) => {
     assert.equal(seatMessages(sender.sent).length, 0, "the seat is not sent back");
     assert.equal(tracker.silentEnds.size, 0);
   });
+});
+
+test("closing a seat cancels its wake without restarting it", async () => {
+  const rows: LogRow[] = [];
+  const tracker = recordingTracker(rows);
+  const sender = makeSender();
+  const clock = fakeClock();
+  noteTurnStarted(SEAT_AGENT, tracker, clock.now);
+  await runSeat(tracker, sender, clock);
+  const wait = pendingSeatWake(tracker, "seat");
+  assert.ok(wait);
+
+  noteAgentClosed("seat", tracker, clock.now);
+  assert.equal(pendingSeatWake(tracker, "seat"), undefined);
+  await wait.done;
+  await clock.fire();
+  assert.deepEqual(sender.sent, []);
+  assert.equal(rows.filter((row) => row.kind === "wait-cancelled" && row.reason === "the seat was closed").length, 1);
+});
+
+test("a close during a turn-end read keeps its parent notification", async () => {
+  const tracker = recordingTracker([]);
+  const sender = makeSender();
+  const clock = fakeClock();
+  let finishRead!: (states: readonly HostAgentState[]) => void;
+  const read = new Promise<readonly HostAgentState[]>((resolve) => { finishRead = resolve; });
+  noteTurnStarted(SEAT_AGENT, tracker, clock.now);
+  const ended = runSeat(tracker, sender, clock, [], { readHost: () => read });
+
+  noteAgentClosed("seat", tracker, clock.now);
+  finishRead([hostState({ id: "seat", closed: true })]);
+  assert.equal((await ended).kind, "sent");
+  assert.deepEqual(sender.sent.map(({ agentId }) => agentId), ["parent"]);
+  assert.equal(pendingSeatWake(tracker, "seat"), undefined);
+});
+
+test("a declaration cannot arm its check after seat work stops during parent delivery", async (t) => {
+  for (const boundary of ["close", "unload"] as const) {
+    await t.test(boundary, async () => {
+      const tracker = recordingTracker([]);
+      const clock = fakeClock();
+      const sent: string[] = [];
+      let finishSend!: () => void;
+      const pending = new Promise<void>((resolve) => { finishSend = resolve; });
+      const sender: TurnEndedSender = {
+        async sendMessage(id) {
+          sent.push(id);
+          if (id === "parent") await pending;
+        },
+      };
+      const handoff = hermesRow("task_doc", { ok: true }, {
+        exactTitle: true, title: "mcp__agents_remember_task__task_doc",
+      });
+      noteTurnStarted(SEAT_AGENT, tracker, clock.now);
+      const ended = runSeat(tracker, sender, clock, [
+        handoff,
+        { type: "assistant_message", text: "WAITING FOR BACKGROUND: test lanes, pid 4242, ends about 09:20" },
+      ], { readHost: async () => null });
+
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.deepEqual(sent, ["parent"], "the parent delivery is already in flight");
+      assert.equal(tracker.declarations.has("seat"), true);
+      assert.equal(pendingSeatWake(tracker, "seat"), undefined);
+      if (boundary === "close") noteAgentClosed("seat", tracker, clock.now);
+      else cleanupSeatWaits(tracker, clock);
+      finishSend();
+      await ended;
+
+      assert.equal(tracker.declarations.has("seat"), false);
+      assert.equal(pendingSeatWake(tracker, "seat"), undefined);
+      assert.equal(clock.timers.length, 0, "the cleared declaration owns no timer");
+      await clock.fire();
+      assert.deepEqual(sent, ["parent"]);
+    });
+  }
 });
 
 test("a turn start inside the wait cancels the send-back and the end is not counted", async (t) => {
@@ -2728,14 +2804,14 @@ test("L184-R1-F09: a deferred resume keeps the host's send-time safety gates", a
     const reads = hostReads(
       [hostState({ id: "seat" })],
       [hostState({ id: "seat" })],
-      [hostState({ id: "seat", archived: true })],
+      [hostState({ id: "seat", closed: true })],
     );
     const armed = await armUnderLimit(reads.read);
     assert.equal(armed.tracker.resumes.size, 1, "the limit defers the send");
     await fireResumes(armed);
     assert.equal(armed.sender.sent.length, 0, "a host-known closed seat is never sent");
     assert.equal(
-      armed.rows.filter((row) => row.kind === "send-skipped" && row.reason === "archived").length,
+      armed.rows.filter((row) => row.kind === "send-skipped" && row.reason === "closed").length,
       1,
       "the refusal is a row",
     );

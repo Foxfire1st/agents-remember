@@ -99,7 +99,7 @@ def _recipient_by_id(config: McpRuntimeConfig, call: RoleMessageCall) -> _Recipi
     """The execution of this line whose receipt records exactly this agent id."""
 
     agent_id = call.agent_id or ""
-    if not _is_minted_id(agent_id):
+    if not is_minted_agent_id(agent_id):
         # The runtime resolves id prefixes and titles; only an id AR minted is passed to it.
         raise _not_found(
             f"{agent_id!r} is not an agent id: AR agent ids are UUIDs. A role name or a title is "
@@ -119,7 +119,8 @@ def _recipient_by_id(config: McpRuntimeConfig, call: RoleMessageCall) -> _Recipi
     return _Recipient(agent_id, found)
 
 
-def _is_minted_id(value: str) -> bool:
+def is_minted_agent_id(value: str) -> bool:
+    """Whether this is a full UUID in the form written to a launch receipt."""
     try:
         return str(uuid.UUID(value)) == value
     except ValueError:
