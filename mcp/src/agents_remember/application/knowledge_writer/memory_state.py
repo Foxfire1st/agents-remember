@@ -5,15 +5,12 @@ read once as bytes. The operation edits parsed copies of the JSON files it touch
 the disk until :meth:`MemoryState.write` is called with the validated result, so a refused operation
 leaves every file exactly as it was.
 
-The **base** is the memory worktree's ``HEAD`` commit: the memory line the leaf started from or last
-synced to. It answers the two questions only a base can answer: an existing record's revision before
-this leaf (a meaning change increments it once, MIK-R07 rule 2), and an entry's anchor before this
-leaf (a history row's ``before``). When ``HEAD`` is unconverted and the candidate is converted, the
-base is ``HEAD``'s conversion (MIK-R24 rule 7, :mod:`.base_side`), the one the worklist and the gate
-read. The exact K_B resolver of MIK-R07 rule 0 belongs to the gate (MIK-R08, MIK-R09); a memory root
-that is not a Git work tree has no base, and then every record and entry is new to this leaf. During
-a merge the produced tree is validated against both parents, ``HEAD`` and ``MERGE_HEAD``; revisions
-and ``before`` anchors still come from ``HEAD`` alone.
+The operation reads the memory worktree's ``HEAD`` for a record's previous revision and an entry's
+previous anchor (a history row's ``before``). With an unconverted ``HEAD`` and a converted candidate,
+the operation reads the conversion of ``HEAD`` (:mod:`.base_side`). During a merge it validates
+the produced tree against both parents. A record left unmerged uses the higher revision of its two
+merge stages. A memory root outside Git has no operation base. The worklist, gate and writer's
+card comparison take the leaf's recorded base from its contract.
 """
 
 from __future__ import annotations
@@ -26,7 +23,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from agents_remember.application.knowledge_writer.base_side import BaseCode, writer_bases
+from agents_remember.application.knowledge_writer.base_side import (
+    BaseCode,
+    recorded_card_base,
+    writer_bases,
+)
 from agents_remember.application.knowledge_writer.file_publication import publish_files
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
@@ -198,6 +199,7 @@ class MemoryState:
     validation_bases: tuple[KnowledgeTree, ...] = ()
     """The converted bases the produced tree is validated against: ``HEAD``, and ``MERGE_HEAD``
     during a merge (:attr:`.base_side.BaseSides.validation_bases`)."""
+    _base_code: BaseCode = field(default_factory=BaseCode)
     _base_records: dict[str, str] | None = None
     _base_anchors: dict[str, dict[str, Any]] | None = None
 
@@ -209,7 +211,8 @@ class MemoryState:
 
         tree = knowledge_tree_from_directory(root)
         files = dict(tree.files)
-        sides = writer_bases(root, tree, code or BaseCode())
+        base_code = code or BaseCode()
+        sides = writer_bases(root, tree, base_code)
         state = cls(
             root=root,
             files=files,
@@ -217,6 +220,7 @@ class MemoryState:
             records=_record_paths(files),
             base_problem=sides.problem,
             validation_bases=sides.validation_bases,
+            _base_code=base_code,
         )
         for path, document in _file_sidecars(files):
             state.sidecar_paths.append(path)
@@ -226,6 +230,13 @@ class MemoryState:
     @property
     def converted(self) -> bool:
         return KnowledgeTree(label="candidate", files=self.files).converted
+
+    def recorded_card_base_files(self, commit: str) -> Mapping[str, bytes] | None:
+        """Read the recorded leaf base in the format of the captured candidate."""
+
+        candidate = KnowledgeTree(label="candidate", files=self.files)
+        base = recorded_card_base(self.root, commit, candidate, self._base_code)
+        return None if base is None else base.files
 
     # -- documents ----------------------------------------------------------------------------
 

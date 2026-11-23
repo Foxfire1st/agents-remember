@@ -701,9 +701,10 @@ def test_a_task_context_review_lists_the_complete_source_inventory_with_no_knowl
     source_world: World,
 ) -> None:
     world = source_world
-    for root in (world.memory, world.memory_worktree):
-        git(root, "rm", "-q", "-r", "-f", "knowledge", "onboarding")
-        git(root, "commit", "-q", "-m", "unconverted memory")
+    git(world.memory, "rm", "-q", "-r", "knowledge", "onboarding")
+    world.memory_base = commit(world.memory, {})
+    git(world.memory_worktree, "reset", "--hard", world.memory_base)
+    world.contract()
     resolved = _public_resolution(world)
     assert resolved.trees is None
     assert {state for _, state, _ in resolved.knowledge_unavailable} == {"legacy-unavailable"}

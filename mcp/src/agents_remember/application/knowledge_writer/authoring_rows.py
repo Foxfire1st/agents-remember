@@ -10,9 +10,9 @@ for the type checker only).
 from __future__ import annotations
 
 import re
-import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, get_args
 
@@ -52,12 +52,7 @@ from agents_remember.application.knowledge_writer.report import (
     RecordOutcome,
     RowOutcome,
 )
-from agents_remember.kernel.git_command import GitPreparationError
 from agents_remember.memory.conversion.code_objects import CodeObjects
-from agents_remember.memory_quality.knowledge_validator.trees import (
-    KnowledgeTreeReadError,
-    knowledge_tree_from_git,
-)
 from agents_remember.models.knowledge.effect import EffectLabel
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.knowledge_files.history import (
@@ -125,10 +120,6 @@ def _first_error(error: ValidationError) -> str:
 _EVIDENCE_MARKER: Final = " Evidence ("
 
 
-class _LeafBaseUnreadable(ValueError):
-    """The leaf's paired base is named but its tree cannot be read."""
-
-
 def _carried_evidence_segments(reason: str) -> list[str]:
     """Previously appended foreign-evidence segments of a stored row reason (MIK-R53 rule 8).
 
@@ -171,7 +162,7 @@ class HistoryRowAuthoring:
         """The persisted worklist's onboarding items' counted change by subject (MIK-R53)."""
         coordination_root: Path | None
         memory_base: str | None
-        """The leaf's paired memory base commit: the gate's K_B for the card comparison."""
+        """The leaf's recorded memory base commit for card comparison."""
         handles: dict[str, str]
 
         def problem(self, where: str, message: str) -> None: ...
@@ -440,8 +431,8 @@ class HistoryRowAuthoring:
         if sources is None:
             return None
         markdown, sidecar = paths
-        if request.disposition == "updated" and not self._row_counted_change(
-            request.subject, markdown, sidecar, where
+        if request.disposition == "updated" and not self._card_counted_change(
+            request.subject, markdown, sidecar
         ):
             self.problem(
                 where,
@@ -491,60 +482,35 @@ class HistoryRowAuthoring:
             return None
         return (subject.removeprefix("onboarding:"),)
 
-    def _row_counted_change(self, subject: str, markdown: str, sidecar: str, where: str) -> bool:
-        """The card comparison, failing closed when the leaf's paired base cannot be read."""
-
-        try:
-            return self._card_counted_change(subject, markdown, sidecar)
-        except _LeafBaseUnreadable as error:
-            self.problem(where, str(error))
-            return False
-
     def _card_counted_change(self, subject: str, markdown: str, sidecar: str) -> bool:
         """Whether the card has a counted change from the leaf's base to this run's candidate.
 
-        With the leaf's paired base named, the current base-to-candidate comparison decides:
-        a persisted worklist flag is the gate's comparison at worklist time, and a card the
-        leaf restored or re-edited after that makes it stale, so the flag never overrides the
-        known base (MIK-R53 rule 2). Without the paired base the persisted flag decides when
-        present -- the worklist is computed against the paired base, so writer and gate agree
-        in preclosed and reopened leaves -- and only when neither is known is the operation's
-        own HEAD compared instead.
+        The recorded base gives a fresh comparison even after the leaf restores or re-edits
+        a card. When the recorded base is unavailable, use the persisted worklist flag for
+        this subject if present, then the operation's own base.
         """
 
-        if self.memory_base is None:
+        base_files = self._recorded_base_files
+        if base_files is None:
             counted = self.onboarding_counted.get(subject)
             if counted is not None:
                 return counted
+            base = self.state.base
+            base_files = base.files if base is not None else {}
         return counted_change(
-            self._counted_base_files(),
+            base_files,
             {path: self._produced_bytes(path) for path in (markdown, sidecar)},
             markdown,
             sidecar,
         )
 
-    def _counted_base_files(self) -> Mapping[str, bytes]:
-        """The card-comparison base: the leaf's paired base, else the operation's own base."""
+    @cached_property
+    def _recorded_base_files(self) -> Mapping[str, bytes] | None:
+        """Read the recorded base once for the operation's onboarding rows."""
 
         if self.memory_base is None:
-            base = self.state.base
-            return base.files if base is not None else {}
-        try:
-            tree = knowledge_tree_from_git(
-                self.state.root, self.memory_base, label="leaf paired base"
-            )
-        except (
-            KnowledgeTreeReadError,
-            GitPreparationError,
-            KeyError,
-            OSError,
-            subprocess.SubprocessError,
-        ) as error:
-            raise _LeafBaseUnreadable(
-                f"the leaf's paired memory base {self.memory_base[:12]} cannot be read, so an "
-                f"updated onboarding row cannot be judged: {error!r}"
-            ) from error
-        return tree.files
+            return None
+        return self.state.recorded_card_base_files(self.memory_base)
 
     def _produced_bytes(self, path: str) -> bytes | None:
         """The candidate bytes at ``path`` as this run produces them (``None`` when deleted)."""

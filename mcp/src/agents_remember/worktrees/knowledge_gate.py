@@ -69,6 +69,7 @@ from agents_remember.worktrees.knowledge_validation import (
 )
 from agents_remember.worktrees.modules.git import branch_commit, local_branch_ref
 from agents_remember.worktrees.services import (
+    CandidateTrees,
     DirectGateSource,
     DirectGateVerdict,
     KnowledgeGatePort,
@@ -208,6 +209,7 @@ def leaf_gate_refusal(
     code_tree: str,
     memory_tree: str,
     persist_worklist: bool = True,
+    memory_commit: str | None = None,
 ) -> str | None:
     """The closeout validator's gate over a leaf's exact candidate; ``None`` when it passes.
 
@@ -234,8 +236,7 @@ def leaf_gate_refusal(
         )
     return port.leaf_refusal(
         contract,
-        code_tree=code_tree,
-        memory_tree=memory_tree,
+        CandidateTrees(code=code_tree, memory=memory_tree, memory_commit=memory_commit),
         parent_memory_tip=tip,
         persist_worklist=persist_worklist,
     )

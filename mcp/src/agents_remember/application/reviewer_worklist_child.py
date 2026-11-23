@@ -63,7 +63,11 @@ def isolated_leaf_worklist(
 
     payload = json.loads(
         json.dumps(
-            {"contract": asdict(contract), "candidate": asdict(candidate), "base": asdict(base)},
+            {
+                "contract": asdict(contract),
+                "candidate": {"code": candidate.code, "memory": candidate.memory},
+                "base": asdict(base),
+            },
             default=_path,
         )
     )

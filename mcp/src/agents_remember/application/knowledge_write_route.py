@@ -29,8 +29,11 @@ from pathlib import Path
 
 from agents_remember.application.knowledge_worklist.leaf import (
     WORKLIST_FILE_NAME,
-    paired_memory_commit,
     read_leaf_worklist,
+)
+from agents_remember.application.knowledge_worklist.recorded_base import (
+    RecordedMemoryBaseError,
+    recorded_memory_base,
 )
 from agents_remember.application.knowledge_write_command import CommandRoute, mounted_route
 from agents_remember.application.knowledge_writer import (
@@ -246,19 +249,11 @@ class LeafQuestions:
 
 
 def _leaf_memory_base(contract: WorktreeContract) -> str | None:
-    """The leaf's paired memory base commit (the gate's K_B), or ``None`` when it cannot be
-    resolved: the card comparison then keeps the operation's own base (MIK-R53 rule 2)."""
+    """Establish the recorded base for card comparison, if it is readable and in leaf history."""
 
-    if contract.memory_worktree is None or not contract.memory_source_branch:
-        return None
     try:
-        return paired_memory_commit(
-            contract.memory_worktree,
-            contract.memory_source_branch,
-            contract.code_repo_path,
-            contract.code_base_commit,
-        )
-    except Exception:
+        return recorded_memory_base(contract)
+    except RecordedMemoryBaseError:
         return None
 
 

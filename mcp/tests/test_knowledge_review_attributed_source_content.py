@@ -177,6 +177,8 @@ def test_a_path_linked_only_in_another_comparison_is_refused_for_this_one(
     first = _listed_inventory(world)
     (world.memory / f"onboarding/{BEFORE_ONLY_PATH}.json").unlink()
     world.memory_base = commit(world.memory, {}, trailer=world.code_base)
+    git(world.memory_worktree, "merge", "-q", "--ff-only", world.memory_base)
+    world.contract()
     commit(world.code_worktree, {CODE_FILE: "# a later comparison\n"})
     current = _listed_inventory(world)
     assert current["after_code_tree_id"] != first["after_code_tree_id"]
@@ -309,12 +311,18 @@ def test_an_unreadable_snapshot_leaves_the_link_undetermined_rather_than_absent(
 
 
 def test_unconverted_knowledge_names_its_unavailability_without_canonical_initialization(
-    attributed_fixture: World,
+    tmp_path: Path,
 ) -> None:
-    world = attributed_fixture
-    for root in (world.memory, world.memory_worktree):
-        git(root, "rm", "-q", "-r", "-f", "knowledge", "onboarding")
-        git(root, "commit", "-q", "-m", "unconverted memory")
+    world = build_world(tmp_path / "legacy")
+    world.code_base = commit(world.code, {UNRELATED_PATH: CODE_V1})
+    git(world.code_worktree, "merge", "-q", "--ff-only", world.code_base)
+    (world.code_worktree / CODE_FILE).write_text(
+        CODE_V1.replace("return value", "return value + 0"), encoding="utf-8"
+    )
+    git(world.memory, "rm", "-q", "-r", "knowledge", "onboarding")
+    world.memory_base = commit(world.memory, {})
+    git(world.memory_worktree, "merge", "-q", "--ff-only", world.memory_base)
+    world.contract()
     inventory = _listed_inventory(world)
     body = _expand(world, UNRELATED_PATH, **_pair(inventory))
     detail = _refused(body, UNRELATED_PATH)

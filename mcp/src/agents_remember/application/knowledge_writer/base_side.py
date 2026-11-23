@@ -1,18 +1,16 @@
-"""The writer's base: ``HEAD``, or its conversion when the candidate is converted (MIK-R24 rule 7).
+"""The writer's operation bases and the recorded leaf base for card comparison.
 
 The writer compares the candidate (the memory working tree) with its base for three things: an
 existing record's revision before this operation, an entry's ``before`` anchor, and the validator's
 carried anchors and frozen history files. Its base is the memory worktree's ``HEAD``. When ``HEAD``
 is unconverted and the candidate is converted -- the converting leaf before its closeout commits the
-conversion, or a crossing sync whose own side is unconverted -- the base is ``HEAD``'s conversion,
-exactly as the worklist, the onboarding gate and the reviewer see it: the same
-:func:`~agents_remember.application.knowledge_worklist.base_cache.converted_base_files`, cached
-under the same key (memory commit, conversion-format version, paired code commit), so one base is
-converted once and every reader sees it.
+conversion, or a crossing sync whose own side is unconverted -- the operation uses
+``HEAD``'s conversion. The onboarding card comparison takes the recorded leaf base and uses
+the same conversion machinery. Each conversion is cached by memory commit, format version and
+paired code commit.
 
-A base without a ``Code-Commit`` trailer is converted at the code commit the request names (a
-leaf's code base B, exactly the gate's and the worklist's fallback, so the cache key is theirs), or
-at the code tree's ``HEAD`` when it names none.
+A base without a readable ``Code-Commit`` trailer is converted at the code commit the request
+names (B for a leaf), or at the code tree's ``HEAD`` when it names none.
 
 On a converted ``HEAD`` nothing changes: it is the base as it was. A conversion that cannot be built,
 or a ``HEAD`` whose tree Git cannot read, is a named problem; the writer then refuses rather than
@@ -47,7 +45,7 @@ from agents_remember.memory_quality.knowledge_validator.trees import (
     knowledge_tree_from_git,
 )
 
-__all__ = ["BaseCode", "BaseSides", "writer_bases"]
+__all__ = ["BaseCode", "BaseSides", "recorded_card_base", "writer_bases"]
 
 
 @dataclass(frozen=True)
@@ -143,6 +141,17 @@ def _side(
 
 
 _BASE_ERRORS = (ValueError, KeyError, OSError, subprocess.SubprocessError)
+
+
+def recorded_card_base(
+    root: Path, commit: str, candidate: KnowledgeTree, code: BaseCode
+) -> KnowledgeTree | None:
+    """Resolve the recorded side in the candidate's format for the onboarding card comparison."""
+
+    try:
+        return _side(root, "recorded leaf base", commit, candidate, code)
+    except _BASE_ERRORS:
+        return None
 
 
 def _head(root: Path, candidate: KnowledgeTree, code: BaseCode) -> BaseSides:

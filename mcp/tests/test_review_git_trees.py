@@ -582,10 +582,14 @@ def test_a_comparison_reopens_from_its_tree_ids_and_names_a_tree_git_can_no_long
 
 
 def test_an_unconverted_before_side_is_compared_as_its_conversion(world: World) -> None:
-    # The official line's base is unconverted (legacy onboarding only); the leaf is converted.
+    # The recorded base is unconverted and the leaf candidate has converted.
     legacy_code = commit(world.code, {"pkg/c.py": "C = 1\n"})
     git(world.memory, "rm", "-q", "-r", "knowledge")
     legacy_memory = commit(world.memory, {"onboarding/legacy.md": "# legacy\n"}, legacy_code)
+    world.memory_base = legacy_memory
+    git(world.memory_worktree, "merge", "-q", "--ff-only", "main")
+    git(world.memory_worktree, "rm", "-q", "onboarding/legacy.md")
+    commit(world.memory_worktree, converted_memory(world.code, legacy_code), trailer=legacy_code)
     world.code_base = legacy_code
     world.contract()
     world.edit()
@@ -682,10 +686,11 @@ def test_no_review_path_opens_a_database_other_than_the_derived_index(world: Wor
 
 
 def test_an_unconverted_leaf_keeps_source_and_names_knowledge_unavailable(world: World) -> None:
-    # Both lines are unconverted: only the source endpoints remain readable, and no dataset is opened.
-    for repository in (world.memory, world.memory_worktree):
-        git(repository, "rm", "-q", "-r", "knowledge")
-        git(repository, "commit", "-q", "-m", "unconverted")
+    # Both sides are unconverted, so the review opens only the source endpoints.
+    git(world.memory, "rm", "-q", "-r", "knowledge")
+    world.memory_base = commit(world.memory, {})
+    git(world.memory_worktree, "merge", "-q", "--ff-only", "main")
+    world.contract()
     world.edit()
     resolved = _resolve(world)
     assert resolved.trees is None
@@ -1127,7 +1132,6 @@ def test_an_unchanged_path_only_a_proof_names_opens_in_a_tree_review(world: Worl
     test_file = "tests/test_land.py"
     world.code_base = commit(world.code, {test_file: "def test_land():\n    assert True\n"})
     git(world.code_worktree, "merge", "-q", "--ff-only", "main")
-    world.memory_base = commit(world.memory, {}, trailer=world.code_base)
     world.contract()
     world.edit()
     tree = git(world.code, "rev-parse", f"{world.code_base}^{{tree}}")

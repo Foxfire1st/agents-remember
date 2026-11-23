@@ -4,7 +4,7 @@ Knowledge is text in Git (D18), so a review comparison is four trees -- code bas
 memory base K_B and memory candidate K_C -- and nothing is copied:
 
 * **Sides & Pinning (rule 1).** B is the contract's code base commit; C and K_C are captured from the
-  leaf worktrees; K_B is the paired memory commit (:func:`paired_memory_commit`, MIK-R08). Uncommitted
+  leaf worktrees; K_B is the contract's recorded memory base. Uncommitted
   candidates are pinned by ``refs/ar/review/<task-id>/<leaf-id>/<n>`` before publication.
 * **Converted base (rule 4).** When K_B is unconverted and K_C is converted, K_B is compared as its
   conversion (MIK-R24 rule 7, MIK-R40 rule 3) written as a Git tree.
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
@@ -32,7 +32,10 @@ from agents_remember.application.knowledge_worklist.base_cache import (
     converted_base_files,
     default_base_cache_directory,
 )
-from agents_remember.application.knowledge_worklist.leaf import paired_memory_commit
+from agents_remember.application.knowledge_worklist.recorded_base import (
+    RecordedMemoryBaseError,
+    recorded_memory_base,
+)
 from agents_remember.application.review_comparison_publication import (
     publication_refusal,
     publish_comparison_record,
@@ -78,6 +81,7 @@ from agents_remember.models.knowledge.review_trees import (
 )
 from agents_remember.models.knowledge_files.canonical import parse_json
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
+from agents_remember.worktrees.knowledge_validation import LayoutProbeError, has_layout_marker
 from agents_remember.worktrees.modules.capture_baseline import (
     begin_capture_baseline,
     capture_baseline_unchanged,
@@ -111,7 +115,6 @@ __all__ = [
     "live_review_trees",
     "memory_converted",
     "numbered_record",
-    "official_line_converted",
     "recheck_memory_candidate",
     "reopen_review_trees",
     "reopened_trees",
@@ -140,48 +143,19 @@ _PIN_ACTION: Final = (
 # -- applicability -------------------------------------------------------------------------------
 
 
-def official_line_converted(memory_repository: Path | None, official_line: str) -> bool | str:
-    """Whether the official memory line's tip holds the layout marker.
-
-    ``False`` only when the probe answers and the tip lacks the marker. A tip Git
-    cannot answer (rev-parse names nothing) is returned as its named error text,
-    never read as converted or unconverted memory: conversion does not repair an
-    unreadable object (MIK-R46 rule 1).
-    """
-
-    if memory_repository is None or not official_line:
-        return False
-    try:
-        resolved = _git(memory_repository, "rev-parse", "--verify", "--quiet", official_line)
-    except (OSError, RuntimeError) as error:
-        return (
-            f"the official memory line {official_line!r} cannot be probed ({error}), and an "
-            "unanswered probe is never read as converted or unconverted memory"
-        )
-    if resolved is None:
-        return (
-            f"the official memory line {official_line!r} cannot be read: rev-parse names "
-            "nothing in the memory repository, and an unanswered probe is never read as "
-            "converted or unconverted memory"
-        )
-    return _git(memory_repository, "cat-file", "-t", f"{resolved}:{LAYOUT_MARKER_PATH}") == ("blob")
-
-
-def memory_converted(contract: WorktreeContract) -> bool | str:
-    """Whether a leaf's review is a tree review: its memory worktree or its official line converted.
-
-    A leaf for which neither holds has unconverted memory. Its review compares no knowledge: it
-    reads the source identities of its code pair, and reports each knowledge side as
-    ``legacy-unavailable``, because the canonical datasets are retired. An official line
-    Git cannot answer is returned as its named error text, never collapsed to unconverted.
-    """
+def memory_converted(contract: WorktreeContract, *, memory_base: str | None = None) -> bool | str:
+    """Probe the memory worktree and recorded base for the layout marker, or name a read failure."""
 
     worktree = contract.memory_worktree
-    if worktree is not None and (worktree / LAYOUT_MARKER_PATH).is_file():
+    if worktree is None:
+        return False
+    if (worktree / LAYOUT_MARKER_PATH).is_file():
         return True
-    return official_line_converted(
-        contract.memory_repo_path or worktree, contract.memory_source_branch
-    )
+    try:
+        base = memory_base if memory_base is not None else recorded_memory_base(contract)
+        return has_layout_marker(contract.memory_repo_path or worktree, base)
+    except (RecordedMemoryBaseError, LayoutProbeError) as error:
+        return str(error)
 
 
 def review_task_id(task_root: Path) -> str:
@@ -207,29 +181,27 @@ def review_ref(task_id: str, leaf_id: str, number: int) -> str:
 def live_review_trees(
     coordination_root: Path, contract: WorktreeContract, code_candidate_tree: str
 ) -> ReviewTrees | ReviewRefusal | None:
-    """Capture, pin and record a live leaf's four trees; ``None`` when its memory is unconverted.
-
-    An official line Git cannot answer is a named refusal, never a silent ``None``.
-    """
+    """Capture, pin and record a live leaf's trees when either memory side is converted."""
 
     worktree = contract.memory_worktree
     memory_repository = contract.memory_repo_path or worktree
-    converted = memory_converted(contract)
-    if isinstance(converted, str):
-        return _unresolved("memory", converted)
-    if worktree is None or memory_repository is None or not converted:
+    if worktree is None or memory_repository is None:
         return None
     try:
-        drafted = _live_draft(
-            coordination_root,
-            contract,
-            memory_repository,
-            code_candidate_tree,
-            resolve_candidates=False,
+        memory_base = recorded_memory_base(contract)
+        converted = memory_converted(contract, memory_base=memory_base)
+        if isinstance(converted, str):
+            raise TreeSideUnreadable("memory base", converted)
+        if not converted:
+            return None
+        drafted = _capture_draft(
+            coordination_root, contract, memory_repository, code_candidate_tree, memory_base
         )
+    except RecordedMemoryBaseError as error:
+        return _unresolved("memory base", str(error))
     except TreeSideUnreadable as error:
         return _unresolved(error.side, error.detail)
-    recorded = _record(contract, drafted)
+    recorded = _record(contract, drafted, matches=ReviewTreeComparisonRecord.same_live_comparison)
     if isinstance(recorded, ReviewRefusal):
         return recorded
     record, path = recorded
@@ -280,8 +252,34 @@ def _live_draft(
     contract: WorktreeContract,
     memory_repository: Path,
     code_candidate_tree: str,
-    *,
-    resolve_candidates: bool = True,
+) -> ReviewTreeComparisonRecord:
+    """Draft the watcher's comparison with committed identities where the lines match."""
+
+    try:
+        memory_base = recorded_memory_base(contract)
+    except RecordedMemoryBaseError as error:
+        raise TreeSideUnreadable("memory base", str(error)) from error
+    draft = _capture_draft(
+        coordination_root, contract, memory_repository, code_candidate_tree, memory_base
+    )
+    return draft.model_copy(
+        update={
+            "code_candidate": _candidate_side(
+                contract.code_repo_path, contract.code_source_branch, draft.code_candidate.tree
+            ),
+            "memory_candidate": _candidate_side(
+                memory_repository, contract.memory_source_branch, draft.memory_candidate.tree
+            ),
+        }
+    )
+
+
+def _capture_draft(
+    coordination_root: Path,
+    contract: WorktreeContract,
+    memory_repository: Path,
+    code_candidate_tree: str,
+    memory_base: str,
 ) -> ReviewTreeComparisonRecord:
     code_repository = contract.code_repo_path
     # Enclosure contracts record the base as a full commit SHA, so the tree peel
@@ -291,15 +289,6 @@ def _live_draft(
     # the code base and the revision Git could not peel.
     base_commit = contract.code_base_commit
     base_tree = _require(code_repository, f"{base_commit}^{{tree}}", "code base")
-    try:
-        memory_base = paired_memory_commit(
-            memory_repository,
-            contract.memory_source_branch,
-            code_repository,
-            base_commit,
-        )
-    except Exception as error:  # the worklist's own pairing failure, named rather than guessed
-        raise TreeSideUnreadable("memory base", str(error)) from error
     memory_base_tree = _require(memory_repository, f"{memory_base}^{{tree}}", "memory base")
     assert contract.memory_worktree is not None
     candidate_tree = _capture(contract.memory_worktree, coordination_root)
@@ -320,16 +309,6 @@ def _live_draft(
             held=_latest_converted_base(contract.task_root, leaf_id),
         )
     )
-    code_candidate = (
-        _candidate_side(code_repository, contract.code_source_branch, code_candidate_tree)
-        if resolve_candidates
-        else ReviewTreeSide(repository=str(code_repository), tree=code_candidate_tree)
-    )
-    memory_candidate = (
-        _candidate_side(memory_repository, contract.memory_source_branch, candidate_tree)
-        if resolve_candidates
-        else ReviewTreeSide(repository=str(memory_repository), tree=candidate_tree)
-    )
     return ReviewTreeComparisonRecord(
         task_id=review_task_id(contract.task_root),
         leaf_id=leaf_id,
@@ -337,11 +316,11 @@ def _live_draft(
         code_base=ReviewTreeSide(
             repository=str(code_repository), tree=base_tree, commit=base_commit
         ),
-        code_candidate=code_candidate,
+        code_candidate=ReviewTreeSide(repository=str(code_repository), tree=code_candidate_tree),
         memory_base=ReviewTreeSide(
             repository=str(memory_repository), tree=memory_base_tree, commit=memory_base
         ),
-        memory_candidate=memory_candidate,
+        memory_candidate=ReviewTreeSide(repository=str(memory_repository), tree=candidate_tree),
         converted_base=converted,
         recorded_at=_now(),
     )
@@ -640,9 +619,14 @@ def _mktree(repository: Path, blobs: Mapping[str, str]) -> str:
 
 
 def _record(
-    contract: WorktreeContract, draft: ReviewTreeComparisonRecord
+    contract: WorktreeContract,
+    draft: ReviewTreeComparisonRecord,
+    *,
+    matches: Callable[
+        [ReviewTreeComparisonRecord, ReviewTreeComparisonRecord], bool
+    ] = ReviewTreeComparisonRecord.same_trees,
 ) -> tuple[ReviewTreeComparisonRecord, Path] | ReviewRefusal:
-    """Record the comparison, or reuse the latest record of the same four trees.
+    """Record the comparison, or reuse the latest record with the requested identity.
 
     Readers of one dashboard that open the same new comparison at once take turns here (MIK-R42):
     the number is one more than the highest that exists, so two of them racing past each other
@@ -650,19 +634,21 @@ def _record(
     """
 
     with _RECORDING:
-        return _recorded(contract, draft)
+        return _recorded(contract, draft, matches)
 
 
 def _recorded(
-    contract: WorktreeContract, draft: ReviewTreeComparisonRecord
+    contract: WorktreeContract,
+    draft: ReviewTreeComparisonRecord,
+    matches: Callable[[ReviewTreeComparisonRecord, ReviewTreeComparisonRecord], bool],
 ) -> tuple[ReviewTreeComparisonRecord, Path] | ReviewRefusal:
     directory = comparison_directory(contract.task_root, draft.leaf_id)
     # This owner may append exactly its new record. Keep consumed bytes, bracket its own
     # listing change, then observe the resulting listing; an external append/removal refuses.
     paths = tuple(sorted(directory.glob("*.json")))
     latest = latest_record_at(paths)
-    if latest is not None and latest.same_trees(draft):
-        # The same four trees as the latest record: reuse it, re-creating a pin that has gone.
+    if latest is not None and matches(latest, draft):
+        # Reuse the matching record, re-creating a pin that has gone.
         repinned = _pin(latest)
         if repinned is not None:
             return repinned
@@ -730,9 +716,9 @@ def _recorded(
     if not published:
         # Another process published this number first. A record is immutable, so the bytes that won
         # are the comparison: this reader answers with that record, never with a second write of the
-        # same number (MIK-R195 F05). A number now naming other trees is refused, not overwritten.
+        # same number. The winning record must have the requested comparison identity.
         raced = numbered_record(contract.task_root, draft.leaf_id, number)
-        winner = raced if raced is not None and raced.same_trees(draft) else None
+        winner = raced if raced is not None and matches(raced, draft) else None
         return (winner, path) if winner is not None else publication_refusal(draft.leaf_id, number)
     return _published_record(record, path, paths)
 
@@ -1192,10 +1178,7 @@ def _unresolved(side: str, detail: str) -> ReviewRefusal:
     return ReviewRefusal(
         code="candidate_unresolved",
         detail=f"the {side} side of the tree comparison cannot be resolved: {detail}",
-        next_action=(
-            "repair the named side (a memory line whose commits carry Code-Commit trailers, a "
-            "readable worktree), then reopen the review; no other tree is substituted"
-        ),
+        next_action="repair the named side of the leaf comparison, then reopen the review",
         offending_input=side,
     )
 

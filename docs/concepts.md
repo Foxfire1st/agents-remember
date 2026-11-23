@@ -429,8 +429,10 @@ row answers an item of the worklist. The review page lists the rows under "Judgm
 
 ### Worklist and knowledge gate
 
-A worklist compares base and candidate code and memory trees. Its items identify
-knowledge the changes reach; a current satisfying judgment row answers each item.
+A worklist compares base and candidate code and memory trees. For a leaf task,
+its [worktree contract](#worktree-contract) records the two base commits. The
+worklist identifies knowledge the changes reach, and a current satisfying judgment
+row answers each item.
 The mandatory knowledge gate recomputes the worklist and validates the exact
 candidate trees. Open items, unreadable inputs and refusing validator violations
 block publication. These checks do not invent the Curator's judgment.

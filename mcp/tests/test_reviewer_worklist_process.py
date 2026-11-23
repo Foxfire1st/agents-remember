@@ -171,14 +171,14 @@ def test_real_child_parity_source_reads_and_held_conversion_at_two_result_sizes(
             assert len(replies) == count
         assert replies[-1]["bytes"] > 65536 and replies[-1]["bytes"] > replies[0]["bytes"]
 
-        # The same real child entry fails loudly if it tries a second capture, pairing or
+        # The same real child entry fails loudly if it tries a second capture, base lookup or
         # conversion. Only the test launcher inserts these sentinels into that child process.
         guarded = """
 from agents_remember.application import reviewer_worklist_child as child
 from agents_remember.application.knowledge_worklist import leaf, onboarding_trace
 def forbidden(*args, **kwargs):
-    raise AssertionError('second capture, pairing or conversion')
-leaf.paired_memory_commit = forbidden
+    raise AssertionError('second capture, base lookup or conversion')
+leaf.recorded_memory_base = forbidden
 leaf._captured_code = forbidden
 leaf.directory_snapshot = forbidden
 leaf.converted_base_files = forbidden
