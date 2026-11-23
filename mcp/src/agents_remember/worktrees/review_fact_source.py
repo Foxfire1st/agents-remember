@@ -29,6 +29,7 @@ from tempfile import TemporaryDirectory
 
 from agents_remember.models.knowledge_files.history import ReviewFact
 from agents_remember.models.knowledge_files.writer_stamp import WriterStamp
+from agents_remember.tasks import ReviewState
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.document_stamp_owner import document_stamp_owner
 from agents_remember.tasks.route_review import ReviewRound, passed_memory_round, usable_verdict_ref
@@ -93,12 +94,17 @@ class _Stamps:
     at: str
 
 
-def qualifying_round(rounds: list[ReviewRound], closed_tree: str | None) -> ReviewRound | None:
-    """The last recorded round when it passed, names its verdict and names ``closed_tree``."""
+def qualifying_round(state: ReviewState | None, closed_tree: str | None) -> ReviewRound | None:
+    """The passing round for the exact tree while the lane has no open findings."""
 
-    if not rounds or closed_tree is None:
+    if (
+        state is None
+        or state.remainingFindingIds
+        or not state.recordedRounds
+        or closed_tree is None
+    ):
         return None
-    last = rounds[-1]
+    last = state.recordedRounds[-1]
     if not passed_memory_round(last) or usable_verdict_ref(last.verdictRef) is None:
         return None
     return last if last.memoryTree == closed_tree else None
@@ -109,8 +115,7 @@ def _review_fact(leaf_json: Path, closed_tree: str | None, now: Clock) -> Review
         document = read_task_doc(leaf_json)
     except FileNotFoundError:
         return None
-    state = document.memoryReviewState
-    round_ = qualifying_round(list(state.recordedRounds) if state else [], closed_tree)
+    round_ = qualifying_round(document.memoryReviewState, closed_tree)
     if round_ is None:
         return None
     stamps = _Stamps(document_stamp_owner(leaf_json.parent, document), now())

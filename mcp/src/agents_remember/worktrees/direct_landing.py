@@ -22,7 +22,7 @@ memory commit. Commit-then-gate is the accepted-risk exception only
 where the developer rules it.
 
 The operation is grant-gated (a direct-execution grant per task) and deliberately
-synchronous: direct mode does not use the ``start_or_observe_operation`` detached
+synchronous: direct mode never leaves the work to another process
 worker. The lane lock serializes execution; the canonical lifecycle journal owns
 crash recovery for the memory output.
 

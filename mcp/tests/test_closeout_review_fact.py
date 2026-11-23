@@ -36,6 +36,7 @@ from agents_remember.cli.role_message_files import (
     store_message_file,
     utc_stem,
 )
+from agents_remember.memory.conversion.task_review_facts import last_passed_memory_round
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.knowledge_files.documents import parse_history_document
 from agents_remember.models.knowledge_files.history import ReviewFact
@@ -695,6 +696,36 @@ def _record_pass_through_the_task_layer(world: _World) -> dict[str, Any]:
     state = recorded.memoryReviewState
     assert state is not None
     return state.recordedRounds[-1].model_dump(mode="json")
+
+
+def test_an_open_memory_amendment_withholds_the_prior_stamped_pass(world: _World) -> None:
+    world.receipt("curator", "01KCURATOR", "gpt-5.5")
+    _record_pass_through_the_task_layer(world)
+    leaf = world.folder / "leaf.json"
+    passed = read_task_doc(leaf)
+    assert passed.memoryReviewState is not None
+    original_fact = leaf_review_fact(world.contract)
+    assert original_fact is not None and original_fact.tree == world.tree()
+    assert original_fact.handed_over_by.seat == "01KCURATOR"
+    assert last_passed_memory_round(passed.memoryReviewState, leaf) is not None
+
+    amended = _record_task_review_bound(
+        passed,
+        {
+            "reviewKind": "memory",
+            "verdict": "block",
+            "verdictRef": "reports/amendment.md",
+            "addedFindings": [
+                {"findingId": "M2", "description": "Open evidence finding", "route": "curator"}
+            ],
+        },
+    )
+    lane = amended.memoryReviewState
+    assert lane is not None and lane.round == passed.memoryReviewState.round
+    assert lane.recordedRounds == passed.memoryReviewState.recordedRounds
+    assert lane.remainingFindingIds == ["M2"]
+    leaf.write_text(amended.model_dump_json(by_alias=True, exclude_none=True), encoding="utf-8")
+    assert (leaf_review_fact(world.contract), last_passed_memory_round(lane, leaf)) == (None, None)
 
 
 def _seat(stamp: Mapping[str, Any]) -> tuple[str, str, str]:

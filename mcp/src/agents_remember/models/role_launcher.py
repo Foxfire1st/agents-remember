@@ -43,6 +43,7 @@ class RoleAgentOverride(BaseModel):
     agent_id: str | None = Field(default=None, alias="agentId", min_length=1, max_length=80)
     model_id: str | None = Field(default=None, alias="modelId", max_length=200)
     effort_id: str | None = Field(default=None, alias="effortId", max_length=80)
+    mode_id: str | None = Field(default=None, alias="modeId")
     feature_values: dict[str, StrictBool | StrictStr] | None = Field(
         default=None, alias="featureValues"
     )
@@ -78,6 +79,7 @@ class RoleSelection(BaseModel):
 
 class RoleLauncherOptionsRequest(RoleSelection):
     agent_id: str | None = Field(default=None, alias="agentId", max_length=80)
+    model_id: str | None = Field(default=None, alias="modelId")
     refresh_catalog: bool = Field(default=False, alias="refreshCatalog")
 
 

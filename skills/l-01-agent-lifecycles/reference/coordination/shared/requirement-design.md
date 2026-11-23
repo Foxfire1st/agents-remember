@@ -42,6 +42,10 @@ A task owns one primary requirement packet. It may also own further approved pac
 
 Before a new task starts, write its task document with one major step per role: build, review, curation, knowledge check and landing. Put detail in sub-steps. Step IDs and titles express intent.
 
+## List a requirement’s final checks in one section
+
+A round stays cheap: the Worker brings focused tests and the fast commit-hook checks to each freeze. Put every expensive run the requirement wants — whole test lanes, a run on a real host or in a sandbox — in its `## Final checks` section, and nothing that a round runs. Only what the section lists is a final check, its presence is the developer’s request for those runs, and it names the tree after the code pass as the one they run on. A requirement without the section asks for no final check beyond the landing’s own commit hook.
+
 ## Preserve existing task structure
 
 An existing task gains a step only when the developer slots new scope into it.

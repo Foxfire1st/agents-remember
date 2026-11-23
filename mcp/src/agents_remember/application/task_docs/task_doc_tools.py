@@ -589,6 +589,7 @@ def _prepare_task_doc_edit(
         doc = _record_task_review_bound(
             original,
             request.edit.review,
+            _RouteReviewBinding(request.contract, request.task_root, json_path),
             settings_limit=review_settings_limit(request.config.coordination_root),
             actual_candidate=candidate_identity_for_review(
                 request.config, request.contract, request.repo_id, request.edit.review

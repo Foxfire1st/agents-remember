@@ -62,6 +62,12 @@ export interface RoleFeatureChoice {
 export const EMPTY_ROLE_MODELS: RoleModelChoice[] = [];
 export const EMPTY_ROLE_EFFORTS: RoleEffortChoice[] = [];
 
+export interface RoleModeChoice {
+  id: string;
+  label: string;
+  description?: string;
+}
+
 export interface RoleAgentChoice {
   discovery?: { models?: CatalogDiscoveryState; modes?: CatalogDiscoveryState; acceptsToolServers?: CatalogDiscoveryState };
   modelsKnown?: boolean;
@@ -72,7 +78,9 @@ export interface RoleAgentChoice {
   models: RoleModelChoice[];
   /** Set when the host could not list this agent's models; the agent stays selectable. */
   listingError?: string;
-  modes?: { id: string; label: string; description?: string }[];
+  modes?: RoleModeChoice[];
+  /** The mode the host itself starts this agent's sessions in, when it names one. */
+  defaultModeId?: string | null;
 }
 
 export interface RoleDefaults {
@@ -101,11 +109,26 @@ export interface RoleAgentOverride {
   agentId?: string;
   modelId?: string;
   effortId?: string;
+  modeId?: string;
   featureValues?: Record<string, boolean | string>;
 }
 
 export interface RoleScopedExecution {
   stepUp?: { model?: string; source?: string } | null;
+  /**
+   * The launch's own choices, as the receipt carries them: the mode the host reported for the
+   * seat (`observedValue`) and the source of the requested choice. Absent when the receipt
+   * carries no such record.
+   */
+  /** The receipt's top-level choices, where the launch's observation of each field is written. */
+  choices?: {
+    mode?: { value?: string | null; source?: string | null; observedValue?: string | null } | null;
+  } | null;
+  sessionOptions?: {
+    choices?: {
+      mode?: { value?: string | null; source?: string | null; observedValue?: string | null } | null;
+    } | null;
+  } | null;
   status: string;
   detail?: string;
   requestId?: string;
@@ -437,6 +460,7 @@ export function sameRoleLaunchSelection(
     leftOverride.agentId === rightOverride.agentId &&
     leftOverride.modelId === rightOverride.modelId &&
     leftOverride.effortId === rightOverride.effortId &&
+    leftOverride.modeId === rightOverride.modeId &&
     JSON.stringify(Object.entries(leftOverride.featureValues ?? {}).sort()) ===
       JSON.stringify(Object.entries(rightOverride.featureValues ?? {}).sort())
   );
@@ -559,22 +583,26 @@ function unofferedEffort(model: RoleModelChoice, effortId: string | undefined): 
   return 'Effort ' + effortId + ' is not offered for ' + model.label + '; pick an effort it offers.';
 }
 
+/** The launcher's override from the chosen fields, dropped when it only restates the role default. */
 export function roleAgentOverrideFor(
-  agentId: string | undefined,
-  modelId: string | undefined,
-  effortId: string | undefined,
+  values: {
+    agentId?: string;
+    modelId?: string;
+    effortId?: string;
+    modeId?: string;
+    featureValues?: RoleAgentOverride['featureValues'];
+  },
   defaults: RoleDefaults,
-  featureValues?: RoleAgentOverride['featureValues'],
 ): RoleAgentOverride | undefined {
+  const { agentId, modelId, effortId, modeId, featureValues } = values;
   if (!agentId) return undefined;
-  const speedValues = Object.keys(featureValues ?? {}).length > 0;
-  if (agentId === defaults.agent && !modelId && !effortId && !speedValues) {
-    return undefined;
-  }
-  return {
-    agentId,
-    ...(modelId ? { modelId } : {}),
-    ...(effortId ? { effortId } : {}),
-    ...(speedValues ? { featureValues } : {}),
-  };
+  const override: RoleAgentOverride = { agentId };
+  if (modelId) override.modelId = modelId;
+  if (effortId) override.effortId = effortId;
+  if (modeId) override.modeId = modeId;
+  if (featureValues && Object.keys(featureValues).length) override.featureValues = featureValues;
+  const changed = [modelId, effortId, modeId, override.featureValues];
+  const restatesRole =
+    agentId === defaults.agent && changed.every((value) => value === undefined);
+  return restatesRole ? undefined : override;
 }

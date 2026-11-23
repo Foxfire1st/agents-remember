@@ -9,17 +9,15 @@ in `DESIGN.md`.
 
 ## Intent
 
-The reader operates the change to understand it. An explanation lets someone who did not write a
-change set understand it end to end, faster and more surely than from the diff, by working it:
+The reader understands the change from the essay first, and works its figures where a figure helps:
 stepping a sequence, switching a condition, tracing a path, comparing before and after on one
 input. Every statement shows what it rests on.
 
-Each driven figure is built from this comparison's own material: its hunks, records and trees, the
-real call chain, the conditions the code checks. An illustration that would fit any change
-explains none.
+Each figure is built from this comparison's own material: its hunks, records and trees, the real
+call chain, the conditions the code checks. An illustration that would fit any change explains
+none. A page reads in full without its animations.
 
-The static page is the same explanation with motion or script off. It is the reduced form, never
-the plan.
+The essay is the plan; the static page is the same explanation with motion or script off.
 
 ## Who reads, and in what order
 
@@ -28,14 +26,15 @@ documentation, with the code a click away and none of its context. Tell it in th
 reader who stops early still holds a true picture:
 
 1. **The answer.** A title stating what the change does or answering the question; a lede of at
-   most four sentences: before, now, for whom. Beneath it, the map: the whole change as one
-   figure whose regions open to their detail.
+   most four sentences: before, now, for whom. Beneath it, the map when it helps: the whole change
+   as one figure whose regions open to their detail; when no figure helps, the lede carries the
+   whole and the essay goes on.
 2. **What it means for the rules.** Which invariants changed, weakened, strengthened or stayed,
-   and why. Selecting one lights its code and its place in the figures.
-3. **How it works now.** The mechanism, before and after, with at least one figure the reader
-   drives.
+   and why. Where the page has figures, selecting one lights its code and its place in them.
+3. **How it works now.** The mechanism, before and after. A figure appears only where it helps
+   this part of the essay; the prose carries the mechanism when no picture does.
 4. **Where to look first.** Ordered entry points into the code, one reason each, each opening its
-   excerpt in place. Say that the order is yours.
+   excerpt in place where the page has excerpts. Say that the order is yours.
 5. **What stayed the same.** The guarantees a reader might fear were touched.
 6. **Risks and open questions,** marked as your reading, in a table the reader can filter.
 7. **Not covered.** What was not read, not comparable or unavailable.
@@ -43,9 +42,11 @@ reader who stops early still holds a true picture:
 A focused explanation keeps this order inside its part. Skip a step with nothing to say; never pad
 one.
 
-## How the page explains through interaction
+## How the essay and its figures work
 
-- **Drive.** "How it works" has at least one figure the reader drives: step, scrub, toggle a
+- **Text first.** The essay carries the content; a figure supports one of its parts. A part with
+  no useful figure keeps its text alone.
+- **Drive.** A part about mechanism may have a figure the reader drives: step, scrub, toggle a
   condition, switch before and after on one input, or select a node to trace its path.
 - **Link.** A claim, its code lines and its figure nodes are one thing in three places: hover or
   focus on one lights the others, a click pins, Escape clears.
@@ -103,7 +104,7 @@ figure labels and step counts. No web fonts.
 
 ## Motion and response
 
-The page responds; it does not perform. A control shows its effect at once, and motion is how one
+A figure responds; it does not perform. A control shows its effect at once, and motion is how one
 state becomes the next: an order, a propagation, a sequence, a block moving. It starts on the
 reader's act (one first-view reveal excepted), leads the eye to one place and stops on its final
 state.

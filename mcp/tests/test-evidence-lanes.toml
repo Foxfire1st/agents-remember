@@ -322,7 +322,9 @@ unit-regression = [
   "mcp/tests/test_leaf_handover_review_rounds.py",
   "mcp/tests/test_leaf_retirement_wording.py",
   "mcp/tests/test_leaf_worktree_watch.py",
+  "mcp/tests/test_lifecycle_operation_journal_retired.py",
   "mcp/tests/test_lifecycle_operation_model_helpers.py",
+  "mcp/tests/test_lifecycle_operation_public_boundary.py",
   "mcp/tests/test_location_cache_scope.py",
   "mcp/tests/test_master_chain_offenders.py",
   "mcp/tests/test_master_chain_public_routes.py",
@@ -725,7 +727,6 @@ integration = [
   "mcp/tests/test_leaf_doc_master_link_binding.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_lifecycle_finalize.py",
-  "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
   "mcp/tests/test_master_retirement.py",
   "mcp/tests/test_master_retirement_readiness.py",
@@ -781,11 +782,9 @@ integration = [
   "mcp/tests/test_tools.py",
   "mcp/tests/test_untyped_sprint_rows.py",
   "mcp/tests/test_weakness_closure_closeout.py",
-  "mcp/tests/test_worker_child_processes.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_closeout_route_review_transport.py",
   "mcp/tests/test_worktree_start_preview.py",
-  "mcp/tests/test_worktree_status_running_operation.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
@@ -810,6 +809,7 @@ architecture-fitness = [
   "mcp/tests/test_retry_coverage.py",
   "mcp/tests/test_single_owner_primitives.py",
   "mcp/tests/test_source_lineage.py",
+  "mcp/tests/test_started_modules_exist.py",
   "mcp/tests/test_static.py",
   "mcp/tests/test_structural_limits.py",
   "mcp/tests/test_suite_load_independence.py",
@@ -823,6 +823,7 @@ provider-conformance = [
 ]
 
 stress-durability = [
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
 ]
 
 migration = [

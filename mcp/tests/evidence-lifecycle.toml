@@ -457,8 +457,9 @@ consumers = [
   "mcp/tests/test_leaf_worktree_watch.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_lifecycle_finalize.py",
+  "mcp/tests/test_lifecycle_operation_journal_retired.py",
   "mcp/tests/test_lifecycle_operation_model_helpers.py",
-  "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_lifecycle_operation_public_boundary.py",
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
   "mcp/tests/test_lifecycle_turn_truth_doctrine.py",
   "mcp/tests/test_location_cache_scope.py",
@@ -475,6 +476,7 @@ consumers = [
   "mcp/tests/test_master_retirement_state_machine.py",
   "mcp/tests/test_mcp_build_staleness.py",
   "mcp/tests/test_mcp_dispatch_concurrency.py",
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
   "mcp/tests/test_mcp_stdio_transport.py",
   "mcp/tests/test_memory_attribution_producers.py",
   "mcp/tests/test_memory_backfill.py",
@@ -755,6 +757,7 @@ consumers = [
   "mcp/tests/test_sprint_archive_phases.py",
   "mcp/tests/test_standalone_master_retirement.py",
   "mcp/tests/test_standalone_master_route.py",
+  "mcp/tests/test_started_modules_exist.py",
   "mcp/tests/test_static.py",
   "mcp/tests/test_step_up_choice_validation.py",
   "mcp/tests/test_step_up_recovery.py",
@@ -854,7 +857,6 @@ consumers = [
   "mcp/tests/test_wire_vocabulary_exhaustiveness.py",
   "mcp/tests/test_wire_vocabulary_exhaustiveness_boundary.py",
   "mcp/tests/test_witness_driver_helpers.py",
-  "mcp/tests/test_worker_child_processes.py",
   "mcp/tests/test_workflow_chain_guidance.py",
   "mcp/tests/test_worklist_publication.py",
   "mcp/tests/test_workspace_wake_zero_census.py",
@@ -864,7 +866,6 @@ consumers = [
   "mcp/tests/test_worktree_own_environment.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_start_preview.py",
-  "mcp/tests/test_worktree_status_running_operation.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
@@ -965,6 +966,7 @@ consumers = [
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_review_source_inventory_boundaries.py",
   "mcp/tests/test_review_subject_catalogue.py",
+  "mcp/tests/test_review_validation_reuse.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_reviewer_worklist_warm.py",
@@ -1087,22 +1089,15 @@ permanence_rationale = "The helper is the single test-side composition root for 
 replacement_contract = "node:mcp/tests/test_transaction_only_worktree_delivery.py::test_public_closeout_commits_code_and_memory_without_acceptance_tools"
 consumer_scope = "exact"
 consumers = [
-  "mcp/tests/test_atomic_master_review_public.py",
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
-  "mcp/tests/test_cross_master_concurrency.py",
-  "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_knowledge_read_boundary.py",
-  "mcp/tests/test_lifecycle_operations.py",
-  "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
-  "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
   "mcp/tests/test_weakness_closure_closeout.py",
-  "mcp/tests/test_worktree_status_running_operation.py",
 ]
 
 [[artifact]]
@@ -1246,7 +1241,8 @@ consumers = [
   "mcp/tests/test_leaf_doc_master_link_binding.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_lifecycle_finalize.py",
-  "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_lifecycle_operation_journal_retired.py",
+  "mcp/tests/test_lifecycle_operation_public_boundary.py",
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
   "mcp/tests/test_master_retirement.py",
   "mcp/tests/test_master_retirement_readiness.py",
@@ -1254,6 +1250,7 @@ consumers = [
   "mcp/tests/test_master_retirement_state_machine.py",
   "mcp/tests/test_mcp_build_staleness.py",
   "mcp/tests/test_mcp_dispatch_concurrency.py",
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
   "mcp/tests/test_mcp_stdio_transport.py",
   "mcp/tests/test_memory_attribution_producers.py",
   "mcp/tests/test_memory_branch_authority.py",
@@ -1321,7 +1318,6 @@ consumers = [
   "mcp/tests/test_worktree_own_environment.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_start_preview.py",
-  "mcp/tests/test_worktree_status_running_operation.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
@@ -2413,6 +2409,44 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/fixtures/lifecycle/old-writer-closeout-record.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "mcp/tests/test_lifecycle_operation_journal_retired.py"
+category = "unit-regression"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "Serialized with the base build's own LifecycleOperationRecord and preparation models at fcb1e3645040b00998912e0cfece35ccd116d4a3. The old validate_preparation_transition accepted the code leg's intent, synthetic create/materialize/commit starts and successful outputs, and selection of the prepared output. Generator SHA-256 10148ebbc3bb797f904d2b0ab6d05c6814428d627e367dd246fe4d29eb7e22aa; fixture SHA-256 2a6312ce95b2a50d6ce81ae1974121565e56d2ca0d3f0affaab283166cb5988d."
+introduced_by = "261112-BUG-L15"
+lifetime = "permanent"
+permanence_rationale = "Pins the old certified command-bearing closeout shape for store decoding, registered control refusal and status inspection after the preparation writer is removed."
+replacement_contract = "node:mcp/tests/test_lifecycle_operation_journal_retired.py::test_the_retained_old_build_record_loads_with_its_command_leg"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_lifecycle_operation_journal_retired.py",
+  "mcp/tests/test_lifecycle_operation_public_boundary.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/lifecycle/old-writer-integrate-record.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "mcp/tests/test_lifecycle_operation_public_boundary.py"
+category = "public-contract"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "Written by LifecycleOperationStore at fcb1e3645040b00998912e0cfece35ccd116d4a3. Its own transition validators accepted generation creation, a synthetic running worker binding, the old termination request and a synthetic inconclusive outcome. Generator SHA-256 27586c1388523c3ceea46563cbb3cae800945c77e05bca2e1c53846f1bb0c831; fixture SHA-256 d73d1548c1028a98052c4e9f5906f70e0f0e012c4796622bf66b51f929b79d44."
+introduced_by = "261112-BUG-L15"
+lifetime = "permanent"
+permanence_rationale = "Pins the old termination-required integration shape for store decoding, registered control refusal and status inspection after the worker lease and termination writer are removed."
+replacement_contract = "node:mcp/tests/test_lifecycle_operation_public_boundary.py::test_the_registered_control_refuses_retained_old_records"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_lifecycle_operation_journal_retired.py",
+  "mcp/tests/test_lifecycle_operation_public_boundary.py",
+]
+
+[[artifact]]
 path = "mcp/tests/fixtures/old_coherence_record_l39.json"
 kind = "fixture"
 authority = "external-recorded"
@@ -2843,8 +2877,9 @@ consumers = [
   "mcp/tests/test_leaf_worktree_watch.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_lifecycle_finalize.py",
+  "mcp/tests/test_lifecycle_operation_journal_retired.py",
   "mcp/tests/test_lifecycle_operation_model_helpers.py",
-  "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_lifecycle_operation_public_boundary.py",
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
   "mcp/tests/test_lifecycle_turn_truth_doctrine.py",
   "mcp/tests/test_location_cache_scope.py",
@@ -2861,6 +2896,7 @@ consumers = [
   "mcp/tests/test_master_retirement_state_machine.py",
   "mcp/tests/test_mcp_build_staleness.py",
   "mcp/tests/test_mcp_dispatch_concurrency.py",
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
   "mcp/tests/test_mcp_stdio_transport.py",
   "mcp/tests/test_memory_attribution_producers.py",
   "mcp/tests/test_memory_backfill.py",
@@ -3141,6 +3177,7 @@ consumers = [
   "mcp/tests/test_sprint_archive_phases.py",
   "mcp/tests/test_standalone_master_retirement.py",
   "mcp/tests/test_standalone_master_route.py",
+  "mcp/tests/test_started_modules_exist.py",
   "mcp/tests/test_static.py",
   "mcp/tests/test_step_up_choice_validation.py",
   "mcp/tests/test_step_up_recovery.py",
@@ -3240,7 +3277,6 @@ consumers = [
   "mcp/tests/test_wire_vocabulary_exhaustiveness.py",
   "mcp/tests/test_wire_vocabulary_exhaustiveness_boundary.py",
   "mcp/tests/test_witness_driver_helpers.py",
-  "mcp/tests/test_worker_child_processes.py",
   "mcp/tests/test_workflow_chain_guidance.py",
   "mcp/tests/test_worklist_publication.py",
   "mcp/tests/test_workspace_wake_zero_census.py",
@@ -3250,7 +3286,6 @@ consumers = [
   "mcp/tests/test_worktree_own_environment.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_start_preview.py",
-  "mcp/tests/test_worktree_status_running_operation.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
@@ -3298,7 +3333,6 @@ consumers = [
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_knowledge_read_boundary_controls.py",
-  "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_repository_certification_profiles.py",
@@ -3313,7 +3347,6 @@ consumers = [
   "mcp/tests/test_weakness_closure_closeout.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
-  "mcp/tests/test_worktree_status_running_operation.py",
 ]
 
 [[artifact]]
@@ -3408,26 +3441,12 @@ permanence_rationale = "One fixture builds isolated Git candidates and real reta
 replacement_contract = "node:mcp/tests/test_closeout_certification_recovery.py::test_retained_report_inventory_refuses_mismatched_evidence_before_any_source_read"
 consumer_scope = "exact"
 consumers = [
-  "mcp/tests/test_automatic_post_integration_cleanup.py",
-  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
   "mcp/tests/test_code_certification_execution.py",
   "mcp/tests/test_gate_certification_evidence.py",
-  "mcp/tests/test_integration_branch_authority.py",
-  "mcp/tests/test_knowledge_read_boundary.py",
-  "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_quality_gate_public_contract.py",
-  "mcp/tests/test_retired_door_publication_fields.py",
-  "mcp/tests/test_review_block_state_values_through_real_tools.py",
-  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
-  "mcp/tests/test_terminal_blocker_reasons.py",
-  "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
-  "mcp/tests/test_transaction_only_worktree_delivery.py",
-  "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
-  "mcp/tests/test_weakness_closure_closeout.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
-  "mcp/tests/test_worktree_status_running_operation.py",
 ]
 
 [[artifact]]
@@ -3461,7 +3480,7 @@ source_version_or_generator = "real Git integration-branch authority fixture"
 introduced_by = "260824-PDLS"
 lifetime = "permanent"
 permanence_rationale = "The helper owns one real-Git authority setup shared by integration and lifecycle suites."
-replacement_contract = "node:mcp/tests/test_integration_branch_authority.py::IntegrationBranchAuthorityTests::test_external_pair_cas_retains_torn_pair_without_clobbering_memory_race"
+replacement_contract = "node:mcp/tests/test_integration_branch_authority.py::IntegrationBranchAuthorityTests::test_cache_damage_cannot_change_the_accepted_pair_or_block_its_ref_move"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
@@ -3627,6 +3646,7 @@ consumers = [
   "mcp/tests/test_review_meaning_effects.py",
   "mcp/tests/test_review_overview_precompute.py",
   "mcp/tests/test_review_read_latency.py",
+  "mcp/tests/test_review_validation_reuse.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_reviewer_worklist_warm.py",
@@ -3815,6 +3835,7 @@ consumers = [
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_review_source_inventory_boundaries.py",
   "mcp/tests/test_review_subject_catalogue.py",
+  "mcp/tests/test_review_validation_reuse.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_reviewer_worklist_warm.py",
@@ -3960,24 +3981,6 @@ consumers = [
 ]
 
 [[artifact]]
-path = "mcp/tests/lifecycle_control_test_support.py"
-kind = "shared-support"
-authority = "internal-canonical"
-owner = "lifecycle-control-test-port"
-category = "integration"
-fidelity = "local-composition"
-cadence = "affected"
-source_version_or_generator = "typed lifecycle control and interruption helpers"
-introduced_by = "260824-PDLS"
-lifetime = "permanent"
-permanence_rationale = "The helper centralizes lifecycle control setup without duplicating product transition policy."
-replacement_contract = "node:mcp/tests/test_lifecycle_operations.py::test_cancel_before_boundary_proves_exit_before_releasing_worker_authority"
-consumer_scope = "exact"
-consumers = [
-  "mcp/tests/test_lifecycle_operations.py",
-]
-
-[[artifact]]
 path = "mcp/tests/lifecycle_enclosure_test_support.py"
 kind = "shared-support"
 authority = "internal-canonical"
@@ -4014,6 +4017,78 @@ consumers = [
   "mcp/tests/test_terminal_notice_recovery.py",
   "mcp/tests/test_terminal_notice_subject.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
+]
+
+[[artifact]]
+path = "mcp/tests/mcp_memory_bounded_corpus.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "native-tool-server-memory-contract"
+category = "stress-durability"
+fidelity = "process-race"
+cadence = "scheduled-release"
+source_version_or_generator = "deterministic generator for canonical synthetic code, cards, and memory graph"
+introduced_by = "261112-BUG-L18"
+lifetime = "permanent"
+permanence_rationale = "The memory guard needs stable fixture pressure and native Git objects."
+replacement_contract = "contract:bounded-native-tool-server-memory"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
+]
+
+[[artifact]]
+path = "mcp/tests/mcp_memory_bounded_fixture.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "native-tool-server-memory-contract"
+category = "stress-durability"
+fidelity = "process-race"
+cadence = "scheduled-release"
+source_version_or_generator = "native disposable Git pair and enclosed MCP settings for the memory stress test"
+introduced_by = "261112-BUG-L18"
+lifetime = "permanent"
+permanence_rationale = "The stress test needs the product leaf, worklist, and capture routes."
+replacement_contract = "contract:bounded-native-tool-server-memory"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
+]
+
+[[artifact]]
+path = "mcp/tests/mcp_memory_bounded_receipts.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "native-tool-server-memory-contract"
+category = "stress-durability"
+fidelity = "process-race"
+cadence = "scheduled-release"
+source_version_or_generator = "matched native stdio replies, saved full results, and Linux memory limits"
+introduced_by = "261112-BUG-L18"
+lifetime = "permanent"
+permanence_rationale = "The numeric guard needs complete tool work and one measured server."
+replacement_contract = "contract:bounded-native-tool-server-memory"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
+]
+
+[[artifact]]
+path = "mcp/tests/mcp_memory_bounded_stdio_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "native-tool-server-memory-contract"
+category = "stress-durability"
+fidelity = "process-race"
+cadence = "scheduled-release"
+source_version_or_generator = "three fixed native workload cycles in one SDK stdio session"
+introduced_by = "261112-BUG-L18"
+lifetime = "permanent"
+permanence_rationale = "The regression needs repeated ordinary calls on a persistent server."
+replacement_contract = "contract:bounded-native-tool-server-memory"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_mcp_memory_bounded_stdio.py",
 ]
 
 [[artifact]]
@@ -4148,7 +4223,7 @@ owner = "paseo-runtime-command-cases"
 category = "unit-regression"
 fidelity = "in-process"
 cadence = "affected"
-source_version_or_generator = "a hand-written stand-in for the npm and Paseo command lines of the pinned runtime (0.11.1): `FakePaseo` keeps the daemon configuration in the home's real config.json and models what a running daemon holds, and the settings, plugin and file-state helpers build the fixtures of the runtime cases"
+source_version_or_generator = "a hand-written stand-in for the npm and Paseo command lines of the pinned runtime (0.16.2): `FakePaseo` keeps the daemon configuration in the home's real config.json and models what a running daemon holds, and the settings, plugin and file-state helpers build the fixtures of the runtime cases"
 introduced_by = "261001-PNT-L1"
 lifetime = "permanent"
 permanence_rationale = "The provision, status and stop commands are judged by what a running daemon holds after them, not by the files they wrote: a start-only setting applies at a start, a live one at a reload, a plugin's files when it is loaded. The stand-in keeps exactly that state, so a case can tell a converged runtime from files that merely look right; no real daemon can be started in the unit lane. It is a module of its own because the runtime test module would exceed the file-size limit with it."
@@ -4394,7 +4469,6 @@ consumers = [
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_knowledge_read_boundary_controls.py",
-  "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_repository_certification_profiles.py",
@@ -4409,7 +4483,6 @@ consumers = [
   "mcp/tests/test_weakness_closure_closeout.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
-  "mcp/tests/test_worktree_status_running_operation.py",
 ]
 
 [[artifact]]
@@ -4451,6 +4524,7 @@ consumers = [
   "mcp/tests/test_review_intent_summary.py",
   "mcp/tests/test_review_overview_precompute.py",
   "mcp/tests/test_review_read_latency.py",
+  "mcp/tests/test_review_validation_reuse.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_reviewer_worklist_warm.py",
@@ -4476,6 +4550,7 @@ consumers = [
   "mcp/tests/test_review_intent_summary.py",
   "mcp/tests/test_review_overview_precompute.py",
   "mcp/tests/test_review_read_latency.py",
+  "mcp/tests/test_review_validation_reuse.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_reviewer_worklist_warm.py",
@@ -4531,37 +4606,6 @@ consumers = [
   "mcp/tests/test_role_instruction_wording_handover.py",
   "mcp/tests/test_role_locator_replay.py",
   "mcp/tests/test_role_message_wording.py",
-]
-
-[[artifact]]
-path = "mcp/tests/selected_lifecycle_test_support.py"
-kind = "shared-support"
-authority = "internal-canonical"
-owner = "selected-lifecycle-test-port"
-category = "integration"
-fidelity = "local-composition"
-cadence = "affected"
-source_version_or_generator = "real task, profile, door, frozen admission and atomic lifecycle selection owners"
-introduced_by = "260831-CCR-L33"
-lifetime = "permanent"
-permanence_rationale = "Lifecycle journal tests require real selected admission and successor references; completion helpers exercise bookkeeping without asserting certification acceptance."
-replacement_contract = "node:mcp/tests/test_lifecycle_operations.py::test_start_returns_immediately_and_duplicate_observes_one_launch"
-consumer_scope = "exact"
-consumers = [
-  "mcp/tests/test_automatic_post_integration_cleanup.py",
-  "mcp/tests/test_cleanup_repeated_archive_ready.py",
-  "mcp/tests/test_integration_branch_authority.py",
-  "mcp/tests/test_knowledge_read_boundary.py",
-  "mcp/tests/test_lifecycle_operations.py",
-  "mcp/tests/test_retired_door_publication_fields.py",
-  "mcp/tests/test_review_block_state_values_through_real_tools.py",
-  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
-  "mcp/tests/test_terminal_blocker_reasons.py",
-  "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
-  "mcp/tests/test_transaction_only_worktree_delivery.py",
-  "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
-  "mcp/tests/test_weakness_closure_closeout.py",
-  "mcp/tests/test_worktree_status_running_operation.py",
 ]
 
 [[artifact]]
@@ -4968,7 +5012,6 @@ consumers = [
   "mcp/tests/test_l84_unique_detail_pointers.py",
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
-  "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
   "mcp/tests/test_mcp_stdio_transport.py",
   "mcp/tests/test_memory_attribution_producers.py",
@@ -4994,7 +5037,6 @@ consumers = [
   "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
   "mcp/tests/test_weakness_closure_closeout.py",
   "mcp/tests/test_workspace_wake_zero_census.py",
-  "mcp/tests/test_worktree_status_running_operation.py",
   "mcp/tests/test_worktree_sync_crossing_writer.py",
   "mcp/tests/test_worktree_sync_knowledge_merge.py",
   "mcp/tests/test_writer_case_proofs.py",
@@ -5087,6 +5129,11 @@ consumers = [
 id = "ar-durable-store/1.0-process-race-evidence"
 owner = "mcp/src/agents_remember/controlplane/durable_store.py"
 evidence_node = "mcp/tests/test_provider_store_durability.py::ProviderStoreDurabilityTests::test_no_record_is_lost_when_an_append_races_a_compaction"
+
+[[contract]]
+id = "bounded-native-tool-server-memory"
+owner = "mcp/src/agents_remember/mcp/server.py"
+evidence_node = "mcp/tests/test_mcp_memory_bounded_stdio.py::test_native_stdio_memory_stays_bounded"
 
 [[contract]]
 id = "canvas-host-and-presenter-cases"

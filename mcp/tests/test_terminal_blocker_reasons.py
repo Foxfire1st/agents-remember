@@ -149,6 +149,9 @@ def test_a_torn_down_provider_runtime_finalizes_on_the_first_call(
     """
 
     closed = _landed_leaf(tmp_path)
+    reports = closed.worktree_group / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    (reports / "review.md").write_text("# Review evidence\n", encoding="utf-8")
     preview = worktree_tools.worktree_abandon_tool(
         _public_config(tmp_path, closed),
         contract_path=closed.contract_path.as_posix(),

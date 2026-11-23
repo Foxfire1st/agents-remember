@@ -46,7 +46,7 @@ Complete this start and first-intake procedure before the seat's first inspectio
 
 The complete intake contains the mode, canonical task and purpose, seam, exact requirement set and resolved tools. Candidate identity and attempt records arrive with the Worker's freeze, or in the integration/master-exit intake as that procedure specifies.
 
-The Worker, Reviewer and Curator run the repair loop directly through `role_message` on `agents-remember-task`: Worker freeze to Reviewer; verdict and sealed findings to Worker; passed freeze and producer lists to Curator; memory change and verdict between Curator and Reviewer.
+The Worker, Reviewer and Curator run the repair loop directly through `role_message` on `agents-remember-task`: Worker freeze to Reviewer; verdict and sealed findings to Worker; passed freeze and producer lists to Curator; memory change and verdict between Curator and Reviewer. After the code pass the Worker sends the requirement's listed final checks, run once on that tree, to the Manager and the Reviewer.
 
 Before sending or answering a Curator's code concern, read [Curation failure handling](curation.md#failure-handling) for both recipients, post-`PASS` handling, the finding and answer, and disagreement routing.
 
@@ -132,9 +132,9 @@ The recipient reads the message and, when a filed message includes a `body` or a
 <!-- ar:roles architect,orchestrator,manager -->
 ## Recover an unfinished closeout
 
-Read the generation from `runningOperation` while queued or running, else `lifecycleOperations` (a stopped one has none), in the answer or the file a cut answer names. The operation stays addressable when the queue is absent or invalid-empty. Act on it through `worktree_operation_control` on `agents-remember-task`, with `operation_kind="closeout"`, that `expected_generation`, and one of retry, recover, resume, cancel, retire or supersede. A mismatched generation is refused; re-read the status.
+Read the result of `worktree_closeout_apply` on `agents-remember-task` for the state reached and any blocker. If the call is interrupted, check the existing per-leg transaction evidence. After correcting a blocker, rerun `worktree_closeout_apply` with the approval and explicit messages for the enabled legs.
 
-After a closeout claim, lifecycle, worker, commit and recovery evidence belongs only to the enclosure-root operation journal. Observe it with `worktree_status` on `agents-remember-task` and execute only advertised `worktree_operation_control` actions. Queue absence or invalidation never strands that journal.
+For a direct landing, read `worktree_status` on `agents-remember-task` for the current generation and advertised actions. Use `worktree_operation_control` with that generation for an advertised direct-landing action. Read saved journal records for audit.
 
 The Manager applies closeout under the recorded authority; no release by an Orchestrator is needed. When an Orchestrator coordinates the sprint, send it the apply's result or refusal with the leaf, master and sprint references, blockers and acceptance facts. Report facts only; do not rank other masters.
 
@@ -142,7 +142,7 @@ The Manager applies closeout under the recorded authority; no release by an Orch
 
 Task documents remain authoritative during every scheduling and operation phase. Task edits never wait for closeout scheduling. Apply every intrinsically valid `task_doc` mutation on `agents-remember-task` first and inspect its machine-readable `projectionEffects`. These name every sprint in the before/after union and the exact rebuild action for any projection left invalid-empty. Relay every incomplete effect's exact `nextAction` to the Orchestrator for sprint-addressed rebuild.
 
-Never whitelist task operations, patch a stale queue row, or treat queue or operation state as a task lock. If the change affects closeout evidence already accepted for a generation, re-prove it before the transaction is retried.
+Never whitelist task operations, patch a stale queue row, or treat queue or operation state as a task lock. If the edit affects evidence used for closeout, re-prove that evidence before retrying the apply.
 
 <!-- ar:roles all -->
 

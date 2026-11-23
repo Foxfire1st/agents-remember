@@ -11,8 +11,9 @@ publish:
   another revision, a task report, a source checkout or a ``..`` path is not ready;
 * every evidence reference the page cites is one the admitted packet carries. A reference the packet
   does not carry would open nothing, so it is a failed check rather than a limitation;
-* the page is usable with reduced motion: no autoplaying media, and declared animation or transition
-  styles are accompanied by a ``prefers-reduced-motion: reduce`` rule.
+* the page is usable with reduced motion: no autoplaying or looping media, every audio and video
+  element carries controls a reader can use, and declared animation or transition styles are
+  accompanied by a ``prefers-reduced-motion: reduce`` rule.
 
 The check says nothing about how good the explanation is, and it does not replace the browser
 isolation proof: rule 10 proves the boundary a page executes inside, rule 14 proves the page itself
@@ -30,6 +31,7 @@ from __future__ import annotations
 import posixpath
 import re
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from typing import Any, Literal
 
 from agents_remember.application.review_evidence_claims import resolve_claim
@@ -62,11 +64,46 @@ _EVIDENCE = re.compile(
     r"""data-evidence\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"']+))""", re.IGNORECASE
 )
 _SCRIPT = re.compile(r"<script\b", re.IGNORECASE)
-_AUTOPLAY = re.compile(r"<(?:audio|video)\b[^>]*\bautoplay\b", re.IGNORECASE)
 _MOTION = re.compile(r"@keyframes|animation\s*:|transition\s*:", re.IGNORECASE)
 _REDUCED_MOTION = re.compile(r"prefers-reduced-motion", re.IGNORECASE)
 _ABSOLUTE = re.compile(r"^(?:[a-z][a-z0-9+.\-]*:|//)", re.IGNORECASE)
 _IGNORED = ("#", "?", "data:")
+
+
+class _MediaTags(HTMLParser):
+    """Collect audio and video start tags with their real attribute names and values."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.tags: list[tuple[str, dict[str, str]]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() in {"audio", "video"}:
+            self.tags.append(
+                (
+                    tag.lower(),
+                    {name.lower(): "" if value is None else value for name, value in attrs},
+                )
+            )
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+
+
+def _media_tags(text: str) -> tuple[tuple[str, dict[str, str]], ...]:
+    """The page's audio and video tags, read as attributes rather than as words in the tag."""
+
+    parser = _MediaTags()
+    parser.feed(text)
+    parser.close()
+    return tuple(parser.tags)
+
+
+def _media_label(tag: str, attrs: dict[str, str]) -> str:
+    """A readable form of one media tag for a failure message."""
+
+    rendered = " ".join(f'{name}="{value}"' for name, value in attrs.items())
+    return f"<{tag}{(' ' + rendered) if rendered else ''}>"
 
 
 @dataclass(frozen=True)
@@ -430,9 +467,22 @@ def _collections_built(packet: EvidencePacket, kind: str) -> bool:
 
 def _check_motion(assets: dict[str, bytes]) -> ReadinessCheck:
     text = "\n".join(payload.decode("utf-8", errors="ignore") for payload in assets.values())
-    if _AUTOPLAY.search(text):
+    tags = _media_tags(text)
+    if any("autoplay" in attrs for _tag, attrs in tags):
         return ReadinessCheck(
             "reduced-motion", "failed", "the page autoplays media a reader cannot stop"
+        )
+    if any("loop" in attrs for _tag, attrs in tags):
+        return ReadinessCheck(
+            "reduced-motion", "failed", "the page loops media a reader cannot stop"
+        )
+    without_controls = [_media_label(tag, attrs) for tag, attrs in tags if "controls" not in attrs]
+    if without_controls:
+        return ReadinessCheck(
+            "reduced-motion",
+            "failed",
+            "the page plays audio or video without controls a reader can use: "
+            + without_controls[0],
         )
     if _MOTION.search(text) and not _REDUCED_MOTION.search(text):
         return ReadinessCheck(

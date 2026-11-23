@@ -14,6 +14,8 @@ Before calling the existing closeout owner, read its current preview and authori
 
 Carry targeted-check results under the closeout preview's accepted code and memory input. Keep failures, unrun checks and missing evidence visible to the owner. Do not replace them with a blanket full-suite gate.
 
+The Worker's report of the requirement's listed final checks, run once on the tree the code review passed, is one of those inputs, and after a failed check it carries the repaired tree's targeted results beside that report. The Manager closes out on the code and memory verdicts and that evidence, not before it passes, and closeout runs no final check itself. A requirement whose `## Final checks` section lists none owes no such report.
+
 Required curation and coherence, and actual conflict and authority checks, still govern the transaction. Requested independent review remains separate evidence.
 
 The owner validates and applies the paired transaction. Do not reproduce its logic through raw Git commands.

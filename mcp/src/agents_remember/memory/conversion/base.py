@@ -7,8 +7,8 @@ sides (MIK-R07 rule 0), the onboarding gate (MIK-R30), the worklist (MIK-R08), t
 and the validator's commit route (MIK-R22 rule 6) all take their sides through
 :func:`comparison_sides`.
 
-Conversions are memoized per process by (memory repository, tree, version, paired code commit):
-the result is a pure function of those inputs (rule 6).
+Conversions are memoized by (memory repository, tree, version, paired code commit). The result
+is a pure function of those inputs (rule 6). A tool call owns its conversions through completion.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from agents_remember.kernel.git_command import (
     run_git,
 )
 from agents_remember.kernel.memory_attribution import parse_code_commit_trailer
+from agents_remember.kernel.request_memo import request_owner
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.conversion.convert import convert_memory
 from agents_remember.memory.conversion.inputs import memory_from_git
@@ -31,8 +32,15 @@ from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTr
 from agents_remember.models.knowledge_files.canonical import parse_json
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 
+type _ConversionKey = tuple[str, str, str, str]
+
 _CACHE_LIMIT: Final = 8
-_cache: dict[tuple[str, str, str, str], KnowledgeTree] = {}
+_cache: dict[_ConversionKey, KnowledgeTree] = {}
+
+
+def _conversion_cache() -> dict[_ConversionKey, KnowledgeTree]:
+    request = request_owner(_conversion_cache, dict[_ConversionKey, KnowledgeTree])
+    return _cache if request is None else request
 
 
 def pinned_version(tree: KnowledgeTree) -> str | None:
@@ -68,7 +76,8 @@ def converted_base(
 
     tree = _tree_id(memory_repository, treeish)
     key = (memory_repository.resolve().as_posix(), tree, version, code_commit)
-    cached = _cache.get(key)
+    cache = _conversion_cache()
+    cached = cache.get(key)
     if cached is not None:
         return cached
     with tempfile.TemporaryDirectory(prefix="ar-converted-base-") as scratch:
@@ -79,9 +88,9 @@ def converted_base(
             memory, CodeObjects(code_repository), paired_commit=code_commit, version=version
         )
     converted = KnowledgeTree(label=f"converted base {treeish}", files=outcome.files)
-    if len(_cache) >= _CACHE_LIMIT:
-        _cache.pop(next(iter(_cache)))
-    _cache[key] = converted
+    if len(cache) >= _CACHE_LIMIT:
+        cache.pop(next(iter(cache)))
+    cache[key] = converted
     return converted
 
 

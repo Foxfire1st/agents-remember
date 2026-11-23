@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import threading
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -28,18 +30,17 @@ from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
 )
 from agents_remember.cli import role_launch_progress
-from agents_remember.cli.investigator_receipts import (
-    investigator_listing,
-    investigator_start_capacity,
-)
+from agents_remember.cli.investigator_receipts import investigator_start_capacity
 from agents_remember.cli.paseo_bridge import (
     PaseoBridgeFailure,
     require_bridge_runtime,
 )
 from agents_remember.cli.paseo_catalog import (
     launcher_catalog_question,
+    paseo_catalog_scope,
     provider_accepts_tool_servers,
 )
+from agents_remember.cli.paseo_catalog_features import launcher_model_options
 from agents_remember.cli.paseo_catalog_snapshot import register_saved_catalog_route
 from agents_remember.cli.paseo_frame import frame_answer
 from agents_remember.cli.paseo_launch import (
@@ -69,10 +70,10 @@ from agents_remember.cli.role_launch_liveness import (
     HostUnreachableRefusal,
     _reconcile_prior_execution,
     _recorded_agent_id,
-    _refresh_execution,
     _Replacement,
     _revive_agent,
 )
+from agents_remember.cli.role_launch_options_receipts import launcher_receipts, result_execution
 from agents_remember.cli.role_launch_preparation import (
     PreparedRoleHandover,
     _launcher_catalog,
@@ -88,14 +89,12 @@ from agents_remember.cli.role_launch_receipts import (
     _migrate_taskless_legacy_receipt,
     _now_iso,
     _place_message_binding_projection,
-    _public_execution,
     _read_receipt,
     _receipt_address_matches,
     _receipt_path,
     _refuse_reused_request_id,
     _replaced_agent_id,
     _request_digest,
-    _taskless_execution_receipts,
     _verify_message_binding_projection,
 )
 from agents_remember.cli.role_launch_receipts import (
@@ -222,33 +221,16 @@ def _role_launch_options_endpoint(
     config: McpRuntimeConfig, request: RoleLauncherOptionsRequest
 ) -> JSONResponse:
     try:
+        if _DISPATCH_LOCK.locked():
+            raise LaunchLockBusy
         context = resolve_role_launch_context(config, request)
-        # The catalog asks Paseo before the launch lock is taken: the
-        # lock is held for the receipts and the one bridge call of the refresh, nothing longer.
+        if request.agent_id is not None and request.model_id is not None:
+            options = launcher_model_options(
+                config, request.agent_id, request.model_id, paseo_catalog_scope(config)
+            )
+            return JSONResponse({"modelOptions": options})
         response = _launcher_catalog(config, context, request)
-        _acquire_dispatch_lock()
-        try:
-            if request.role in TASKLESS_ROLES:
-                _migrate_taskless_legacy_receipt(config, request)
-                if request.role == "investigator":
-                    listing = investigator_listing(config, request)
-                    response["executions"] = [
-                        _public_execution(receipt) for _, receipt in listing.records
-                    ]
-                    response["omittedCount"] = listing.omitted_count
-                else:
-                    response["executions"] = [
-                        _public_execution(receipt)
-                        for _, receipt in _taskless_execution_receipts(config, request)
-                    ]
-            else:
-                receipt_path = _receipt_path(config, request)
-                receipt = _read_receipt(receipt_path)
-                response["execution"] = (
-                    _refresh_execution(config, receipt_path, receipt) if receipt else None
-                )
-        finally:
-            _DISPATCH_LOCK.release()
+        response.update(launcher_receipts(config, request, _receipt_lock))
         return JSONResponse(response)
     except LaunchLockBusy as busy:
         return busy.read_answer()
@@ -308,37 +290,14 @@ def _role_launch_result_endpoint(
         require_bridge_runtime(config)
     except PaseoBridgeFailure as error:
         raise bridge_http_error(error) from error
-    # The lock is held for the receipt and the one bridge call of the refresh, nothing longer.
     try:
-        _acquire_dispatch_lock()
+        if _DISPATCH_LOCK.locked():
+            raise LaunchLockBusy
+        return JSONResponse(result_execution(config, request, _receipt_lock))
     except LaunchLockBusy as busy:
         return busy.read_answer()
-    try:
-        if request.role in TASKLESS_ROLES:
-            if request.request_id is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Taskless role results require the exact saved requestId.",
-                )
-            _migrate_taskless_legacy_receipt(config, request)
-            path = _receipt_path(config, request, request.request_id)
-        else:
-            path = _receipt_path(config, request)
-        receipt = _read_receipt(path)
-        if receipt is None:
-            raise HTTPException(
-                status_code=404, detail="No role execution is recorded for this AR selection."
-            )
-        if not _receipt_address_matches(receipt, request):
-            raise HTTPException(
-                status_code=409,
-                detail="The recorded role execution belongs to another AR selection.",
-            )
-        return JSONResponse(_refresh_execution(config, path, receipt))
     except (OSError, ValueError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    finally:
-        _DISPATCH_LOCK.release()
 
 
 def _prepared_message_binding_projection(
@@ -861,6 +820,15 @@ def _acquire_dispatch_lock(wait_seconds: float = 0.0) -> None:
     )
     if not acquired:
         raise LaunchLockBusy
+
+
+@contextmanager
+def _receipt_lock() -> Iterator[None]:
+    _acquire_dispatch_lock()
+    try:
+        yield
+    finally:
+        _DISPATCH_LOCK.release()
 
 
 # The seats one set call prepares, in start order: the Worker opens at once, the

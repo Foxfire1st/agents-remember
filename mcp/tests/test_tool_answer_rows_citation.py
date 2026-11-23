@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any
 from unittest.mock import patch
 
@@ -28,6 +27,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 from agents_remember.mcp.tools.memory import _citation_fix_answer
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.tools.tool_answer import bound_for
+from agents_remember_test_support.testing.tool_answer_fixtures import fixed_width_row_case_root
 from test_worktree_support import git, open_external_contract_fixture
 from tool_answer_l110_rows import (
     assert_answer_survives_the_guard,
@@ -174,8 +174,7 @@ def _write_stale_world(onboarding: Path, count: int) -> None:
 def _run_documents_scope() -> dict[str, Any]:
     """Run citation_fix over two sidecars through a two-document scope."""
 
-    with TemporaryDirectory() as temporary:
-        root = Path(temporary)
+    with fixed_width_row_case_root() as root:
         contract, configured, scoped = _scoped_pair(root)
         package = contract.code_worktree / "pkg"
         package.mkdir(parents=True, exist_ok=True)
@@ -207,8 +206,7 @@ class CitationProductionTests(unittest.TestCase):
         refusing any card.
         """
 
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
+        with fixed_width_row_case_root() as root:
             contract, configured, scoped = _scoped_pair(root)
             package = contract.code_worktree / "pkg"
             package.mkdir(parents=True, exist_ok=True)
@@ -251,8 +249,7 @@ class CitationProductionTests(unittest.TestCase):
     def test_converted_paths_derive_the_row_cases(self) -> None:
         """Real converted runs: authored cards pass, unresolvable ones refuse bounded."""
 
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
+        with fixed_width_row_case_root() as root:
             contract, configured, scoped = _scoped_pair(root)
             package = contract.code_worktree / "pkg"
             package.mkdir(parents=True, exist_ok=True)
@@ -286,8 +283,7 @@ class CitationProductionTests(unittest.TestCase):
     def test_a_real_over_bound_call_hits_the_guard(self) -> None:
         """A real pathological call (verbose stale rows) exceeds the bound and is cut."""
 
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
+        with fixed_width_row_case_root() as root:
             contract, configured, scoped = _scoped_pair(root)
             package = contract.code_worktree / "pkg"
             package.mkdir(parents=True, exist_ok=True)

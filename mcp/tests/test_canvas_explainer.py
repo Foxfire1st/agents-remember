@@ -7,10 +7,14 @@ cleanup, and physical confinement of metadata and ordinary workspace entries.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 from unittest import mock
 
 import pytest
@@ -46,7 +50,17 @@ from agents_remember.canvas.explainer_workspace import (
     update_environment,
 )
 from agents_remember.canvas.paths import PathRefused
+from agents_remember.cli.role_launch_receipts import (
+    RECEIPT_SCHEMA,
+    _archive_receipt,
+    _write_receipt,
+)
 from agents_remember.models.knowledge.review_frame import FrameBinding
+from agents_remember.worktrees.role_reports import (
+    collect_execution_reports,
+    remove_group_role_folders,
+)
+from agents_remember.worktrees.worktree_contract import WorktreeContract
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from canvas_host_test_support import LEAF, TASK, config, packet, record
 
@@ -147,7 +161,136 @@ def test_a_build_checks_out_both_bound_trees_and_binds_last(tmp_path: Path) -> N
     assert (workspace / "instructions/evidence.json").is_file()
     assert (workspace / "instructions/assignment.txt").read_text() == "You are the explainer.\n"
     assert (workspace / "scratch").is_dir() and (workspace / "drafts").is_dir()
+    assert (workspace / "stages").is_dir() and (workspace / "inputs").is_dir()
     assert seen[-1] == build.steps[-1] == "bound"
+
+
+def _collect_report_fixture(
+    tmp_path: Path, reports_root: Path, request: str, document: str, sources: dict[str, str]
+) -> tuple[Path, dict[str, object]]:
+    local = tmp_path / request / "role-reports" / "worker" / request
+    canonical = reports_root / "worker" / request
+    primary = next(iter(sources))
+    _write(local, sources)
+    receipt = {
+        "schema": RECEIPT_SCHEMA,
+        "requestId": request,
+        "selection": {"taskDocumentRef": {"repository": REPOSITORY, "path": document}},
+        "report": {"canonicalPath": str(canonical / primary)},
+        "workspace": {"taskReportAccessRoot": str(local), "taskReportRoot": str(canonical)},
+    }
+    collect_execution_reports(receipt)
+    receipt_path = reports_root / "paseo-native-executions" / f"{request}.json"
+    _write_receipt(receipt_path, receipt)
+    return receipt_path, receipt
+
+
+def test_a_build_copies_the_task_document_and_packets_and_names_the_reports(
+    tmp_path: Path,
+) -> None:
+    """The reading stage's inputs: the leaf document, its packets, and the reports by path."""
+
+    code = _repository(tmp_path, "code", {"src/app.py": "x = 1\n"})
+    memory = _repository(tmp_path, "memory", {"m.md": "m\n"})
+    runtime = config(tmp_path)
+    task_folder = runtime.coordination_root / "tasks" / REPOSITORY / TASK
+    (task_folder / "requirements").mkdir(parents=True)
+    (task_folder / "requirements" / "R-1.md").write_text("# The rule\n", encoding="utf-8")
+    (task_folder / "the-leaf.json").write_text(
+        json.dumps(
+            {
+                "id": LEAF,
+                "requirements": ["[R-1@v1](requirements/R-1.md) — sole primary."],
+            }
+        ),
+        encoding="utf-8",
+    )
+    reports_root = task_folder / "notes" / "reports"
+    document = f"{TASK}/the-leaf.json"
+    archived = {
+        "role-launch/worker.md": "Archived primary report\n",
+        "first-report.md": (
+            "The render measured `round-3/mime-probe.json`.\n"
+            "Other paths `../sibling/evidence/counts.json` and "
+            "`role-launch/worker.handover.json` do not belong in this inventory.\n"
+        ),
+        "role-launch/attempt-journal.md": (
+            "The mounted page measured `sandbox-evidence-r2/recorded2/check-reduced.json`.\n"
+        ),
+        "round-3/mime-probe.json": '{"state": "loaded", "kind": "none"}\n',
+        "sandbox-evidence-r2/recorded2/check-reduced.json": '{"reduced": {"steps": 4}}\n',
+        "evidence/round/measurement.txt": "Measured elapsed time: 5 s\n",
+    }
+    active = {
+        "role-launch/worker.md": "Active report\n",
+        "evidence/measurement.md": "[Counts](summary.json)\n",
+        "evidence/summary.json": '{"count": 12}\n',
+    }
+    closed = {
+        "role-launch/worker.md": "Closed report\n",
+        "evidence/timing.md": "Measured elapsed time in `timing.json`.\n",
+        "evidence/timing.json": '{"elapsed": 5}\n',
+    }
+    archive_path, archive_receipt = _collect_report_fixture(
+        tmp_path,
+        reports_root,
+        "archived",
+        document,
+        {
+            **archived,
+            "role-launch/worker.handover.json": '{"schema": "ar-role-handover/v1"}\n',
+            "evidence/uncited.json": '{"draft": true}\n',
+        },
+    )
+    assert "reportCollectionFiles" in archive_receipt
+    _archive_receipt(archive_path, archive_receipt)
+    assert not archive_path.exists()
+    assert "reportCollectionFiles" not in json.loads(
+        (archive_path.parent / "history" / archive_path.name).read_text(encoding="utf-8")
+    )
+    _collect_report_fixture(tmp_path, reports_root, "active", document, active)
+    closed_path, closed_receipt = _collect_report_fixture(
+        tmp_path, reports_root, "closed", document, closed
+    )
+    # Group cleanup collects reports without updating the launch receipt's cache.
+    closed_receipt.pop("reportCollectionFiles")
+    closed_receipt.pop("reportCollection")
+    _write_receipt(closed_path, closed_receipt)
+    contract = cast(
+        WorktreeContract,
+        SimpleNamespace(worktree_group=tmp_path / "closed", task_root=task_folder),
+    )
+    remove_group_role_folders(contract, dry_run=False)
+    assert not (tmp_path / "closed" / "role-reports").exists()
+    _collect_report_fixture(
+        tmp_path,
+        reports_root,
+        "sibling",
+        f"{TASK}/other-leaf.json",
+        {
+            "role-launch/worker.md": "Sibling report\n",
+            "evidence/measurement.md": "Sibling counts in `evidence/counts.json`.\n",
+            "evidence/counts.json": '{"count": 22}\n',
+        },
+    )
+
+    build = build_environment(
+        EnvironmentRun(ref=_ref(runtime), inputs=_inputs(code, memory), now=NOW)
+    )
+
+    inputs = build.workspace / "inputs"
+    assert (inputs / "task.json").is_file()
+    assert json.loads((inputs / "task.json").read_text(encoding="utf-8"))["id"] == LEAF
+    assert (inputs / "requirement-R-1.md").read_text(encoding="utf-8") == "# The rule\n"
+    reports = (inputs / "reports.md").read_text(encoding="utf-8")
+    expected = set()
+    for request, sources in (("archived", archived), ("active", active), ("closed", closed)):
+        for path, contents in sources.items():
+            report = reports_root / "worker" / request / path
+            assert report.read_text(encoding="utf-8") == contents
+            digest = sha256(contents.encode()).hexdigest()
+            expected.add(f"- `sha256:{digest}` `{report}`")
+    assert {line for line in reports.splitlines() if line.startswith("- ")} == expected
 
 
 def test_an_unchanged_update_answers_current_and_writes_nothing(tmp_path: Path) -> None:
@@ -207,6 +350,67 @@ def test_a_moved_update_reuses_both_registered_worktrees(tmp_path: Path) -> None
     assert (build.workspace / "trees/memory/m.md").read_text() == "changed memory\n"
     assert not list(build.workspace.glob("snapshot-*"))
     assert read_binding(build.workspace) == update.binding
+
+
+def test_a_moved_update_refreshes_the_inputs_and_keeps_the_stage_files(tmp_path: Path) -> None:
+    """A moved Update creates the pre-feature folders, replaces old packets, and keeps stages."""
+
+    code = _repository(tmp_path, "code", {"a.py": "1\n"})
+    memory = _repository(tmp_path, "memory", {"m.md": "m\n"})
+    runtime = config(tmp_path)
+    task_folder = runtime.coordination_root / "tasks" / REPOSITORY / TASK
+    (task_folder / "requirements").mkdir(parents=True)
+    (task_folder / "the-leaf.json").write_text(
+        json.dumps({"id": LEAF, "requirements": ["[R-1@v1](requirements/R-1.md) — primary."]}),
+        encoding="utf-8",
+    )
+    (task_folder / "requirements" / "R-1.md").write_text("# First rule\n", encoding="utf-8")
+    build = build_environment(
+        EnvironmentRun(ref=_ref(runtime), inputs=_inputs(code, memory, 7), now=NOW)
+    )
+    shutil.rmtree(build.workspace / "stages")
+    shutil.rmtree(build.workspace / "inputs")
+
+    first = update_environment(
+        EnvironmentRun(
+            ref=_ref(runtime),
+            inputs=_inputs(code, memory, 8),
+            now=NOW,
+            previous=build.binding,
+        )
+    )
+
+    assert not first.current
+    assert (build.workspace / "stages").is_dir()
+    assert (build.workspace / "inputs" / "task.json").is_file()
+    assert (build.workspace / "inputs" / "requirement-R-1.md").read_text() == "# First rule\n"
+    stage = build.workspace / "stages" / "01-reading.md"
+    stage.write_text("the reading stays\n", encoding="utf-8")
+
+    (task_folder / "the-leaf.json").write_text(
+        json.dumps({"id": LEAF, "requirements": ["[R-2@v1](requirements/R-2.md) — primary."]}),
+        encoding="utf-8",
+    )
+    (task_folder / "requirements" / "R-2.md").write_text("# Second rule\n", encoding="utf-8")
+    _write(code, {"b.py": "2\n"})
+    _git(code, "add", "-A")
+    _git(code, "commit", "-qm", "two")
+
+    second = update_environment(
+        EnvironmentRun(
+            ref=_ref(runtime),
+            inputs=_inputs(code, memory, 9),
+            now=NOW,
+            previous=first.binding,
+        )
+    )
+
+    assert not second.current
+    assert (build.workspace / "inputs" / "task.json").is_file()
+    assert (build.workspace / "inputs" / "requirement-R-2.md").read_text() == "# Second rule\n"
+    assert not (build.workspace / "inputs" / "requirement-R-1.md").exists()
+    assert stage.read_text() == "the reading stays\n"
+    assert (build.workspace / "inputs" / "reports.md").is_file()
 
 
 def test_retire_ends_the_seats_processes_and_leaves_a_receipt(tmp_path: Path) -> None:

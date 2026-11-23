@@ -368,10 +368,19 @@ def _refresh_execution(
     only by a retry of its saved call.
     """
 
+    reading = read_execution_agent(config, receipt)
+    return apply_execution_reading(path, receipt, reading)
+
+
+def read_execution_agent(config: McpRuntimeConfig, receipt: dict[str, Any]) -> AgentReading | None:
     agent_id = _recorded_agent_id(receipt)
-    if agent_id is None:
-        return _public_execution(receipt)
-    return _apply_reading(path, receipt, read_agent(config, agent_id))
+    return read_agent(config, agent_id) if agent_id is not None else None
+
+
+def apply_execution_reading(
+    path: Path, receipt: dict[str, Any], reading: AgentReading | None
+) -> dict[str, Any]:
+    return _public_execution(receipt) if reading is None else _apply_reading(path, receipt, reading)
 
 
 def _recorded_agent_id(receipt: dict[str, Any]) -> str | None:

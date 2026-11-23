@@ -27,9 +27,10 @@ import type { PluginPage } from "./page";
 // above the box as padding at the end of the chat's scroll root, so the last message can always be
 // scrolled above the tray.
 //
-// Pinned, unsupported Paseo 0.11.1 DOM adapter (the pinned server package's web build
-// index-32cec38dd4de4493a1d5392537c1e464.js, read in its source on 2026-10-19, the rows' records
-// on 2026-10-20; not yet measured in a running page, unlike the display sign in client/bridge.ts).
+// Pinned, unsupported Paseo 0.16.2 DOM adapter (the pinned server package's web build
+// index-3d51f4c450eeff5bd838a646e9c611f2.js, whose markers were re-read for the 0.16.2 pin;
+// the rows' records were first read on 2026-10-20; not yet measured in a running page, unlike
+// the display sign in client/bridge.ts).
 // UNSUPPORTED Paseo behaviour this file relies on:
 //   - the chat's scroll root `<div data-testid="agent-chat-scroll" id="agent-chat-scroll-web-dom-
 //     scroll">` (or `…-web-dom-virtualized`); matched by the `agent-chat-scroll-` id prefix and the
@@ -40,7 +41,7 @@ import type { PluginPage } from "./page";
 //     `<messageId>:segment:<n>`, or a generated id when the provider names none; a tool call's
 //     `agent_tool_<callId>` or `agent_tool_turn:<turnId>/<callId>`; the message nodes
 //     `data-testid="assistant-message"` and `"user-message"`;
-//   - each row's own record. The build runs React DOM 19.1.0 (it refuses any other), which keeps
+//   - each row's own record. The build runs React DOM 19.2.3 (it refuses any other), which keeps
 //     a host element's props under `__reactProps$<random>`. A row's props are
 //     `{ "data-history-row-id": item.id, "data-message-id", style, children: <row item={item}> }`,
 //     where the item is the chat's stream item. Its `timestamp` and `timelineCursor` are the host's

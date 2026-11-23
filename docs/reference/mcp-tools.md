@@ -27,23 +27,46 @@ tokens, or at the lower bound of its tool; a few tools have a higher bound of at
 A list in an answer is cut at 20 entries, or at 10 in a status answer, and carries its count. An
 answer over its bound arrives as a short form of at most 400 tokens. If the recorded result's
 path cannot fit after the other droppable fields are removed, the full path and final hint remain
-and the short form exceeds 400 tokens. It always holds
-`overflow: true`, `answerTokens` and `log`, and `ok`, `code` and `buildCurrentness` where the
-answer has them. A recorded result's place is always named: where the path did not fit beside the
-other fields, the short form drops those fields first, so `log` rides whenever the whole result was
-written (`resultKept: false` and `logError` say why it was not). It then adds `error`, cut when long
-(`errorCut`), and the answer's other numbers, booleans and short texts while they fit;
-`droppedFields` counts the fields left out.
+and the short form exceeds 400 tokens. It always holds `overflow: true` and `answerTokens`.
+It keeps `ok`, `code` and `buildCurrentness` where the answer has them. When the whole result
+was recorded, `log` gives its exact path. Otherwise the answer carries `resultKept: false`
+and includes `logError` when a logging error is available.
+
+The shared guard selects a row by tool name and the reply's top-level Boolean `ok`.
+When its validator refuses, `knowledge_integrity_check` replies with `ok: true` and
+`state: refused`. The guard considers only fields present with their declared type in the
+validated whole result. Each fitting field keeps its whole value and type, including
+any nested object, map or list. The table lists fields in priority order. Fields are strings
+unless the table gives another type.
+
+| Tool | Wire `ok` | Declared fields |
+| --- | --- | --- |
+| `memory_carryover_plan` | `true` | `state`, `next.summary`, `counts` (map from names to integers) |
+| `memory_carryover_plan` | `false` | `nextAction`, `message` |
+| `knowledge_integrity_check` | `true` | `state`, `validation.candidate`, `bases` (list of strings) |
+| `memory_init` | `true` | `git.repairAttempted` (boolean) |
+| `memory_init` | `false` | `memoryRoot`, `initialBranch` |
+| `worktree_record_landing` | `true` for `recorded` and `would-record` | `state`, `next` (object with `summary` and `tool` strings), `staleEntries.count` (integer), `staleEntries.record` (list of up to 20 strings) |
+
+Fitting outcome and next-action fields appear before the locator. Counts and other selected
+fields follow it. If a declared value cannot fit whole, the guard omits it and, when there is
+room, adds its name and measured size to `cut.omittedFields` as `field` and `sizeTokens`.
+A fitting omission keeps its place before the guard considers the next declared field.
+`droppedFields` still counts omissions when their names and sizes cannot fit. The guard also
+fits `error`, shortened when needed (`errorCut`), and other numbers, booleans and short texts
+as space permits.
 
 Every cut answer ends with one last field, `cut`: it says that the answer was cut and names the file
 that holds the whole result (`log`), with `readIt` telling the reader to read the rest there. Where
 nothing was recorded, `cut.log` is `null` and `cut.why` names the reason, so no reader is sent to a
 path that holds nothing.
 
-The status tool keeps its list of lifecycle operations out of its answer: the answer carries
-`lifecycleOperationCount` and, while an operation is queued or running, `runningOperation` with the
-one sentence that names it. The whole list is in the file that holds the result. A status answer
-with one running closeout is therefore not cut.
+The `read_ar_files` tool defines its own short-answer fields.
+
+`worktree_status` replies with `lifecycleOperationCount` and saves the full `lifecycleOperations`
+list in the file named by `log`. For a queued or running direct landing, `runningOperation`
+is one sentence naming its kind, generation and state. The answer size guard keeps this
+compact line in the short form.
 
 A worktree, closeout or landing answer names the state reached and the next call in `nextTool`
 with `nextArgs`. A refusal that follows from the state of a task answers `ok: false` with the
@@ -224,7 +247,7 @@ lists command callers, timing and examples.
 | `worktree_start` | Create or load the worktree contract of a task with its code worktree and its memory worktree; `task_name` is the folder name of the master, `leaf_id` is the id of the task, and `parent_task` names the folder of the master or of the sprint that commands it. A dry run changes no task document, contract, Git ref or worktree; it returns the start preview even for the first task of a master whose own contract does not exist yet. The tool does not read the dependencies that a requirement packet names: tasks start in parallel, and the order of landing is the Manager's decision. | `repo_id`, `task_name`, `worktree_name`, `leaf_id`, `parent_task`, `workflow_kind="light-task"`, `source_branch`, `work_branch`, `memory_choice`, `stale_base_choice`, `dry_run=false` |
 | `worktree_enclosure_adopt` | Give one exact readable enclosure that has no [enclosure locator](../concepts.md#enclosure) its locator. The call validates the configured contract/root pair and writes the locator with an audit record; no other tool calls it. Dry-run by default. | `contract_path`, `expected_worktree_group`, nonblank `rationale`, `dry_run=true`, `approved=false`, optional `expected_publication_request_id` |
 | `worktree_attach` | Re-attach to an existing worktree contract of a task without changing Git. | `repo_id`, `task_name` or `contract_path`, `leaf_id`, `parent_task` |
-| `worktree_status` | Report the lifecycle status of one task by its address, without reading the closeout queue. While the task's enclosure locator is live, the status comes from the enclosure's manifest and [operation journal](../concepts.md#operation-journal), with the controls that can run now. While an operation of that enclosure is `queued` or `running`, the answer carries `runningOperation`, one sentence naming the kind, its generation and its state: it is part of the answer the size guard keeps whole, so polling this tool after a closeout call tells the caller that the closeout is still alive even when `lifecycleOperations` is too large to ride the answer. Once cleanup or abandon has archived the enclosure, the locator is terminal: the status comes from the archive outside the enclosure, its [archive record](../concepts.md#archive-record) and the worktree contract; it tells `archive-ready` (the archive stands, the contract does not yet record the cleanup) from `cleanup-completed` and returns the archived `cleanupArguments` with the exact `nextArgs` of the retry. It also reports one line when copies of task documents differ from their sources. | `repo_id`, `task_name` or `contract_path`, `leaf_id`, `parent_task`, `caller` |
+| `worktree_status` | Report the lifecycle status of one task by its address, without reading the closeout queue. While the task's enclosure locator is live, the status comes from the enclosure's manifest and [operation journal](../concepts.md#operation-journal), with the controls that can run now. While a direct landing of that enclosure is `queued` or `running`, the answer carries `runningOperation`, one sentence naming the kind, its generation and its state: it is part of the answer the size guard keeps whole, so it reaches the caller even when `lifecycleOperations` is too large to ride the answer. A closeout and an integration run inside their own call and record nothing, so neither ever appears there and polling this tool never reports one as live. Once cleanup or abandon has archived the enclosure, the locator is terminal: the status comes from the archive outside the enclosure, its [archive record](../concepts.md#archive-record) and the worktree contract; it tells `archive-ready` (the archive stands, the contract does not yet record the cleanup) from `cleanup-completed` and returns the archived `cleanupArguments` with the exact `nextArgs` of the retry. It also reports one line when copies of task documents differ from their sources. | `repo_id`, `task_name` or `contract_path`, `leaf_id`, `parent_task`, `caller` |
 | `worktree_sync` | Pull the moved official line into a live worktree: fetch, merge code, fast-forward or merge memory under the admitted sync plan, and advance the recorded base pair. With `sync_source="repository-default"` it pulls each repository's default branch instead: the base pair stays, the journal records the resolved branches and pinned tips, and one sync-log entry names the sources, incoming tips and produced heads; resume and cancel use the journal alone, and `continue` refuses with `sync-source-moved` when the default changed. Knowledge merges structurally and is validated; conflicts retain the advertised `continue` / `cancel` route. | `contract_path`, `memory_sync_choice`, `sync_source`, `resolution_action`, `dry_run=false` |
 | `worktree_pause` | Pause an atomic master and hand control back to the user; publishes nothing. | `contract_path` |
 
@@ -282,8 +305,8 @@ See [Worktrees And Closeout](worktrees-c09.md) for the lifecycle and its gates.
 | `worktree_closeout_apply` | Judge the exact candidate trees with the knowledge gate; `knowledge-gate-refused` carries its findings. Validate every enabled explicit nonblank input, then run the whole closeout inside the call: spend the approval of the closeout, commit the code, commit the memory and record the closeout in the worktree contract. The answer is the state reached, `closed` or a refusal such as `blocked` or `closeout-gate-blocked`; nothing runs after the call returns, and there is nothing to poll. The call reads no [closeout door](../concepts.md#closeout-door), the record by which a task waits for closeout; no tool of the tool server creates one. Before a commit, the code repository's own pre-commit hook runs on the tree to be committed; the paragraph below this table describes that check. | `contract_path`, `intent_note`, explicit message for each enabled commit leg (`code_commit_message`, `memory_commit_message`), `dry_run=false`, `corrective_dispositions` |
 | `worktree_integrate` | Land a closed-out task (`ff-only` or `replay`) inside the call and answer the state reached: `integrated`, `would-integrate` for a dry run, or a refusal such as `blocked-non-ff`, `blocked` or `handover-gate-blocked`. Nothing runs after the call returns, and the call leaves no record in the operation journal. | `contract_path`, `strategy="ff-only"`, `dry_run=false` |
 | `worktree_checkpoint_landing` | Land the work gathered on the branch of an unfinished atomic master onto the branch that the master itself lands on, and keep the master open; requires the user's approval. It is not a pause: `worktree_pause` pauses a master. | `contract_path`, `strategy="ff-only"`, `dry_run=false` |
-| `worktree_record_landing` | Record a commit the landing target already holds. When the landing chain's own proof passes and the only findings are entries that a changed path left stale, the answer carries `staleEntries` with their count, sentences, record and remedy, and the contract keeps them as the master's debt; any other refusal stands. | `contract_path`, `landed_code_commit`, optional `landed_memory_content_commit`, `dry_run=false` |
-| `worktree_operation_control` | Execute one currently advertised task-addressed control for an exact generation in the operation journal. Only a direct landing leaves a generation there: for `operation_kind` `closeout` or `integrate`, a request that passes the checks of its shape, its contract and its caller is refused with `lifecycle-operation-missing`. Retry/recover preserve accepted input; cancellation proves worker exit and Git safety; retire/supersede are evidence-aware. | `contract_path`, `operation_kind` (`closeout`, `integrate`, `direct-landing`), `action` (`retry`, `recover`, `resume`, `cancel`, `retire`, `supersede`), `expected_generation`, nonblank `intent_note`, action-specific inputs, `dry_run=false` |
+| `worktree_record_landing` | Record a commit the landing target already holds. When the landing chain's own proof passes and the only findings are entries that a changed path left stale, the contract keeps them as the master's debt. A cut answer considers the state, next sentence and tool, stale-entry count and up to 20 record IDs in that order, keeping each as it fits. If the IDs do not fit, the answer names `staleEntries.record` in `cut.omittedFields` when the omission fits. Otherwise, the omitted field contributes only to `droppedFields`. The detail file holds the complete debt, including the finding sentences, IDs and remedy. Any other refusal stands. | `contract_path`, `landed_code_commit`, optional `landed_memory_content_commit`, `dry_run=false` |
+| `worktree_operation_control` | Execute one currently advertised task-addressed control for an exact generation in the operation journal. Only a direct landing leaves a generation there: a closeout and `worktree_integrate` run inside their own call and record nothing, so for `operation_kind` `closeout` or `integrate` the call is refused with `lifecycle-operation-retired`, when the journal has no record of that kind or the requested generation matches a record an older build wrote. The answer names `worktree_closeout_apply` or `worktree_integrate` and leaves the journal for audit. A mismatched generation returns `lifecycle-generation-changed` with the requested and observed generation. Retry/recover preserve accepted input; cancellation proves Git safety; retire/supersede are evidence-aware. | `contract_path`, `operation_kind` (`closeout`, `integrate`, `direct-landing`), `action` (`retry`, `recover`, `resume`, `cancel`, `retire`, `supersede`), `expected_generation`, nonblank `intent_note`, action-specific inputs, `dry_run=false` |
 | `direct_landing` | Grant-gated landing, from the master's branch, of a named task that holds a [direct-execution grant](../concepts.md#direct-execution), without an enclosure for that task. Verifies the code commit at the HEAD of the master's branch, or creates it from the task's uncommitted changes with `code_commit_message`; persists a durable direct-landing generation before Git mutation and recovers it through `worktree_operation_control`. | `contract_path` (the worktree contract of the master), `leaf_task_document_ref`, optional `code_commit` (verify) or `code_commit_message` (create), explicit enabled-leg messages, `intent_note`, optional gated `candidate_tree`, `leaf_id`, `dry_run=false` |
 | `direct_execution_grant` | Give, take back, or reclaim direct-execution grants before work starts. Only a caller bound to the Architect role can call it. The user gives the same record with the dashboard's switch "Direct execution"; `task_doc` has no operation that gives, changes, or removes a grant. | `task_document_ref`, `action` (`give`, `revoke`, or `reclaim` — reclaim takes back only abandoned tasks' grants with clean checkouts and reports what was preserved and why; started tasks keep their grants) |
 | `worktree_cleanup` | After the landing, archive/read back canonical lifecycle evidence, publish the external archive record, then remove worktrees, merged task branches, reports, and the enclosure. Archive-ready is not cleanup-completed; retry this exact public call with its archived `teardown_providers` value until surviving contract truth records completion. Bounded pre-locator exception: with no enclosure locator, no worktree folder, and no work branches, the call finishes with nothing to archive/delete, records the why in the surviving contract, and reads it back. This is non-terminal for task documents. | `contract_path`, `dry_run=false`, `teardown_providers=true` (also removes the containers, networks and folder `provider-runtime/` that a [search provider](../concepts.md#search-provider) left in the enclosure) |
@@ -433,10 +456,22 @@ refused `review-budget-exhausted`; a further round then needs, in the review obj
 An approval before the bound is refused `review-admission-invalid`. `reviewKind: "memory"`
 selects the separate sequence of memory reviews; the default is `code`.
 `record_review` takes `{verdict, findings:[{findingId, description}]}` first,
-then `remainingFindingIds:[...]`; successors only shrink the sealed set. `record_route_review`
-takes `{verdict, verdictRef, routes:[{route, verdict, evidenceRef}]}`; the plane stamps the
-candidate tree and time, every evidence path must be a real task-relative file, and it
-overwrites the prior candidate's review.
+then `remainingFindingIds:[...]`; successors only shrink the sealed set. A finding that a
+sanctioned route adds after sealing is recorded instead as
+`{verdict:"block", addedFindings:[{findingId, description, route}]}`, `route` being one of
+`curator`, `advisory` and `final-check`: that round adds the finding to the sealed list and
+reopens that point only, without a counted round; where the document carries a route review,
+both operations require the addition's own `verdictRef`. The new blocking route record binds
+that file and the previously recorded route units to the reviewed tree. The sealed finding
+list stores the description, and the route history keeps the finding ID and route. The door
+returns `route-review-blocked` until the Reviewer publishes a passing routed verdict for the
+repair. The repair round counts toward the configured limit. Generic `record_review`
+can record the finding and reopen the route, but the repair's evidence must be
+published through `record_route_review` on a routed leaf. `record_route_review` takes
+`{verdict, verdictRef, routes:[{route, verdict, evidenceRef}]}`. The plane stamps the
+candidate tree and time, every evidence path must be a real task-relative file, and the
+new record becomes the current route record. A routed addition supplies the previously
+recorded routes together with the new verdict reference and `addedFindings`.
 - Atomic masters: the operation targets the master's task document and binds the accumulated
 candidate, membership and evidence; a child publishes no independent review; master review is
 required only when the master lands into its parent. `branch_addressed=true` (accepted only for

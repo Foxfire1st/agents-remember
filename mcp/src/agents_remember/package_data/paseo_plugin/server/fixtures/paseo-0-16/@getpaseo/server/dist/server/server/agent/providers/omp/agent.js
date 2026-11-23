@@ -1,0 +1,2155 @@
+import { mapCustomMessageToToolCall } from "../custom-message.js";
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { setImmediate as waitForImmediate, setTimeout as delay } from "node:timers/promises";
+import stripAnsi from "strip-ansi";
+import { importSessionFromPersistence } from "../../provider-session-import.js";
+import { runProviderRefreshActivity } from "../../provider-refresh-deadline.js";
+import { runProviderTurn } from "../provider-runner.js";
+import { checkProviderLaunchAvailable, resolveProviderLaunch, } from "../../provider-launch-config.js";
+import { renderPromptAttachmentAsText } from "../../prompt-attachments.js";
+import { composeSystemPromptParts } from "../../system-prompt.js";
+import { buildBinaryDiagnosticRows, buildCommandResolutionDiagnosticRows, formatProviderDiagnostic, formatProviderDiagnosticError, toDiagnosticErrorMessage, } from "../diagnostic-utils.js";
+import { formatOmpVersionSupport, mergeOmpRuntimeSettings, resolveOmpDiagnosticPaths, resolveOmpLaunchMode, resolveOmpProviderOptions, OMP_MODES, OmpProviderOptionsSchema, } from "./provider-config.js";
+export { formatOmpVersionSupport, resolveOmpDiagnosticPaths } from "./provider-config.js";
+import { applyProviderOptionsPatch } from "../../option-controls.js";
+import { assertChangesAreLive, validateProviderOptions } from "../../provider-options.js";
+import { OmpSubagentCardTracker } from "./subagent-card-tracker.js";
+import { ompSkillPromptUserText, shouldDisplayOmpCustomMessage } from "./custom-message.js";
+import { getUserMessageText } from "./message-history.js";
+import { mapOmpSystemNoticeToNotification } from "./system-notice.js";
+import { materializeProviderImage } from "../provider-image-output.js";
+import { OmpCliRuntime } from "./cli-runtime.js";
+import { listOmpImportableSessions, readOmpImportSessionConfig } from "./session-descriptor.js";
+import { OmpMcpBridge } from "./mcp-bridge.js";
+import { parseToolArgs, parseToolResult, toolFailureMessage, isOmpToolFailure, resolveToolCallName, } from "./tool-call-detail.js";
+import { mapOmpAvailableCommandsUpdate, mapOmpRuntimeSlashCommands } from "./commands.js";
+import { readOmpHistoryTodoState, streamOmpHistory } from "./history.js";
+import { mapOmpTodoReminderEvent, mapOmpTodoState, mapOmpTodoToolResult } from "./todo-mapper.js";
+import { mapOmpRuntimeEventToTimelineItem } from "./event-mapper.js";
+import { mapOmpAdvisorMessageToToolCall } from "./advisor-message.js";
+import { handleOmpHostToolRuntimeEvent, OmpHostToolRouter } from "./host-tools.js";
+import { OmpSubagentIndex } from "./subagent-index.js";
+import { OmpQuestionUi } from "./question-ui.js";
+import { mapOmpToolDetail } from "./tool-call-mapper.js";
+import { OmpUsagePoller } from "./usage-poller.js";
+import { buildOmpRpcUiPermissionResponse, mapOmpRpcUiPermissionRequest, } from "./rpc-ui-permission-mapper.js";
+import { DEFAULT_OMP_THINKING_LEVEL, mapOmpModel } from "./map-omp-model.js";
+const OMP_PROVIDER = "omp";
+const OMP_CORE_CAPABILITIES = {
+    supportsStreaming: true,
+    supportsSessionPersistence: true,
+    supportsSessionListing: true,
+    supportsDynamicModes: true,
+    supportsMcpServers: true,
+    supportsReasoningStream: true,
+    supportsToolInvocations: true,
+    supportsRewindConversation: true,
+    supportsRewindFiles: false,
+    supportsRewindBoth: false,
+};
+// COMPAT(ompDelayedLocalOnlyResult): OMP 17.0.5 can report a regular prompt as
+// local-only shortly before an extension-queued model turn starts. Added in
+// v0.2.0-beta.1; remove after January 20, 2027 once the minimum OMP version
+// guarantees prompt_result waits for queued extension work.
+const OMP_NO_TURN_SETTLE_MS = 5000;
+const OMP_PROVIDER_IDLE_DEADLINE_MS = 600000;
+const OMP_FAST_INACTIVE_MESSAGE = "Fast is enabled but does not apply to this model.";
+function promptResultError(result) {
+    if (result.status !== "error")
+        return null;
+    return result.error?.message || "OMP rejected the prompt";
+}
+function createOmpProviderIdleScheduler() {
+    return {
+        waitForRetry: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+        },
+    };
+}
+function createOmpNoTurnScheduler() {
+    return {
+        waitForSettle: async (signal) => {
+            await delay(OMP_NO_TURN_SETTLE_MS, undefined, { signal });
+        },
+    };
+}
+function isOmpThinkingLevel(value) {
+    return (value === "off" ||
+        value === "minimal" ||
+        value === "low" ||
+        value === "medium" ||
+        value === "high" ||
+        value === "xhigh" ||
+        value === "max" ||
+        value === "auto");
+}
+function normalizeOmpThinkingOption(value) {
+    if (!value) {
+        return null;
+    }
+    return isOmpThinkingLevel(value) ? value : null;
+}
+function parseAutoCompactMode(value) {
+    const mode = (value ?? "toggle").trim().toLowerCase();
+    if (mode === "on" || mode === "true" || mode === "enable" || mode === "enabled") {
+        return true;
+    }
+    if (mode === "off" || mode === "false" || mode === "disable" || mode === "disabled") {
+        return false;
+    }
+    if (mode === "toggle") {
+        return "toggle";
+    }
+    return "unknown";
+}
+function ompModelSupportsImageInput(model) {
+    return model?.input?.includes("image") === true;
+}
+async function renderTextOnlyImageHint(image) {
+    try {
+        const materialized = await materializeProviderImage({
+            data: image.data,
+            mimeType: image.mimeType,
+        });
+        return `[Image available at: ${materialized.path}]`;
+    }
+    catch (error) {
+        return `[Image attachment omitted: failed to write local file (${toDiagnosticErrorMessage(error)})]`;
+    }
+}
+async function convertPromptInput(prompt, options) {
+    if (typeof prompt === "string") {
+        return { text: prompt };
+    }
+    const textParts = [];
+    const images = [];
+    const forwardImages = ompModelSupportsImageInput(options.model);
+    for (const block of prompt) {
+        if (block.type === "text") {
+            textParts.push(block.text);
+            continue;
+        }
+        if (block.type === "image") {
+            if (forwardImages) {
+                images.push({
+                    type: "image",
+                    data: block.data,
+                    mimeType: block.mimeType,
+                });
+            }
+            else {
+                textParts.push(await renderTextOnlyImageHint(block));
+            }
+            continue;
+        }
+        textParts.push(renderPromptAttachmentAsText(block));
+    }
+    const payload = {
+        text: textParts.join("\n\n"),
+    };
+    if (images.length > 0) {
+        payload.images = images;
+    }
+    return payload;
+}
+function parseModelReference(modelId) {
+    if (!modelId) {
+        return null;
+    }
+    if (modelId.includes("/")) {
+        const [provider, ...rest] = modelId.split("/");
+        const id = rest.join("/");
+        if (provider && id) {
+            return { provider, id };
+        }
+    }
+    if (modelId.includes(":")) {
+        const [provider, ...rest] = modelId.split(":");
+        const id = rest.join(":");
+        if (provider && id) {
+            return { provider, id };
+        }
+    }
+    return { id: modelId };
+}
+function parsePersistenceMetadata(metadata) {
+    if (!metadata) {
+        return { bridgedTools: new Map() };
+    }
+    const bridgedTools = new Map();
+    if (Array.isArray(metadata.bridgedTools)) {
+        for (const entry of metadata.bridgedTools) {
+            if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string")
+                continue;
+            const identity = entry[1];
+            if (!identity || typeof identity !== "object" || Array.isArray(identity))
+                continue;
+            if (typeof identity.server !== "string" || typeof identity.tool !== "string")
+                continue;
+            bridgedTools.set(entry[0], { server: identity.server, tool: identity.tool });
+        }
+    }
+    return {
+        bridgedTools,
+        ...(typeof metadata.cwd === "string" ? { cwd: metadata.cwd } : {}),
+        ...(typeof metadata.model === "string" ? { model: metadata.model } : {}),
+        ...(typeof metadata.thinkingOptionId === "string"
+            ? { thinkingOptionId: metadata.thinkingOptionId }
+            : {}),
+        ...(typeof metadata.modeId === "string" ? { modeId: metadata.modeId } : {}),
+        ...(typeof metadata.systemPrompt === "string" ? { systemPrompt: metadata.systemPrompt } : {}),
+    };
+}
+function buildResumeConfig(metadata, overrides, provider) {
+    const overrideConfig = overrides ?? {};
+    const cwd = overrideConfig.cwd ?? metadata.cwd ?? process.cwd();
+    const model = overrideConfig.model ?? metadata.model;
+    const thinkingOptionId = overrideConfig.thinkingOptionId ?? metadata.thinkingOptionId;
+    const modeId = overrideConfig.modeId ?? metadata.modeId;
+    return {
+        cwd,
+        model,
+        thinkingOptionId,
+        modeId,
+        config: {
+            ...overrideConfig,
+            provider,
+            cwd,
+            model,
+            thinkingOptionId,
+            modeId,
+            systemPrompt: overrideConfig.systemPrompt ?? metadata.systemPrompt,
+        },
+    };
+}
+function buildResumeStartInput(input) {
+    return {
+        cwd: input.resumeConfig.cwd,
+        protocolMode: "rpc-ui",
+        env: input.launchContext?.env,
+        session: input.sessionFile,
+        thinkingOptionId: normalizeOmpThinkingOption(input.resumeConfig.thinkingOptionId) ?? undefined,
+        ...(input.launchMode.modeId ? { modeId: input.launchMode.modeId } : {}),
+        ...(input.launchMode.extraArgs ? { extraArgs: input.launchMode.extraArgs } : {}),
+        systemPrompt: composeSystemPromptParts(input.resumeConfig.config.systemPrompt, input.resumeConfig.config.daemonAppendSystemPrompt),
+    };
+}
+function readNativeMessageId(message) {
+    if (typeof message.id === "string") {
+        return message.id;
+    }
+    return typeof message.entryId === "string" ? message.entryId : undefined;
+}
+function withOmpCapabilities() {
+    return {
+        ...OMP_CORE_CAPABILITIES,
+        supportsMcpServers: true,
+        supportsNativePaseoTools: true,
+    };
+}
+function isOmpRequestAbortError(error) {
+    if (error instanceof Error && error.name === "AbortError") {
+        return true;
+    }
+    return /\brequest was aborted\b|\babort(ed)?\b/i.test(toDiagnosticErrorMessage(error));
+}
+function isOmpSteerTransportFailure(error) {
+    // JsonlRpcProcess currently uses plain Error for both RPC rejections and transport failures.
+    // Only its own timeout/closed-process messages are transport failures; OMP rejections are unavailable.
+    const message = toDiagnosticErrorMessage(error);
+    return (/^OMP RPC request timed out phase=steer\b/.test(message) ||
+        /^OMP RPC process (?:is closed|exited\b)/.test(message));
+}
+function hasOmpFastMode(state) {
+    return typeof state.fastModeEnabled === "boolean" && typeof state.fastModeActive === "boolean";
+}
+function resolveThinkingOptionId(cachedThinkingOptionId, sessionThinkingLevel) {
+    const currentThinking = cachedThinkingOptionId ?? sessionThinkingLevel;
+    return normalizeOmpThinkingOption(currentThinking);
+}
+function modelToId(model) {
+    return model?.provider && model.id ? `${model.provider}/${model.id}` : null;
+}
+function ompAssistantText(message) {
+    const text = message.content
+        .flatMap((part) => {
+        if (part.type === "text") {
+            return [part.text];
+        }
+        if (part.type === "thinking") {
+            return [part.thinking];
+        }
+        return [];
+    })
+        .join("\n\n")
+        .trim();
+    return text.length > 0 ? text : null;
+}
+function formatOmpErrorMessage(message) {
+    const headline = message.errorMessage?.trim() || "OMP turn failed";
+    const details = [
+        message.stopReason ? `stopReason=${message.stopReason}` : null,
+        message.provider && message.model ? `model=${message.provider}/${message.model}` : null,
+        message.responseModel ? `responseModel=${message.responseModel}` : null,
+        message.responseId ? `responseId=${message.responseId}` : null,
+    ].filter((detail) => detail !== null);
+    const partialText = ompAssistantText(message);
+    if (partialText) {
+        details.push(`partial=${JSON.stringify(partialText.slice(0, 500))}`);
+    }
+    return details.length > 0 ? `${headline} (${details.join(", ")})` : headline;
+}
+function latestOmpErrorMessage(messages) {
+    const latestAssistant = messages.findLast((message) => message.role === "assistant");
+    if (!latestAssistant || !latestAssistant.errorMessage?.trim()) {
+        return null;
+    }
+    return formatOmpErrorMessage(latestAssistant);
+}
+function isOmpAbortedTerminalResponse(messages) {
+    const latestAssistant = messages.findLast((message) => message.role === "assistant");
+    return latestAssistant?.stopReason?.toLowerCase() === "aborted";
+}
+function optionalString(value) {
+    return typeof value === "string" ? value : undefined;
+}
+function isExtensionUiRequestEvent(event) {
+    return event.type === "extension_ui_request" && typeof event.id === "string";
+}
+function isProcessExitEvent(event) {
+    return event.type === "process_exit" && typeof event.error === "string";
+}
+function isOmpAgentSessionEvent(event) {
+    switch (event.type) {
+        case "agent_start":
+        case "turn_start":
+        case "message_start":
+        case "message_end":
+        case "message_update":
+        case "tool_execution_start":
+        case "tool_execution_update":
+        case "tool_execution_end":
+        case "compaction_start":
+        case "compaction_end":
+        case "agent_end":
+            return true;
+        default:
+            return false;
+    }
+}
+function createRuntime(logger, runtimeSettings, providerOptions) {
+    return new OmpCliRuntime({
+        logger,
+        runtimeSettings,
+        command: ["omp"],
+        commandsRpcName: "get_available_commands",
+        readyTimeoutMs: providerOptions.readyTimeoutMs,
+        requestTimeoutMs: providerOptions.rpcTimeoutMs,
+    });
+}
+class OmpHistorySession {
+    constructor(handle, config, sessionFile, provider, bridgedTools) {
+        this.handle = handle;
+        this.config = config;
+        this.sessionFile = sessionFile;
+        this.bridgedTools = bridgedTools;
+        this.capabilities = withOmpCapabilities();
+        this.provider = provider;
+    }
+    get id() {
+        return this.handle.sessionId;
+    }
+    async run() {
+        throw new Error("OMP history session cannot start a turn");
+    }
+    async startTurn() {
+        throw new Error("OMP history session cannot start a turn");
+    }
+    subscribe() {
+        return () => undefined;
+    }
+    async *streamHistory() {
+        yield* streamOmpHistory({
+            sessionFile: this.sessionFile,
+            provider: this.provider,
+            bridgedTools: this.bridgedTools,
+        });
+        const todo = await readOmpHistoryTodoState(this.sessionFile);
+        if (todo)
+            yield { type: "timeline", provider: this.provider, item: todo };
+    }
+    async getRuntimeInfo() {
+        return {
+            provider: this.provider,
+            sessionId: this.handle.sessionId,
+            model: this.config.model ?? null,
+            thinkingOptionId: this.config.thinkingOptionId ?? null,
+            modeId: this.config.modeId ?? null,
+        };
+    }
+    async getAvailableModes() {
+        return [...OMP_MODES];
+    }
+    async getCurrentMode() {
+        return this.config.modeId ?? null;
+    }
+    async setMode() {
+        throw new Error("OMP history session cannot change mode");
+    }
+    getPendingPermissions() {
+        return [];
+    }
+    async respondToPermission() {
+        throw new Error("OMP history session has no pending permissions");
+    }
+    describePersistence() {
+        return this.handle;
+    }
+    async interrupt() { }
+    async close() { }
+}
+export class OmpAgentSession {
+    usageSession() {
+        const env = this.runtimeSession.environment;
+        if (this.closed)
+            return null;
+        return {
+            provider: "omp",
+            model: modelToId(this.state.model) ?? undefined,
+            env,
+            sessionKey: this.usageSessionKey,
+        };
+    }
+    constructor(options) {
+        this.provider = OMP_PROVIDER;
+        this.capabilities = withOmpCapabilities();
+        this.subscribers = new Set();
+        this.activeToolCalls = new Map();
+        this.pendingExtensionUiRequests = new Map();
+        this.questionUi = new OmpQuestionUi();
+        this.activeTurnId = null;
+        this.pendingClientMessages = [];
+        this.activeAssistantMessageId = null;
+        this.activeTurnTerminalAssistantMessage = null;
+        this.activeTurnStarted = false;
+        this.outOfBandTurnStartAnnounced = false;
+        this.activeTurnHasUserMessage = false;
+        this.activeNoTurnPromptText = null;
+        this.pendingNoTurnOutputs = [];
+        this.activePromptRequestId = null;
+        this.activePromptAgentInvoked = null;
+        this.activePromptError = null;
+        this.pendingPromptResults = new Map();
+        this.pendingNoTurnCompletionAbort = null;
+        this.manualCompactionRunning = false;
+        this.commandCache = null;
+        this.subagentIndex = new OmpSubagentIndex();
+        this.lastTodoItem = null;
+        this.runtimeDead = false;
+        this.replacingRuntime = null;
+        this.unsubscribeRuntime = null;
+        this.closed = false;
+        this.emittedUserMessageIds = new Set();
+        this.usageSessionKey = randomUUID();
+        this.runtimeSession = options.runtimeSession;
+        this.hostTools = options.hostTools;
+        this.restartRuntime = options.restartRuntime;
+        this.config = options.config;
+        this.state = options.initialState;
+        this.openOptionsPatch = this.fastModeDifference(options.config.providerOptions?.fast_mode);
+        // A replacement runtime starts from the Fast this one opened with, not the one it was asked for.
+        if (typeof this.openOptionsPatch.fast_mode === "boolean")
+            this.rememberFastMode(this.openOptionsPatch.fast_mode);
+        this.currentModeId = options.currentModeId ?? null;
+        this.logger = options.logger;
+        this.live = options.live ?? true;
+        this.providerIdleScheduler = options.providerIdleScheduler ?? createOmpProviderIdleScheduler();
+        this.providerIdleDeadlineMs = options.providerIdleDeadlineMs ?? OMP_PROVIDER_IDLE_DEADLINE_MS;
+        this.noTurnScheduler = options.noTurnScheduler ?? createOmpNoTurnScheduler();
+        this.usagePoller = new OmpUsagePoller({
+            scheduler: options.usagePollScheduler,
+            readStats: () => this.runtimeSession.getSessionStats(),
+            onUsage: (usage, turnId) => {
+                this.emit({
+                    type: "usage_updated",
+                    provider: this.provider,
+                    usage,
+                    ...(turnId === undefined ? {} : { turnId }),
+                });
+            },
+            onPollError: (error) => {
+                this.logger.debug({ err: error }, "OMP context usage poll failed");
+            },
+        });
+        this.subagentCardTracker = new OmpSubagentCardTracker();
+        this.lastKnownThinkingOptionId =
+            normalizeOmpThinkingOption(options.config.thinkingOptionId) ??
+                this.state.thinkingLevel ??
+                null;
+        this.attachRuntime(this.runtimeSession);
+    }
+    attachRuntime(runtime) {
+        this.unsubscribeRuntime = runtime.onEvent((event) => {
+            if (!this.closed && runtime === this.runtimeSession)
+                this.handleRuntimeEvent(event);
+        });
+        void runtime.setSubagentSubscription("events").catch((eventsError) => {
+            this.logger.debug({ err: eventsError }, "OMP subagent event subscription unavailable; falling back to progress");
+            void runtime.setSubagentSubscription("progress").catch((progressError) => {
+                this.logger.debug({ err: progressError }, "OMP subagent progress subscription unavailable");
+            });
+        });
+    }
+    get id() {
+        return this.state.sessionId;
+    }
+    get controls() {
+        if (!hasOmpFastMode(this.state))
+            return [];
+        return [
+            {
+                type: "toggle",
+                key: "fast_mode",
+                label: "Fast",
+                icon: "zap",
+                ...(this.state.fastModeEnabled && !this.state.fastModeActive
+                    ? { description: OMP_FAST_INACTIVE_MESSAGE, tooltip: OMP_FAST_INACTIVE_MESSAGE }
+                    : {}),
+            },
+        ];
+    }
+    async applyOptions(options) {
+        assertChangesAreLive({
+            provider: "omp",
+            patch: options,
+            current: this.config.providerOptions,
+            live: ["fast_mode"],
+        });
+        const next = validateProviderOptions("omp", OmpProviderOptionsSchema, applyProviderOptionsPatch({ options: this.config.providerOptions, patch: options }));
+        if (options.fast_mode === undefined)
+            return {};
+        const requested = next?.fast_mode ?? false;
+        if (!hasOmpFastMode(this.state))
+            throw new Error("OMP fast mode is unavailable");
+        if (requested !== this.state.fastModeEnabled) {
+            const result = await this.runtimeSession.setFastMode(requested);
+            this.state = {
+                ...this.state,
+                fastModeEnabled: result.enabled,
+                fastModeActive: result.active,
+            };
+        }
+        if (typeof this.state.fastModeEnabled === "boolean") {
+            this.rememberFastMode(this.state.fastModeEnabled);
+        }
+        return this.fastModeDifference(requested);
+    }
+    /** A replacement runtime starts from the Fast the session has now, not the one it opened with. */
+    rememberFastMode(enabled) {
+        this.config.providerOptions = { ...this.config.providerOptions, fast_mode: enabled };
+    }
+    /** The option patch when the runtime's fast mode is not what `given` stands for; unset is off. */
+    fastModeDifference(given) {
+        if (!hasOmpFastMode(this.state))
+            return {};
+        const enabled = this.state.fastModeEnabled === true;
+        return (given ?? false) === enabled ? {} : { fast_mode: enabled };
+    }
+    async run(prompt, options) {
+        return runProviderTurn({
+            prompt,
+            runOptions: options,
+            startTurn: (p, o) => this.startTurn(p, o),
+            subscribe: (callback) => this.subscribe(callback),
+            getSessionId: () => this.state.sessionId,
+            reduceFinalText: ({ current, item }) => item.type === "assistant_message" ? `${current}${item.text}` : current,
+        });
+    }
+    async startTurn(prompt, options) {
+        return this.startPrompt({ prompt, options });
+    }
+    async startPrompt({ prompt, options, streamingBehavior, announceTurn = false, }) {
+        if (this.activeTurnId) {
+            throw new Error("An OMP turn is already active");
+        }
+        const turnId = randomUUID();
+        this.live = true;
+        this.activeTurnId = turnId;
+        this.activeAssistantMessageId = null;
+        this.activeTurnTerminalAssistantMessage = null;
+        this.activeTurnStarted = false;
+        this.outOfBandTurnStartAnnounced = false;
+        this.activeTurnHasUserMessage = false;
+        this.activePromptRequestId = null;
+        this.clearNoTurnBuffers();
+        const payload = await convertPromptInput(prompt, { model: this.state.model });
+        if (this.closed)
+            throw new Error("OMP session is closed");
+        if (this.activeTurnId !== turnId)
+            return { turnId };
+        this.rememberClientMessage(options?.clientMessageId ?? null, payload.text);
+        this.activeNoTurnPromptText = payload.text;
+        this.usagePoller.startTurn();
+        if (announceTurn) {
+            this.outOfBandTurnStartAnnounced = true;
+            this.emit({ type: "turn_started", provider: this.provider, turnId });
+        }
+        void (async () => {
+            try {
+                if (this.runtimeDead)
+                    await this.replaceRuntime(this.currentModeId ?? "full");
+                if (this.closed)
+                    throw new Error("OMP session is closed");
+                const ack = await this.runtimeSession.prompt({
+                    message: payload.text,
+                    images: payload.images,
+                    streamingBehavior,
+                });
+                this.activePromptRequestId = ack.requestId ?? null;
+                const correlatedResult = ack.requestId
+                    ? this.pendingPromptResults.get(ack.requestId)
+                    : undefined;
+                if (ack.requestId) {
+                    this.pendingPromptResults.delete(ack.requestId);
+                }
+                this.activePromptAgentInvoked = correlatedResult?.agentInvoked ?? ack.agentInvoked ?? null;
+                this.activePromptError = correlatedResult?.error ?? null;
+                if (correlatedResult?.agentInvoked === false) {
+                    this.scheduleNoTurnPromptCompletion(turnId);
+                    return;
+                }
+                if (correlatedResult?.agentInvoked !== true && ack.agentInvoked === false) {
+                    await this.completeNoTurnPrompt(turnId);
+                    return;
+                }
+            }
+            catch (error) {
+                if (this.activeTurnId !== turnId) {
+                    return;
+                }
+                this.usagePoller.stopTurn();
+                this.resetActiveTurn({ terminalizeWork: true });
+                if (isOmpRequestAbortError(error)) {
+                    this.emit({
+                        type: "turn_canceled",
+                        provider: this.provider,
+                        turnId,
+                        reason: toDiagnosticErrorMessage(error),
+                    });
+                    return;
+                }
+                this.emit({
+                    type: "turn_failed",
+                    provider: this.provider,
+                    turnId,
+                    error: toDiagnosticErrorMessage(error),
+                });
+            }
+        })();
+        return { turnId };
+    }
+    async steerActiveTurn(prompt, options) {
+        if (this.closed || this.activeTurnId !== options.expectedTurnId)
+            return { status: "unavailable" };
+        const payload = await convertPromptInput(prompt, { model: this.state.model });
+        if (this.closed || this.activeTurnId !== options.expectedTurnId)
+            return { status: "unavailable" };
+        if (this.parseSlashCommandInput(payload.text))
+            return { status: "unavailable" };
+        const submission = this.rememberClientMessage(options.clientMessageId ?? null, payload.text);
+        try {
+            await this.runtimeSession.steer(payload.text, payload.images);
+        }
+        catch (error) {
+            this.forgetClientMessage(submission);
+            if (isOmpSteerTransportFailure(error))
+                throw error;
+            return { status: "unavailable" };
+        }
+        if (this.closed || this.activeTurnId !== options.expectedTurnId)
+            return { status: "unavailable" };
+        if (options.clearPendingPermissions) {
+            for (const requestId of this.pendingExtensionUiRequests.keys()) {
+                await this.respondToPermission(requestId, {
+                    behavior: "deny",
+                    message: "The user sent a message instead of approving.",
+                });
+            }
+        }
+        return { status: "accepted" };
+    }
+    rememberClientMessage(clientMessageId, text) {
+        const submission = { clientMessageId, text };
+        this.pendingClientMessages.push(submission);
+        if (this.pendingClientMessages.length > 16)
+            this.pendingClientMessages.shift();
+        return submission;
+    }
+    forgetClientMessage(submission) {
+        const index = this.pendingClientMessages.indexOf(submission);
+        if (index >= 0)
+            this.pendingClientMessages.splice(index, 1);
+    }
+    takeClientMessage() {
+        return this.pendingClientMessages.shift();
+    }
+    subscribe(callback) {
+        this.subscribers.add(callback);
+        return () => {
+            this.subscribers.delete(callback);
+        };
+    }
+    async *streamHistory() {
+        yield* streamOmpHistory({
+            sessionFile: this.state.sessionFile,
+            runtimeSession: this.runtimeSession,
+            provider: this.provider,
+            bridgedTools: this.hostTools?.bridge?.toolIdentities(),
+        });
+        for (const item of mapOmpTodoState(this.state)) {
+            yield {
+                type: "timeline",
+                provider: this.provider,
+                item,
+            };
+        }
+    }
+    async getRuntimeInfo() {
+        await this.refreshState();
+        return this.runtimeInfoFromState();
+    }
+    runtimeInfoFromState() {
+        return {
+            provider: this.provider,
+            sessionId: this.state.sessionId,
+            model: modelToId(this.state.model),
+            thinkingOptionId: resolveThinkingOptionId(this.lastKnownThinkingOptionId, this.state.thinkingLevel),
+            modeId: this.currentModeId,
+        };
+    }
+    async getAvailableModes() {
+        return [...OMP_MODES];
+    }
+    async getCurrentMode() {
+        return this.currentModeId;
+    }
+    async setMode(modeId) {
+        if (!OMP_MODES.some((mode) => mode.id === modeId)) {
+            throw new Error(`Invalid OMP mode '${modeId}'`);
+        }
+        if (modeId === this.currentModeId)
+            return;
+        if (this.activeTurnId || this.state.isStreaming || this.state.isCompacting) {
+            return { type: "warning", message: "Change approval mode once the current turn ends" };
+        }
+        await this.replaceRuntime(modeId);
+    }
+    async replaceRuntime(modeId) {
+        if (this.replacingRuntime)
+            return this.replacingRuntime;
+        const replace = async () => {
+            const old = this.runtimeSession;
+            const oldHostTools = this.hostTools;
+            const previousSessionId = this.state.sessionId;
+            const restarted = await this.restartRuntime(this.config.internal ? null : (this.state.sessionFile ?? null), modeId);
+            const next = restarted.runtimeSession;
+            try {
+                if (this.closed)
+                    throw new Error("OMP session is closed");
+                const state = await next.getState();
+                if (this.closed)
+                    throw new Error("OMP session is closed");
+                this.unsubscribeRuntime?.();
+                // Request ids restart with each OMP process, so results held for the old one cannot
+                // correlate with prompts sent to the new one.
+                this.pendingPromptResults.clear();
+                this.runtimeSession = next;
+                this.hostTools = restarted.hostTools;
+                this.installState(state);
+                this.currentModeId = modeId;
+                this.config.modeId = modeId;
+                this.runtimeDead = false;
+                this.attachRuntime(next);
+                this.subagentIndex.clear(old);
+                await oldHostTools?.close();
+                await old.close().catch(() => undefined);
+                if (state.sessionId !== previousSessionId) {
+                    this.emit({
+                        type: "thread_started",
+                        provider: this.provider,
+                        sessionId: state.sessionId,
+                    });
+                }
+            }
+            catch (error) {
+                await restarted.hostTools?.close();
+                await next.close().catch(() => undefined);
+                throw error;
+            }
+        };
+        this.replacingRuntime = replace().finally(() => {
+            this.replacingRuntime = null;
+        });
+        return this.replacingRuntime;
+    }
+    getPendingPermissions() {
+        return [...this.pendingExtensionUiRequests.values()];
+    }
+    async respondToPermission(requestId, response) {
+        const request = this.pendingExtensionUiRequests.get(requestId);
+        if (!request) {
+            throw new Error(`No pending permission request with id '${requestId}'`);
+        }
+        this.pendingExtensionUiRequests.delete(requestId);
+        const approvalResponse = buildOmpRpcUiPermissionResponse(request, response);
+        if (approvalResponse) {
+            this.runtimeSession.respondToExtensionUiRequest(requestId, approvalResponse);
+        }
+        else {
+            this.questionUi.respond(request, response, (id, uiResponse) => this.runtimeSession.respondToExtensionUiRequest(id, uiResponse));
+        }
+        this.emit({
+            type: "permission_resolved",
+            provider: this.provider,
+            requestId,
+            resolution: response,
+            turnId: this.currentTurnIdForEvent(),
+        });
+    }
+    describePersistence() {
+        return {
+            provider: this.provider,
+            sessionId: this.state.sessionId,
+            nativeHandle: this.state.sessionFile,
+            metadata: {
+                cwd: this.config.cwd,
+                ...(this.hostTools?.bridge
+                    ? { bridgedTools: [...this.hostTools.bridge.toolIdentities()] }
+                    : {}),
+                ...(this.config.model ? { model: this.config.model } : {}),
+                ...(this.config.thinkingOptionId ? { thinkingOptionId: this.config.thinkingOptionId } : {}),
+                ...(this.currentModeId ? { modeId: this.currentModeId } : {}),
+            },
+        };
+    }
+    async interrupt() {
+        const turnId = this.activeTurnId;
+        await this.runtimeSession.abort();
+        if (turnId && this.activeTurnId === turnId) {
+            this.usagePoller.stopTurn();
+            this.resetActiveTurn({ terminalizeWork: true });
+            this.emit({
+                type: "turn_canceled",
+                provider: this.provider,
+                reason: "interrupted",
+                turnId,
+            });
+        }
+    }
+    async revertConversation(input) {
+        if (this.activeTurnId) {
+            throw new Error("Cannot rewind the OMP conversation while a turn is active");
+        }
+        const target = input.messageId.trim();
+        if (!target) {
+            throw new Error("OMP rewind requires a user message id");
+        }
+        await this.runtimeSession.branch(target);
+        await this.refreshState();
+        this.activeToolCalls.clear();
+    }
+    async canStopRuntime() {
+        if (this.closed ||
+            this.activeTurnId ||
+            this.activeToolCalls.size ||
+            this.pendingExtensionUiRequests.size ||
+            this.pendingClientMessages.length ||
+            this.pendingNoTurnOutputs.length ||
+            this.pendingNoTurnCompletionAbort)
+            return false;
+        const state = await this.runtimeSession.getState();
+        return (state.isSettled === true &&
+            state.hasPendingAsyncWork === false &&
+            !state.isStreaming &&
+            !state.isCompacting &&
+            state.queuedMessageCount === 0);
+    }
+    async close() {
+        if (this.closed) {
+            return;
+        }
+        this.closed = true;
+        this.unsubscribeRuntime?.();
+        this.usagePoller.close();
+        this.cancelNoTurnPromptCompletion();
+        try {
+            await this.runtimeSession.close();
+        }
+        finally {
+            await this.hostTools?.close();
+            this.clearOmpSessionState();
+        }
+    }
+    clearOmpSessionState() {
+        this.subagentIndex.clear(this.runtimeSession);
+        this.clearOmpTurnState();
+    }
+    clearOmpTurnState() {
+        this.hostTools?.clear();
+        this.subagentCardTracker.clear();
+    }
+    terminalizeActiveWork() {
+        for (const [toolCallId, toolCall] of this.activeToolCalls) {
+            this.emitToolCallEvent(toolCallId, toolCall, "canceled", null, null);
+        }
+        this.activeToolCalls.clear();
+        for (const event of this.subagentIndex.terminalizeRunning(this.runtimeSession)) {
+            this.emit(event);
+        }
+        this.clearOmpTurnState();
+    }
+    resetActiveTurn({ terminalizeWork }) {
+        if (terminalizeWork)
+            this.terminalizeActiveWork();
+        this.activeTurnId = null;
+        this.activeAssistantMessageId = null;
+        this.activeTurnTerminalAssistantMessage = null;
+        this.activeTurnStarted = false;
+        this.outOfBandTurnStartAnnounced = false;
+        this.activeTurnHasUserMessage = false;
+        this.pendingClientMessages.length = 0;
+        this.clearNoTurnBuffers();
+    }
+    async listCommands() {
+        if (this.commandCache) {
+            return this.commandCache;
+        }
+        const commands = await this.runtimeSession.getCommands();
+        return mapOmpRuntimeSlashCommands(commands);
+    }
+    tryHandleOutOfBand(prompt) {
+        if (typeof prompt !== "string") {
+            return null;
+        }
+        const parsed = this.parseSlashCommandInput(prompt);
+        if (!parsed) {
+            return null;
+        }
+        this.live = true;
+        const commandName = parsed.commandName.toLowerCase();
+        if (commandName === "compact") {
+            return {
+                run: async ({ emit }) => {
+                    await this.executeCompactCommand(parsed.args, emit);
+                },
+            };
+        }
+        if (commandName === "autocompact") {
+            return {
+                run: async ({ emit }) => {
+                    await this.executeAutoCompactCommand(parsed.args, emit);
+                },
+            };
+        }
+        if (commandName === "steer" || commandName === "follow-up") {
+            const message = parsed.args?.trim();
+            if (!message) {
+                return null;
+            }
+            const streamingBehavior = commandName === "steer" ? "steer" : "followUp";
+            return {
+                run: async () => {
+                    if (!this.activeTurnId && !this.activeTurnStarted) {
+                        await this.startPrompt({ prompt: message, streamingBehavior, announceTurn: true });
+                    }
+                    else {
+                        await this.runtimeSession.prompt({ message, streamingBehavior });
+                    }
+                },
+            };
+        }
+        if (commandName === "handoff") {
+            return {
+                run: async ({ emit }) => {
+                    await this.executeHandoffCommand(parsed.args, emit);
+                },
+            };
+        }
+        return null;
+    }
+    async setModel(modelId) {
+        const parsedReference = parseModelReference(modelId);
+        if (!parsedReference) {
+            return { model: modelToId(this.state.model) };
+        }
+        if (!parsedReference.provider) {
+            throw new Error(`OMP model id must include a provider: ${modelId}`);
+        }
+        const model = await this.runtimeSession.setModel(parsedReference.provider, parsedReference.id);
+        this.config.model = `${model.provider}/${model.id}`;
+        await this.refreshState();
+        return { model: modelToId(this.state.model) };
+    }
+    async setThinkingOption(thinkingOptionId) {
+        const thinkingLevel = normalizeOmpThinkingOption(thinkingOptionId) ?? DEFAULT_OMP_THINKING_LEVEL;
+        await this.runtimeSession.setThinkingLevel(thinkingLevel);
+        this.lastKnownThinkingOptionId = thinkingLevel;
+        this.config.thinkingOptionId = thinkingLevel;
+        this.state = {
+            ...this.state,
+            thinkingLevel,
+        };
+    }
+    emit(event) {
+        for (const subscriber of this.subscribers) {
+            subscriber(event);
+        }
+    }
+    currentTurnIdForEvent() {
+        return this.activeTurnId ?? undefined;
+    }
+    scheduleNoTurnPromptCompletion(turnId) {
+        this.cancelNoTurnPromptCompletion();
+        const abort = new AbortController();
+        this.pendingNoTurnCompletionAbort = abort;
+        void this.noTurnScheduler
+            .waitForSettle(abort.signal)
+            .then(async () => {
+            if (this.pendingNoTurnCompletionAbort !== abort) {
+                return undefined;
+            }
+            this.pendingNoTurnCompletionAbort = null;
+            return await this.completeNoTurnPrompt(turnId);
+        })
+            .catch((error) => {
+            if (!abort.signal.aborted) {
+                this.logger.debug({ err: error }, "OMP local-only settle wait failed");
+            }
+        });
+    }
+    cancelNoTurnPromptCompletion() {
+        this.pendingNoTurnCompletionAbort?.abort();
+        this.pendingNoTurnCompletionAbort = null;
+    }
+    async completeNoTurnPrompt(turnId) {
+        await waitForImmediate();
+        if (this.closed ||
+            this.activeTurnId !== turnId ||
+            this.activeTurnStarted ||
+            this.activePromptAgentInvoked === true ||
+            this.activeTurnHasUserMessage) {
+            return;
+        }
+        const error = this.activePromptError;
+        this.emitBufferedNoTurnOutputs(turnId);
+        if (error) {
+            this.usagePoller.stopTurn();
+            this.resetActiveTurn({ terminalizeWork: true });
+            this.emit({ type: "turn_failed", provider: this.provider, turnId, error });
+            return;
+        }
+        this.completeTurn(turnId, []);
+    }
+    clearNoTurnBuffers() {
+        this.cancelNoTurnPromptCompletion();
+        this.activeNoTurnPromptText = null;
+        this.activePromptRequestId = null;
+        this.activePromptAgentInvoked = null;
+        this.activePromptError = null;
+        this.pendingNoTurnOutputs.splice(0, this.pendingNoTurnOutputs.length);
+    }
+    emitBufferedNoTurnOutputs(turnId) {
+        const promptText = this.activeNoTurnPromptText;
+        const outputs = this.pendingNoTurnOutputs.filter((output) => output.turnId === turnId);
+        this.clearNoTurnBuffers();
+        if (promptText) {
+            const clientMessageId = this.takeClientMessage()?.clientMessageId;
+            this.emit({
+                type: "timeline",
+                provider: this.provider,
+                turnId,
+                item: {
+                    type: "user_message",
+                    text: promptText,
+                    ...(clientMessageId ? { clientMessageId } : {}),
+                },
+            });
+        }
+        for (const output of outputs) {
+            this.emit({
+                type: "timeline",
+                provider: this.provider,
+                turnId,
+                item: {
+                    type: "assistant_message",
+                    text: output.message,
+                },
+            });
+        }
+    }
+    bufferNoTurnOutput(message) {
+        if (!this.activeTurnId || this.activeTurnStarted) {
+            return;
+        }
+        this.pendingNoTurnOutputs.push({ turnId: this.activeTurnId, message });
+    }
+    parseSlashCommandInput(text) {
+        const trimmed = text.trim();
+        if (!trimmed.startsWith("/") || trimmed.length <= 1) {
+            return null;
+        }
+        const withoutPrefix = trimmed.slice(1);
+        const firstWhitespaceIdx = withoutPrefix.search(/\s/);
+        const commandName = firstWhitespaceIdx === -1 ? withoutPrefix : withoutPrefix.slice(0, firstWhitespaceIdx);
+        if (!commandName || commandName.includes("/")) {
+            return null;
+        }
+        const rawArgs = firstWhitespaceIdx === -1 ? "" : withoutPrefix.slice(firstWhitespaceIdx + 1).trim();
+        return rawArgs.length > 0 ? { commandName, args: rawArgs } : { commandName };
+    }
+    async executeCompactCommand(customInstructions, emit) {
+        if (this.manualCompactionRunning) {
+            throw new Error("An OMP compact command is already running");
+        }
+        // OMP answers a manual compact with its RPC response alone, without
+        // compaction_start or compaction_end, so the request owns both rows.
+        this.manualCompactionRunning = true;
+        const emitCompaction = (status) => emit({
+            type: "timeline",
+            provider: this.provider,
+            item: { type: "compaction", status, trigger: "manual" },
+        });
+        emitCompaction("loading");
+        try {
+            await this.runtimeSession.compact(customInstructions);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            emitCompaction("completed");
+            emit({
+                type: "timeline",
+                provider: this.provider,
+                item: {
+                    type: "assistant_message",
+                    text: `[Error] Failed to compact context: ${message}`,
+                },
+            });
+            return;
+        }
+        finally {
+            this.manualCompactionRunning = false;
+        }
+        emitCompaction("completed");
+        await this.usagePoller.refresh();
+    }
+    async executeAutoCompactCommand(mode, emit) {
+        let enabled = parseAutoCompactMode(mode);
+        if (enabled === "unknown") {
+            emit({
+                type: "timeline",
+                provider: this.provider,
+                item: {
+                    type: "assistant_message",
+                    text: "[Error] Usage: /autocompact [on|off|toggle]",
+                },
+            });
+            return;
+        }
+        if (enabled === "toggle") {
+            const state = await this.runtimeSession.getState();
+            if (typeof state.autoCompactionEnabled !== "boolean") {
+                emit({
+                    type: "timeline",
+                    provider: this.provider,
+                    item: {
+                        type: "assistant_message",
+                        text: "[Error] Auto-compaction state is unavailable. Use /autocompact on or /autocompact off.",
+                    },
+                });
+                return;
+            }
+            enabled = !state.autoCompactionEnabled;
+        }
+        try {
+            await this.runtimeSession.setAutoCompaction(enabled);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            emit({
+                type: "timeline",
+                provider: this.provider,
+                item: {
+                    type: "assistant_message",
+                    text: `[Error] Failed to set auto-compaction: ${message}`,
+                },
+            });
+            return;
+        }
+        this.state = {
+            ...this.state,
+            autoCompactionEnabled: enabled,
+        };
+        emit({
+            type: "timeline",
+            provider: this.provider,
+            item: {
+                type: "assistant_message",
+                text: `Auto-compaction ${enabled ? "enabled" : "disabled"}.`,
+            },
+        });
+    }
+    async executeHandoffCommand(instructions, emit) {
+        try {
+            await this.runtimeSession.handoff(instructions);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            emit({
+                type: "timeline",
+                provider: this.provider,
+                item: {
+                    type: "assistant_message",
+                    text: `[Error] Failed to hand off turn: ${message}`,
+                },
+            });
+        }
+    }
+    handleExtensionUiRequest(event) {
+        const message = optionalString(event.message);
+        if (event.method === "notify" && message) {
+            this.emit({
+                type: "timeline",
+                provider: this.provider,
+                turnId: this.currentTurnIdForEvent(),
+                item: {
+                    type: "notification",
+                    level: event.notifyType === "warning" || event.notifyType === "error"
+                        ? event.notifyType
+                        : "info",
+                    message,
+                },
+            });
+            return;
+        }
+        const sideEffectItem = this.mapExtensionUiSideEffect(event);
+        if (sideEffectItem) {
+            this.emit({
+                type: "timeline",
+                provider: this.provider,
+                turnId: this.currentTurnIdForEvent(),
+                item: sideEffectItem,
+            });
+            return;
+        }
+        const request = mapOmpRpcUiPermissionRequest(event, { provider: this.provider }) ??
+            this.questionUi.handleRequest(event, this.provider, (id, response) => this.runtimeSession.respondToExtensionUiRequest(id, response));
+        if (!request) {
+            return;
+        }
+        this.pendingExtensionUiRequests.set(request.id, request);
+        this.emit({
+            type: "permission_requested",
+            provider: this.provider,
+            request,
+            turnId: this.currentTurnIdForEvent(),
+        });
+    }
+    mapExtensionUiSideEffect(event) {
+        if (event.method !== "open_url" || typeof event.url !== "string") {
+            return null;
+        }
+        const lines = [`[Open URL](${event.url})`, `URL: ${event.url}`];
+        if (typeof event.launchUrl === "string") {
+            lines.push(`Launch URL: ${event.launchUrl}`);
+        }
+        if (typeof event.instructions === "string") {
+            lines.push("", event.instructions);
+        }
+        return { type: "assistant_message", text: lines.join("\n") };
+    }
+    handleCommandOutput(textValue) {
+        if (!this.activeTurnId) {
+            return;
+        }
+        const text = stripAnsi(optionalString(textValue) ?? "").trim();
+        if (!text) {
+            return;
+        }
+        if (!this.activeTurnStarted) {
+            this.bufferNoTurnOutput(text);
+            return;
+        }
+        this.emit({
+            type: "timeline",
+            provider: this.provider,
+            turnId: this.currentTurnIdForEvent(),
+            item: { type: "assistant_message", text },
+        });
+    }
+    // OMP changes the level on its own, e.g. `/switch @role` or a model switch that carries a level.
+    handleThinkingLevelChanged(event) {
+        if (event.type !== "thinking_level_changed") {
+            return false;
+        }
+        const thinkingLevel = normalizeOmpThinkingOption(event.configured ?? event.thinkingLevel);
+        if (!thinkingLevel || thinkingLevel === this.lastKnownThinkingOptionId) {
+            return true;
+        }
+        this.lastKnownThinkingOptionId = thinkingLevel;
+        this.config.thinkingOptionId = thinkingLevel;
+        this.state = { ...this.state, thinkingLevel };
+        this.emit({
+            type: "thinking_option_changed",
+            provider: this.provider,
+            thinkingOptionId: thinkingLevel,
+        });
+        return true;
+    }
+    handleExtraRuntimeEvent(event) {
+        if (this.handleThinkingLevelChanged(event)) {
+            return true;
+        }
+        if (event.type === "model_changed") {
+            void this.refreshState()
+                .then(() => this.emit({
+                type: "model_changed",
+                provider: this.provider,
+                runtimeInfo: this.runtimeInfoFromState(),
+            }))
+                .catch((error) => this.logger.debug({ err: error }, "OMP state unavailable after model change"));
+            return true;
+        }
+        if (handleOmpHostToolRuntimeEvent(event, this.hostTools, this.runtimeSession, this.logger)) {
+            return true;
+        }
+        if (event.type === "subagent_lifecycle") {
+            const payload = event.payload;
+            if (payload.parentToolCallId && this.activeToolCalls.has(payload.parentToolCallId)) {
+                this.subagentCardTracker.handleLifecycle(payload, (toolCallId) => this.emitActiveToolCall(toolCallId));
+            }
+            for (const mapped of this.subagentIndex.handleLifecycle(this.runtimeSession, payload)) {
+                this.emit(mapped);
+            }
+            return true;
+        }
+        if (event.type === "subagent_progress") {
+            const payload = event.payload;
+            if (payload.parentToolCallId && this.activeToolCalls.has(payload.parentToolCallId)) {
+                this.subagentCardTracker.handleProgress(payload, (toolCallId) => this.emitActiveToolCall(toolCallId));
+            }
+            for (const mapped of this.subagentIndex.handleProgress(this.runtimeSession, payload)) {
+                this.emit(mapped);
+            }
+            return true;
+        }
+        if (event.type === "subagent_event") {
+            const payload = event.payload;
+            for (const mapped of this.subagentIndex.handleEvent(this.runtimeSession, payload)) {
+                this.emit(mapped);
+            }
+            return true;
+        }
+        if (event.type === "todo_reminder") {
+            const item = mapOmpTodoReminderEvent(event);
+            if (item) {
+                this.emitTodoItem(item);
+            }
+            else {
+                this.logger.debug({ event }, "Dropped malformed OMP todo reminder event");
+            }
+            return true;
+        }
+        if (event.type === "available_commands_update") {
+            const commands = mapOmpAvailableCommandsUpdate(event);
+            if (commands) {
+                this.commandCache = commands;
+            }
+            else {
+                this.logger.debug({ event }, "Dropped malformed OMP command update event");
+            }
+            return true;
+        }
+        const mappedEvent = mapOmpRuntimeEventToTimelineItem(event);
+        if (!mappedEvent.handled) {
+            return false;
+        }
+        if (mappedEvent.item) {
+            this.emit({
+                type: "timeline",
+                provider: this.provider,
+                item: mappedEvent.item,
+            });
+        }
+        else {
+            this.logger.debug({ event, reason: mappedEvent.logReason }, "Dropped unsupported OMP runtime event");
+        }
+        return true;
+    }
+    emitActiveToolCall(toolCallId) {
+        const toolCall = this.activeToolCalls.get(toolCallId);
+        return toolCall ? this.emitToolCallEvent(toolCallId, toolCall, "running", null, null) : false;
+    }
+    emitTodoItem(item, turnId) {
+        if (item.type === "todo") {
+            const previous = this.lastTodoItem;
+            const isDuplicate = previous?.items.length === item.items.length &&
+                previous.items.every((previousItem, index) => {
+                    const nextItem = item.items[index];
+                    return (nextItem?.text === previousItem.text && nextItem.completed === previousItem.completed);
+                });
+            if (isDuplicate) {
+                return;
+            }
+            this.lastTodoItem = item;
+        }
+        this.emit({ type: "timeline", provider: this.provider, turnId, item });
+    }
+    handleRuntimeEvent(event) {
+        if (isExtensionUiRequestEvent(event)) {
+            this.handleExtensionUiRequest(event);
+            return;
+        }
+        if (isProcessExitEvent(event)) {
+            this.handleProcessExit(event.error);
+            return;
+        }
+        if (event.type === "command_output") {
+            this.handleCommandOutput(event.text);
+            return;
+        }
+        if (event.type === "prompt_result") {
+            const requestId = optionalString("id" in event ? event.id : undefined);
+            const agentInvoked = "agentInvoked" in event && typeof event.agentInvoked === "boolean"
+                ? event.agentInvoked
+                : undefined;
+            if (requestId && agentInvoked !== undefined) {
+                const result = { agentInvoked, error: promptResultError(event) };
+                if (requestId === this.activePromptRequestId && this.activeTurnId) {
+                    this.activePromptAgentInvoked = agentInvoked;
+                    this.activePromptError = result.error;
+                    if (agentInvoked === false) {
+                        this.scheduleNoTurnPromptCompletion(this.activeTurnId);
+                    }
+                    else {
+                        this.cancelNoTurnPromptCompletion();
+                    }
+                }
+                else if (this.activePromptRequestId === null) {
+                    this.pendingPromptResults.set(requestId, result);
+                }
+            }
+            return;
+        }
+        if (this.handleExtraRuntimeEvent(event)) {
+            return;
+        }
+        if (isOmpAgentSessionEvent(event)) {
+            if (event.type === "agent_start") {
+                this.live = true;
+            }
+            else if (!this.live) {
+                // A resumed OMP process replays session events for pre-existing
+                // conversation on startup; that content is delivered via
+                // streamHistory, so replay must not re-enter the live timeline.
+                return;
+            }
+            this.handleSessionEvent(event);
+            return;
+        }
+        this.logger.debug({ event }, "Dropped unknown OMP runtime event");
+    }
+    handleProcessExit(error) {
+        this.runtimeDead = true;
+        void this.hostTools?.close();
+        this.usagePoller.stopTurn();
+        if (!this.activeTurnId) {
+            this.terminalizeActiveWork();
+            this.subagentIndex.clear(this.runtimeSession);
+            this.emit({ type: "turn_failed", provider: this.provider, error });
+            return;
+        }
+        const turnId = this.activeTurnId;
+        this.resetActiveTurn({ terminalizeWork: true });
+        this.subagentIndex.clear(this.runtimeSession);
+        this.emit({
+            type: "turn_failed",
+            provider: this.provider,
+            turnId,
+            error,
+        });
+    }
+    handleSessionEvent(event) {
+        const turnId = this.currentTurnIdForEvent();
+        switch (event.type) {
+            case "agent_start":
+                this.activeTurnStarted = true;
+                this.clearNoTurnBuffers();
+                this.emit({
+                    type: "thread_started",
+                    provider: this.provider,
+                    sessionId: this.state.sessionId,
+                });
+                return;
+            case "turn_start":
+                this.activeTurnStarted = true;
+                this.clearNoTurnBuffers();
+                if (this.outOfBandTurnStartAnnounced) {
+                    this.outOfBandTurnStartAnnounced = false;
+                }
+                else {
+                    this.emit({ type: "turn_started", provider: this.provider, turnId });
+                }
+                return;
+            case "message_start":
+                this.handleMessageStart(event);
+                return;
+            case "message_end":
+                if (event.message.role === "user") {
+                    this.activeTurnHasUserMessage = true;
+                }
+                this.handleMessageEnd(event, turnId);
+                return;
+            case "message_update":
+                this.handleMessageUpdate(event, turnId);
+                return;
+            case "tool_execution_start": {
+                const toolCall = parseToolArgs(event.toolName, event.args);
+                this.activeToolCalls.set(event.toolCallId, toolCall);
+                this.questionUi.start(event.toolName, event.args);
+                this.emitToolCallEvent(event.toolCallId, toolCall, "running", null, null);
+                return;
+            }
+            case "tool_execution_update": {
+                const toolCall = this.activeToolCalls.get(event.toolCallId);
+                if (!toolCall) {
+                    return;
+                }
+                const partialResult = parseToolResult(event.partialResult);
+                this.emitToolCallEvent(event.toolCallId, toolCall, "running", partialResult, null);
+                return;
+            }
+            case "tool_execution_end": {
+                this.handleToolExecutionEnd(event, turnId);
+                return;
+            }
+            case "compaction_start":
+            case "compaction_end":
+                this.handleCompactionEvent(event, turnId);
+                return;
+            case "agent_end": {
+                const messages = event.messages ?? [];
+                let terminalMessages = null;
+                if (messages.some((message) => message.role === "assistant")) {
+                    terminalMessages = messages;
+                }
+                else if (this.activeTurnTerminalAssistantMessage) {
+                    terminalMessages = [this.activeTurnTerminalAssistantMessage];
+                }
+                // OMP can end an internal extension-notice cycle before it starts the
+                // model turn for the same prompt. Ignore only cycles where neither the
+                // terminal payload nor the live stream contained an assistant message.
+                if (!terminalMessages) {
+                    return;
+                }
+                // A state request is processed after OMP's RPC loop becomes promptable,
+                // so do not advertise Paseo idle until it reports that transition.
+                void this.completeTurnAfterProviderIdle(turnId, terminalMessages);
+                return;
+            }
+            default:
+                return;
+        }
+    }
+    handleToolExecutionEnd(event, turnId) {
+        const toolCall = this.activeToolCalls.get(event.toolCallId) ?? parseToolArgs(event.toolName, null);
+        this.activeToolCalls.delete(event.toolCallId);
+        this.questionUi.finish(event.toolName);
+        const result = parseToolResult(event.result);
+        const failed = isOmpToolFailure(toolCall, result, Boolean(event.isError));
+        const error = failed ? toolFailureMessage(result) : null;
+        const status = failed ? "failed" : "completed";
+        this.emitToolCallEvent(event.toolCallId, toolCall, status, result, error);
+        if (event.toolName === "task") {
+            this.subagentCardTracker.delete(event.toolCallId);
+        }
+        if (event.toolName === "todo") {
+            const item = mapOmpTodoToolResult(result);
+            if (item) {
+                this.emitTodoItem(item, turnId);
+            }
+            else {
+                this.logger.debug({ event }, "Dropped malformed OMP todo tool result");
+            }
+        }
+    }
+    handleCompactionEvent(event, turnId) {
+        // A manual compact emits its own rows around the request.
+        if (this.manualCompactionRunning) {
+            return;
+        }
+        this.emit({
+            type: "timeline",
+            provider: this.provider,
+            turnId,
+            item: {
+                type: "compaction",
+                status: event.type === "compaction_start" ? "loading" : "completed",
+                trigger: event.reason === "manual" ? "manual" : "auto",
+            },
+        });
+    }
+    handleMessageUpdate(event, turnId) {
+        if (event.message.role !== "assistant") {
+            return;
+        }
+        if (event.assistantMessageEvent.type === "text_delta") {
+            // Omp-compatible runtimes may emit updates without a preceding message_start.
+            this.activeAssistantMessageId ?? (this.activeAssistantMessageId = event.message.responseId || randomUUID());
+            this.emit({
+                type: "timeline",
+                provider: this.provider,
+                turnId,
+                item: {
+                    type: "assistant_message",
+                    text: event.assistantMessageEvent.delta ?? "",
+                    messageId: this.activeAssistantMessageId,
+                },
+            });
+            return;
+        }
+        if (event.assistantMessageEvent.type === "thinking_delta") {
+            this.emit({
+                type: "timeline",
+                provider: this.provider,
+                turnId,
+                item: {
+                    type: "reasoning",
+                    text: event.assistantMessageEvent.delta ?? "",
+                },
+            });
+        }
+    }
+    handleMessageStart(event) {
+        if (event.message.role === "assistant") {
+            this.activeAssistantMessageId = event.message.responseId || null;
+        }
+    }
+    handleMessageEnd(event, turnId) {
+        if (event.message.role === "assistant") {
+            this.activeAssistantMessageId = null;
+            this.questionUi.observeMessage(event.message);
+            if (turnId) {
+                this.activeTurnTerminalAssistantMessage = event.message;
+            }
+            return;
+        }
+        if (event.message.role === "custom") {
+            if (shouldDisplayOmpCustomMessage(event.message)) {
+                const text = getUserMessageText(event.message.content);
+                if (text) {
+                    const skillPrompt = ompSkillPromptUserText(event.message);
+                    if (skillPrompt) {
+                        this.emitSkillPromptEcho(turnId);
+                        return;
+                    }
+                    const item = mapOmpAdvisorMessageToToolCall(event.message, text) ??
+                        mapOmpSystemNoticeToNotification(text);
+                    this.emit({
+                        type: "timeline",
+                        provider: this.provider,
+                        turnId,
+                        item: item ?? mapCustomMessageToToolCall(event.message, text, `omp-custom-${randomUUID()}`),
+                    });
+                }
+            }
+            return;
+        }
+        if (event.message.role !== "user") {
+            return;
+        }
+        const text = getUserMessageText(event.message.content);
+        if (!text) {
+            return;
+        }
+        const nativeMessage = event.message;
+        const messageId = readNativeMessageId(nativeMessage);
+        const emitUserMessage = (resolvedMessageId) => {
+            if (resolvedMessageId) {
+                // OMP re-emits user message_end frames for entries it has already
+                // surfaced (e.g. after steer or a resumed process); emit each native
+                // entry exactly once.
+                if (this.emittedUserMessageIds.has(resolvedMessageId)) {
+                    return;
+                }
+                this.emittedUserMessageIds.add(resolvedMessageId);
+            }
+            const clientMessageId = this.takeClientMessage()?.clientMessageId;
+            this.emit({
+                type: "timeline",
+                provider: this.provider,
+                turnId,
+                item: {
+                    type: "user_message",
+                    text,
+                    ...(resolvedMessageId ? { messageId: resolvedMessageId } : {}),
+                    ...(clientMessageId ? { clientMessageId } : {}),
+                },
+            });
+        };
+        if (messageId) {
+            emitUserMessage(messageId);
+            return;
+        }
+        void this.runtimeSession
+            .getBranchMessages()
+            .then((messages) => emitUserMessage(messages.toReversed().find((message) => message.text === text)?.entryId))
+            .catch((error) => {
+            this.logger.debug({ err: error, sessionFile: this.state.sessionFile }, "OMP native user message ID lookup failed");
+            emitUserMessage();
+        });
+    }
+    emitSkillPromptEcho(turnId) {
+        const pending = this.takeClientMessage();
+        if (!pending)
+            return;
+        this.activeTurnHasUserMessage = true;
+        this.emit({
+            type: "timeline",
+            provider: this.provider,
+            turnId,
+            item: {
+                type: "user_message",
+                text: pending.text,
+                ...(pending.clientMessageId ? { clientMessageId: pending.clientMessageId } : {}),
+            },
+        });
+    }
+    emitToolCallEvent(toolCallId, toolCall, status, result, error) {
+        const turnId = this.currentTurnIdForEvent();
+        const detail = this.mapToolDetail(toolCallId, toolCall, result);
+        if (!detail) {
+            return false;
+        }
+        const bridgedTool = this.hostTools?.bridge?.tool(toolCall.toolName);
+        const baseItem = {
+            type: "tool_call",
+            callId: toolCallId,
+            name: bridgedTool
+                ? `${bridgedTool.server} / ${bridgedTool.tool}`
+                : resolveToolCallName(toolCall, result),
+            detail,
+        };
+        const item = status === "failed" ? { ...baseItem, status, error } : { ...baseItem, status, error: null };
+        this.emit({
+            type: "timeline",
+            provider: this.provider,
+            turnId,
+            item,
+        });
+        return true;
+    }
+    mapToolDetail(toolCallId, toolCall, result) {
+        return mapOmpToolDetail(toolCall, result, {
+            toolCallId,
+            bridgedTool: this.hostTools?.bridge?.tool(toolCall.toolName),
+            mapSubagentDetail: (detail) => this.subagentCardTracker.detailFor(toolCallId, detail),
+        });
+    }
+    completeTurn(turnId, messages) {
+        // OMP reports a stopped turn as a terminal response carrying its interrupt
+        // text as an error. That is the user's own Stop, not a failed turn.
+        if (isOmpAbortedTerminalResponse(messages)) {
+            this.usagePoller.stopTurn();
+            this.resetActiveTurn({ terminalizeWork: true });
+            this.emit({
+                type: "turn_canceled",
+                provider: this.provider,
+                turnId,
+                reason: "interrupted",
+            });
+            return;
+        }
+        const errorMessage = latestOmpErrorMessage(messages);
+        if (typeof errorMessage === "string" && errorMessage.length > 0) {
+            this.usagePoller.stopTurn();
+            this.resetActiveTurn({ terminalizeWork: true });
+            this.emit({
+                type: "turn_failed",
+                provider: this.provider,
+                turnId,
+                error: errorMessage,
+            });
+            return;
+        }
+        const finalUsage = this.usagePoller.completeTurn(turnId);
+        this.resetActiveTurn({ terminalizeWork: false });
+        this.emit({
+            type: "turn_completed",
+            provider: this.provider,
+            turnId,
+        });
+        void this.refreshAfterTurn(finalUsage);
+    }
+    async completeTurnAfterProviderIdle(turnId, messages) {
+        const deadline = Date.now() + this.providerIdleDeadlineMs;
+        while (!this.closed && this.activeTurnStarted && this.currentTurnIdForEvent() === turnId) {
+            if (Date.now() >= deadline) {
+                this.usagePoller.stopTurn();
+                this.resetActiveTurn({ terminalizeWork: true });
+                this.emit({
+                    type: "turn_failed",
+                    provider: this.provider,
+                    turnId,
+                    error: "OMP provider idle deadline exceeded",
+                });
+                return;
+            }
+            try {
+                const state = await this.runtimeSession.getState();
+                this.installState(state);
+                if (this.closed || !this.activeTurnStarted || this.currentTurnIdForEvent() !== turnId) {
+                    // An interrupt settled this turn while the state check was in flight.
+                    return;
+                }
+                if (!state.isStreaming && !state.isCompacting) {
+                    this.completeTurn(turnId, messages);
+                    return;
+                }
+            }
+            catch (error) {
+                this.logger.debug({ err: error }, "OMP state unavailable while waiting for provider idle");
+            }
+            await this.providerIdleScheduler.waitForRetry();
+        }
+    }
+    async refreshState() {
+        this.installState(await this.runtimeSession.getState());
+    }
+    // The runtime owns Fast: whatever it reports is what the session now runs with, so every state
+    // read from the runtime is installed here and a difference is published once.
+    installState(state) {
+        const before = this.state.fastModeEnabled;
+        this.state = state;
+        if (this.state.fastModeEnabled !== before && typeof this.state.fastModeEnabled === "boolean") {
+            this.rememberFastMode(this.state.fastModeEnabled);
+            this.emit({
+                type: "options_changed",
+                provider: this.provider,
+                patch: { fast_mode: this.state.fastModeEnabled },
+            });
+        }
+    }
+    async refreshAfterTurn(finalUsage) {
+        await Promise.all([this.refreshState().catch(() => undefined), finalUsage]);
+    }
+}
+export class OmpAgentClient {
+    constructor(options) {
+        this.provider = OMP_PROVIDER;
+        this.capabilities = withOmpCapabilities();
+        const runtimeSettings = mergeOmpRuntimeSettings({
+            command: {
+                mode: "replace",
+                argv: ["omp"],
+            },
+        }, options.runtimeSettings);
+        this.logger = options.logger;
+        this.runtimeSettings = runtimeSettings;
+        this.providerIdleScheduler = options.providerIdleScheduler;
+        this.noTurnScheduler = options.noTurnScheduler;
+        this.usagePollScheduler = options.usagePollScheduler;
+        this.providerIdleDeadlineMs = options.providerIdleDeadlineMs;
+        this.runtime = options.runtime;
+    }
+    async configureNativePaseoTools(runtimeSession, catalog, config, launchEnv) {
+        if (!catalog && !config.mcpServers) {
+            return;
+        }
+        const bridge = await OmpMcpBridge.connect(config.mcpServers, config.cwd, this.logger, {
+            ...process.env,
+            ...this.runtimeSettings?.env,
+            ...launchEnv,
+        });
+        const router = new OmpHostToolRouter({ runtimeSession, catalog, bridge, logger: this.logger });
+        try {
+            await router.register();
+            return router;
+        }
+        catch (error) {
+            await router.close();
+            throw error;
+        }
+    }
+    async restoreFastMode(runtimeSession, config, state) {
+        const value = config.providerOptions?.fast_mode;
+        if (typeof value !== "boolean" || !hasOmpFastMode(state) || value === state.fastModeEnabled)
+            return state;
+        const result = await runtimeSession.setFastMode(value);
+        return { ...state, fastModeEnabled: result.enabled, fastModeActive: result.active };
+    }
+    async createSession(config, launchContext) {
+        const launchMode = this.resolveLaunchMode(config.modeId, config.providerOptions);
+        const startInput = {
+            cwd: config.cwd,
+            protocolMode: "rpc-ui",
+            model: config.model,
+            thinkingOptionId: normalizeOmpThinkingOption(config.thinkingOptionId) ?? undefined,
+            noSession: config.internal === true,
+            modeId: launchMode.modeId,
+            extraArgs: launchMode.extraArgs,
+            systemPrompt: composeSystemPromptParts(config.systemPrompt, config.daemonAppendSystemPrompt),
+            env: launchContext?.env,
+        };
+        const runtimeSession = await this.resolveRuntime(config.providerOptions).startSession(startInput);
+        let hostTools;
+        try {
+            hostTools = await this.configureNativePaseoTools(runtimeSession, launchContext?.paseoTools, config, startInput.env);
+            const initialState = await this.restoreFastMode(runtimeSession, config, await runtimeSession.getState());
+            return new OmpAgentSession({
+                runtimeSession,
+                hostTools,
+                restartRuntime: this.buildRestartRuntime(startInput, config, launchContext),
+                config,
+                initialState,
+                currentModeId: launchMode.modeId,
+                logger: this.logger,
+                providerIdleScheduler: this.providerIdleScheduler,
+                noTurnScheduler: this.noTurnScheduler,
+                usagePollScheduler: this.usagePollScheduler,
+                providerIdleDeadlineMs: this.providerIdleDeadlineMs,
+            });
+        }
+        catch (error) {
+            await hostTools?.close();
+            await runtimeSession.close().catch(() => undefined);
+            throw error;
+        }
+    }
+    async resumeSession(handle, overrides, launchContext, options) {
+        const sessionFile = handle.nativeHandle;
+        if (!sessionFile) {
+            throw new Error("OMP resume requires a native session file handle");
+        }
+        const persistenceMetadata = parsePersistenceMetadata(handle.metadata);
+        const resumeConfig = buildResumeConfig(persistenceMetadata, overrides, this.provider);
+        if (options?.purpose === "history") {
+            return new OmpHistorySession(handle, resumeConfig, sessionFile, this.provider, persistenceMetadata.bridgedTools);
+        }
+        const launchMode = this.resolveLaunchMode(resumeConfig.modeId, resumeConfig.config.providerOptions);
+        const startInput = buildResumeStartInput({
+            resumeConfig,
+            sessionFile,
+            launchContext,
+            launchMode,
+        });
+        const runtimeSession = await this.resolveRuntime(resumeConfig.config.providerOptions).startSession(startInput);
+        let hostTools;
+        try {
+            hostTools = await this.configureNativePaseoTools(runtimeSession, launchContext?.paseoTools, resumeConfig.config, startInput.env);
+            const resumedState = await this.applyResumeModel(runtimeSession, resumeConfig.model);
+            const config = {
+                ...resumeConfig.config,
+                model: modelToId(resumedState.model) ?? resumeConfig.config.model,
+            };
+            const initialState = await this.restoreFastMode(runtimeSession, config, resumedState);
+            return new OmpAgentSession({
+                runtimeSession,
+                hostTools,
+                restartRuntime: this.buildRestartRuntime(startInput, config, launchContext),
+                config,
+                initialState,
+                currentModeId: launchMode.modeId,
+                logger: this.logger,
+                providerIdleScheduler: this.providerIdleScheduler,
+                noTurnScheduler: this.noTurnScheduler,
+                usagePollScheduler: this.usagePollScheduler,
+                providerIdleDeadlineMs: this.providerIdleDeadlineMs,
+                live: false,
+            });
+        }
+        catch (error) {
+            await hostTools?.close();
+            await runtimeSession.close().catch(() => undefined);
+            throw error;
+        }
+    }
+    // OMP resumes a session on the model it recorded, or on its default when that model
+    // is gone. Switching afterwards keeps a removed model from blocking the resume.
+    async applyResumeModel(runtimeSession, requestedModel) {
+        const state = await runtimeSession.getState();
+        const reference = parseModelReference(requestedModel ?? null);
+        if (!reference?.provider) {
+            return state;
+        }
+        const { provider, id } = reference;
+        const isRequested = (model) => model?.provider === provider && model.id === id;
+        if (isRequested(state.model)) {
+            return state;
+        }
+        const availableModels = await runtimeSession.getAvailableModels();
+        if (!availableModels.some(isRequested)) {
+            this.logger.warn({ requestedModel, sessionModel: modelToId(state.model) }, "OMP resumed on the session's model because the requested model is unavailable");
+            return state;
+        }
+        await runtimeSession.setModel(provider, id);
+        return runtimeSession.getState();
+    }
+    buildRestartRuntime(startInput, config, launchContext) {
+        return async (sessionFile, modeId) => {
+            const launchMode = this.resolveLaunchMode(modeId, config.providerOptions);
+            const next = await this.resolveRuntime(config.providerOptions).startSession({
+                ...startInput,
+                model: config.model,
+                thinkingOptionId: normalizeOmpThinkingOption(config.thinkingOptionId) ?? undefined,
+                modeId: launchMode.modeId,
+                extraArgs: launchMode.extraArgs,
+                ...(!startInput.noSession && sessionFile ? { session: sessionFile } : {}),
+            });
+            let hostTools;
+            try {
+                hostTools = await this.configureNativePaseoTools(next, launchContext?.paseoTools, config, startInput.env);
+                const state = await next.getState();
+                await this.restoreFastMode(next, config, state);
+                return { runtimeSession: next, hostTools };
+            }
+            catch (error) {
+                await hostTools?.close();
+                await next.close().catch(() => undefined);
+                throw error;
+            }
+        };
+    }
+    async fetchCatalog(options, context) {
+        const launchMode = this.resolveLaunchMode(undefined, options.providerOptions);
+        let runtimeSession;
+        let closePromise;
+        const closeSession = () => {
+            if (!runtimeSession)
+                return Promise.resolve();
+            closePromise ?? (closePromise = runtimeSession.close());
+            return closePromise;
+        };
+        const handleAbort = () => void closeSession().catch(() => undefined);
+        context?.signal.addEventListener("abort", handleAbort, { once: true });
+        try {
+            await runProviderRefreshActivity(context, "runtime.start", async () => {
+                runtimeSession = await this.resolveRuntime(options.providerOptions).startSession({
+                    cwd: options.scope === "global" ? homedir() : options.cwd,
+                    protocolMode: "rpc-ui",
+                    modeId: launchMode.modeId,
+                    extraArgs: launchMode.extraArgs,
+                    signal: context?.signal,
+                });
+                if (context?.signal.aborted)
+                    await closeSession();
+            });
+            if (!runtimeSession)
+                throw new Error("OMP catalog runtime did not start");
+            const catalogSession = runtimeSession;
+            const models = (await runProviderRefreshActivity(context, "get_available_models", () => catalogSession.getAvailableModels(null))).map((model) => mapOmpModel(model, this.provider));
+            return { models, modes: [...OMP_MODES] };
+        }
+        finally {
+            context?.signal.removeEventListener("abort", handleAbort);
+            await closeSession();
+        }
+    }
+    async listControls(config) {
+        return { controls: [], options: config.providerOptions ?? {} };
+    }
+    async listImportableSessions(options) {
+        return await listOmpImportableSessions({
+            ...options,
+            sessionDir: resolveOmpProviderOptions(options?.providerOptions).runtimeOptions.sessionDir,
+            runtimeSettings: this.runtimeSettings,
+        });
+    }
+    async importSession(input, context) {
+        const descriptorOptions = {
+            sessionDir: resolveOmpProviderOptions(context.config.providerOptions).runtimeOptions
+                .sessionDir,
+            runtimeSettings: this.runtimeSettings,
+        };
+        const importConfig = await readOmpImportSessionConfig(input.providerHandleId, descriptorOptions);
+        return importSessionFromPersistence({
+            provider: this.provider,
+            request: input,
+            context,
+            resumeSession: this.resumeSession.bind(this),
+            config: importConfig,
+        });
+    }
+    async isAvailable() {
+        try {
+            const launch = await this.resolveOmpLaunch();
+            const availability = await checkProviderLaunchAvailable(launch);
+            return availability.available;
+        }
+        catch {
+            return false;
+        }
+    }
+    async getDiagnostic() {
+        try {
+            const launch = await this.resolveOmpLaunch();
+            const availability = await checkProviderLaunchAvailable(launch);
+            const binaryRows = await buildBinaryDiagnosticRows(launch, availability, {
+                versionCommand: {
+                    command: availability.resolvedPath ?? launch.command,
+                    args: [...launch.args, "--version"],
+                    env: this.runtimeSettings?.env,
+                },
+            });
+            const version = binaryRows.find((row) => row.label === "Version")?.value ?? "unknown";
+            const env = { ...process.env, ...this.runtimeSettings?.env };
+            const paths = resolveOmpDiagnosticPaths(env);
+            const bunVersion = process.versions.bun ?? "unavailable";
+            return {
+                diagnostic: formatProviderDiagnostic("Oh My Pi (OMP)", [
+                    ...(await buildCommandResolutionDiagnosticRows(launch, {
+                        knownBinaryNames: ["omp", launch.command],
+                        pathValue: env.PATH ?? env.Path,
+                    })),
+                    ...binaryRows,
+                    { label: "Version support", value: formatOmpVersionSupport(version) },
+                    { label: "Active profile", value: paths.profile },
+                    { label: "Config root", value: paths.configRoot },
+                    { label: "Agent directory", value: paths.agentDir },
+                    {
+                        label: "Agent database",
+                        value: `${paths.agentDb} (${existsSync(paths.agentDb) ? "found" : "not found"})`,
+                    },
+                    { label: "XDG data root", value: paths.xdgDataRoot },
+                    { label: "XDG state root", value: paths.xdgStateRoot },
+                    { label: "XDG cache root", value: paths.xdgCacheRoot },
+                    {
+                        label: "Bun runtime",
+                        value: `${bunVersion}; npm-installed OMP requires Bun >= 1.3.14`,
+                    },
+                ]),
+            };
+        }
+        catch (error) {
+            this.logger.debug({ err: error }, "OMP diagnostic lookup failed");
+            return {
+                diagnostic: formatProviderDiagnosticError("Oh My Pi (OMP)", error),
+            };
+        }
+    }
+    resolveLaunchMode(modeId, providerOptions) {
+        return resolveOmpLaunchMode(modeId, resolveOmpProviderOptions(providerOptions).modelRoles);
+    }
+    resolveRuntime(providerOptions) {
+        const { runtimeOptions } = resolveOmpProviderOptions(providerOptions);
+        return this.runtime ?? createRuntime(this.logger, this.runtimeSettings, runtimeOptions);
+    }
+    async resolveOmpLaunch() {
+        return resolveProviderLaunch({
+            commandConfig: this.runtimeSettings?.command,
+            defaultBinary: "omp",
+        });
+    }
+}
+//# sourceMappingURL=agent.js.map

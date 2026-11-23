@@ -384,7 +384,8 @@ def leaf_documents(task_root: Path) -> tuple[Path, ...]:
     """
     documents: list[Path] = []
     for path in sorted(task_root.rglob("*.json")):
-        if "enclosures" in path.parts or "worktrees" in path.parts:
+        parts = path.relative_to(task_root).parts
+        if "enclosures" in parts or "worktrees" in parts:
             continue
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))

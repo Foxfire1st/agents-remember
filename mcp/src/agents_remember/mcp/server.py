@@ -8,11 +8,9 @@ import json
 import time
 from contextlib import suppress
 from datetime import UTC, datetime
-from functools import partial
 from importlib import import_module
 from typing import Any
 
-from anyio import CancelScope
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Settings as FastMCPSettings
 
@@ -41,6 +39,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     load_config,
 )
+from agents_remember.kernel.request_memo import request_memo_scope
 from agents_remember.memory_quality.style.citations.extents import definition_scope
 from agents_remember.serving.build_currentness import build_currentness
 from agents_remember.serving.server_registry import register_server
@@ -54,6 +53,7 @@ from .registration.explainer_surface import (
     read_explainer_binding,
     register_explainer_surface,
 )
+from .thread_workers import run_in_request_thread
 
 
 class AgentsRememberMCP(FastMCP):
@@ -92,6 +92,16 @@ class AgentsRememberMCP(FastMCP):
         return answer
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        try:
+            with request_memo_scope():
+                return await self._execute_tool_call(name, arguments)
+        finally:
+            from agents_remember.serving import heap_diag  # noqa: PLC0415
+
+            # The arena walk can block, so run it off the event loop after the call scopes unwind.
+            await run_in_request_thread(heap_diag.trim_malloc)
+
+    async def _execute_tool_call(self, name: str, arguments: dict[str, Any]) -> Any:
         # MIK-R204 @ v1 rule 3 as amended: this is the fallback start, for a client that never
         # lists tools. The same once-only latch runs the outside-scratch sweep and, when autoStart
         # is set, dashboard supervision; a second call is a no-op. Both launches are daemon threads
@@ -172,22 +182,7 @@ def _nonwriting_call(tool: Any, arguments: dict[str, Any]) -> bool:
 
 def _threaded(function: Any) -> Any:
     async def execute(**arguments: Any) -> Any:
-        # asyncio.to_thread carries the request and tool-log context into the worker.
-        worker = asyncio.create_task(asyncio.to_thread(partial(function, **arguments)))
-        try:
-            return await asyncio.shield(worker)
-        except BaseException:
-            # A thread cannot be cancelled. Keep the write lock until it exits, even
-            # under repeated transport cancellation; a second writer must not race it.
-            with CancelScope(shield=True):
-                while not worker.done():
-                    try:
-                        await asyncio.wait((worker,))
-                    except asyncio.CancelledError:
-                        continue
-            if not worker.cancelled():
-                worker.exception()
-            raise
+        return await run_in_request_thread(function, **arguments)
 
     return execute
 

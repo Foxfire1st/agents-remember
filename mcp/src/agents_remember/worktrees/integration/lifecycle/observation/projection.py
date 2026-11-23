@@ -184,9 +184,9 @@ def unreadable_contract_operation_projections(
         try:
             # Contract-invalid status cannot safely run Git reconciliation: that
             # reconciliation deliberately revalidates repository authority by
-            # reading the contract. Retain only the read-only worker-exit
-            # projection here, then expose zero controls below.
-            record = _project_worker_observed_record(store.read())
+            # reading the contract. Read the journal without reconciling it, and
+            # expose zero controls below.
+            record = store.read()
         except LifecycleOperationReadError as error:
             projections.append(lifecycle_journal_read_decision(kind, error).projection())
             continue
@@ -223,10 +223,11 @@ def unreadable_contract_operation_projections(
 def _project_observed_record(
     record: LifecycleOperationRecord | None,
 ) -> LifecycleOperationRecord | None:
-    projected = _project_worker_observed_record(record)
+    projected = record
     if projected is None:
         return None
-    if projected.operationKind not in {"closeout", "direct-landing"}:
+    if projected.operationKind != "direct-landing":
+        # Retired journals carry historical paths and are read for audit.
         return projected
     reconciled = reconcile_closeout_mutations(projected, temporary_indices=True)
     recovery_commits = derive_closeout_recovery_commits(projected, mutations=reconciled)
@@ -242,18 +243,6 @@ def _project_observed_record(
             ),
         }
     )
-
-
-def _project_worker_observed_record(
-    record: LifecycleOperationRecord | None,
-) -> LifecycleOperationRecord | None:
-    if record is None:
-        return None
-    from agents_remember.worktrees.integration.lifecycle.worker.state import (  # noqa: PLC0415
-        project_worker_exit,
-    )
-
-    return project_worker_exit(record)
 
 
 def observed_operation_projection(

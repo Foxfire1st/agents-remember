@@ -489,7 +489,7 @@ function EmptyExplanation({
     <div className={card} data-testid="explanation-empty">
       <h3 className={title}>No explanation yet</h3>
       <p className={bodyText}>
-        {`The explainer reads the whole change set of ${taskLabel} and writes one end-to-end review of it here. It can also grade the blocks, so the tree can sort by its judgment.`}
+        {`The explainer reads the whole change set of ${taskLabel} and writes one end-to-end explanation of it here. It can also grade the blocks, so the tree can sort by its judgment.`}
       </p>
       {failure ? (
         <p className={bodyText} data-testid="explanation-empty-browser">

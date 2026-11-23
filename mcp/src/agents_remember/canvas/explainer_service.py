@@ -89,14 +89,19 @@ from agents_remember.models.knowledge.review_frame import FrameBinding
 #: `END_TO_END_LINE` for the form's line, so the words the developer reads and the seat's first turn
 #: cannot drift apart (MIK-R211 v2 rule 5, the developer's F1).
 END_TO_END_REQUEST = (
-    "Explain this change set end to end: what changed, which invariants it touches and how each one "
-    "still holds, and where the evidence for each claim is."
+    "Explain this change set end to end: read the task and its reports, choose the changes and "
+    "their parts that matter, explain each part on its own, write the essay with its evidence, "
+    "then plan and make each visual and build the page."
 )
 
 #: What an empty Send on a task in planning asks for. A planning leaf has no change set and no
-#: invariants that hold yet; the explainer is to explain the requirement and the planned effects
-#: (BUG-R02 rule 2), so its first turn says exactly that, in one sentence.
-PLANNED_REQUEST = "Explain this task's requirement and its planned effects."
+#: invariants that hold yet; the explainer is to explain the requirement and the planned effects in
+#: the same stages, so its first turn says exactly that, in one sentence.
+PLANNED_REQUEST = (
+    "Explain this task's requirement and its planned effects: choose the code and memory it "
+    "touches and the parts that will change, explain each on its own, write the essay, then plan "
+    "and make each visual and build the page."
+)
 
 __all__ = [
     "END_TO_END_REQUEST",
@@ -796,7 +801,7 @@ class _SendOptions(TypedDict, total=False):
     cannot pass a value the message composer would not have taken.
     """
 
-    history: str
+    history: str | None
     picks: Sequence[Mapping[str, object] | str]
     stale_part_ids: Sequence[str]
     stale_grades: Sequence[str]

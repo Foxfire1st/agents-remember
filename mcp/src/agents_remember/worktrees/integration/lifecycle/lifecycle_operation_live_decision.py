@@ -23,9 +23,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_recovery import (
     direct_recovery_refusal,
 )
-from agents_remember.worktrees.integration.lifecycle.worker.termination import (
-    worker_exit_unproven,
-)
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -50,8 +47,6 @@ def raise_live_evidence_decision(
     if direct_recovery.state == "developer-decision":
         raise direct_recovery_refusal(direct_recovery)
     if record.operationKind != "integrate":
-        if worker_exit_unproven(record):
-            return
         if generation_requires_recovery(record) and record.status not in {
             "completed",
             "cancelled",
@@ -63,8 +58,6 @@ def raise_live_evidence_decision(
         record,
     )
     require_integration_operation_convergent(observed_integration)
-    if worker_exit_unproven(record):
-        return
     if generation_requires_recovery(record) and record.status not in {
         "completed",
         "cancelled",

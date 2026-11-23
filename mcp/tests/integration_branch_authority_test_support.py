@@ -22,10 +22,6 @@ from agents_remember.tasks import (
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     publish_new_lifecycle_operation_location,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
-)
 from agents_remember.worktrees.modules.landing_commit_check import (
     message_with_commit_check_trailer,
 )
@@ -38,15 +34,7 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
-from closeout_input_test_support import (
-    closeout_operation_input,
-    finish_operation_record,
-    publish_closeout_finalization,
-    start_closeout_operation,
-    start_operation_record,
-)
 from repository_profile_test_support import AGENTS_REMEMBER_PROFILE_REFERENCE
-from selected_lifecycle_test_support import selected_closeout_operation_input
 from test_closeout_queue import _ensure_fixture_services
 from test_source_lineage import _fixture, _git
 from writer_worklist_test_support import write_knowledge
@@ -152,17 +140,6 @@ def _publish_completed_closeout_fixture(
     """Attach integration evidence after valid admission, optionally varying its final target."""
 
     _ensure_fixture_services()
-    input_factory = (
-        selected_closeout_operation_input if closed.kind == "leaf" else closeout_operation_input
-    )
-    operation_input = input_factory(
-        closed,
-        config_path=fixture.config_path,
-        approval_note="approved closed integration fixture",
-    )
-    start_closeout_operation(operation_input, launcher=lambda *_: None)
-    store = LifecycleOperationStore(operation_record_path(closed.worktree_group, "closeout"))
-    start_operation_record(store)
     finalized = replace(
         load_contract(closed.contract_path),
         code_source_branch=final_source_branch or closed.code_source_branch,
@@ -173,8 +150,6 @@ def _publish_completed_closeout_fixture(
         memory_content_commit=closed.memory_content_commit,
     )
     write_contract(finalized.contract_path, finalized)
-    publish_closeout_finalization(store, finalized)
-    finish_operation_record(store, {"state": "closed"}, ok=True)
     if finalized.kind == "series":
         fixture.master_contract = finalized
     else:

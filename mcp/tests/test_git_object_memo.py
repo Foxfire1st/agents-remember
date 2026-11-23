@@ -2,30 +2,37 @@
 
 Fail-first: every test below fails without the request-scoped object memo in
 ``kernel/git_command.py``. All git runs go to real temporary repositories; the
-count is taken at the runner, so a child saved is a child counted.
+count is taken at the runner, so a child saved is a child counted. The batch
+blob cases also exercise exact bytes and allocation at that runner boundary.
 """
 
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 import tempfile
+import tracemalloc
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, BinaryIO
 from unittest import mock
 from unittest.mock import patch
 
+import pytest
 from agents_remember.kernel import git_command
 from agents_remember.kernel.git_command import (
     GitRunnerOptions,
     memo_git_object_lookups,
+    read_git_blobs_bytes,
     run_git,
     run_git_with_index,
 )
+from agents_remember.kernel.git_preparation import GitPreparationError
+from agents_remember.kernel.read_cancellation import ReadCancelled
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember_test_support.testing.git_command import _commit, _init
 
@@ -434,3 +441,112 @@ class ReplaceFreshnessTests(unittest.TestCase):
                 self.assertEqual(peeled.returncode, 0)
                 self.assertEqual(repeated.returncode, 0)
                 self.assertEqual(calls, 3)
+
+
+def _git_answer(root: Path, *args: str) -> str:
+    result = run_git(root, list(args))
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+def _write_blob(root: Path, body: bytes) -> str:
+    path = root / "payload.bin"
+    path.write_bytes(body)
+    return _git_answer(root, "hash-object", "-w", str(path))
+
+
+@pytest.mark.parametrize("object_format", ["sha1", "sha256"])
+def test_git_blob_frames_preserve_binary_and_empty_bodies(
+    tmp_path: Path, object_format: str
+) -> None:
+    _git_answer(tmp_path, "init", "-q", f"--object-format={object_format}")
+    binary = b"\x00\xff\r\n\nopaque\x00"
+    opaque_id = _write_blob(tmp_path, binary)
+    empty_id = _write_blob(tmp_path, b"")
+    answer = read_git_blobs_bytes(tmp_path, [opaque_id, empty_id, opaque_id])
+    assert answer == {opaque_id: binary, empty_id: b""}
+    assert list(answer) == sorted(answer)
+
+    missing_id = "0" * len(opaque_id)
+    tree_id = _git_answer(tmp_path, "write-tree")
+    for object_id in (missing_id, tree_id):
+        with pytest.raises(GitPreparationError, match=f"{object_id} is not a readable blob"):
+            read_git_blobs_bytes(tmp_path, [opaque_id, object_id])
+
+
+@pytest.mark.parametrize("failure", [None, ReadCancelled(), subprocess.TimeoutExpired("git", 300)])
+def test_git_blob_spool_is_private_and_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: BaseException | None
+) -> None:
+    _git_answer(tmp_path, "init", "-q")
+    blob_id = _write_blob(tmp_path, b"payload")
+    original = git_command.run_git_into
+    spools: list[BinaryIO] = []
+
+    def capture(
+        root: Path, args: list[str], output: BinaryIO, options: GitRunnerOptions
+    ) -> subprocess.CompletedProcess[bytes]:
+        spools.append(output)
+        metadata = os.fstat(output.fileno())
+        assert stat.S_IMODE(metadata.st_mode) == 0o600
+        assert metadata.st_nlink == 0
+        if failure is not None:
+            raise failure
+        return original(root, args, output, options)
+
+    monkeypatch.setattr(git_command, "run_git_into", capture)
+    if failure is None:
+        assert read_git_blobs_bytes(tmp_path, [blob_id]) == {blob_id: b"payload"}
+    else:
+        with pytest.raises(type(failure)):
+            read_git_blobs_bytes(tmp_path, [blob_id])
+    assert len(spools) == 1 and spools[0].closed
+
+
+@pytest.mark.parametrize(
+    ("suffix", "message"),
+    [
+        (b" missing\n", "is not a readable blob"),
+        (b" tree 0\n\n", "is not a readable blob"),
+        (b" blob -1\n\n", "is not a readable blob"),
+        (b" blob 1", "is not a readable blob"),
+        (b" blob 3\nx", "incomplete blob frame"),
+        (b" blob 1\nx?", "incomplete blob frame"),
+        (b" blob 1\nx\n?", "extra bytes"),
+    ],
+)
+def test_git_blob_reader_refuses_invalid_frames(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: bytes, message: str
+) -> None:
+    blob_id = "1" * 40
+
+    def write_frame(
+        root: Path, args: list[str], output: BinaryIO, options: GitRunnerOptions
+    ) -> subprocess.CompletedProcess[bytes]:
+        assert root == tmp_path
+        assert args == ["cat-file", "--batch"]
+        assert options.input_text == f"{blob_id}\n"
+        output.write(blob_id.encode("ascii") + suffix)
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(git_command, "run_git_into", write_frame)
+    with pytest.raises(GitPreparationError, match=message):
+        read_git_blobs_bytes(tmp_path, [blob_id])
+
+
+def test_git_blob_batch_allocates_one_payload_copy(tmp_path: Path) -> None:
+    _git_answer(tmp_path, "init", "-q")
+    body_size = 3 * 1024 * 1024
+    blob_ids = [_write_blob(tmp_path, bytes([i]) * body_size) for i in range(4)]
+
+    tracemalloc.start()
+    try:
+        answer = read_git_blobs_bytes(tmp_path, blob_ids)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    for blob_id, value in zip(blob_ids, range(4), strict=True):
+        assert answer[blob_id] == bytes([value]) * body_size
+    returned_bytes = len(blob_ids) * body_size
+    assert peak < returned_bytes * 3 // 2

@@ -1,7 +1,7 @@
 """MIK-R105 rule 12 (L104-B19): the presenter capability text through the capsule contract.
 
 The finding was that ``canvas/review-presenter.md`` was checkout-local: an installed build could
-not read it, its 1,100-word budget was asserted by a canvas test rather than enforced at the read,
+not read it, its word budget was asserted by a canvas test rather than enforced at the read,
 and nothing recorded whether a launch delivered the canonical text or a user's addition or
 replacement of it.
 
@@ -36,6 +36,7 @@ from agents_remember.cli.role_instructions import (
     CAPABILITY_REPLACEMENT,
     CapabilityRefused,
     capability_copy_drift,
+    capability_resource,
     compose_capability_capsule,
     load_capability_resource,
     write_generated_capability_copy,
@@ -75,18 +76,27 @@ def test_the_capability_text_is_read_from_the_package_data_copy(tmp_path: Path) 
     assert loaded.canonical_path == CANONICAL_PATH
     assert installed.resolve() == (PACKAGE_ROOT / PACKAGED_PATH).resolve()
     assert installed.read_text(encoding="utf-8") == loaded.text
-    # The D566 review-presenter text: 1,090 words. It carries the architect's first-reads order from
-    # generation 6's measurement. L201 (MIK-R211 v5) describes the explainer's normal workspace and
-    # its harness's own tools in place of the confinement and the eighteen removed tools, says where
-    # each render's run folder is (renders/run-NNN/), instructs grading for the page's Sort menu,
-    # and reports to the architect with the role_message call D607 proved (D602-D608). It also names
-    # the planned binding's folder, which carries the requirement packets the task names and its
-    # declared planned effects as text.
-    assert loaded.words == 1090
-    assert loaded.words <= loaded.word_budget == 1100
+    # The staged essay-first text. It carries the reading, choices, parts, explanations, essay,
+    # visuals and page as stages, each with its file; the self-contained explanation; the rule that
+    # text carries the content; and the planned variant. The first-reads order, workspace
+    # instructions, render run folders, grading and the architect report all remain.
+    assert loaded.words == 1500
+    assert loaded.words <= loaded.word_budget == 1500
     assert len(loaded.digest) == 64 and loaded.revision == f"sha256:{loaded.digest}"
     for clause in REQUIRED_WORDING:
         assert clause in loaded.text
+    for stage in (
+        "stages/01-reading.md",
+        "stages/02-changes.md",
+        "stages/03-parts.md",
+        "stages/04-explanations.md",
+        "stages/05-essay.md",
+        "stages/06-visuals.md",
+    ):
+        assert stage in loaded.text
+    assert "A self-contained explanation" in loaded.text
+    assert "The text carries the content; pictures support it." in loaded.text
+    assert "A planned binding follows the same stages" in loaded.text
 
     # The capsule carries the effects-off rule in whatever words its own revision uses (D566:
     # "Reduced motion and effects off show each figure's final, labelled state..."). A copy with
@@ -99,7 +109,7 @@ def test_the_capability_text_is_read_from_the_package_data_copy(tmp_path: Path) 
     draft.write_text(loaded.text.replace(sentence, ""), encoding="utf-8")
     shorter = load_capability_resource(CAPABILITY, root=tmp_path)
     assert shorter.words == loaded.words - len(sentence.split())
-    assert shorter.words <= shorter.word_budget == 1100
+    assert shorter.words <= shorter.word_budget == 1500
 
 
 def test_the_budget_and_the_wording_are_enforced_at_the_read(tmp_path: Path) -> None:
@@ -107,11 +117,13 @@ def test_the_budget_and_the_wording_are_enforced_at_the_read(tmp_path: Path) -> 
 
     packaged = tmp_path / PACKAGED_PATH
     packaged.parent.mkdir(parents=True)
-    packaged.write_text("word " * 1101, encoding="utf-8")
+    packaged.write_text(
+        "word " * (capability_resource(CAPABILITY).word_budget + 1), encoding="utf-8"
+    )
     with pytest.raises(CapabilityRefused) as too_long:
         load_capability_resource(CAPABILITY, root=tmp_path)
     assert too_long.value.reason == "capability-too-long"
-    assert "1101" in too_long.value.detail
+    assert "1501" in too_long.value.detail
 
     canonical = load_capability_resource(CAPABILITY).text
     packaged.write_text(
@@ -169,7 +181,7 @@ def test_the_launch_record_names_the_baseline_the_addition_or_the_replacement() 
     assert provenance["baseline"]["revision"] == baseline.revision
     assert provenance["baseline"]["canonicalPath"] == CANONICAL_PATH
     assert provenance["baseline"]["packagedPath"] == PACKAGED_PATH
-    assert provenance["baseline"]["wordBudget"] == 1100
+    assert provenance["baseline"]["wordBudget"] == 1500
     assert provenance["user"] is None
 
     added, addition = compose_capability_capsule(

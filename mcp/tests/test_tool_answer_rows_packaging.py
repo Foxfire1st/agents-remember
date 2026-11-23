@@ -11,13 +11,8 @@ cut, measured bounds, production-bound equality).
 
 from __future__ import annotations
 
-import contextlib
 import json
-import os
-import shutil
-import tempfile
 import unittest
-from collections.abc import Iterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -60,6 +55,7 @@ from agents_remember.models.tools.tool_answer import bound_for
 from agents_remember.worktrees.integration.closeout.curator_coherence_publication import (
     curator_coherence_action,
 )
+from agents_remember_test_support.testing.tool_answer_fixtures import fixed_width_row_case_root
 from curator_coherence_test_support import (
     prepared_publish_inputs,
     write_curator_evidence,
@@ -74,40 +70,6 @@ from tool_answer_l110_rows import (
 )
 
 REPO_ID = "repo-a"
-
-
-# R1-05 (v2): row bounds govern authored dimensions, so the row cases author
-# their fixture root width instead of inheriting ambient TMPDIR length.
-# mkdtemp appends 8 random chars: constant width, unique per case. The XDG
-# roots the answers embed are patched to the same fixture. The asserted
-# bytes are exactly what the producers emitted — no rewriting, no raised
-# bounds, no capped roots; the density floors still forbid hiding a real
-# overflow behind shrinking.
-_ROW_CASE_ROOT_PREFIX = "rowcase-ambient-width-fixed-for-row-bounds-"
-
-
-@contextlib.contextmanager
-def _fixed_width_case_root() -> Iterator[Path]:
-    """A hermetic fixture root of authored, constant width under /tmp."""
-    root = Path(tempfile.mkdtemp(prefix=_ROW_CASE_ROOT_PREFIX, dir="/tmp"))
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
-
-
-def _case_xdg(root: Path) -> Any:
-    """Point the XDG roots the answers embed at the same owned fixture."""
-    xdg = root / "xdg"
-    xdg.mkdir(exist_ok=True)
-    return patch.dict(
-        os.environ,
-        {
-            "XDG_CONFIG_HOME": xdg.as_posix(),
-            "XDG_DATA_HOME": xdg.as_posix(),
-            "XDG_CACHE_HOME": xdg.as_posix(),
-        },
-    )
 
 
 def _scoped_pair(root: Path) -> tuple[Any, McpRuntimeConfig, McpRuntimeConfig]:
@@ -290,7 +252,7 @@ class InitBaselineProductionTests(unittest.TestCase):
     def test_init_and_baseline_paths_derive_the_row_cases(self) -> None:
         """A real init scaffolds, status reads ready, adopt records the ledger."""
 
-        with _fixed_width_case_root() as root, _case_xdg(root):
+        with fixed_width_row_case_root() as root:
             _code, path = _world(root)
             preview = memory_init_tool(
                 load_config(path), repo_id=REPO_ID, initial_branch="main", dry_run=True
@@ -319,7 +281,7 @@ class CarryoverProductionTests(unittest.TestCase):
     def test_plan_and_apply_derive_the_row_cases(self) -> None:
         """A real carryover plan and apply over the landed-branch world."""
 
-        with _fixed_width_case_root() as root, _case_xdg(root):
+        with fixed_width_row_case_root() as root:
             fixture, _contract, selection = _converted_world(root)
             planned = memory_carryover_plan_tool(fixture.cfg, selection)
             planned_report = write_tool_report(
@@ -358,7 +320,7 @@ class IntegrityProductionTests(unittest.TestCase):
     def test_reported_and_refused_paths_derive_the_row_cases(self) -> None:
         """A real integrity check reports the validator's listing; legacy refuses."""
 
-        with _fixed_width_case_root() as root, _case_xdg(root):
+        with fixed_width_row_case_root() as root:
             memory = root / "memory"
             init_repository(memory)
             write_review_tree(memory)
@@ -403,81 +365,72 @@ class IntegrityProductionTests(unittest.TestCase):
 def test_coherence_paths_derive_the_row_cases() -> None:
     """Real status, prepare, publish, and validate answers fit the coherence row."""
 
-    parent = Path(tempfile.gettempdir())
-    # Author the actual fixture width, not answer padding or an ambient TMPDIR-dependent floor.
     stem = "coherence-row-cases-converted-memory-publication-evidence-"
-    padding = max(0, 160 - len(os.fsencode(parent)) - 1 - len(stem) - 8)
-    root = Path(tempfile.mkdtemp(prefix=stem + "x" * padding, dir=parent))
-    try:
-        with (
-            _case_xdg(root),
-        ):
-            recorded = build_recorded_fixture(root)
-            kinds = ("source-change", "new-card", "removed-anchor")
-            candidates = [
-                {
-                    "sourceFile": f"pkg/candidate-{index:04d}.py",
-                    "onboardingFile": f"onboarding/pkg/candidate-{index:04d}.py.md",
-                    "classification": kinds[index % len(kinds)],
-                }
-                for index in range(40)
-            ]
-            write_curator_evidence(
-                recorded.contract, caller_ref=recorded.sprint, source_candidates=candidates
-            )
-            prepared = curator_coherence_action(
-                recorded.contract,
-                CuratorCoherenceRequest(
-                    action="prepare", contract_path=recorded.contract.contract_path.as_posix()
-                ),
-            )
-            assert_production_answer(None, "curator_coherence", prepared)
-            assert_answer_survives_the_guard("curator_coherence", prepared, prepared)
+    with fixed_width_row_case_root(prefix=stem, width=160) as root:
+        recorded = build_recorded_fixture(root)
+        kinds = ("source-change", "new-card", "removed-anchor")
+        candidates = [
+            {
+                "sourceFile": f"pkg/candidate-{index:04d}.py",
+                "onboardingFile": f"onboarding/pkg/candidate-{index:04d}.py.md",
+                "classification": kinds[index % len(kinds)],
+            }
+            for index in range(40)
+        ]
+        write_curator_evidence(
+            recorded.contract, caller_ref=recorded.sprint, source_candidates=candidates
+        )
+        prepared = curator_coherence_action(
+            recorded.contract,
+            CuratorCoherenceRequest(
+                action="prepare", contract_path=recorded.contract.contract_path.as_posix()
+            ),
+        )
+        assert_production_answer(None, "curator_coherence", prepared)
+        assert_answer_survives_the_guard("curator_coherence", prepared, prepared)
 
-            evidence = recorded.contract.task_root / "evidence.md"
-            evidence.write_text(
-                "# fixture evidence\n\nthe record this judgment cites\n", encoding="utf-8"
+        evidence = recorded.contract.task_root / "evidence.md"
+        evidence.write_text(
+            "# fixture evidence\n\nthe record this judgment cites\n", encoding="utf-8"
+        )
+        judgments = [
+            CuratorCoherenceJudgment(
+                sourceFile=candidate["sourceFile"],
+                onboardingFile=candidate["onboardingFile"],
+                classification=candidate["classification"],
+                disposition="reconciled",
+                rationale="The fixture candidate has one explicit reconciliation judgment.",
+                evidenceRef="task:evidence.md",
             )
-            judgments = [
-                CuratorCoherenceJudgment(
-                    sourceFile=candidate["sourceFile"],
-                    onboardingFile=candidate["onboardingFile"],
-                    classification=candidate["classification"],
-                    disposition="reconciled",
-                    rationale="The fixture candidate has one explicit reconciliation judgment.",
-                    evidenceRef="task:evidence.md",
-                )
-                for candidate in candidates
-            ]
-            published = curator_coherence_action(
-                recorded.contract,
-                CuratorCoherenceRequest(
-                    action="publish",
-                    contract_path=recorded.contract.contract_path.as_posix(),
-                    semantic_requirement_revision="MIK-R110@v1",
-                    delivery_attempt="L110-A001",
-                    judgments=judgments,
-                    caller=DeclaredCaller(role="architect", task_document_ref=recorded.sprint),
-                    **prepared_publish_inputs(prepared),
-                ),
-            )
-            measured = assert_production_answer(None, "curator_coherence", published)
-            assert 2 * measured >= 850, f"coherence bound slack: {measured}"
-            assert_answer_survives_the_guard("curator_coherence", published, published)
+            for candidate in candidates
+        ]
+        published = curator_coherence_action(
+            recorded.contract,
+            CuratorCoherenceRequest(
+                action="publish",
+                contract_path=recorded.contract.contract_path.as_posix(),
+                semantic_requirement_revision="MIK-R110@v1",
+                delivery_attempt="L110-A001",
+                judgments=judgments,
+                caller=DeclaredCaller(role="architect", task_document_ref=recorded.sprint),
+                **prepared_publish_inputs(prepared),
+            ),
+        )
+        measured = assert_production_answer(None, "curator_coherence", published)
+        assert 2 * measured >= 850, f"coherence bound slack: {measured}"
+        assert_answer_survives_the_guard("curator_coherence", published, published)
 
-            status = curator_coherence_action(
-                recorded.contract,
-                CuratorCoherenceRequest(
-                    action="status", contract_path=recorded.contract.contract_path.as_posix()
-                ),
-            )
-            assert_production_answer(None, "curator_coherence", status)
-            validated = curator_coherence_action(
-                recorded.contract,
-                CuratorCoherenceRequest(
-                    action="validate", contract_path=recorded.contract.contract_path.as_posix()
-                ),
-            )
-            assert_production_answer(None, "curator_coherence", validated)
-    finally:
-        shutil.rmtree(root)
+        status = curator_coherence_action(
+            recorded.contract,
+            CuratorCoherenceRequest(
+                action="status", contract_path=recorded.contract.contract_path.as_posix()
+            ),
+        )
+        assert_production_answer(None, "curator_coherence", status)
+        validated = curator_coherence_action(
+            recorded.contract,
+            CuratorCoherenceRequest(
+                action="validate", contract_path=recorded.contract.contract_path.as_posix()
+            ),
+        )
+        assert_production_answer(None, "curator_coherence", validated)

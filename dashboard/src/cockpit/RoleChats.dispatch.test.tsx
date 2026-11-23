@@ -4,6 +4,7 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RoleChatsPane } from './RoleChats';
+import { launcherModelReply } from './roleChatModelOptions.test-utils';
 import type { RoleAgentChoice } from './roleLaunchModel';
 
 const AGENTS: RoleAgentChoice[] = [
@@ -69,7 +70,9 @@ function take(url: string): Route {
 }
 
 function bodies(url: string): unknown[] {
-  return seen.filter((call) => call.url === url).map((call) => call.body);
+  return seen.filter((call) => call.url === url &&
+    (url !== '/api/role-launch/options' || !(call.body as { modelId?: unknown })?.modelId))
+    .map((call) => call.body);
 }
 
 beforeEach(() => {
@@ -81,6 +84,8 @@ beforeEach(() => {
     vi.fn(async (url: string, init?: RequestInit) => {
       seen.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       if (url === '/api/role-launch/options') {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        if (body.modelId) return launcherModelReply(body, optionsBody());
         const next = take(url);
         return new Response(JSON.stringify(next?.body ?? {}), { status: next?.status ?? 500 });
       }
@@ -202,7 +207,7 @@ describe('when the options effect runs', () => {
     const start = await startEnabled(view);
     expect(start.disabled).toBe(false);
     // A feature-only change leaves the scope memos (and the options load) alone.
-    fireEvent.change(view.getByLabelText('Speed override'), { target: { value: 'priority' } });
+    fireEvent.change(await view.findByLabelText('Speed override'), { target: { value: 'priority' } });
     // Flush effects and settled fetches deterministically instead of a wall-clock sleep.
     await act(async () => {});
     expect(bodies('/api/role-launch/options')).toHaveLength(1);
@@ -223,6 +228,8 @@ describe('L150-CODE-04: newer Result authority survives a delayed options reply'
       const url = String(input);
       seen.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       if (url === '/api/role-launch/options') {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        if (body.modelId) return launcherModelReply(body, optionsBody());
         return new Promise<Response>((answer) => {
           parked.push({ answer });
         });

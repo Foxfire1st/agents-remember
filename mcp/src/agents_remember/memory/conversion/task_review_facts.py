@@ -197,9 +197,9 @@ def _unreadable_review_state(error: ValidationError) -> str | None:
 def last_passed_memory_round(
     state: ReviewState | None, document: Path
 ) -> PassedReview | str | None:
-    """The last pass, a reason if that round is contradictory, or None if no pass is recorded."""
+    """The last pass for a lane without open findings, or a reason if its record conflicts."""
 
-    if state is None:
+    if state is None or state.remainingFindingIds:
         return None
     rounds = state.recordedRounds
     memory = [one for one in rounds if one.kind == "memory"]

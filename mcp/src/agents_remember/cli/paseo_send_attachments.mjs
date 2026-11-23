@@ -1,9 +1,9 @@
 // The images and text attachments one agent-send hands on with its message (MIK-R188 rule 9).
 //
 // Paseo's send takes `images: [{data, mimeType}]` and `attachments` beside the text
-// (`SendMessageOptions`, Paseo's client package 0.15.4, `daemon-client.d.ts:173-185`; the bridge
+// (`SendMessageOptions`, Paseo's client package 0.16.2, `daemon-client.d.ts`; the bridge
 // script is its one importer, so this module names no package). A text attachment
-// must carry `mimeType: "text/plain"` (`TextAttachmentSchema`, protocol 0.15.4 `messages.d.ts:925`).
+// must carry `mimeType: "text/plain"` (`TextAttachmentSchema`, protocol 0.16.2 `messages.d.ts`).
 // Only text attachments are handed on: the developer's tray sends no other kind.
 //
 // A payload without them, or with empty lists, adds nothing, so a send without them keeps the

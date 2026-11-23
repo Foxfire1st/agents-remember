@@ -6187,38 +6187,38 @@
       "capsules": {
         "architect/orientation": 4664,
         "architect/planning": 4434,
-        "architect/review": 4588,
-        "architect/coordination": 5473,
-        "architect/authorized-closeout": 4003,
+        "architect/review": 4675,
+        "architect/coordination": 5462,
+        "architect/authorized-closeout": 4078,
         "architect/recovery": 3907,
         "orchestrator/orientation": 2810,
         "orchestrator/planning": 2144,
-        "orchestrator/review": 2405,
-        "orchestrator/coordination": 3742,
-        "orchestrator/authorized-closeout": 2253,
+        "orchestrator/review": 2492,
+        "orchestrator/coordination": 3731,
+        "orchestrator/authorized-closeout": 2328,
         "orchestrator/recovery": 2157,
-        "manager/orientation": 3454,
-        "manager/review": 3049,
-        "manager/curation": 3288,
-        "manager/coordination": 4561,
-        "manager/authorized-closeout": 2897,
-        "manager/recovery": 2801,
-        "worker/orientation": 3200,
-        "worker/implementation": 3274,
-        "worker/recovery": 2532,
+        "manager/orientation": 3466,
+        "manager/review": 3148,
+        "manager/curation": 3300,
+        "manager/coordination": 4562,
+        "manager/authorized-closeout": 2984,
+        "manager/recovery": 2813,
+        "worker/orientation": 3261,
+        "worker/implementation": 3538,
+        "worker/recovery": 2593,
         "curator/orientation": 4020,
         "curator/curation": 4518,
         "curator/recovery": 3328,
-        "reviewer/orientation": 3865,
-        "reviewer/review": 4112,
-        "reviewer/recovery": 3197,
+        "reviewer/orientation": 3855,
+        "reviewer/review": 4195,
+        "reviewer/recovery": 3187,
         "investigator/orientation": 2105,
         "investigator/recovery": 1473,
         "bootstrap/orientation": 1743,
         "bootstrap/recovery": 1450,
         "bootstrap/bootstrap": 2549,
-        "launcher/orientation": 1027,
-        "launcher/coordination": 1841
+        "launcher/orientation": 1057,
+        "launcher/coordination": 1871
       },
       "step_details": {
         "reference/bootstrap/failure-states.md": 605,
@@ -6230,9 +6230,9 @@
         "reference/coordination/architect/process-decisions.md": 217,
         "reference/coordination/shared/child-questions.md": 349,
         "reference/coordination/shared/master-state.md": 289,
-        "reference/coordination/shared/requirement-design.md": 528,
+        "reference/coordination/shared/requirement-design.md": 637,
         "reference/coordination/shared/seat-recovery.md": 281,
-        "reference/coordination/shared/third-rejected-round.md": 223,
+        "reference/coordination/shared/third-rejected-round.md": 253,
         "reference/curator/card-formats-and-citations.md": 1816,
         "reference/curator/card-sentence-decisions.md": 344,
         "reference/curator/change-routing.md": 193,
@@ -6253,15 +6253,15 @@
         "reference/knowledge/use.md": 690,
         "reference/message-handover.md": 245,
         "reference/refused-write.md": 564,
-        "reference/review-baseline.md": 268,
+        "reference/review-baseline.md": 276,
         "reference/sandbox-actors.md": 234,
         "reference/tasks/document-authoring.md": 591,
         "reference/writing/technical-english-profile.md": 1217,
         "reference/writing/visual-explainers.md": 278,
-        "templates/turn-report.md": 1708
+        "templates/turn-report.md": 1735
       },
       "digest": {
-        "core/every-role.md": 2327
+        "core/every-role.md": 2324
       },
       "ordinary_templates": {
         "templates/bootstrap-report.md": 309,
@@ -6270,7 +6270,7 @@
         "templates/master-task.md": 246,
         "templates/repo-entity-catalog.md": 294,
         "templates/repo-overview.md": 257,
-        "templates/requirement-packet.md": 504,
+        "templates/requirement-packet.md": 606,
         "templates/route-local-overview.md": 278
       }
     },
@@ -6334,40 +6334,40 @@
         "sha256": "8ed97cba6c7933aded1ba950ce99b8c6e4c0a243e517897b1e59673d58581719"
       },
       "skills/l-01-agent-lifecycles/core/acceptance.md": {
-        "size_words": 1603,
-        "sha256": "4cf207f8c52bc403ede25b12b64691df3bd45eb807fa335f04d564166ca42e52"
+        "size_words": 1647,
+        "sha256": "579904c9e64af0329dc249bcd3d95cf7af4e306321f1ffce0dca1a3f89dd41af"
       },
       "skills/l-01-agent-lifecycles/core/authority.md": {
-        "size_words": 2206,
-        "sha256": "d93f0f515c2ea493d145d063ee7e6b98a7a555cf1b6298f28ef5ffbcb4fc684a"
+        "size_words": 2225,
+        "sha256": "c142da074d1cd549f0fd3725e3a3ef1412bfed722d3d6b3598b78012173a3236"
       },
       "skills/l-01-agent-lifecycles/core/digest-map.json": {
         "size_words": 18866,
-        "sha256": "059c964944e71336418b10ec61c43f5d84bd550a28f2fc7d694a6d67ade636cf"
+        "sha256": "2885065f67f89174521a80c8fea2827855cb9f2779b5f2eacd01e05d87e7095c"
       },
       "skills/l-01-agent-lifecycles/core/every-role.md": {
-        "size_words": 2327,
-        "sha256": "8c27af7759b59ab754b18b3d0f7bda1666656788eeaa70fa8a31618e738249ac"
+        "size_words": 2324,
+        "sha256": "5258a0a3b9d50a4e7b5fba3bdafde59bd139b5959876b4b3c6b2d81e3d50e7a7"
       },
       "skills/l-01-agent-lifecycles/core/invariants.md": {
         "size_words": 1213,
         "sha256": "63fec8a32ae5a69ffa7acb472707122f8eae1f9126ffda60a98c20c0fcf9d753"
       },
       "skills/l-01-agent-lifecycles/core/launcher.md": {
-        "size_words": 500,
-        "sha256": "96ad30c5a89cbfc32a9ac59e9be60ef9ebfd85588365eaa898ddbcc6cabb60fb"
+        "size_words": 530,
+        "sha256": "a12603fbe8a85e641c39e2b851d4be344fbca25ac033a69a0f8dca16071c0bb5"
       },
       "skills/l-01-agent-lifecycles/core/lifecycle-frame.md": {
         "size_words": 390,
         "sha256": "661f7438655f25d884b1596b31cfcc04ba609633dd8e5906acc6f0b839cca405"
       },
       "skills/l-01-agent-lifecycles/core/loop.md": {
-        "size_words": 1248,
-        "sha256": "1f3cb72d010a174c059358504b072d04527fb38ae8dc7675f9ab2c59e2e020ad"
+        "size_words": 1400,
+        "sha256": "7d47ecf18036fdba20740dcb8d5811898abc1dd0cf142f3275b4eea1a9fc92ee"
       },
       "skills/l-01-agent-lifecycles/criteria/code-seam.md": {
-        "size_words": 1022,
-        "sha256": "c3b81c76de343acfb9d143e8410c4d6fc7bd02f9e84664f06cee3e644bb9c4a1"
+        "size_words": 1007,
+        "sha256": "0d0e516ca90b15ba6cf288dc6b88a4d8864877ef8c98da5047e570f2d26871d8"
       },
       "skills/l-01-agent-lifecycles/criteria/doctrine.md": {
         "size_words": 340,
@@ -6378,8 +6378,8 @@
         "sha256": "bf3c3b23e48b98821f50c00797f2c0ce4facbeca98e45826dd45256ffd403da6"
       },
       "skills/l-01-agent-lifecycles/criteria/plan-review.md": {
-        "size_words": 1074,
-        "sha256": "ef11ea20138cd2e6693b3158b879528a8ecbb31f399a0e0021ee098e868ed281"
+        "size_words": 1073,
+        "sha256": "603290c829c0f3b6dd3736da5e348481b14ae791ea3442fe79eedf74c5a27943"
       },
       "skills/l-01-agent-lifecycles/criteria/report-verification.md": {
         "size_words": 783,
@@ -6390,20 +6390,20 @@
         "sha256": "c988052b9a104b4206086b55f10178c308a38eebe091cac422d7b5976a73b96f"
       },
       "skills/l-01-agent-lifecycles/operations/closeout.md": {
-        "size_words": 452,
-        "sha256": "f9142dc78a06d5161689df432b2853591820987c143d246b08ea71baa2b6dc20"
+        "size_words": 527,
+        "sha256": "0d42dc6e8fefde7dc9d349da15fa0e5b0cabf48e5393d7b93daa2c6ec40ccf8e"
       },
       "skills/l-01-agent-lifecycles/operations/coordination.md": {
-        "size_words": 2219,
-        "sha256": "88a01dcb7dbda8adb7eb9754736b5852b88bd23e2804a37cf9c620a597e1e6af"
+        "size_words": 2208,
+        "sha256": "e080d75e7e2c8b4bb001bed45b7095c6f2a5861f6088e7d3283256ed34bfdc7d"
       },
       "skills/l-01-agent-lifecycles/operations/curation.md": {
         "size_words": 1730,
         "sha256": "1857e1beb8ca9269588a3c811ad6b395f112edd2e0ddc81dc5bbb03b504b5a3a"
       },
       "skills/l-01-agent-lifecycles/operations/implementation.md": {
-        "size_words": 1087,
-        "sha256": "47244c585ee85f98726122e926fdb820910baf2a3f0c1fc7486e89f298e37ad5"
+        "size_words": 1290,
+        "sha256": "d469d2dc23df72eb45627493074e2c93b70f5974c41016e9a1a143df08b1ab82"
       },
       "skills/l-01-agent-lifecycles/operations/orientation.md": {
         "size_words": 1211,
@@ -6418,16 +6418,16 @@
         "sha256": "5740777d773a2c8733d5696ac52af01718a1d40813d85b6e0a0c46d904d74429"
       },
       "skills/l-01-agent-lifecycles/operations/review.md": {
-        "size_words": 1734,
-        "sha256": "a580b2fb62f8f2464c9597d0b9f6490722c937a2716065c876c9d085bfb9f5a2"
+        "size_words": 1827,
+        "sha256": "429141d967eed89e581d5d428f6f0276b5202bccc5cb46fe9e34c29f37732112"
       },
       "skills/l-01-agent-lifecycles/pointer-actions-derived.json": {
-        "size_words": 3417,
-        "sha256": "597da177047dda8556dd1a3c619039cf22af4154eac638099f43dc9530954561"
+        "size_words": 3449,
+        "sha256": "827ed75068692a0ab25d1923378870a5555c97fcbfd3b3b1daecc51211720e32"
       },
       "skills/l-01-agent-lifecycles/pointer-actions.json": {
-        "size_words": 1699,
-        "sha256": "d771bd94479522dccdc3507587c0e829e37f9b9c211bcd04c2b20c8f1b6beea1"
+        "size_words": 1705,
+        "sha256": "3469d5b598957f407ab42a40355bcfc4b66280b572b1035a0062e0cb289b2b74"
       },
       "skills/l-01-agent-lifecycles/reference/bootstrap/failure-states.md": {
         "size_words": 605,
@@ -6466,16 +6466,16 @@
         "sha256": "c26e608713a4ac2a96f4f8550ff55a668be56dcc854819f14f9183a5095533d0"
       },
       "skills/l-01-agent-lifecycles/reference/coordination/shared/requirement-design.md": {
-        "size_words": 528,
-        "sha256": "58967d36620ae35297a9bf022b050ebc21f0e5c2d9115aeff612d382877236ea"
+        "size_words": 637,
+        "sha256": "f2d88180a31916cd671ba62e58b720ea92071c993d321b4aacc8c9e63fc7a46a"
       },
       "skills/l-01-agent-lifecycles/reference/coordination/shared/seat-recovery.md": {
         "size_words": 281,
         "sha256": "062b3893433cc314402a206843ccd5dd514353bb9216356a85ea36252b898ef0"
       },
       "skills/l-01-agent-lifecycles/reference/coordination/shared/third-rejected-round.md": {
-        "size_words": 223,
-        "sha256": "241c3869bdbdfba0ed7f9e690c7192fb1a1bdacb37c36a2470bc56da59b9369d"
+        "size_words": 253,
+        "sha256": "f304cbbd3f0a635da3f3124db3744aa1e8beb4118f5c66d37cf9a91bb472c082"
       },
       "skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md": {
         "size_words": 1816,
@@ -6562,8 +6562,8 @@
         "sha256": "36f6992eddb203c1c58e57bfb84b7c3b28f412e57f604ac26c66fda890acf843"
       },
       "skills/l-01-agent-lifecycles/reference/review-baseline.md": {
-        "size_words": 268,
-        "sha256": "c75e23d9ebfdae17af6e3210d7312090e71437a0c5181eaa27beba919363c4eb"
+        "size_words": 276,
+        "sha256": "ff2b0ac06976f1655ee1b287de2448d363d8705d0d01749224a3e392f8c60e1a"
       },
       "skills/l-01-agent-lifecycles/reference/sandbox-actors.md": {
         "size_words": 234,
@@ -6602,20 +6602,20 @@
         "sha256": "a9568fd887bbc7b34443e94f060623a43689a42abbde634c18c7157f8cabea9a"
       },
       "skills/l-01-agent-lifecycles/roles/manager.md": {
-        "size_words": 2464,
-        "sha256": "6d36410ee6f3108a0b01f4f66864dea6dc420e7538a25f9d2f757c250ec4c491"
+        "size_words": 2476,
+        "sha256": "87c250dd7599b8b3c3ffc17ff8797f33c95e8f1b8aef977c7e13b0a223503e71"
       },
       "skills/l-01-agent-lifecycles/roles/orchestrator.md": {
         "size_words": 1819,
         "sha256": "10ca8084d12e5052765acdbc50bb94b7c39d96caf81f080cf3e7d52bcb2ca623"
       },
       "skills/l-01-agent-lifecycles/roles/reviewer.md": {
-        "size_words": 2924,
-        "sha256": "0bbe37a5e6fd93f99727d3907de9738083bdfd350a92af88445ad2129520458d"
+        "size_words": 2914,
+        "sha256": "e812cd6777f31f289c5981f27ee3d8f5f73ddd728a4e7615876542159b604d33"
       },
       "skills/l-01-agent-lifecycles/roles/worker.md": {
-        "size_words": 2229,
-        "sha256": "8391f7e20f53dc2e4087a2f40c76d748a99f961b044f4c5eeb3992955771f144"
+        "size_words": 2290,
+        "sha256": "a15284d3b41ba46ff3d797912d1a4db64372b1de83f90bfe8421650c02a9c40d"
       },
       "skills/l-01-agent-lifecycles/templates/bootstrap-report.md": {
         "size_words": 309,
@@ -6646,8 +6646,8 @@
         "sha256": "78fedcd5acfb265b0ea28f7ace834df5bcdc9a759150b7b0d3eb68e4a7bcb1eb"
       },
       "skills/l-01-agent-lifecycles/templates/manager-brief.md": {
-        "size_words": 1455,
-        "sha256": "5488060f32244e500220deb21c609e5b3308e05211e99c3ce9c954b2ae1560a3"
+        "size_words": 1465,
+        "sha256": "8938f7dc698a85538e3e29ff6bb407898d7dc6dc980869c4299097afb7cd446f"
       },
       "skills/l-01-agent-lifecycles/templates/master-handover-packet.md": {
         "size_words": 742,
@@ -6670,41 +6670,41 @@
         "sha256": "4945deed4342d13b523ffc4024d0e3c8ae35dd07175814a6091c0dc5701b0820"
       },
       "skills/l-01-agent-lifecycles/templates/requirement-packet.md": {
-        "size_words": 504,
-        "sha256": "8565490d0b775f8a7cb4de0b83a67762be4e4ae49aece1e933251f3d2bee8080"
+        "size_words": 606,
+        "sha256": "022f423e1e77cdae3ee92ccc51f1ba2d23a148f75cc2451fba810098a109738f"
       },
       "skills/l-01-agent-lifecycles/templates/route-local-overview.md": {
         "size_words": 278,
         "sha256": "6530c0ffdad825b9519531fe9684ec94286b8473ae36591d11b621fadace60f3"
       },
       "skills/l-01-agent-lifecycles/templates/turn-report.md": {
-        "size_words": 1708,
-        "sha256": "78e7d8c471b0d8badb9e2dca78c6f45bcfefacfbf62022b7f93903a0a12dbd1a"
+        "size_words": 1735,
+        "sha256": "67ca3513d6b2c90f7115ae52ba0d83a754595b8903a8c284e69429d07334cdab"
       },
       "skills/l-01-agent-lifecycles/templates/verdict.md": {
-        "size_words": 3631,
-        "sha256": "d4bea4b0dbcaee213fbc156a9c5c9f32e2cf4c21383ad51f0d45eb9912a2e04f"
+        "size_words": 3660,
+        "sha256": "2811afc3e2bf80b3b9b1b681d6dfffd41f8c69ce48152f532870271e6fe476b4"
       }
     },
     "compiler_input_revisions": {
       "SKILL.md": "sha256:702b67efa7c5f61f541dc44373b76a74b320d1ffb4a8b251354bb58625a494eb",
       "composition-manifest.json": "sha256:8ed97cba6c7933aded1ba950ce99b8c6e4c0a243e517897b1e59673d58581719",
-      "core/acceptance.md": "sha256:4cf207f8c52bc403ede25b12b64691df3bd45eb807fa335f04d564166ca42e52",
-      "core/authority.md": "sha256:d93f0f515c2ea493d145d063ee7e6b98a7a555cf1b6298f28ef5ffbcb4fc684a",
-      "core/every-role.md": "sha256:8c27af7759b59ab754b18b3d0f7bda1666656788eeaa70fa8a31618e738249ac",
+      "core/acceptance.md": "sha256:579904c9e64af0329dc249bcd3d95cf7af4e306321f1ffce0dca1a3f89dd41af",
+      "core/authority.md": "sha256:c142da074d1cd549f0fd3725e3a3ef1412bfed722d3d6b3598b78012173a3236",
+      "core/every-role.md": "sha256:5258a0a3b9d50a4e7b5fba3bdafde59bd139b5959876b4b3c6b2d81e3d50e7a7",
       "core/invariants.md": "sha256:63fec8a32ae5a69ffa7acb472707122f8eae1f9126ffda60a98c20c0fcf9d753",
-      "core/launcher.md": "sha256:96ad30c5a89cbfc32a9ac59e9be60ef9ebfd85588365eaa898ddbcc6cabb60fb",
+      "core/launcher.md": "sha256:a12603fbe8a85e641c39e2b851d4be344fbca25ac033a69a0f8dca16071c0bb5",
       "core/lifecycle-frame.md": "sha256:661f7438655f25d884b1596b31cfcc04ba609633dd8e5906acc6f0b839cca405",
-      "core/loop.md": "sha256:1f3cb72d010a174c059358504b072d04527fb38ae8dc7675f9ab2c59e2e020ad",
+      "core/loop.md": "sha256:7d47ecf18036fdba20740dcb8d5811898abc1dd0cf142f3275b4eea1a9fc92ee",
       "operations/bootstrap.md": "sha256:c988052b9a104b4206086b55f10178c308a38eebe091cac422d7b5976a73b96f",
-      "operations/closeout.md": "sha256:f9142dc78a06d5161689df432b2853591820987c143d246b08ea71baa2b6dc20",
-      "operations/coordination.md": "sha256:88a01dcb7dbda8adb7eb9754736b5852b88bd23e2804a37cf9c620a597e1e6af",
+      "operations/closeout.md": "sha256:0d42dc6e8fefde7dc9d349da15fa0e5b0cabf48e5393d7b93daa2c6ec40ccf8e",
+      "operations/coordination.md": "sha256:e080d75e7e2c8b4bb001bed45b7095c6f2a5861f6088e7d3283256ed34bfdc7d",
       "operations/curation.md": "sha256:1857e1beb8ca9269588a3c811ad6b395f112edd2e0ddc81dc5bbb03b504b5a3a",
-      "operations/implementation.md": "sha256:47244c585ee85f98726122e926fdb820910baf2a3f0c1fc7486e89f298e37ad5",
+      "operations/implementation.md": "sha256:d469d2dc23df72eb45627493074e2c93b70f5974c41016e9a1a143df08b1ab82",
       "operations/orientation.md": "sha256:3120f8aea8dbc2fafb10fd9722e54e4e58c03f87dbe630a343e44bdb87f5cd30",
       "operations/planning.md": "sha256:44ad84e9bca975aef237b6215e8a53f8cb279aee861e73f76cbe5d1b864d330b",
       "operations/recovery.md": "sha256:5740777d773a2c8733d5696ac52af01718a1d40813d85b6e0a0c46d904d74429",
-      "operations/review.md": "sha256:a580b2fb62f8f2464c9597d0b9f6490722c937a2716065c876c9d085bfb9f5a2",
+      "operations/review.md": "sha256:429141d967eed89e581d5d428f6f0276b5202bccc5cb46fe9e34c29f37732112",
       "reference/bootstrap/failure-states.md": "sha256:6e78e0368bea8f3894fc4be894fda8ae9fb5e94955e967dac963f1c0b5ee89f4",
       "reference/bootstrap/foundation-state.md": "sha256:e8273f95fb816c142bfa5711a9887fe639fc0e5fa4f7eb4da685f1a645e5b3d6",
       "reference/coordination/architect/claim-verification.md": "sha256:9979acc5bbee3aa8aa748115b3f66a23901dfca0f34be5b07f882ad9c584e07b",
@@ -6714,9 +6714,9 @@
       "reference/coordination/architect/process-decisions.md": "sha256:8f4cb8c55c84c4fd634f6e2684f57fade67e1dc210806803c42d2439a4cc1855",
       "reference/coordination/shared/child-questions.md": "sha256:c830497d927f8713c19780acced74ba7f32d0f0fabce19356f579191ee32e8e9",
       "reference/coordination/shared/master-state.md": "sha256:c26e608713a4ac2a96f4f8550ff55a668be56dcc854819f14f9183a5095533d0",
-      "reference/coordination/shared/requirement-design.md": "sha256:58967d36620ae35297a9bf022b050ebc21f0e5c2d9115aeff612d382877236ea",
+      "reference/coordination/shared/requirement-design.md": "sha256:f2d88180a31916cd671ba62e58b720ea92071c993d321b4aacc8c9e63fc7a46a",
       "reference/coordination/shared/seat-recovery.md": "sha256:062b3893433cc314402a206843ccd5dd514353bb9216356a85ea36252b898ef0",
-      "reference/coordination/shared/third-rejected-round.md": "sha256:241c3869bdbdfba0ed7f9e690c7192fb1a1bdacb37c36a2470bc56da59b9369d",
+      "reference/coordination/shared/third-rejected-round.md": "sha256:f304cbbd3f0a635da3f3124db3744aa1e8beb4118f5c66d37cf9a91bb472c082",
       "reference/curator/card-formats-and-citations.md": "sha256:7cbfccff0f53947408d511c8af439e1b14ebc65ad0eeb25ed33f7b97b8a04fa6",
       "reference/curator/card-sentence-decisions.md": "sha256:863cb4688aa375d1303459951d9ddb9d69ec9833d42d62238aa18dc9d776263c",
       "reference/curator/change-routing.md": "sha256:a17858f4a703d3287bab8e9f93bb1e1583eb59ce74cc9ff64aa1657b89cbfd49",
@@ -6737,7 +6737,7 @@
       "reference/knowledge/use.md": "sha256:a2f200e015552f4154eb20cacac572f5bf482aeecaef79037567a5cac8ba7c21",
       "reference/message-handover.md": "sha256:5c1f0ccf7f823e73345cfc96fdd37088e28dea92e00c7dcfc62cdec065d64ce7",
       "reference/refused-write.md": "sha256:83d69507881a091ffbaaa473a3deb5e9b87c86593df19ce16067dbd0bc9e7fb0",
-      "reference/review-baseline.md": "sha256:c75e23d9ebfdae17af6e3210d7312090e71437a0c5181eaa27beba919363c4eb",
+      "reference/review-baseline.md": "sha256:ff2b0ac06976f1655ee1b287de2448d363d8705d0d01749224a3e392f8c60e1a",
       "reference/sandbox-actors.md": "sha256:48bcbdc6fac65899c7e67d5e4b78dde1aeddd844fd8174beb559a3fde5cc7a36",
       "reference/tasks/document-authoring.md": "sha256:5c66644a20d1b02c9303f60b6c152374e26e3cbbe5bc1333f8694bfdc6eec54f",
       "reference/writing/technical-english-profile.md": "sha256:e381e9b560fa509b0cfb55565e80991a857a68ec657ee42e22fe3f56df5fe788",
@@ -6746,11 +6746,11 @@
       "roles/bootstrap.md": "sha256:11994559aec49ff91c037d4b276c7870c355754696cf062692a875802ca61d3f",
       "roles/curator.md": "sha256:aa5112af73e980dfc70e18c25ca3f766fd29e2b39f7c3c4002e40deb80d6dc75",
       "roles/investigator.md": "sha256:a9568fd887bbc7b34443e94f060623a43689a42abbde634c18c7157f8cabea9a",
-      "roles/manager.md": "sha256:6d36410ee6f3108a0b01f4f66864dea6dc420e7538a25f9d2f757c250ec4c491",
+      "roles/manager.md": "sha256:87c250dd7599b8b3c3ffc17ff8797f33c95e8f1b8aef977c7e13b0a223503e71",
       "roles/orchestrator.md": "sha256:10ca8084d12e5052765acdbc50bb94b7c39d96caf81f080cf3e7d52bcb2ca623",
-      "roles/reviewer.md": "sha256:0bbe37a5e6fd93f99727d3907de9738083bdfd350a92af88445ad2129520458d",
-      "roles/worker.md": "sha256:8391f7e20f53dc2e4087a2f40c76d748a99f961b044f4c5eeb3992955771f144",
-      "templates/turn-report.md": "sha256:78e7d8c471b0d8badb9e2dca78c6f45bcfefacfbf62022b7f93903a0a12dbd1a"
+      "roles/reviewer.md": "sha256:e812cd6777f31f289c5981f27ee3d8f5f73ddd728a4e7615876542159b604d33",
+      "roles/worker.md": "sha256:a15284d3b41ba46ff3d797912d1a4db64372b1de83f90bfe8421650c02a9c40d",
+      "templates/turn-report.md": "sha256:67ca3513d6b2c90f7115ae52ba0d83a754595b8903a8c284e69429d07334cdab"
     }
   }
 }

@@ -427,7 +427,8 @@ def test_the_settings_role_owns_the_seats_model_effort_and_mode(
 
     A seat launched on the provider's defaults is not the seat the settings describe, so the values
     are carried into the create under the host's own names and the reply is read back: a host that
-    states a different model or mode is refused rather than silently obeyed.
+    states a different model or effort is refused rather than silently obeyed, while a different
+    mode is recorded as the host answered it.
     """
 
     calls: list[tuple[str, dict]] = []
@@ -484,6 +485,97 @@ def test_the_settings_role_owns_the_seats_model_effort_and_mode(
     assert provenance["mode"] == "auto-review"
     assert provenance["featureValues"] == {"service_tier": "fast"}
     assert (_workspace(tmp_path) / "instructions" / "seat-provenance.json").is_file()
+
+
+def test_the_explainer_records_a_differing_host_mode_apart_from_the_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A host that reports another mode is recorded as it answered, beside the requested choice."""
+
+    def bridge(_config, command, payload):
+        if command == "workspace-open":
+            return {"workspace": {"id": "w1"}}
+        return {
+            "agent": {
+                "id": "agent-1",
+                "provider": "claude",
+                "model": "claude-opus-5-5",
+                "thinkingOptionId": "high",
+                "lastModeId": "auto",
+            }
+        }
+
+    monkeypatch.setattr(host_module, "bridge_call", bridge)
+    monkeypatch.setattr(
+        host_module,
+        "qualified_launch",
+        lambda _config, _repo: (
+            "claude",
+            {
+                "model": "claude-opus-5-5",
+                "effort": "high",
+                "mode": "auto-review",
+                "featureValues": {},
+                "choices": {"mode": {"value": "auto-review", "source": "our settings"}},
+            },
+        ),
+    )
+    host = _host(tmp_path, bridge=bridge)
+    provenance = host.create_seat(
+        agent_id="agent-1",
+        workspace=_workspace(tmp_path),
+        title="Explainer · " + LEAF,
+        capsule=CAPSULE,
+        labels={"ar.capability": "review-explainer", "ar.repository": REPO, "ar.task": TASK},
+    )
+    assert provenance["mode"] == "auto"
+    assert provenance["observedChoices"]["mode"] == {"value": "auto", "source": "host report"}
+    assert provenance["choices"]["mode"]["value"] == "auto-review"
+
+
+def test_the_explainer_records_an_absent_host_mode_as_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A host that names no mode leaves the observation empty; the request is not repeated as one."""
+
+    def bridge(_config, command, payload):
+        if command == "workspace-open":
+            return {"workspace": {"id": "w1"}}
+        return {
+            "agent": {
+                "id": "agent-1",
+                "provider": "claude",
+                "model": "claude-opus-5-5",
+                "thinkingOptionId": "high",
+            }
+        }
+
+    monkeypatch.setattr(host_module, "bridge_call", bridge)
+    monkeypatch.setattr(
+        host_module,
+        "qualified_launch",
+        lambda _config, _repo: (
+            "claude",
+            {
+                "model": "claude-opus-5-5",
+                "effort": "high",
+                "mode": "auto-review",
+                "featureValues": {},
+                "choices": {"mode": {"value": "auto-review", "source": "our settings"}},
+            },
+        ),
+    )
+    host = _host(tmp_path, bridge=bridge)
+    provenance = host.create_seat(
+        agent_id="agent-1",
+        workspace=_workspace(tmp_path),
+        title="Explainer · " + LEAF,
+        capsule=CAPSULE,
+        labels={"ar.capability": "review-explainer", "ar.repository": REPO, "ar.task": TASK},
+    )
+    assert provenance["mode"] is None
+    assert provenance["observedChoices"]["mode"]["value"] is None
+    assert provenance["choices"]["mode"]["value"] == "auto-review"
 
 
 def test_a_role_setting_the_runtime_cannot_honour_is_a_named_refusal(
@@ -831,10 +923,14 @@ def test_the_launch_environment_carries_the_module_the_product_fetched(
     assert env[host_module.PLAYWRIGHT_ENV] == module.as_posix()
 
 
-def test_a_resume_carries_the_settings_roles_model_effort_and_mode(
+def test_a_resume_carries_the_settings_roles_model_and_effort(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """S21: resume re-applies the settings role's model/effort/mode and records what it saw."""
+    """S21: the resume call carries the settings role's model and effort under the create's names.
+
+    The host resumes the saved timeline, so the record names the mode the host reports: this test
+    asserts the call's fields, not a reapplication of the mode to a running seat.
+    """
 
     calls: list[tuple[str, dict]] = []
 

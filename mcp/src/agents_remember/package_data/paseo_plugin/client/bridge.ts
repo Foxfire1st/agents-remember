@@ -28,7 +28,7 @@ import type { PluginPage } from "./page";
 //
 // A document page names the agent's workspace in `ar.open` for the record; navigation itself
 // carries the agent alone, because the supported `navigation.openAgent({agentId})` resolves the
-// agent's workspace from the application's own session (pinned @getpaseo/server 0.15.4:
+// agent's workspace from the application's own session (pinned @getpaseo/server 0.16.2:
 // resolveNavigateToAgent reads sessions/agents before navigating to that workspace with the
 // agent target). The bridge never invents a workspace hop of its own.
 //
@@ -297,9 +297,11 @@ export function installBridge(
    * It only reads; it writes nothing into the application's storage and calls nothing of
    * the application.
    *
-   * Pinned @getpaseo/server 0.15.4, web build
-   * index-5b20acda9d1cbd738d1d29fb61ed512c.js: the agent route is
-   * `/h/<server>/workspace/<workspace>` with the intent `open=agent:<id>`; the app persists
+   * Pinned @getpaseo/server 0.16.2, web build
+   * index-3d51f4c450eeff5bd838a646e9c611f2.js: the agent route is
+   * `/h/<server>/workspace/<workspace>` with the agent named in the query
+   * (`?open=agent:<agent id>`; the value must carry the `agent:` intent and a bare id is
+   * rejected); the app persists
    * its tab store under the localStorage name `workspace-layout-state` as `{ state, version }`,
    * with `state.layoutByWorkspace[<serverId>:<workspaceId>]` holding `focusedPaneId` and a tree
    * of `{ kind: "group", group: { children } }` / `{ kind: "pane", pane }` nodes, each pane
@@ -307,11 +309,7 @@ export function installBridge(
    * `agent_<agent id>` (buildDeterministicWorkspaceTabId), the same identity the wide strip
    * shows as `workspace-tab-agent_<id>`. Comparisons are exact: route path segments, never a
    * search of the whole address (a workspace id in the query names nothing); the whole stored
-   * key, never its ending (another server's key never matches). Re-read on 0.11.1
-   * for the pin move (MIK-R123): route, store name/shape and tab/scroll signs confirmed
-   * in index-32cec38d…; the chat was seen in the dashboard's frame in the task's sandbox.
-   * Re-read for the 0.15.4 move: the same route, store name, key, pane shape and
-   * tab id are in index-5b20acda….
+   * key, never its ending (another server's key never matches).
    *
    * NATIVE MEASUREMENT 2026-10-09 (sandbox ar-l121-witness, pinned bundle, real Chromium,
    * no live roles): the state lies in the page's localStorage under `workspace-layout-state`
@@ -454,7 +452,7 @@ export function installBridge(
   };
   /**
    * The application's own pane for a host that could not load the agent, with its own Retry
-   * (`agent-load-error`, pinned @getpaseo/server 0.15.4, also 0.11.0-beta.2 to 0.12.0; unsupported, read
+   * (`agent-load-error`, pinned @getpaseo/server 0.16.2, also 0.11.0-beta.2 to 0.12.0; unsupported, read
    * only, like the loading and not-found markers).
    */
   const loadFailed = (): boolean => {

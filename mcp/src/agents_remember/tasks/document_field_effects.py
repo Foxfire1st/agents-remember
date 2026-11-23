@@ -24,6 +24,7 @@ from agents_remember.models.task_intent import (
 from agents_remember.models.task_retirement import MasterRetirementProof, RetirementEdgeSelection
 
 from .document import (
+    AddedFindingRound,
     CodeExample,
     Decision,
     DiscardedSubTask,
@@ -54,7 +55,7 @@ from .document import (
     TaskEnclosureRef,
     TaskExecutionRegistration,
 )
-from .route_review import ReviewRound
+from .route_review import AddedFindingRef, ReviewRound
 
 
 class TaskDocumentFieldEffect(StrEnum):
@@ -227,6 +228,15 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "findingId": EVIDENCE,
         "description": EVIDENCE,
     },
+    AddedFindingRef: {
+        "findingId": EVIDENCE,
+        "route": EVIDENCE,
+    },
+    AddedFindingRound: {
+        "round": EVIDENCE,
+        "verdictRef": EVIDENCE,
+        "findingIds": EVIDENCE,
+    },
     ReviewApproval: {
         "by": EVIDENCE,
         "text": EVIDENCE,
@@ -237,6 +247,8 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "pending": EVIDENCE,
         "baselineFindings": EVIDENCE,
         "remainingFindingIds": EVIDENCE,
+        "addedFindings": EVIDENCE,
+        "addedFindingRounds": EVIDENCE,
         "limit": EVIDENCE,
         "candidateTree": EVIDENCE,
         "candidateIdentity": EVIDENCE,
@@ -266,6 +278,7 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "verdictSha256": EVIDENCE,
         "dependencies": EVIDENCE,
         "recordDigest": EVIDENCE,
+        "addedFindingIds": EVIDENCE,
     },
     RouteReviewScope: {
         "kind": EVIDENCE,

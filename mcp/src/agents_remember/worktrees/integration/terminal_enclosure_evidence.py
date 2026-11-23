@@ -24,7 +24,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     _require_record_matches_canonical_path,
 )
-from agents_remember.worktrees.integration.lifecycle.worker.state import project_worker_exit
 from agents_remember.worktrees.sync_transaction_state import (
     SYNC_OPERATION_RECORD_NAME,
     observe_sync_operation,
@@ -205,9 +204,6 @@ def _require_archivable_operation(
 ) -> None:
     _require_terminal_operation(record, name)
     _require_cleanup_retry_disposition(record, operation, current, name)
-    observed = project_worker_exit(record)
-    _require_absent_worker_authority(observed, name)
-    _require_resolved_worker_termination(observed, name)
     _require_resolved_mutations(record, name)
     _require_resolved_publications(record, name)
 
@@ -234,29 +230,6 @@ def _require_cleanup_retry_disposition(
             f"{name} remains retryable and cannot be collected by cleanup",
             name=name,
             observed={"status": record.status},
-        )
-
-
-def _require_absent_worker_authority(record: LifecycleOperationRecord, name: str) -> None:
-    if record.workerPid is not None or record.workerLease is not None:
-        raise _operation_refusal(
-            "terminal-archive-operation-worker-active",
-            f"{name} retains worker authority",
-            name=name,
-            observed={
-                "workerPidPresent": record.workerPid is not None,
-                "workerLeasePresent": record.workerLease is not None,
-            },
-        )
-
-
-def _require_resolved_worker_termination(record: LifecycleOperationRecord, name: str) -> None:
-    if record.workerTermination is not None and record.workerTermination.state != "exited":
-        raise _operation_refusal(
-            "terminal-archive-operation-worker-termination-active",
-            f"{name} retains unresolved termination authority",
-            name=name,
-            observed={"workerTermination": record.workerTermination.state},
         )
 
 

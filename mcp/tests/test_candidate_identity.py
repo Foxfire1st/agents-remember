@@ -7,6 +7,7 @@ modifications, and its untracked bytes. ``None`` means unproven, never equal.
 from __future__ import annotations
 
 import subprocess
+import tempfile
 from pathlib import Path
 
 import agents_remember.worktrees.candidate_identity as identity
@@ -62,12 +63,13 @@ def test_untracked_content_change_changes_the_identity(tmp_path: Path) -> None:
 
 
 def test_non_repository_resolves_to_none(tmp_path: Path) -> None:
-    plain = tmp_path / "plain"
-    plain.mkdir()
-    assert resolve_candidate_identity(plain) is None
+    # Git searches the directory's ancestors for a repository.
+    with tempfile.TemporaryDirectory(dir="/var/tmp") as directory:
+        plain = Path(directory)
+        assert resolve_candidate_identity(plain) is None
+        assert resolve_candidate_identity(plain / "base.txt") is None
     assert resolve_candidate_identity(None) is None
     assert resolve_candidate_identity(tmp_path / "missing") is None
-    assert resolve_candidate_identity(tmp_path / "plain" / "base.txt") is None
 
 
 def test_failed_diff_read_propagates_unproven(tmp_path: Path, monkeypatch) -> None:

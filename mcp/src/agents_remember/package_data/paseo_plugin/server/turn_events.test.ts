@@ -44,7 +44,7 @@ test("F06: incomplete pagination never admits a seat wake; a complete listing do
       } } };
       const cleanup = registerParentWakeEvents(server, { home });
       try {
-        handlers.get("agent.turn.after")!({ agent: { id: "seat", parentAgentId: "parent" }, timeline: [], outcome: { kind: "completed" }, turnId: null }, context);
+        handlers.get("agent.turn.after")!({ agent: { id: "seat", parentAgentId: "parent" }, outcome: { kind: "completed" }, turnId: null }, context);
         await settle();
         const readsAtEnd = reads;
         const seatBefore = sent.filter((message) => message.id === "seat").length;
@@ -117,7 +117,7 @@ test("L184-R1-F13: a seat that left the role record never receives its deferred 
   try {
     // The limited seat's silent end: one wait, and the resume armed at its reset.
     handlers.get("agent.turn.after")!(
-      { agent: { id: "seat", parentAgentId: "parent" }, timeline: [], outcome: { kind: "completed" }, turnId: null },
+      { agent: { id: "seat", parentAgentId: "parent" }, outcome: { kind: "completed" }, turnId: null },
       context,
     );
     await settle();
@@ -128,7 +128,7 @@ test("L184-R1-F13: a seat that left the role record never receives its deferred 
     // The product removed the seat: the seat's own end rereads the whole record.
     writeRoles({ parent });
     handlers.get("agent.turn.after")!(
-      { agent: { id: "seat", parentAgentId: "parent" }, timeline: [], outcome: { kind: "completed" }, turnId: null },
+      { agent: { id: "seat", parentAgentId: "parent" }, outcome: { kind: "completed" }, turnId: null },
       context,
     );
     await settle();
@@ -180,7 +180,7 @@ const HAND_OVER = (() => {
   };
 })();
 
-/** The 0.15.4 refetch reply: projected entries, each row's item beside its turn id. */
+/** The pinned host's (0.16.2) refetch reply: projected entries, each row's item beside its turn id. */
 function refetchReply(agentId: string, rows: ReadonlyArray<{ readonly item: unknown; readonly turnId: string }>) {
   return {
     agentId,
@@ -238,7 +238,6 @@ async function endTurnThroughRefetch(
         agent: { id: "seat", workspaceId: null, parentAgentId: "parent", provider: "codex", cwd: home, title: null },
         turnId: "turn-1",
         outcome: { kind: "completed" },
-        timeline: [],
       },
       context,
     );
@@ -260,12 +259,12 @@ async function endTurnThroughRefetch(
 }
 
 /**
- * From Paseo 0.13 the `agent.turn.after` hook carries an empty
- * `timeline` (0.15.4 `plugins/lifecycle/index.js` publishes `timeline: []`). The
- * contributed handler reads the ended turn through `agents.ref(id).timeline.refetch`,
- * so a hand-over in the turn is still recognised and a silent end still waits.
+ * The pinned @getpaseo/plugin (0.16.2) type omits `timeline` from `agent.turn.after`
+ * (lifecycle.d.ts:107-117) while the server still sends `timeline: []` as compatibility. The contributed handler reads the
+ * ended turn through `agents.ref(id).timeline.refetch`, so a hand-over in the turn
+ * is still recognised and a silent end still waits.
  */
-test("Paseo 0.15.4 hook shape: the turn read through refetch recognises a hand-over", async (t) => {
+test("Paseo 0.16.2 hook shape: the turn read through refetch recognises a hand-over", async (t) => {
   for (const handedOver of [true, false]) {
     await t.test(handedOver ? "hand-over" : "silent end", async (t) => {
       const items = [

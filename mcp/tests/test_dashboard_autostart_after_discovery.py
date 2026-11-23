@@ -58,6 +58,7 @@ from agents_remember.application.runtime import startup as server_startup
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.mcp.server import create_server
 from agents_remember.serving import daemon
+from agents_remember_test_support.testing.event_loop import new_test_event_loop
 
 MODE = sys.argv[1]
 SETTINGS = Path(sys.argv[2])
@@ -124,7 +125,7 @@ config = load_config(SETTINGS)
 server = create_server(config)
 report["after_create"] = snapshot()
 
-loop = asyncio.new_event_loop()
+loop = new_test_event_loop()
 
 
 async def list_and_step(label: str) -> object:
@@ -204,7 +205,7 @@ def _environment() -> dict[str, str]:
     """The child's environment: the worktree's sources, no inherited AR launch binding."""
 
     env = {key: value for key, value in os.environ.items() if not key.startswith("AR_")}
-    env["PYTHONPATH"] = str(SRC)
+    env["PYTHONPATH"] = os.pathsep.join((str(SRC), str(MCP_ROOT / "test_support")))
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     return env
 

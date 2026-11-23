@@ -178,6 +178,11 @@ class ToolDescriptionBoundsTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.described = _live_descriptions()
 
+    def test_closeout_apply_description_explains_single_call_completion(self) -> None:
+        description = self.described["worktree_closeout_apply"]
+        self.assertNotIn("poll", description.lower())
+        self.assertIn("in one call", description)
+
     def test_tool_descriptions_hold_bounds_and_name_where_the_rest_is(self) -> None:
         self.assertEqual(set(self.described), set(PUBLIC_TOOLS))
         for name, text in sorted(self.described.items()):

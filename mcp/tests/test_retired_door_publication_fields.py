@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from agents_remember.models.closeout.input import CloseoutCorrectedCall
 from agents_remember.models.lifecycles.door import (
     CloseoutDoorGeneration,
     DoorAdmissionProvenance,
@@ -28,12 +29,19 @@ from agents_remember.models.lifecycles.door import (
     DoorSchedulingProvenance,
 )
 from agents_remember.models.lifecycles.enclosure import TerminalWorktreeCleanupArguments
-from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
+from agents_remember.models.lifecycles.operation import (
+    CloseoutOperationInput,
+    LifecycleOperationRecord,
+)
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_intent import MissingTaskIntent
+from agents_remember.worktrees.closeout_input import normalize_closeout_input, raw_closeout_messages
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
+)
+from agents_remember.worktrees.integration.mutation_evidence import (
+    initial_closeout_mutation_evidence,
 )
 from agents_remember.worktrees.integration.terminal_enclosure_archive import (
     terminal_archive_required_result,
@@ -132,6 +140,49 @@ def test_operation_store_and_cleanup_terminal_archive_read_a_legacy_record(tmp_p
     fixture = _authority_fixture(tmp_path, external_memory=True)
     closed = _closed_external_leaf_worktrees(fixture, tmp_path, publish_closeout_evidence=True)
     record_path = operation_record_path(closed.worktree_group, "closeout")
+    contract_path = closed.contract_path.as_posix()
+    effective_input = normalize_closeout_input(
+        closed,
+        raw_closeout_messages(code="retain fixture code", memory="retain fixture memory"),
+        route="worktree",
+        corrected_call=CloseoutCorrectedCall(
+            tool="worktree_closeout_apply",
+            arguments={"contract_path": contract_path},
+        ),
+    )
+    generation = _door_generation().model_copy(
+        update={
+            "taskId": closed.task_id,
+            "taskName": closed.task_name,
+            "contractPath": contract_path,
+        }
+    )
+    # Seed the old journal shape explicitly. The synchronous closeout has no journal writer.
+    retained = LifecycleOperationRecord(
+        taskId=closed.task_id,
+        taskName=closed.task_name,
+        contractPath=contract_path,
+        operationKind="closeout",
+        candidateState=_digest(b"retained-candidate"),
+        fingerprint=_digest(b"retained-fingerprint"),
+        operationKey=_digest(b"retained-operation"),
+        taskIntent=MissingTaskIntent(),
+        input=CloseoutOperationInput(
+            configPath=fixture.config_path.as_posix(),
+            contractPath=contract_path,
+            effectiveInput=effective_input,
+            approvalNote="Fixture closeout was given up before mutation.",
+        ),
+        status="cancelled",
+        phase="cancelled",
+        generationDisposition="cancelled",
+        queuedAt="2026-08-15T00:00:00+00:00",
+        reportPath=record_path.with_suffix(".log").as_posix(),
+        doorPublication=DoorPublicationEvidence(state="proven", generation=generation),
+        mutationEvidence=initial_closeout_mutation_evidence(closed, effective_input),
+    )
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_path.write_text(retained.model_dump_json(), encoding="utf-8")
     _inject_retired_digests(record_path)
 
     # The strict store reader (the one that raised the three extra_forbidden errors).

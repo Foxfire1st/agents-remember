@@ -4902,7 +4902,7 @@
          43,
          43
        ],
-       "sha256": "71910711fa5de0e7443616d1f931b4f363be13f9ecd7d05b883684980fc01ed6",
+       "sha256": "503fa47cb3c1e3be8d5c260955f294f623ed7c1e021722bec8b18b7553c66799",
        "audience": [
          "architect",
          "manager",
@@ -5256,7 +5256,7 @@
          120,
          120
        ],
-       "sha256": "23ab653f240860b095727b564d8307697fecfd067064b8c93a867b4ea3cd82ab",
+       "sha256": "d9bfb0b7f7699640bdbc563a42909e40d461a217051007b5c3e464d3ab1fb48a",
        "audience": [
          "architect",
          "curator",
@@ -6102,63 +6102,63 @@
      "LO3.3": {
        "lines": [
          36,
-         36
+         43
        ],
-       "sha256": "2d7c42b5ddb5448fc10bc23558eb83773afe90fa3b16ed57dfc4d44aa4ae1628"
+       "sha256": "fdf70c32fde20d44d2bd58cd417aed085e259ad570334e937a20be0bef0ea16b"
      },
      "LO3.4": {
        "lines": [
-         40,
-         42
+         46,
+         48
        ],
        "sha256": "30456e86e9fad216a4f413ea9e3ea3b90c154ec5e6dd8682a34d3791fcc25092"
      },
      "LO3.5": {
        "lines": [
-         44,
-         46
+         50,
+         52
        ],
        "sha256": "b834b7a0d9a8e1e92c2e753fd5c89431009c3a16fccc2fc8a76cde0fdfd76b33"
      },
      "LO3.7": {
        "lines": [
-         48,
-         48
+         54,
+         54
        ],
        "sha256": "ea850cdc8cb193620bdffc46796154256b17bca0f5e988be88b839afb5d78988"
      },
      "LO3.6": {
        "lines": [
-         50,
-         68
+         56,
+         75
        ],
-       "sha256": "ee11239bdf1be21a4cee2b0f48f7c5093f0ec26168db9f4ebca7dc3d8c81a8ae"
+       "sha256": "85c32a367dd0c53c52fe1d939245a288580062ee86b69a9a6868463c09a1e3b4"
      },
      "LO4.1": {
        "lines": [
-         72,
-         76
+         79,
+         83
        ],
        "sha256": "b4520828d71d2e5458e8f22ca76accd7d511261cbce240d57bc2a7b89bf9215e"
      },
      "LO5.1": {
        "lines": [
-         80,
-         80
+         87,
+         87
        ],
        "sha256": "4e78df749857bccdeac10dec0a60aefb857ef27b77efe7eb57c753d564b40490"
      },
      "LO6.1": {
        "lines": [
-         84,
-         84
+         91,
+         91
        ],
        "sha256": "267f91c23b774a0818c2063095dc1187042cab46b4f291698663f189ccdabf3d"
      },
      "LO6.2": {
        "lines": [
-         86,
-         97
+         93,
+         104
        ],
        "sha256": "54d3f2194c776df5a183deb0a64651c60882b1ccc9fcfcf02a85327c49396a78",
        "audience": [
@@ -6167,8 +6167,8 @@
      },
      "LO6.3": {
        "lines": [
-         99,
-         105
+         106,
+         112
        ],
        "sha256": "df08a8645114ab75ab8f3ef59d779c153b5a44d4c87599288f3c3ebe0c29ced6",
        "audience": [
@@ -6405,24 +6405,24 @@
      "AC2.10": {
        "lines": [
          56,
-         60
+         62
        ],
-       "sha256": "53fa0bebae98ae22c9e1d9680f102b599555482282727e31cde582f245cb9fcd",
+       "sha256": "690315bcd7f259ee735c41a2ac7b50b6fbd2de14bb901a3c85561958b14aa3cd",
        "audience": [
          "reviewer"
        ]
      },
      "AC3.1": {
        "lines": [
-         64,
-         64
+         66,
+         66
        ],
        "sha256": "e954781dc163cb56292c6d34e6664c1ed899c75c016b5ff9bfe186b1dd861160"
      },
      "AC3.2": {
        "lines": [
-         66,
-         66
+         68,
+         68
        ],
        "sha256": "443c79c0930b2dc9764748ad845a5558bec5c10320f7617bf0d4df3e3b5c81c5",
        "audience": [
@@ -6431,8 +6431,8 @@
      },
      "AC3.3": {
        "lines": [
-         67,
-         67
+         69,
+         69
        ],
        "sha256": "25362313035d6dd4e452a07a61000d823ebfeedb54046c2009e83614c78be203",
        "audience": [
@@ -6441,8 +6441,8 @@
      },
      "AC3.4": {
        "lines": [
-         71,
-         79
+         73,
+         81
        ],
        "sha256": "621e41ea1d332543ff5184ac9539d5b141548c6af43d499b1c41bf5412c5fe61",
        "audience": [
@@ -6451,8 +6451,8 @@
      },
      "AC3.5": {
        "lines": [
-         81,
-         85
+         83,
+         87
        ],
        "sha256": "db6f4c853f59ce4035ebd4b0174809936d4ab36d66b16baa2f1c03c81304a41c",
        "audience": [
@@ -6461,17 +6461,17 @@
      },
      "AC3.6": {
        "lines": [
-         89,
-         97
+         91,
+         99
        ],
        "sha256": "7097801dd0273a3126936d4a5fb915cdc7707f1c6fefa125d061d2910234aac2"
      },
      "AC3.7": {
        "lines": [
-         101,
-         103
+         103,
+         105
        ],
-       "sha256": "3a5b1dce48043dfe61648473347a159425d13ca3a747eebc778716d6f48fd85b",
+       "sha256": "e3ccb3efab62a1263f7731e0f633e9db67fa8a971a388686c3be0f87a094bd31",
        "audience": [
          "reviewer",
          "worker"
@@ -6479,15 +6479,15 @@
      },
      "AC3.8": {
        "lines": [
-         105,
-         105
+         107,
+         107
        ],
        "sha256": "2ed0f8758414f273ff49e4e1129c76363b166804a45dce50269404c9beb0a1c7"
      },
      "AC4.1": {
        "lines": [
-         109,
-         111
+         111,
+         113
        ],
        "sha256": "0fc984ff2868c40049e0299d86678d0707322583e9bbb7d646711cd2e35298b8",
        "audience": [
@@ -6496,8 +6496,8 @@
      },
      "AC5.1": {
        "lines": [
-         115,
-         115
+         117,
+         117
        ],
        "sha256": "30505ec7a8f5c0b22a6989bb333800ea4a02f50a9943e4f2f703de2d3852f19c",
        "audience": [
@@ -6507,8 +6507,8 @@
      },
      "AC5.2": {
        "lines": [
-         117,
-         117
+         119,
+         119
        ],
        "sha256": "e8816f5773f53b6372205d14f26fb11ecfec6b8baa94eced33a62946ecc76cf2",
        "audience": [
@@ -6518,8 +6518,8 @@
      },
      "AC5.3": {
        "lines": [
-         118,
-         118
+         120,
+         120
        ],
        "sha256": "0f8bb85ef5bef30ee9351859feac0c7abd18ad78cce6fd4160b86a64397840af",
        "audience": [
@@ -6529,8 +6529,8 @@
      },
      "AC5.4": {
        "lines": [
-         120,
-         122
+         122,
+         124
        ],
        "sha256": "86f602bd38e6651d9f7080ac5be2d16b1b046990a800f8c82d01b042048203e2",
        "audience": [
@@ -6540,8 +6540,8 @@
      },
      "AC5.5": {
        "lines": [
-         124,
-         124
+         126,
+         126
        ],
        "sha256": "bb3ca328119d6d03371d4bab747a3ce52481efe9d79a038ec3e4511484c755b1",
        "audience": [
@@ -6551,8 +6551,8 @@
      },
      "AC5.6": {
        "lines": [
-         126,
-         126
+         128,
+         128
        ],
        "sha256": "74424015e10669d74b0a615666fba22542d397d434c62d38f257a15f17acf2a5",
        "audience": [
@@ -6784,8 +6784,8 @@
        },
        "3": {
          "lines": [
-           113,
-           119
+           115,
+           121
          ],
          "sha256": "8042abd69a4d9aecebc897bcbcefab1c24db22ac71fb88eacdabda8325713714"
        },
@@ -6842,8 +6842,8 @@
        },
        "3": {
          "lines": [
-           113,
-           119
+           115,
+           121
          ],
          "sha256": "8042abd69a4d9aecebc897bcbcefab1c24db22ac71fb88eacdabda8325713714"
        },
@@ -6900,8 +6900,8 @@
        },
        "3": {
          "lines": [
-           123,
-           129
+           125,
+           131
          ],
          "sha256": "82a310d78dcdd51631be941f06d00db5e50a0876dfa2f91dd2756317d8601376"
        },
@@ -6917,7 +6917,7 @@
            115,
            145
          ],
-         "sha256": "da54fb839ed32e86154780cdcd0a744b687104fba510f6147a432c9ea5261363"
+         "sha256": "96d729dc765c656a4316eb6c108d52f236ab0ad3da0e3d06e6a42b32ee01a472"
        },
        "6": {
          "lines": [
@@ -6968,9 +6968,9 @@
        "3": {
          "lines": [
            67,
-           90
+           92
          ],
-         "sha256": "ff69952838f4cb7fb9bd16ea53293186483712d9651393f20ee9e73b0dd76489"
+         "sha256": "e616db5afcd6259210f9ec7597c24d480da5c6bccbe9096e7fbb1e8a36074fb0"
        },
        "4": {
          "lines": [
@@ -6984,7 +6984,7 @@
            86,
            97
          ],
-         "sha256": "0d3e42e9a889e16e9e4c3664f815eeb254dd67d8dbd0345529ecf9e6de93b394"
+         "sha256": "b5fd017bb38ca37616aca97352dbcb751bf6c0d6be4e352e626a3cc160a7f1de"
        },
        "6": {
          "lines": [
@@ -7026,9 +7026,9 @@
        "3": {
          "lines": [
            67,
-           90
+           92
          ],
-         "sha256": "ff69952838f4cb7fb9bd16ea53293186483712d9651393f20ee9e73b0dd76489"
+         "sha256": "e616db5afcd6259210f9ec7597c24d480da5c6bccbe9096e7fbb1e8a36074fb0"
        },
        "4": {
          "lines": [
@@ -7042,7 +7042,7 @@
            86,
            97
          ],
-         "sha256": "0d3e42e9a889e16e9e4c3664f815eeb254dd67d8dbd0345529ecf9e6de93b394"
+         "sha256": "b5fd017bb38ca37616aca97352dbcb751bf6c0d6be4e352e626a3cc160a7f1de"
        },
        "6": {
          "lines": [
@@ -7337,31 +7337,31 @@
      "LO0.1": {
        "0": {
          "lines": [
-           62,
-           102
+           64,
+           84
          ],
-         "sha256": "d3d5aabefe1e813530a2935f3d0be45809cabf8ab65d97032c701fae48c9edc2"
+         "sha256": "5c565bce7619e41efdb023951bda599b4fd13ceb04b6cbcbd9836aa7832c7d80"
        },
        "1": {
          "lines": [
            101,
            103
          ],
-         "sha256": "2f4ddc94027c45e85c5c9c22e2f7077261c80b7603011f51ab3a6a6516a2a49e"
+         "sha256": "e1d67ea3426379bfcc4055945371a82780b25422faf0d019f658bce2c3b7103a"
        },
        "2": {
          "lines": [
            49,
            57
          ],
-         "sha256": "4d7ea40f4fbcb66e7106cb3121b2cfcaddb384e62abb92c8b919d8aaab400167"
+         "sha256": "635b2738ce168f133f6a419aad8466c3152102de58e9c2e31e1ef59b88ad4df0"
        },
        "3": {
          "lines": [
            50,
            60
          ],
-         "sha256": "e9187da268cf1f157628418931fb4a3778af7d19120ec058a232488955d6ab6c"
+         "sha256": "840dc0f7a1daa7761b41122ea6f30524bd457fe04028fff2da3c4bc289abb764"
        }
      },
      "LO0.2": {
@@ -7395,7 +7395,7 @@
            29,
            37
          ],
-         "sha256": "095bf43f69e84a3e12d7a83392c0d4236a41b3d3ca3402cfd7b3ab56ad236e41"
+         "sha256": "b69f94d758f5d8c5b44cc9e69f0251c9ff37043a39750055f5836ecd21ba7128"
        }
      },
      "LO2.2": {
@@ -7404,14 +7404,14 @@
            50,
            54
          ],
-         "sha256": "a2f7e2451ab701e8449c1d6c0eae084c58bb41f18b8b5c3ed14f7dad43a9533a"
+         "sha256": "4ec80441da7468556f8ab31ee1b2e2438e6f19351e52aab2da072545c0852e09"
        },
        "1": {
          "lines": [
            68,
            78
          ],
-         "sha256": "3df1ccea5b134a896ad05f1cab6b70dc40346f61a7c51841e2cfa643ad3a1d85"
+         "sha256": "1de473ae3926f8253588128d1467553d1b82fe7900fff5e6112c72b5d1371237"
        }
      },
      "LO2.4": {
@@ -7427,7 +7427,7 @@
            68,
            78
          ],
-         "sha256": "3df1ccea5b134a896ad05f1cab6b70dc40346f61a7c51841e2cfa643ad3a1d85"
+         "sha256": "1de473ae3926f8253588128d1467553d1b82fe7900fff5e6112c72b5d1371237"
        }
      },
      "LO2.3": {
@@ -7458,8 +7458,8 @@
      "LO3.2": {
        "0": {
          "lines": [
-           98,
-           102
+           100,
+           104
          ],
          "sha256": "76a78c03fa53c935cb27a8b9b96dca31b4c32c00de71ae19a9e8015d81228369"
        },
@@ -7474,24 +7474,24 @@
      "LO3.3": {
        "0": {
          "lines": [
-           114,
-           141
+           116,
+           146
          ],
-         "sha256": "039bfc54bab9e1c493635e14e93bd01fc2afdca2c01d8ea940fa182c49dabbc8"
+         "sha256": "7ad36325aff94f3dd11ff2e0607b80e3429e8ea0f3014293c5d7fc431b921011"
        },
        "1": {
          "lines": [
            125,
            125
          ],
-         "sha256": "cfd292133def62e845cd01ddfccbb1eb4468db12d86d95a613fd92a6d31ce258"
+         "sha256": "821b31c1e2510675cac644bc40464de44f2dcfc38a53352fe9095eae06681ece"
        }
      },
      "LO3.4": {
        "0": {
          "lines": [
-           98,
-           102
+           100,
+           104
          ],
          "sha256": "76a78c03fa53c935cb27a8b9b96dca31b4c32c00de71ae19a9e8015d81228369"
        },
@@ -7525,30 +7525,30 @@
            50,
            54
          ],
-         "sha256": "a2f7e2451ab701e8449c1d6c0eae084c58bb41f18b8b5c3ed14f7dad43a9533a"
+         "sha256": "4ec80441da7468556f8ab31ee1b2e2438e6f19351e52aab2da072545c0852e09"
        },
        "1": {
          "lines": [
            34,
            43
          ],
-         "sha256": "5a54b40f19f2e390ac00c7f5b00707607479f56d716813e18b8010ccad61daaa"
+         "sha256": "9612ee7c4f40ef8bb648c4d3142d490b9affe4c54670b50fd3ec97d3509735b6"
        }
      },
      "LO3.6": {
        "0": {
          "lines": [
-           114,
-           141
+           144,
+           146
          ],
-         "sha256": "039bfc54bab9e1c493635e14e93bd01fc2afdca2c01d8ea940fa182c49dabbc8"
+         "sha256": "6742365d5be426d124d58c4fdb113181cbd19c8dc5843773c28a9ce10754eb80"
        },
        "1": {
          "lines": [
            125,
            133
          ],
-         "sha256": "3dfd4e87946e60f5b9a08469448e7da5c3943ae9e3afab156cb351388d9a0fc5"
+         "sha256": "d25c872bdf45417ed09ce4a825bd6282f6b5118ffe2bfb4c4826f041c43c6cae"
        }
      },
      "LO4.1": {
@@ -7557,21 +7557,21 @@
            57,
            82
          ],
-         "sha256": "462136380c8677c39a0bf9d2cc13ce1b77ce5e9e252c9373f96a950e8c0dbdae"
+         "sha256": "221d8fa80c17ef376d058cb4f72f8fcb9879888dc8f7ef7e7d6a8626386b6d5c"
        },
        "1": {
          "lines": [
            57,
            82
          ],
-         "sha256": "462136380c8677c39a0bf9d2cc13ce1b77ce5e9e252c9373f96a950e8c0dbdae"
+         "sha256": "221d8fa80c17ef376d058cb4f72f8fcb9879888dc8f7ef7e7d6a8626386b6d5c"
        }
      },
      "LO5.1": {
        "0": {
          "lines": [
-           80,
-           80
+           87,
+           87
          ],
          "sha256": "4e78df749857bccdeac10dec0a60aefb857ef27b77efe7eb57c753d564b40490"
        }
@@ -7621,16 +7621,16 @@
        "1": {
          "lines": [
            67,
-           90
+           92
          ],
-         "sha256": "ff69952838f4cb7fb9bd16ea53293186483712d9651393f20ee9e73b0dd76489"
+         "sha256": "e616db5afcd6259210f9ec7597c24d480da5c6bccbe9096e7fbb1e8a36074fb0"
        },
        "2": {
          "lines": [
            3,
            29
          ],
-         "sha256": "a63c602cd74415524468b8ca26df18752c8b419cced756957b21499c60013632"
+         "sha256": "7863ee640fb2f96ce52e730f266fa74683a13058659004cbdd1830661b17ad04"
        }
      },
      "AC1.2": {
@@ -7639,21 +7639,21 @@
            48,
            50
          ],
-         "sha256": "c0582611bba1cc7183074e266fe7224f2626726f2c75c40b153baa5faa8f3f6f"
+         "sha256": "81506960032780f5398c9ca0af26d4118b3447ee386910b1e736f54a8b6b93d9"
        },
        "1": {
          "lines": [
            86,
            97
          ],
-         "sha256": "0d3e42e9a889e16e9e4c3664f815eeb254dd67d8dbd0345529ecf9e6de93b394"
+         "sha256": "b5fd017bb38ca37616aca97352dbcb751bf6c0d6be4e352e626a3cc160a7f1de"
        }
      },
      "AC1.3": {
        "0": {
          "lines": [
-           68,
-           71
+           70,
+           73
          ],
          "sha256": "b0f67aec2334f71c3d15bf4b19f4536d134e8db6fa936e0aee018bcee524eca6"
        },
@@ -7662,7 +7662,7 @@
            68,
            78
          ],
-         "sha256": "3df1ccea5b134a896ad05f1cab6b70dc40346f61a7c51841e2cfa643ad3a1d85"
+         "sha256": "1de473ae3926f8253588128d1467553d1b82fe7900fff5e6112c72b5d1371237"
        }
      },
      "AC1.6": {
@@ -7749,7 +7749,7 @@
            68,
            78
          ],
-         "sha256": "3df1ccea5b134a896ad05f1cab6b70dc40346f61a7c51841e2cfa643ad3a1d85"
+         "sha256": "1de473ae3926f8253588128d1467553d1b82fe7900fff5e6112c72b5d1371237"
        }
      },
      "AC3.8": {
@@ -7776,8 +7776,8 @@
        },
        "3": {
          "lines": [
-           123,
-           129
+           125,
+           131
          ],
          "sha256": "82a310d78dcdd51631be941f06d00db5e50a0876dfa2f91dd2756317d8601376"
        },
@@ -7793,7 +7793,7 @@
            115,
            145
          ],
-         "sha256": "da54fb839ed32e86154780cdcd0a744b687104fba510f6147a432c9ea5261363"
+         "sha256": "96d729dc765c656a4316eb6c108d52f236ab0ad3da0e3d06e6a42b32ee01a472"
        },
        "6": {
          "lines": [
@@ -7812,8 +7812,8 @@
      }
    },
    "digest": {
-     "sha256": "8c27af7759b59ab754b18b3d0f7bda1666656788eeaa70fa8a31618e738249ac",
-     "sizeWords": 2327
+     "sha256": "5258a0a3b9d50a4e7b5fba3bdafde59bd139b5959876b4b3c6b2d81e3d50e7a7",
+     "sizeWords": 2324
    },
    "places": {
      "place-01": {
@@ -8034,7 +8034,7 @@
          27,
          29
        ],
-       "sha256": "c972f318145d2918e206c86031f4abce527af08198a82dd289dc1c7da734e0af",
+       "sha256": "185952c8b18fd664b6b0e9014e7a45ce52cace2801c344e1fe0d38f63e4ee6ff",
        "clauses": [
          {
            "lines": [
@@ -8053,7 +8053,7 @@
              29,
              29
            ],
-           "sha256": "b001d7d978b429749ffc5766c3d33154681978da004cff44d95fe4cc6bcbedec",
+           "sha256": "f7f1e263b6568bbe838998952855cfae84b86588b0b22cab11edc88356a2d69d",
            "audience": [
              "architect",
              "manager",
@@ -8068,14 +8068,14 @@
          31,
          31
        ],
-       "sha256": "9e348d1653dbde0d8e96eb82c0f29fe79d7ea1779c9350450adfe29737fedf33",
+       "sha256": "5e55e9ea7675b61e133b00790afdaef5cc7d17c39405e3858b83d5c73dd08a11",
        "clauses": [
          {
            "lines": [
              31,
              31
            ],
-           "sha256": "9e348d1653dbde0d8e96eb82c0f29fe79d7ea1779c9350450adfe29737fedf33",
+           "sha256": "5e55e9ea7675b61e133b00790afdaef5cc7d17c39405e3858b83d5c73dd08a11",
            "audience": [
              "architect",
              "manager",

@@ -8,7 +8,7 @@ reader in rules 9 to 13 reads.
 
 The judgment is deliberately conservative. A fact is set only by a successful
 report, and an ``unavailable`` read never clears one. The one exception is Paseo's
-``lastSuccessful`` (0.12.0 to 0.15.4): an ``error`` entry can carry the newest available report of
+``lastSuccessful`` (0.12.0 to 0.16.2): an ``error`` entry can carry the newest available report of
 that login, and that report is judged as itself (rule 7).
 """
 

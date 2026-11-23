@@ -53,7 +53,7 @@ export interface HierarchyClient {
       subscribe(handler: (update: { kind: "upsert"; project: NativeProject } | { kind: "remove"; projectId: string }) => void): () => void;
     };
     workspaces: { list(options: { page: { limit: number; cursor?: string }; subscribe?: {} }): Promise<Directory<NativeWorkspace>> };
-    agents: { list(options: { page: { limit: number; cursor?: string }; subscribe?: {}; filter: { includeArchived: true } }): Promise<Directory<{ agent: NativeAgent }>> };
+    agents: { list(options: { page: { limit: number; cursor?: string }; subscribe?: {}; filter: { includeArchived: true; includeBackground: true } }): Promise<Directory<{ agent: NativeAgent }>> };
   };
   addComposerPill(input: { id: string; workspaceId: string; agentId: string; button: ParentButton }): Registration;
 }
@@ -188,12 +188,12 @@ export function startHierarchy(
     try {
       const [projectData, agentData, workspaceData] = await Promise.all([
         client.paseo.projects.list(),
-        agentSnapshot ?? client.paseo.agents.list({ page: { limit: PAGE_SIZE }, filter: { includeArchived: true }, subscribe: {} }).then((data) => { agentSnapshot = data; return observe("agent_update", data); }),
+        agentSnapshot ?? client.paseo.agents.list({ page: { limit: PAGE_SIZE }, filter: { includeArchived: true, includeBackground: true }, subscribe: {} }).then((data) => { agentSnapshot = data; return observe("agent_update", data); }),
         workspaceSnapshot ?? client.paseo.workspaces.list({ page: { limit: PAGE_SIZE }, subscribe: {} }).then((data) => { workspaceSnapshot = data; return observe("workspace_update", data); }),
       ]);
       if (!live || epoch !== generation) return;
       const [allAgents, allWorkspaces] = await Promise.all([
-        allEntries(agentData, (cursor) => client.paseo.agents.list({ page: { limit: PAGE_SIZE, cursor }, filter: { includeArchived: true } })),
+        allEntries(agentData, (cursor) => client.paseo.agents.list({ page: { limit: PAGE_SIZE, cursor }, filter: { includeArchived: true, includeBackground: true } })),
         allEntries(workspaceData, (cursor) => client.paseo.workspaces.list({ page: { limit: PAGE_SIZE, cursor } })),
       ]);
       if (!live || epoch !== generation) return;

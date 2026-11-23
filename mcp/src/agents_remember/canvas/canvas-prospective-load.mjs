@@ -38,6 +38,8 @@ const MEDIA = {
   ".txt": "text/plain",
   ".md": "text/markdown",
   ".png": "image/png",
+  ".webm": "video/webm",
+  ".mp4": "video/mp4",
   ".woff2": "font/woff2",
 };
 

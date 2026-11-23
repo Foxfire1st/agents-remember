@@ -1,6 +1,6 @@
 {
   "package": "@getpaseo/cli",
-  "version": "0.15.4",
+  "version": "0.16.2",
   "node": {
     "version": "26.11.1",
     "archives": {

@@ -111,10 +111,11 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
                     answer, seen = self._complete(coord, "memory_quality_check", whole)
                     call = guard.call_args_list[0]
                     precut = call.args[0]
-                    location = call.kwargs["log"]
+                    detail = call.kwargs["location"]
+                    location = detail.log
                     self.assertIsInstance(location, str)
                     self.assertTrue(Path(location).is_file())
-                    self.assertIsNone(call.kwargs["log_error"])
+                    self.assertIsNone(detail.log_error)
                     self.assertEqual(precut, {**whole, "log": location})
                     self.assertEqual(call.kwargs["final_tokens"], count_response_tokens(precut))
                     self.assertGreater(call.kwargs["final_tokens"], bound)
@@ -137,7 +138,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
                                 "bound": bound,
                                 "actualPrecutTokens": call.kwargs["final_tokens"],
                                 "actualLog": location,
-                                "logError": call.kwargs["log_error"],
+                                "logError": detail.log_error,
                                 "line": line,
                                 "deliveredTokens": delivered,
                                 "observerTokens": seen[-1][1]["delivered_tokens"],

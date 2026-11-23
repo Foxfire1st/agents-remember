@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from agents_remember.cli import (
     paseo_catalog,
+    paseo_catalog_features,
     role_launch_preparation,
     role_launch_routes,
 )
@@ -213,7 +214,51 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
         self.assertEqual(model_less, {"id": "eve", "label": "Eve", "models": []})
         self.assertEqual(failed["listingError"], "auth missing")
         self.assertEqual(
-            bridge.calls, [("catalog", {"cwd": self.config.workspace_root.as_posix()})] * 2
+            bridge.calls,
+            [("catalog", {"cwd": self.config.workspace_root.as_posix(), "mode": "metadata"})] * 2,
+        )
+
+    def test_selected_options_reads_only_the_requested_pair(self) -> None:
+        role_reads = self.bridge()
+        offer = {
+            "id": "service_tier",
+            "type": "select",
+            "options": [{"id": "priority", "label": "Fast"}],
+        }
+        selected_read = FakeBridge(
+            {
+                "readAt": "2026-10-26T16:00:00+00:00",
+                "selectedFeatures": {
+                    "provider": "codex",
+                    "model": "gpt-b",
+                    "features": [offer],
+                    "serviceTiers": offer["options"],
+                },
+            }
+        )
+        request = RoleLauncherOptionsRequest(role="architect", agentId="codex", modelId="gpt-b")
+        with (
+            patch.object(role_launch_routes, "resolve_role_launch_context", return_value=object()),
+            patch.object(paseo_catalog_features, "bridge_call", selected_read),
+        ):
+            answer = role_launch_routes._role_launch_options_endpoint(self.config, request)
+        selected = json.loads(bytes(answer.body))["modelOptions"]
+        self.assertEqual((selected["agentId"], selected["modelId"]), ("codex", "gpt-b"))
+        self.assertEqual(selected["features"], [{**offer, "permissionBearing": False}])
+        self.assertEqual(role_reads.calls, [])
+        self.assertEqual(
+            selected_read.calls,
+            [
+                (
+                    "catalog",
+                    {
+                        "cwd": self.config.workspace_root.as_posix(),
+                        "mode": "selected",
+                        "selectedProvider": "codex",
+                        "selectedModel": "gpt-b",
+                    },
+                )
+            ],
         )
 
     def test_each_view_and_start_asks_fresh_and_refresh_rescans(self) -> None:
@@ -431,10 +476,14 @@ class ServiceTierCatalogTests(PaseoCatalogTestCase):
     def test_unsupported_tier_and_exact_unavailable_model_are_not_substituted(self) -> None:
         self.bridge()
         for tier in ["fast", "default", "unadvertised"]:
+            role = {**defaults("codex", "gpt-a"), "serviceTier": tier}
+            shown = _legacy_options_fields(self.config, role, HARNESS_ORDER)
+            self.assertTrue(shown["roleDefaults"]["available"])
+            self.assertEqual(shown["roleDefaults"]["serviceTier"], tier)
             with self.assertRaisesRegex(LaunchSelectionRefused, "service tier"):
                 _requested_launch_values(
                     self.config,
-                    {**defaults("codex", "gpt-a"), "serviceTier": tier},
+                    role,
                     HARNESS_ORDER,
                     None,
                 )

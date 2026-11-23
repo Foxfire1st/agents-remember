@@ -326,8 +326,8 @@ PROCESS_MUTABLE_STATES = (
     ),
     _row(
         "memory_quality.style.citations.grammars",
-        "typescript_anchor_identifier",
-        "Forget parsed TypeScript anchor memoization between test modules.",
+        "_process_typescript_anchor_identifier",
+        "Forget process-owned TypeScript anchor memoization between test modules.",
         _clear_cache,
     ),
     _row(
@@ -416,9 +416,9 @@ PROCESS_MUTABLE_STATES = (
         "Forget retained lifecycle locations between test modules.",
     ),
     _row(
-        "worktrees.integration.lifecycle.lifecycle_operation_store",
-        "_record_cache",
-        "Forget stat-bound lifecycle operation records between test modules.",
+        "worktrees.integration.lifecycle.lifecycle_operation_record_cache",
+        "_process_operation_records",
+        "Forget process-owned stat-bound lifecycle operation records between test modules.",
     ),
     _row(
         "serving.projections.projection_store",

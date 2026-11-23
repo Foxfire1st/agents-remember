@@ -47,10 +47,8 @@ from agents_remember.canvas.explainer_service import (
     ARCHIVED,
     BUILD_STALL_SECONDS,
     BUSY,
-    END_TO_END_REQUEST,
     IN_TURN,
     MISSING,
-    PLANNED_REQUEST,
     BoundComparison,
     ExplainerDeps,
     ExplainerRefused,
@@ -547,9 +545,14 @@ def test_an_empty_send_on_a_planned_leaf_asks_for_the_requirement_and_planned_ef
     )
 
     assert outcome.built and outcome.message_sent
-    assert host.sent[0][1] == PLANNED_REQUEST
-    assert "requirement" in PLANNED_REQUEST and "planned effects" in PLANNED_REQUEST
-    assert "change set" not in PLANNED_REQUEST and "invariant" not in PLANNED_REQUEST
+    expected = (
+        "Explain this task's requirement and its planned effects: choose the code and memory it "
+        "touches and the parts that will change, explain each on its own, write the essay, then "
+        "plan and make each visual and build the page."
+    )
+    assert host.sent[0][1] == expected
+    assert expected.index("write the essay") < expected.index("each visual")
+    assert "change set" not in expected and "invariant" not in expected
 
 
 def test_a_repeated_request_reconciles_the_same_build(tmp_path: Path) -> None:
@@ -1029,8 +1032,8 @@ def test_a_send_builds_over_the_route_and_names_the_seat(tmp_path: Path) -> None
     assert state["label"] == "#7"
 
 
-def test_an_empty_send_asks_for_the_end_to_end_review(tmp_path: Path) -> None:
-    """The developer's F1: "leave it empty for the end-to-end review" must Send, and ask for it."""
+def test_an_empty_send_asks_for_the_end_to_end_explanation(tmp_path: Path) -> None:
+    """The empty Send asks for the essay before the visuals, in that order, in its own words."""
 
     runtime, bound = _world(tmp_path)
     host = FakeHost()
@@ -1040,12 +1043,18 @@ def test_an_empty_send_asks_for_the_end_to_end_review(tmp_path: Path) -> None:
 
     assert answer.status_code == 200, answer.text
     assert answer.json()["seat"]["messageSent"]
-    # The seat's first turn is the composed ask, not an empty string.
-    assert host.sent[0][1] == END_TO_END_REQUEST
-    assert "end to end" in END_TO_END_REQUEST
+    # The seat's first turn is the composed ask, not an empty string. The literal is repeated here
+    # so a lost essay-before-visuals sequence fails independently of the implementation constant.
+    expected = (
+        "Explain this change set end to end: read the task and its reports, choose the changes and "
+        "their parts that matter, explain each part on its own, write the essay with its evidence, "
+        "then plan and make each visual and build the page."
+    )
+    assert host.sent[0][1] == expected
+    assert expected.index("write the essay") < expected.index("each visual")
 
 
-def test_a_send_with_no_message_field_at_all_also_asks_for_the_end_to_end_review(
+def test_a_send_with_no_message_field_at_all_also_asks_for_the_end_to_end_explanation(
     tmp_path: Path,
 ) -> None:
     runtime, bound = _world(tmp_path)
@@ -1055,7 +1064,11 @@ def test_a_send_with_no_message_field_at_all_also_asks_for_the_end_to_end_review
     answer = client.post(_url("build"), json={"requestId": "r-bare"})
 
     assert answer.status_code == 200, answer.text
-    assert host.sent[0][1] == END_TO_END_REQUEST
+    assert host.sent[0][1] == (
+        "Explain this change set end to end: read the task and its reports, choose the changes and "
+        "their parts that matter, explain each part on its own, write the essay with its evidence, "
+        "then plan and make each visual and build the page."
+    )
 
 
 def test_a_send_without_its_request_id_is_a_400(tmp_path: Path) -> None:

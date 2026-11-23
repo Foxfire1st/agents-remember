@@ -25,17 +25,13 @@ LAUNCH_CODE_PATTERNS = (
 )
 NAMED_EXCEPTIONS: dict[str, str] = {}
 # Modules where an agent kind's name IS this build's launch decision, required by MIK-R71:
-# rule 21 names the least permissive mode for each agent kind (Claude `default`, Codex
-# `auto`), and the launch grants a new agent the read of its own assignment through the
-# host mechanism of its provider. Like RULE6_MODULES these are scanned but their agent
+# the launch grants a new agent the read of its own assignment through the host mechanism of
+# its provider, and that mechanism differs by harness. The product names no least permissive
+# mode of its own any more, so the mode table that used to need an admission is gone and only
+# the rule-22 grant mechanism stays. Like RULE6_MODULES these are scanned but their agent
 # names are admitted: the decision cannot name the agent kind it decides for without
 # naming it.
 RULE21_MODULES = {
-    "cli/paseo_catalog.py": (
-        "the rule-21 least-permissive-mode table (least permissive supported mode for "
-        "this agent kind): the reference names the mode for each agent kind, Claude "
-        "`default` and Codex `auto`; MIK-R71 rule 21"
-    ),
     "cli/paseo_launch.py": (
         "the provider's own grant mechanism for rule 22 (the installed host grants by "
         "exact tool name for Claude; Codex carries a side effect that prevents the same "
@@ -46,7 +42,6 @@ RULE21_MODULES = {
 # either file fails the guard. Unlike RULE6's whole-module allowance, the admission is
 # bound to these occurrences; a file that stops naming them, or names more, is refused.
 RULE21_ADMITTED_NAMES = {
-    "cli/paseo_catalog.py": {"claude", "codex"},
     "cli/paseo_launch.py": {"Claude", "Codex", "claude"},
 }
 
@@ -184,8 +179,8 @@ class NoHarnessNameTests(unittest.TestCase):
         self.assertEqual(sorted(RULE6_MODULES), ["application/agent_binding.py"])
         for _name, reason in RULE6_MODULES.items():
             self.assertGreater(len(reason), 40)
-        # The R71 exception is exactly two modules: an entry that no longer applies has to go.
-        self.assertEqual(sorted(RULE21_MODULES), ["cli/paseo_catalog.py", "cli/paseo_launch.py"])
+        # The exception is exactly one module: an entry that no longer applies has to go.
+        self.assertEqual(sorted(RULE21_MODULES), ["cli/paseo_launch.py"])
         for _name, reason in RULE21_MODULES.items():
             self.assertGreater(len(reason), 40)
         self.assertEqual(sorted(PRESENTER_MODULES), ["cli/paseo_bridge.mjs"])

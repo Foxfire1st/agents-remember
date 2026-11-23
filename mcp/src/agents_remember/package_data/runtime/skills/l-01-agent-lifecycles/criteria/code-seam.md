@@ -4,11 +4,11 @@ The Reviewer uses this file for the shared procedure governing all five criteria
 
 ## Shared catalog review rules
 
-These rules govern the review procedure for all five criteria catalogs. They do not select additional catalogs.
+These rules govern the review procedure for all five criteria catalogs and select no additional catalog.
 
-The baseline review runs every standing criterion in each bound catalog. Do not invent criteria during intake. In fix-verification, use only the sealed baseline evidence needed for the outstanding identifiers; do not repeat the catalog census or add a criterion.
+The baseline review runs every standing criterion in each bound catalog. Do not invent criteria during intake. In fix-verification, use only the sealed evidence the outstanding identifiers need; repeat no census and add no criterion.
 
-Only two routes may add a finding after sealing: a valid code finding from the Curator, or a valid finding from an advisory review the Architect commissioned and forwarded in its questions file. Before adding a sealed finding or reopening the verdict through either route, follow [the review operation](../operations/review.md#boundaries).
+Only three routes may add a finding after sealing: a Curator code finding, an advisory review's finding the Architect commissioned, and a final check that fails after the pass; follow [the review operation](../operations/review.md#boundaries) before adding one or reopening the verdict.
 
 ### Explore during the baseline
 

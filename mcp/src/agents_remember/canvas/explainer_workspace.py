@@ -15,8 +15,11 @@ it may write. This module owns the bytes:
 
 A build also copies in what the explainer needs, the way a task agent's workspace gets it (MIK-R211
 v5 rule 3): the task's reference notes for the leaf (``reference/``), the pinned library files
-(``kit/``), and every published revision of the leaf (``revisions/<n>/``), as plain writable folders.
-The draft starts as a copy of the latest of them.
+(``kit/``), every published revision of the leaf (``revisions/<n>/``), and for the reading stage the
+task document and the requirement packets it names (``inputs/``). The manifest lists the
+source paths and SHA-256 digests of the selected leaf's reports to read in place.
+The two writable folders for the essay-first work are ``stages/`` and
+``drafts/assets/``. The draft starts as a copy of the latest revision.
 
 Nothing here talks to the host, reads a comparison or prepares a packet: the caller hands those in,
 so the same code is exercised without a host. Every write and every removal is admitted against the
@@ -39,11 +42,13 @@ from agents_remember.canvas.explainer_paths import (
     DRAFTS_DIRECTORY,
     EXPLAINER_FRAME,
     FRAMES_DIRECTORY,
+    INPUTS_DIRECTORY,
     INSTRUCTIONS_DIRECTORY,
     KIT_DIRECTORY,
     REFERENCE_DIRECTORY,
     REVISIONS_DIRECTORY,
     SCRATCH_DIRECTORY,
+    STAGES_DIRECTORY,
     copy_folder,
     copy_revision,
     ensure_leaf_workspace,
@@ -82,13 +87,15 @@ from agents_remember.canvas.kit import (
     kit_files,
 )
 from agents_remember.canvas.paths import PathRefused, task_root
+from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.kernel.atomic_write import atomic_write_bytes, atomic_write_text
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
 from agents_remember.models.knowledge.review_evidence import EvidencePacket
 from agents_remember.models.knowledge.review_frame import FrameBinding
-from agents_remember.tasks.planned_comparison import leaf_document
+from agents_remember.tasks.planned_comparison import leaf_document, leaf_document_stem
 from agents_remember.tasks.task_paths import slugify
+from agents_remember.worktrees.role_reports import canonical_execution_reports
 
 __all__ = [
     "EnvironmentBuild",
@@ -387,6 +394,119 @@ def _copy_planned_documents(workspace: Path, *, root: Path, files: Mapping[str, 
     return len(files)
 
 
+def _copy_inputs(
+    workspace: Path,
+    *,
+    task: Path,
+    ref: EnvironmentRef,
+    document: Mapping[str, Any],
+) -> int:
+    """Copy the task document and requirement packets in, and name the reports to read in place.
+
+    A done binding reads its task document and requirement here. The manifest lists the selected
+    leaf's source report paths and SHA-256 digests so the reports can be read in place.
+    """
+
+    root = workspace.parent
+    leaf_id = ref.leaf_id
+    destination = workspace / INPUTS_DIRECTORY
+    copied = 0
+    stem = leaf_document_stem(task, leaf_id)
+    if stem is not None:
+        for final, suffix in (("task.json", ".json"), ("task.md", ".md")):
+            source = task / f"{stem}{suffix}"
+            if source.is_file() and not source.is_symlink():
+                target = destination / final
+                guard_explainer_path(target, root=root, label="explainer input")
+                atomic_write_bytes(target, source.read_bytes())
+                copied += 1
+    planned = planned_documents(document, task)
+    for name, text in planned.items():
+        if not name.startswith("requirement-"):
+            continue
+        target = destination / name
+        guard_explainer_path(target, root=root, label="explainer input")
+        atomic_write_text(target, text)
+        copied += 1
+    current = {name for name in planned if name.startswith("requirement-")}
+    _remove_stale_requirements(destination, current, root=root)
+    reports = durable_reports_root(task)
+    target = destination / "reports.md"
+    guard_explainer_path(target, root=root, label="explainer input")
+    recorded = _leaf_report_paths(task, leaf_id=leaf_id, repository_id=ref.repository_id)
+    if recorded:
+        lines = [
+            "# Task reports",
+            "",
+            f"The reports recorded for leaf `{leaf_id}`. Read each in place. The digest is the",
+            "report's provenance; a claim still rests on the packet's admitted tree or record.",
+            "",
+        ]
+        for report in recorded:
+            try:
+                with report.open("rb") as stream:
+                    digest = hashlib.file_digest(stream, "sha256").hexdigest()
+            except OSError:
+                continue
+            lines.append(f"- `sha256:{digest}` `{report}`")
+        body = "\n".join(lines) + "\n"
+    else:
+        body = (
+            "# Task reports\n\n"
+            f"No report is recorded for leaf `{leaf_id}` under `{reports}`; the requirement "
+            "packets and the bound trees remain the evidence.\n"
+        )
+    atomic_write_text(target, body)
+    return copied
+
+
+def _remove_stale_requirements(destination: Path, current: set[str], *, root: Path) -> None:
+    """Delete requirement copies the active packet set no longer names."""
+
+    for existing in destination.glob("requirement-*"):
+        if existing.name in current or not existing.is_file() or existing.is_symlink():
+            continue
+        guard_explainer_path(existing, root=root, label="explainer input")
+        existing.unlink()
+
+
+def _leaf_report_paths(task: Path, *, leaf_id: str, repository_id: str) -> list[Path]:
+    """Find canonical reports for the leaf's recorded role executions."""
+
+    stem = leaf_document_stem(task, leaf_id)
+    if stem is None:
+        return []
+    reference = {"repository": repository_id, "path": f"{task.name}/{stem}.json"}
+    reports_root = durable_reports_root(task)
+    store = reports_root / EXECUTIONS_DIRECTORY
+    if reports_root.is_symlink() or store.is_symlink():
+        return []
+    found: set[Path] = set()
+    for folder in (store, store / "history"):
+        if folder.is_symlink():
+            continue
+        for receipt_path in folder.glob("*.json"):
+            receipt = _selected_report_receipt(receipt_path, reference)
+            if receipt is not None:
+                found.update(canonical_execution_reports(receipt, reports_root))
+    return sorted(found)
+
+
+def _selected_report_receipt(
+    receipt_path: Path, reference: Mapping[str, str]
+) -> dict[str, Any] | None:
+    if receipt_path.is_symlink():
+        return None
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    selection = receipt.get("selection") if isinstance(receipt, dict) else None
+    if isinstance(selection, dict) and selection.get("taskDocumentRef") == reference:
+        return receipt
+    return None
+
+
 def _copy_documents(run: EnvironmentRun, workspace: Path, reporter: _Progress) -> None:
     """Copy in what the explainer needs, as a task agent's documents are (MIK-R211 v5 rule 3).
 
@@ -403,7 +523,7 @@ def _copy_documents(run: EnvironmentRun, workspace: Path, reporter: _Progress) -
     try:
         task = task_root(ref.config, ref.repository_id, ref.task)
     except PathRefused:
-        reporter.step("documents", reference=0, kit=kit, revisions=0, planned=0)
+        reporter.step("documents", reference=0, kit=kit, revisions=0, planned=0, inputs=0)
         return
     reference = task / "notes" / "reference" / ref.leaf_id
     notes = (
@@ -411,9 +531,10 @@ def _copy_documents(run: EnvironmentRun, workspace: Path, reporter: _Progress) -
         if reference.is_dir() and not reference.is_symlink()
         else 0
     )
+    document = leaf_document(task, ref.leaf_id) or {}
+    inputs = _copy_inputs(workspace, task=task, ref=ref, document=document)
     planned = 0
     if run.inputs.planned is not None:
-        document = leaf_document(task, ref.leaf_id) or {}
         planned = _copy_planned_documents(
             workspace, root=root, files=planned_documents(document, task)
         )
@@ -432,6 +553,7 @@ def _copy_documents(run: EnvironmentRun, workspace: Path, reporter: _Progress) -
         kit=kit,
         revisions=len(revisions),
         planned=planned,
+        inputs=inputs,
         draftFrom=revisions[-1][0] if started else None,
     )
 
@@ -485,6 +607,10 @@ def update_environment(run: EnvironmentRun) -> EnvironmentUpdate:
             current=True,
             steps=tuple(reporter.steps),
         )
+    for folder in (STAGES_DIRECTORY, INPUTS_DIRECTORY):
+        target = workspace / folder
+        guard_explainer_path(target, root=workspace.parent, label="explainer workspace")
+        target.mkdir(parents=True, exist_ok=True)
     guard_explainer_path(workspace / "binding.json", root=workspace.parent, label="binding")
     (workspace / "binding.json").unlink(missing_ok=True)
     try:
@@ -492,6 +618,7 @@ def update_environment(run: EnvironmentRun) -> EnvironmentUpdate:
         packet_bytes = _stage_and_commit_instructions(
             workspace=workspace, run=run, snapshot_name="trees", reporter=reporter
         )
+        _copy_documents(run, workspace, reporter)
         binding = _environment_binding(run, packet_bytes)
         write_binding(workspace, binding)
         reporter.step("bound", trees="trees")
@@ -641,6 +768,8 @@ def _write_capsule(
         "designNotice": inputs.design_notice,
         "drafts": DRAFTS_DIRECTORY,
         "scratch": SCRATCH_DIRECTORY,
+        "stages": STAGES_DIRECTORY,
+        "inputs": INPUTS_DIRECTORY,
     }
     if packet_digest is not None:
         grants["evidenceDigest"] = packet_digest

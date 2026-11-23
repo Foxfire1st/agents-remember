@@ -14,9 +14,6 @@ import pytest
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.models.lifecycles.operation import (
-    IntegrateOperationInput,
-)
 from agents_remember.worktrees.integration import (
     integration_ref_transaction,
 )
@@ -30,15 +27,11 @@ from agents_remember.worktrees.integration.integration_ref_transaction import (
     prepare_integration_ref_move,
     require_integrated_memory_ancestry,
 )
-from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
-)
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.git import is_ancestor
+from agents_remember.worktrees.modules.git import branch_commit, is_ancestor
 from agents_remember.worktrees.modules.integrate import (
     IntegrationSources,
+    integration_targets,
 )
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
@@ -79,28 +72,21 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                     require_ordinary_worktree(candidate, operation="test")
 
     def test_external_pair_cas_retains_torn_pair_without_clobbering_memory_race(self) -> None:
+        """The ref move reads both sources once and never overwrites a raced memory branch.
+
+        A closeout and an integration run inside their own call, so authority is the exact
+        pair read from the two repositories here, not a journal record.
+        """
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fixture = _authority_fixture(root, external_memory=True)
             closed = _closed_external_leaf_worktrees(fixture, root)
             memory_repo = closed.memory_repo_path
             assert memory_repo is not None
-            operation_input = IntegrateOperationInput(
-                configPath=fixture.config_path.as_posix(),
-                contractPath=closed.contract_path.as_posix(),
-            )
-            lifecycle_operations.start_or_observe_operation(
-                operation_input,
-                closed,
-                launcher=lambda *_: None,
-            )
-            store = LifecycleOperationStore(
-                operation_record_path(closed.worktree_group, "integrate")
-            )
-            running = store.read()
-            assert running is not None
-            authority = running.integrationAuthority
-            assert authority is not None
+            targets = {target.side: target for target in integration_targets(closed)}
+            code_source = branch_commit(closed.code_repo_path, targets["code"].branch)
+            memory_source = branch_commit(memory_repo, targets["memory"].branch)
             _git(memory_repo, "branch", "memory-race", "ar/master")
             _commit_on(memory_repo, "memory-race", "parallel-memory.txt")
             raced_memory = _git(memory_repo, "rev-parse", "memory-race")
@@ -145,10 +131,10 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                 snapshot = prepare_integration_ref_move(
                     closed,
                     commits,
-                    WorktreeArgs(operation_key=running.operationKey),
+                    WorktreeArgs(operation_key="a" * 64),
                     IntegrationSources(
-                        current_code_source=authority.codeSourceCommit,
-                        current_memory_source=authority.memorySourceCommit,
+                        current_code_source=code_source,
+                        current_memory_source=memory_source,
                         code_replay_required=False,
                         memory_replay_required=False,
                     ),
@@ -157,7 +143,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
             expected = raised.exception.expected
             self.assertEqual(
                 expected["before"],
-                {"codeRef": authority.codeSourceCommit, "memoryRef": authority.memorySourceCommit},
+                {"codeRef": code_source, "memoryRef": memory_source},
             )
             self.assertEqual(
                 expected["intended"],

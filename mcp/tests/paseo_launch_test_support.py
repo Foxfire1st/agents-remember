@@ -128,6 +128,10 @@ class FakeRuntime:
         agent_id = payload["agentId"]
         existing = agent_id in self.agents
         if not existing:
+            if payload.get("existingOnly") is True:
+                raise PaseoBridgeFailure(
+                    "paseo_agent_missing_for_replay", "The saved agent is absent."
+                )
             self.agents[agent_id] = {
                 "id": agent_id,
                 "provider": payload["provider"],

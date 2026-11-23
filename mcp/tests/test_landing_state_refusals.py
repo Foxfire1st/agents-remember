@@ -1144,10 +1144,10 @@ class RealLargestTests(unittest.TestCase):
         return answer
 
     def _deep_root(self, width: int) -> _Path:
-        parent = _tempfile.TemporaryDirectory()
+        parent = _tempfile.TemporaryDirectory(prefix="ar-", dir="/tmp")
         self.addCleanup(parent.cleanup)
-        base = _Path(parent.name)
-        deep = base / ("q" * (width - len(str(base)) - 1))
+        base = _Path(parent.name).resolve()
+        deep = base / ("q" * (width - len(_os.fsencode(base)) - 1))
         deep.mkdir()
         return deep
 

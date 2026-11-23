@@ -6,6 +6,7 @@ import {
   type RoleDefaults,
   type RoleEffortChoice,
   type RoleLaunchSelection,
+  type RoleModeChoice,
   type RoleModelChoice,
 } from "../roleLaunchModel";
 
@@ -18,6 +19,7 @@ export interface ResolvedAgentChoice {
   selectedModel: RoleModelChoice | undefined;
   efforts: RoleEffortChoice[];
   defaultEffort: RoleEffortChoice | undefined;
+  usesRoleEffort: boolean;
   selectedAgentLabel: string | undefined;
 }
 
@@ -33,24 +35,29 @@ function resolveAgent(
 }
 
 function resolveModel(
-  models: RoleModelChoice[],
+  agent: ReturnType<typeof resolveAgent>,
   roleDefaults: RoleDefaults,
   selection: RoleLaunchSelection,
 ): Pick<ResolvedAgentChoice, "defaultModel" | "selectedModelId" | "selectedModel"> {
-  const defaultModel = models.find((model) => matchesChoice(model, roleDefaults.model));
-  const selectedModelId = selection.agentOverride?.modelId ?? defaultModel?.id ?? roleDefaults.model ?? "";
+  const { models, selectedAgent } = agent;
+  const roleModel = selectedAgent && matchesChoice(selectedAgent, roleDefaults.agent) ? roleDefaults.model : undefined;
+  const defaultModel = models.find((model) => matchesChoice(model, roleModel));
+  const nativeDefault = models.find((model) => model.isDefault);
+  const selectedModelId = selection.agentOverride?.modelId ?? defaultModel?.id ?? roleModel ?? nativeDefault?.id ?? "";
   return { defaultModel, selectedModelId, selectedModel: models.find((model) => matchesChoice(model, selectedModelId)) };
 }
 
 function resolveEffort(
-  selectedModel: RoleModelChoice | undefined,
+  { defaultModel, selectedModel }: ReturnType<typeof resolveModel>,
   roleDefaults: RoleDefaults,
-): Pick<ResolvedAgentChoice, "efforts" | "defaultEffort"> {
+): Pick<ResolvedAgentChoice, "efforts" | "defaultEffort" | "usesRoleEffort"> {
   const efforts = selectedModel?.efforts ?? EMPTY_ROLE_EFFORTS;
+  // The configured effort applies only to its role's provider and model.
+  const configuredEffort = defaultModel && defaultModel === selectedModel ? roleDefaults.effort : undefined;
   const defaultEffort = efforts.find(
-    (effort) => matchesChoice(effort, roleDefaults.effort ?? selectedModel?.defaultEffort),
+    (effort) => matchesChoice(effort, configuredEffort ?? selectedModel?.defaultEffort),
   );
-  return { efforts, defaultEffort };
+  return { efforts, defaultEffort, usesRoleEffort: Boolean(configuredEffort) };
 }
 
 // The agent behind the row's override selectors: the chosen agent with its models,
@@ -62,8 +69,8 @@ export function resolveAgentChoice(
   selection: RoleLaunchSelection,
 ): ResolvedAgentChoice {
   const agent = resolveAgent(agents, roleDefaults, selection);
-  const model = resolveModel(agent.models, roleDefaults, selection);
-  const effort = resolveEffort(model.selectedModel, roleDefaults);
+  const model = resolveModel(agent, roleDefaults, selection);
+  const effort = resolveEffort(model, roleDefaults);
   return { ...agent, ...model, ...effort };
 }
 
@@ -111,4 +118,80 @@ export function displayedEffortLabel(
   }
   if (choice.defaultEffort) return choice.defaultEffort.label + " · default";
   return selection.agentOverride ? "Model default" : "Role default";
+}
+
+export interface ResolvedModeChoice {
+  modes: RoleModeChoice[];
+  defaultModeId: string;
+  defaultSource: string;
+}
+
+// Where a role's resolved mode came from, as the launcher names it.
+function roleModeSource(roleDefaults: RoleDefaults): string {
+  return roleDefaults.choices?.mode?.source ?? "host default";
+}
+
+// The modes the selected agent's harness offers and the mode this row starts in when none is
+// chosen: the row's own mode when the selected agent is the harness that row names, else the
+// role's resolved mode on its own agent, else the host's own default for that agent. The start
+// applies the same rule, so the shown default and the launched mode cannot disagree.
+function modesOf(choice: ResolvedAgentChoice): RoleModeChoice[] {
+  return choice.selectedAgent?.modes ?? [];
+}
+
+// The settings row's own mode, when the selected agent is the harness that row names.
+function rowModeDefault(
+  choice: ResolvedAgentChoice,
+  roleDefaults: RoleDefaults,
+): ResolvedModeChoice | null {
+  const rowMode = roleDefaults.choices?.rowMode as
+    | { harness?: string | null; value?: string | null }
+    | undefined;
+  if (!choice.selectedAgent || rowMode?.harness !== choice.selectedAgent.id || !rowMode.value) {
+    return null;
+  }
+  return { modes: modesOf(choice), defaultModeId: rowMode.value, defaultSource: "our settings" };
+}
+
+// The mode resolution already made for the role's own agent.
+function roleModeDefault(
+  choice: ResolvedAgentChoice,
+  roleDefaults: RoleDefaults,
+): ResolvedModeChoice | null {
+  if (!choice.selectedAgent || !matchesChoice(choice.selectedAgent, roleDefaults.agent)) return null;
+  return {
+    modes: modesOf(choice),
+    defaultModeId: roleDefaults.mode ?? "",
+    defaultSource: roleModeSource(roleDefaults),
+  };
+}
+
+// The host profile's mode, which the start applies before the settings row on the host's own
+// agent. It must win here too, or the row would show the row's mode where the start sends this.
+function hostRoleDefault(
+  choice: ResolvedAgentChoice,
+  roleDefaults: RoleDefaults,
+): ResolvedModeChoice | null {
+  if (!choice.selectedAgent || !matchesChoice(choice.selectedAgent, roleDefaults.agent)) return null;
+  if (roleModeSource(roleDefaults) !== "host role") return null;
+  return {
+    modes: modesOf(choice),
+    defaultModeId: roleDefaults.mode ?? "",
+    defaultSource: "host role",
+  };
+}
+
+export function resolveModeChoice(
+  choice: ResolvedAgentChoice,
+  roleDefaults: RoleDefaults,
+): ResolvedModeChoice {
+  return (
+    hostRoleDefault(choice, roleDefaults) ??
+    rowModeDefault(choice, roleDefaults) ??
+    roleModeDefault(choice, roleDefaults) ?? {
+      modes: modesOf(choice),
+      defaultModeId: choice.selectedAgent?.defaultModeId ?? "",
+      defaultSource: "host default",
+    }
+  );
 }

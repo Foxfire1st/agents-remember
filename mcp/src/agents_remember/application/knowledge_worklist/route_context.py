@@ -84,7 +84,9 @@ class _ChainLookups:
 Chain = tuple[tuple[str, Any, tuple[str, ...]], ...]
 """One path's chain: each family's ID, title and routes, nearest route first."""
 
-ROUTE_CHAINS: BoundedMemo[tuple[str, str], Chain] = BoundedMemo(65_536)
+ROUTE_CHAINS: BoundedMemo[tuple[str, str], Chain] = BoundedMemo.by_retained_bytes(
+    8 * 1024 * 1024, max_entries=65_536
+)
 """``(memory tree id, path)`` -> the path's chain on the whole parse of that tree (D569)."""
 
 

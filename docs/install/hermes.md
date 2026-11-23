@@ -101,18 +101,24 @@ entry names another ground under "Checked".
 The keys of Agents Remember stand in the user settings file. That file can be read-only; the
 [settings reference](../reference/settings-json.md) shows the two commands that open and close it.
 
-- **A role agent on Hermes asks before every file edit.** Agents Remember sends Hermes no
-  [permission mode](../concepts.md#permission-mode) unless the user settings file states one.
+- **A role agent on Hermes asks before every file edit.** Hermes advertises `default` as its own
+  default mode and lists the modes its sessions offer. Agents Remember chooses a
+  [permission mode](../concepts.md#permission-mode) this way: use a launcher-chosen mode first;
+  otherwise use the mode named by an applicable host profile, then the mode named by an applicable
+  settings row; if neither applies, use the host-advertised default when the harness's modes are known
+  and the host advertises a default; if no mode applies, send no mode field. Hermes advertises
+  `default`, so on this harness the last step supplies it wherever the modes are known.
+  [Harnesses](../reference/harnesses.md) gives the same rule across harnesses.
   - Setting: `orchestration.roles.<role>.mode` in the user settings file, for example
-    `"accept_edits"`. The host offers the permission modes that Hermes names for its sessions. A
-    start with a mode that the host does not offer is refused with `mode_not_offered`, and the
-    refusal names the modes that the host offers.
+    `"accept_edits"`. The host offers the permission modes that Hermes names for its sessions, and
+    the role launcher's "Role mode override" offers the same ones for the chat it starts. Agents
+    Remember passes a named mode to the host as named.
     `orchestration.roles.<role>.featureValues.auto_accept` set to `true` lets the host approve the
     agent's permission prompts.
   - Who: you state both keys. Agents Remember sends them with the start, so the first turn already
     runs with them. A repository's settings file that states either key is refused.
-  - Checked: the keys and the refusal, in the code of Agents Remember; that the modes come from
-    Hermes, in the source of the host this build installs. No agent was started for it.
+  - Checked: the keys, in the code of Agents Remember; that the modes come from Hermes, in the
+    source of the host this build installs. No agent was started for it.
 - **Every inline script asks for approval.** This holds for `python3 -c`, for `node -e`, and for a
   script or a shell passed as a heredoc. The check is Hermes' own; the host's automatic approval,
   `featureValues.auto_accept` of the entry above, does not answer it.

@@ -174,7 +174,7 @@ export function FirstRequestForm({
           placeholder={
             planned
               ? 'What do you want explained? Leave it empty for the requirement and planned effects.'
-              : 'What do you want explained? Leave it empty for the end-to-end review.'
+              : 'What do you want explained? Leave it empty for the end-to-end explanation.'
           }
           value={message}
           onChange={(event) => onMessage(event.target.value)}

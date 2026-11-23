@@ -542,7 +542,7 @@ dashboard's launcher.
 | `harness` | a harness id: the id of a [host provider](../concepts.md#host-provider) | The harness of the agent. The id needs no entry under `orchestration.harnesses`. |
 | `model` | a model id or label the host offers for that harness | The model of the agent. |
 | `effort` | a thinking option the host offers for that model | The thinking option of the agent. |
-| `mode` | a mode id or label the host offers for that harness | The permission mode of the agent. User settings file only. |
+| `mode` | a mode id or label the host offers for that harness | The permission mode of the agent, on the harness the row names; another harness starts in the host's default mode. User settings file only. |
 | `featureValues` | an object: `true` or `false` for a toggle, an option id for a selection | The features of the agent, such as `fast_mode` or `plan_mode`. |
 | `serviceTier` | a speed option the host offers, by id or label | The speed of the agent; the same choice as `featureValues.service_tier`. |
 | `notes` | text | Your instruction text for the role. User settings file only. |
@@ -553,7 +553,9 @@ A start matches each name with the ids and the labels of the host's catalog with
 case. The host's catalog is what the running host reports: its host providers with their models,
 thinking options, modes and features. A choice that the host does not offer refuses the start
 before a workspace of the host or an agent is created: `agent_not_offered`, `model_not_offered`,
-`effort_not_offered`, `mode_not_offered`, `service_tier_not_offered` or `feature_not_offered`.
+`effort_not_offered`, `service_tier_not_offered` or `feature_not_offered`. A `mode` is the one
+exception: it is not checked against the host's list but passed to the host as named, because the
+host owns the modes of its own harness.
 [Harnesses](harnesses.md) describes what each harness needs.
 
 This example is a complete user settings file. Replace each model placeholder with an id that
@@ -872,7 +874,9 @@ review rounds a task may run without a further approval. `task_doc` reads it whe
 begins, from the user settings file only: a value in a repository settings file is accepted and
 not applied. A changed number holds for the next round without a restart. When the rounds of a
 task have reached the number plus the extra rounds approved for that task, the next round is
-refused with `review-budget-exhausted` until an approval of a further round is recorded.
+refused with `review-budget-exhausted` until an approval of a further round is recorded. A
+requirement's final checks are no review round: they run once after the code review passes and do
+not count under this number.
 
 The loader accepts and checks four more keys of `orchestration.loops`, and nothing reads them:
 

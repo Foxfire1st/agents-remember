@@ -107,10 +107,10 @@ def malloc_trim_interval_seconds(environ: dict[str, str] | None = None) -> float
 
 def _resolve_malloc_trim() -> Callable[[int], int] | None:
     """The glibc ``malloc_trim`` symbol, or ``None`` where libc lacks it (non-glibc / no libc)."""
-    name = ctypes.util.find_library("c")
-    if name is None:
-        return None
     try:
+        name = ctypes.util.find_library("c")
+        if name is None:
+            return None
         libc = ctypes.CDLL(name)
         func = libc.malloc_trim
     except (OSError, AttributeError):

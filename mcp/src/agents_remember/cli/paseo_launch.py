@@ -48,12 +48,15 @@ from agents_remember.cli.paseo_bridge import (
     PaseoBridgeFailure,
     bridge_call,
 )
+from agents_remember.errors import RolePreparationError
 from agents_remember.kernel._agentic_settings_core import EXTRA_ARGS_HARNESSES
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.worktrees.modules.quality.dagger_authority import HOST_REGISTRY_ROOT_ENV
 
 PASEO_AGENT_KIND = "paseo-agent"
+NATIVE_ANTIGRAVITY = "antigravity"
+NATIVE_ANTIGRAVITY_REPLAY_MISSING = "paseo_agent_missing_for_replay"
 # The labels every role agent carries; a task reference is `<repository>/<document path>`.
 ROLE_LABEL = "ar.role"
 REQUEST_LABEL = "ar.request-id"
@@ -554,12 +557,25 @@ def exclusion_applied_agent(call: dict[str, Any]) -> dict[str, Any]:
 
 
 def agent_create_input(call: dict[str, Any], workspace_id: str) -> dict[str, Any]:
-    """The exact native agent-create input: the agent definition and its workspace.
+    """The bridge's agent-create input: the agent definition and its workspace.
 
     The record of what the launch applied stays with the product; the host reads none of it.
     """
 
-    return {**exclusion_applied_agent(call), "workspaceId": workspace_id}
+    agent = exclusion_applied_agent(call)
+    if agent.get("provider") == NATIVE_ANTIGRAVITY:
+        # A saved native role may be reconciled with an existing agent. Only the bridge
+        # can use its own lookup to decide whether the native create would be necessary.
+        agent["existingOnly"] = True
+    return {**agent, "workspaceId": workspace_id}
+
+
+def native_antigravity_role_start_refusal() -> RolePreparationError:
+    return RolePreparationError(
+        "native-antigravity-task-server-unavailable",
+        "Paseo's native antigravity plug-in drops the per-seat agents-remember-task server.",
+        "Choose antigravity-acp to start this role.",
+    )
 
 
 def applied_to_agent(call: dict[str, Any]) -> dict[str, Any]:
@@ -649,6 +665,13 @@ def run_launch_call(
             workspace_preparation=opened.get("preparation"),
         )
     except PaseoBridgeFailure as error:
+        if error.code == NATIVE_ANTIGRAVITY_REPLAY_MISSING:
+            return LaunchOutcome(
+                kind="refused",
+                code=error.code,
+                message=str(native_antigravity_role_start_refusal()),
+                predecessor_settled=predecessor_settled,
+            )
         lost = error.code == AGENT_WITHOUT_MESSAGE_LOST
         return LaunchOutcome(
             kind="refused" if lost or error.code == BRIDGE_REFUSED else "no-answer",

@@ -227,6 +227,25 @@ def _publish(  # noqa: PLR0913 - one test publication states its own comparison 
 # --- F01: the binding keeps the comparison's full identity --------------------------------------
 
 
+def test_a_video_asset_is_admitted_and_published(task: Path) -> None:
+    """A code-rendered video is published beside every other asset with its media type."""
+
+    assets = {
+        **ASSETS,
+        "clip.webm": b"\x1a\x45\xdf\xa3webm-bytes",
+        "clip.mp4": b"\x00\x00\x00\x18mp4-bytes",
+    }
+    published = _publish(task, _record(), assets=assets)
+    assert published.published
+    assert published.manifest is not None
+    media = {asset.path: asset.media_type for asset in published.manifest.assets}
+    assert media["clip.webm"] == "video/webm"
+    assert media["clip.mp4"] == "video/mp4"
+    scope = frame_scope(task, LEAF, FRAME)
+    assert open_asset(scope, 1, "clip.webm") == assets["clip.webm"]
+    assert open_asset(scope, 1, "clip.mp4") == assets["clip.mp4"]
+
+
 def test_f01_a_revision_bound_to_a_foreign_comparison_is_stale(task: Path) -> None:
     published = _publish(task, _record())
     assert published.published

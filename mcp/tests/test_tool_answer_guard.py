@@ -38,6 +38,7 @@ from agents_remember.models.tools.tool_answer import (
     TOOL_ANSWER_OVERFLOW_FIXED_MAX_TOKENS,
     TOOL_ANSWER_OVERFLOW_MAX_TOKENS,
     TOOL_CODE_MAX_CHARS,
+    ShortFormLocation,
     bound_for,
     is_valid_tool_code,
     next_from_next_step,
@@ -61,7 +62,7 @@ class ToolAnswerGuardTests(unittest.TestCase):
         short, _dropped, error_cut = short_form(
             big,
             answer_tokens=tokens,
-            log="/logs/ar-tools/d.json",
+            location=ShortFormLocation(log="/logs/ar-tools/d.json"),
             count=count_response_tokens,
         )
         self.assertTrue(short["ok"])
@@ -82,7 +83,10 @@ class ToolAnswerGuardTests(unittest.TestCase):
             "blob": _big_blob(),
         }
         short, _dropped, error_cut = short_form(
-            refusal, answer_tokens=9999, log="/logs/d.json", count=count_response_tokens
+            refusal,
+            answer_tokens=9999,
+            location=ShortFormLocation(log="/logs/d.json"),
+            count=count_response_tokens,
         )
         self.assertEqual(short["code"], "start-reservation-conflict")
         self.assertIn("recover this reserved start", short["error"])
@@ -97,13 +101,40 @@ class ToolAnswerGuardTests(unittest.TestCase):
         tokens = count_response_tokens(answer)
         self.assertGreater(tokens, TOOL_ANSWER_MAX_TOKENS)
         short, dropped, error_cut = short_form(
-            answer, answer_tokens=tokens, log="/logs/d.json", count=count_response_tokens
+            answer,
+            answer_tokens=tokens,
+            location=ShortFormLocation(log="/logs/d.json"),
+            count=count_response_tokens,
         )
         self.assertEqual(short["code"], "start-blocked")
         self.assertFalse(error_cut)
         self.assertGreater(dropped, 0)
         self.assertEqual(short["droppedFields"], dropped)
         self.assertLessEqual(count_response_tokens(short), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
+
+    def test_short_form_measures_the_current_drop_count_after_shedding_a_scalar(self) -> None:
+        answer = {
+            "ok": True,
+            "count": 7,
+            "reference": "alpha beta gamma delta " * 5,
+            "summary": "review before continuing. " * 6,
+            "body": ["whole result"] * 900,
+        }
+        log = "/coord" + "/proof-segment" * 40 + "/detail.json"
+        short, dropped, _error_cut = short_form(
+            answer,
+            answer_tokens=count_response_tokens(answer),
+            location=ShortFormLocation(log=log),
+            count=count_response_tokens,
+        )
+
+        self.assertLessEqual(count_response_tokens(short), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
+        self.assertEqual(short["droppedFields"], dropped)
+        self.assertEqual(dropped, 2)
+        self.assertEqual(short["count"], 7)
+        self.assertEqual(short["cut"]["log"], log)
+        self.assertNotIn("summary", short)
+        self.assertNotIn("reference", short)
 
     def test_short_form_is_measured_fifty_thousand_char_error(self) -> None:
         # Rule 4, E2: a 50,000-character error is cut to 600 with errorCut,
@@ -112,7 +143,10 @@ class ToolAnswerGuardTests(unittest.TestCase):
         self.assertGreater(len(error), 50000)
         refusal = {"ok": False, "code": "start-blocked", "error": error}
         short, _dropped, error_cut = short_form(
-            refusal, answer_tokens=99999, log="/logs/d.json", count=count_response_tokens
+            refusal,
+            answer_tokens=99999,
+            location=ShortFormLocation(log="/logs/d.json"),
+            count=count_response_tokens,
         )
         self.assertEqual(short["code"], "start-blocked")
         self.assertTrue(error_cut)
@@ -135,9 +169,11 @@ class ToolAnswerGuardTests(unittest.TestCase):
             short, _dropped, _cut = short_form(
                 {"ok": False, "code": code, "error": "what to do. " * 40},
                 answer_tokens=99999,
-                log=(
-                    "/coord/worktrees/agents-remember/108_x/logs/ar-tools-2026-10-08/"
-                    "160323398195-worktree_closeout_preview-717bc84c.json"
+                location=ShortFormLocation(
+                    log=(
+                        "/coord/worktrees/agents-remember/108_x/logs/ar-tools-2026-10-08/"
+                        "160323398195-worktree_closeout_preview-717bc84c.json"
+                    ),
                 ),
                 count=count_response_tokens,
             )
@@ -157,7 +193,7 @@ class ToolAnswerGuardTests(unittest.TestCase):
         short, dropped, _cut = short_form(
             {"ok": False, "code": "start-blocked", "error": "what to do.", "note": "y" * 150},
             answer_tokens=99999,
-            log=log,
+            location=ShortFormLocation(log=log),
             count=count_response_tokens,
         )
         self.assertEqual(short["log"], log)
@@ -176,7 +212,10 @@ class ToolAnswerGuardTests(unittest.TestCase):
         self.assertEqual(len(error), 600)
         refusal = {"ok": False, "code": "start-blocked", "error": error}
         short, _dropped, error_cut = short_form(
-            refusal, answer_tokens=99999, log="/logs/d.json", count=count_response_tokens
+            refusal,
+            answer_tokens=99999,
+            location=ShortFormLocation(log="/logs/d.json"),
+            count=count_response_tokens,
         )
         self.assertEqual(short["code"], "start-blocked")
         self.assertTrue(error_cut)
@@ -196,7 +235,7 @@ class ToolAnswerGuardTests(unittest.TestCase):
             short, _dropped, _cut = short_form(
                 {"ok": False, "code": bad, "error": "what to do."},
                 answer_tokens=9999,
-                log="/logs/d.json",
+                location=ShortFormLocation(log="/logs/d.json"),
                 count=count_response_tokens,
             )
             self.assertFalse(short["ok"] is None)
@@ -249,7 +288,10 @@ class ToolAnswerGuardTests(unittest.TestCase):
         tokens = count_response_tokens(answer)
         self.assertGreater(tokens, TOOL_ANSWER_MAX_TOKENS)
         short, _dropped, _cut = short_form(
-            answer, answer_tokens=tokens, log="/logs/d.json", count=count_response_tokens
+            answer,
+            answer_tokens=tokens,
+            location=ShortFormLocation(log="/logs/d.json"),
+            count=count_response_tokens,
         )
         self.assertLessEqual(count_response_tokens(short), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
 
@@ -278,7 +320,7 @@ class ToolAnswerGuardTests(unittest.TestCase):
         short, _dropped, _cut = short_form(
             {"ok": True, "blob": _big_blob()},
             answer_tokens=9999,
-            log_error="the whole result was not recorded: no space.",
+            location=ShortFormLocation(log_error="the whole result was not recorded: no space."),
             count=count_response_tokens,
         )
         self.assertIn("not recorded", short["logError"])
@@ -436,15 +478,16 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             coord = Path(tmp)
             bound = bound_for("memory_quality_check")
-            whole = {"ok": True, "blob": ""}
-            size = 0
-            while not bound - 40 <= count_response_tokens(whole) <= bound - 5:
-                size += 64
-                whole["blob"] = "x" * size
-            self.assertLessEqual(count_response_tokens(whole), bound)
+            whole: dict[str, Any] = {"ok": True, "blob": ""}
+            for size in range(bound + 1):
+                whole["blob"] = " x" * size
+                if count_response_tokens(whole) == bound:
+                    break
+            self.assertEqual(count_response_tokens(whole), bound, "no exact-bound fixture")
             answer, seen = self._complete(coord, "memory_quality_check", whole)
             delivered = count_response_tokens(answer)
             self.assertTrue(answer.get("overflow"))
+            self.assertGreater(count_response_tokens({**whole, "log": answer["log"]}), bound)
             self.assertLessEqual(delivered, TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
             (line,) = [self._read_line(coord)]
             self.assertEqual(line["answerTokens"], delivered)
