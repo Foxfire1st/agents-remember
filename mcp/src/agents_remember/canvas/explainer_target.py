@@ -1035,14 +1035,14 @@ def _resolve_symbol_in_blob(
 
 
 def _symbol_span(path: str, data: bytes, name: str) -> tuple[int, int] | None:
-    if not name or grammars.grammar_of(path) is None:
+    if not name or (grammar := grammars.grammar_of(path)) is None:
         return None
     lines = data.decode("utf-8", errors="surrogateescape").split("\n")
     try:
         bound = extents.definitions(path, lines)
     except Exception:
         return None
-    spans = extents.qualified_spans(name, bound)
+    spans = extents.qualified_spans(name, bound, grammar=grammar)
     return spans[0] if len(spans) == 1 else None
 
 
