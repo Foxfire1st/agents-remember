@@ -52,6 +52,7 @@ from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document import TaskEnclosureRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
@@ -1070,8 +1071,9 @@ class R71FolderAndGrantTests(unittest.TestCase):
         )
         self.config.workspace_root.mkdir()
 
-    def test_r71_launch_builder_grants_only_the_supported_claude_route(self) -> None:
+    def test_r71_launch_builder_grants_its_task_server_tools_by_provider(self) -> None:
         context = resolve_role_launch_context(self.config, RoleSelection(role="architect"))
+        granted_tools = {"claude": ("server_info",), "codex": PUBLIC_TOOLS}
         for provider in ("claude", "codex", "pi", "hermes"):
             launch = RoleLaunch(
                 agent_id=str(uuid.uuid4()),
@@ -1087,13 +1089,17 @@ class R71FolderAndGrantTests(unittest.TestCase):
             )
             created = build_launch_call(launch)["agent"]
             self.assertEqual(set(created["mcpServers"]), {"agents-remember-task"})
-            if provider == "claude":
-                self.assertEqual(
-                    [row["tool"] for row in created["toolPolicy"]["preapproved"]],
-                    ["server_info"],
-                )
-            else:
+            tools = granted_tools.get(provider)
+            if tools is None:
                 self.assertNotIn("toolPolicy", created)
+            else:
+                self.assertEqual(
+                    created["toolPolicy"]["preapproved"],
+                    [
+                        {"kind": "mcp", "server": "agents-remember-task", "tool": name}
+                        for name in tools
+                    ],
+                )
 
     def test_r71_folder_preparation_refuses_external_link_before_creating_any_child(self) -> None:
         context = resolve_role_launch_context(self.config, RoleSelection(role="architect"))

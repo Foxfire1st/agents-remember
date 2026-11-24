@@ -48,11 +48,10 @@ from agents_remember.cli.paseo_bridge import (
 from agents_remember.cli.paseo_catalog import LaunchSelectionRefused
 from agents_remember.cli.paseo_catalog import settings_role_launch as qualified_launch
 from agents_remember.cli.paseo_launch import (
-    ROLE_IDENTITY_READ_TOOLS,
     launching_source_root,
-    preapproval_policy,
     tool_server_definition,
 )
+from agents_remember.cli.paseo_seat_policy import preapproval_policy
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
@@ -406,13 +405,9 @@ class PaseoExplainerHost:
             "mcpServers": {SERVER_NAME: server},
             "systemPrompt": capsule,
         }
-        # The same grant a task agent's launch carries, from the same place (``paseo_launch``):
-        # the identity read, and the explainer's own four tools beside it, because only the seat
-        # calls them and a render or a grade must not wait on a prompt nobody answers. Every other
-        # tool stays with the seat's permission mode (MIK-R211 v5 rule 3: no confinement).
-        policy = preapproval_policy(
-            provider, SERVER_NAME, (*ROLE_IDENTITY_READ_TOOLS, *EXPLAINER_SURFACE)
-        )
+        # Add the explainer's own tools to the task-seat grant so a render or grade can run
+        # without waiting for a prompt. The shared policy supplies the provider's grant.
+        policy = preapproval_policy(provider, SERVER_NAME, EXPLAINER_SURFACE)
         if policy is not None:
             create["toolPolicy"] = policy
         for option, native in (

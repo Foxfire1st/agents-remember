@@ -27,6 +27,7 @@ from agents_remember.models.role_launcher import (
     RoleLauncherOptionsRequest,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.task_paths import slugify
 from paseo_launch_test_support import (
@@ -168,6 +169,12 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                             "prompt": self.first_message(request),
                             "systemPrompt": note,
                             "mcpServers": {"agents-remember-task": definition},
+                            "toolPolicy": {
+                                "preapproved": [
+                                    {"kind": "mcp", "server": "agents-remember-task", "tool": name}
+                                    for name in PUBLIC_TOOLS
+                                ]
+                            },
                         },
                     ),
                 )

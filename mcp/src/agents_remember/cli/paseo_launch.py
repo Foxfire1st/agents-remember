@@ -25,7 +25,7 @@ from __future__ import annotations
 import os
 import sys
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
@@ -48,6 +48,7 @@ from agents_remember.cli.paseo_bridge import (
     PaseoBridgeFailure,
     bridge_call,
 )
+from agents_remember.cli.paseo_seat_policy import preapproval_detail, preapproval_policy
 from agents_remember.errors import RolePreparationError
 from agents_remember.kernel._agentic_settings_core import EXTRA_ARGS_HARNESSES
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -95,20 +96,6 @@ _CARRIED_VARIABLES = (
 )
 TOOL_SERVER_APPLIED = "tool server applied"
 TOOL_SERVER_NOT_SUPPORTED = "tool server not applied: not supported by provider"
-ROLE_IDENTITY_READ_TOOLS = ("server_info",)
-
-
-def preapproval_policy(provider: str, server: str, tools: Sequence[str]) -> dict[str, Any] | None:
-    """The provider's own grant of ``tools`` on ``server`` (MIK-R71 rule 22), or ``None``.
-
-    Installed host applyClaudeToolPolicy grants by exact tool name and retains all other tools.
-    Codex's enabled_tools side effect prevents this same grant, so it gets none. Every launch that
-    grants tools asks here, so no other launch code names a harness.
-    """
-
-    if provider != "claude":
-        return None
-    return {"preapproved": [{"kind": "mcp", "server": server, "tool": name} for name in tools]}
 
 
 @dataclass(frozen=True, slots=True)
@@ -440,7 +427,7 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
         agent["mcpServers"] = {
             TOOL_SERVER_NAME: tool_server_definition(launch.settings_file, agent_binding(launch))
         }
-        policy = preapproval_policy(launch.provider, TOOL_SERVER_NAME, ROLE_IDENTITY_READ_TOOLS)
+        policy = preapproval_policy(launch.provider, TOOL_SERVER_NAME)
         if policy is not None:
             agent["toolPolicy"] = policy
     if launch.parent_agent_id:
@@ -601,13 +588,7 @@ def applied_to_agent(call: dict[str, Any]) -> dict[str, Any]:
     return {
         "toolServer": tool_server,
         "recoveryNote": agent["systemPrompt"],
-        "assignmentReadGrant": {
-            "server": TOOL_SERVER_NAME,
-            "preapproved": agent.get("toolPolicy", {}).get("preapproved", []),
-            "detail": "Claude per-tool session grant for server_info; other tools remain subject to the agent's permission mode"
-            if "toolPolicy" in agent
-            else "not applied: this provider has no supported per-tool route that retains the role server's other tools",
-        },
+        "assignmentReadGrant": _recorded_tool_grant(agent),
         **(
             {"serverExclusion": call["serverExclusion"]}
             if isinstance(call.get("serverExclusion"), dict)
@@ -621,6 +602,16 @@ def applied_to_agent(call: dict[str, Any]) -> dict[str, Any]:
             else {}
         ),
     }
+
+
+def _recorded_tool_grant(agent: dict[str, Any]) -> dict[str, Any]:
+    """Describe the grant carried in the stored call."""
+
+    grants = agent.get("toolPolicy", {}).get("preapproved", [])
+    detail = "This launch carries no per-tool approval."
+    if grants:
+        detail = preapproval_detail(agent["provider"])
+    return {"server": TOOL_SERVER_NAME, "preapproved": grants, "detail": detail}
 
 
 def run_launch_call(
