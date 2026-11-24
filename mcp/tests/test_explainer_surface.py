@@ -23,8 +23,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from agents_remember.application.agent_binding import TOOL_SERVER_NAME
 from agents_remember.canvas.explainer_paths import GENERATION_SUFFIX
 from agents_remember.canvas.explainer_state import ExplainerRefused, agent_id
+from agents_remember.cli.paseo_seat_policy import preapproval_policy
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.registration.explainer_surface import (
     EXPLAINER_BINDING_ENV,
@@ -82,6 +84,12 @@ def _advertised(server: Any) -> tuple[str, ...]:
     return tuple(sorted(tool.name for tool in asyncio.run(server.list_tools())))
 
 
+def _codex_approved(explainer_tools: tuple[str, ...] = ()) -> tuple[str, ...]:
+    policy = preapproval_policy("codex", TOOL_SERVER_NAME, explainer_tools)
+    assert policy is not None
+    return tuple(sorted(grant["tool"] for grant in policy["preapproved"]))
+
+
 def test_a_bound_server_advertises_ars_general_tools_and_exactly_the_explainers_four(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -94,7 +102,9 @@ def test_a_bound_server_advertises_ars_general_tools_and_exactly_the_explainers_
 
     assert EXPLAINER_SURFACE == ("define_category", "grade", "remove_category", "render")
     assert set(EXPLAINER_SURFACE).isdisjoint(PUBLIC_TOOLS)
-    assert _advertised(server) == tuple(sorted({*PUBLIC_TOOLS, *EXPLAINER_SURFACE}))
+    advertised = _advertised(server)
+    assert advertised == tuple(sorted({*PUBLIC_TOOLS, *EXPLAINER_SURFACE}))
+    assert _codex_approved(EXPLAINER_SURFACE) == advertised
 
 
 def test_a_bound_server_refuses_nothing_for_being_the_explainer(
@@ -157,6 +167,7 @@ def test_an_ordinary_server_keeps_the_full_roster(
     server = create_server(config)
 
     advertised = _advertised(server)
+    assert _codex_approved() == advertised
     assert len(advertised) > len(EXPLAINER_SURFACE)
     assert "worktree_start" in advertised and "role_message" in advertised
     # The explainer's four are not advertised on an ordinary server: it is the architect's

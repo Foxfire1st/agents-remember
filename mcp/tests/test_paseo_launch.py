@@ -14,6 +14,7 @@ from unittest.mock import patch
 from agents_remember.application.agent_binding import (
     AGENT_ID_VARIABLE,
     REQUEST_ID_VARIABLE,
+    TOOL_SERVER_NAME,
     AgentBinding,
 )
 from agents_remember.application.role_launch_context import RoleLaunchContext, selection_binding
@@ -40,6 +41,7 @@ from agents_remember.models.role_launcher import (
     RoleResultRequest,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document import TaskEnclosureRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
@@ -409,6 +411,21 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
             for path in self.root.rglob("*.json")
             if "-native-executions" in path.as_posix() and "message-bindings" not in path.parts
         )
+
+
+class LaunchToolApprovalTests(PaseoLaunchTestCase):
+    def test_codex_start_preapproves_its_task_server_roster(self) -> None:
+        request = self.request("worker", agentId="codex")
+        status, result = self.dispatch(request)
+        self.assertEqual((status, result["status"]), (200, "running"))
+
+        created = next(call for kind, call in self.runtime.launch_calls() if kind == "agent-create")
+        self.assertEqual(set(created["mcpServers"]), {TOOL_SERVER_NAME})
+        grants = [
+            {"kind": "mcp", "server": TOOL_SERVER_NAME, "tool": name} for name in PUBLIC_TOOLS
+        ]
+        self.assertEqual(created.get("toolPolicy"), {"preapproved": grants})
+        self.assertEqual(self.receipt(request)["assignmentReadGrant"]["preapproved"], grants)
 
 
 class LaunchRefusalTests(PaseoLaunchTestCase):

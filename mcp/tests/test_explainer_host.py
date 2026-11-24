@@ -20,6 +20,7 @@ from agents_remember.cli import paseo_explainer_host as host_module
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import LaunchSelectionRefused
 from agents_remember.errors import PaseoRuntimeFailure
+from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from canvas_host_test_support import REPO, TASK, config
 from explainer_host_test_support import CAPSULE, LEAF, SERVER_NAME, _host, _workspace
 
@@ -241,13 +242,7 @@ def test_the_seat_is_created_with_the_capsule_and_no_first_prompt(
 def test_the_policy_is_a_task_agents_with_the_four_tools_granted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """MIK-R211 v5 rule 3: the seat's grant is a task agent's, never a list that confines it.
-
-    Claude's host grants by exact name and keeps every other tool, so the identity read and the
-    four kept tools are granted and the harness's and AR's general tools stay with the permission
-    mode. Codex's route would remove every tool not listed, so it gets no grant, as a task agent's
-    launch does not.
-    """
+    """The explainer adds its four tools to the grant its provider gives a task seat."""
 
     created: dict[str, dict] = {}
     for provider in ("claude", "codex"):
@@ -271,10 +266,14 @@ def test_the_policy_is_a_task_agents_with_the_four_tools_granted(
             labels={"ar.capability": "review-explainer", "ar.repository": REPO, "ar.task": TASK},
         )
 
-    granted = {entry["tool"] for entry in created["claude"]["toolPolicy"]["preapproved"]}
-    assert granted == {"server_info", *EXPLAINER_SURFACE}
     assert set(EXPLAINER_SURFACE) == {"render", "define_category", "remove_category", "grade"}
-    assert "toolPolicy" not in created["codex"]
+    for provider, names in (
+        ("claude", ("server_info", *EXPLAINER_SURFACE)),
+        ("codex", (*PUBLIC_TOOLS, *EXPLAINER_SURFACE)),
+    ):
+        assert created[provider]["toolPolicy"]["preapproved"] == [
+            {"kind": "mcp", "server": SERVER_NAME, "tool": name} for name in names
+        ]
 
 
 def test_the_seat_is_instructed_with_the_capability_its_loader_admits() -> None:

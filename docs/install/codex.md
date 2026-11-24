@@ -76,8 +76,14 @@ The keys of Agents Remember stand in two files. The user settings file is
 reference](../reference/settings-json.md) shows the two commands that open and close it. The
 settings file is `~/.config/agents-remember/agents-remember-settings.json`.
 
-- **A role agent on Codex can ask before a call of a tool of Agents Remember, and waits until you
-  answer.** Without a mode in the user settings file, the agent starts in the default mode that the
+- **A new Codex role seat starts with every tool on its own `agents-remember-task` server approved.**
+  Resumed or reloaded seats keep their startup grant, and tools added by later builds require
+  replacing the seat.
+  - Checked in the Paseo 0.16.2 source for which grant the host restores on resume or reload.
+    In one sandbox startup in `auto-review`, the Codex seat completed a `task_doc` write through
+    its own task server, and `paseo permit ls` returned no pending permissions.
+- **The seat's approval mode governs shell commands and other tool servers.** Without a mode in the
+  user settings file, the agent starts in the default mode that the
   host names for Codex, `auto-review`. Agents Remember picks no mode of its own.
   - Setting: `orchestration.roles.<role>.mode` in the user settings file, for example
     `"auto-review"`. The host offers `auto`, `auto-review` and `full-access` for Codex. In the mode
@@ -88,10 +94,8 @@ settings file is `~/.config/agents-remember/agents-remember-settings.json`.
   - Who: you state the mode. Agents Remember sends it with the start, and the role launcher's
     "Role mode override" chooses one for the chat it starts, with the source "start call". You
     change the mode of a running agent in its chat.
-  - Checked: the start mode and the key, in the code of Agents Remember; the modes, the approval
-    policy of each and the reviewer each names, in the source of the host this build installs; the
-    automatic approval review and its stage, in the feature list of Codex 0.166.0; and a role agent
-    in this mode, whose call of an Agents Remember tool waited for an answer from outside.
+  - Checked in source: the launch's mode and settings key in Agents Remember, and the modes,
+    policies and reviewers in the installed host.
 - **Agents Remember tool calls in Codex role seats use Codex's 300-second default.** Paseo 0.16.2
   passes the seat's standard I/O or HTTP connection settings without a per-server timeout.
   Codex rejects a table containing only `tool_timeout_sec` in `config.toml` because a server
