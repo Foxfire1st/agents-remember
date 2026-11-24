@@ -108,7 +108,7 @@ def with_recomputed_worklist(
     """Attach the recomputed worklist's summary to a completed sync's result, where one applies.
 
     Used by the finalization and by the ``continue`` replay of a completed generation, so both
-    report the worklist of the base pair the sync wrote. The result is otherwise untouched.
+    report the worklist against the bases in the saved contract.
     """
 
     worklist = recompute_knowledge_worklist(contract)
@@ -120,11 +120,9 @@ def with_recomputed_worklist(
 def recompute_knowledge_worklist(contract: WorktreeContract) -> dict[str, object] | None:
     """MIK-R08 rule 8: a completed managed sync recomputes the leaf's worklist.
 
-    The sync moved the base pair, so B and K_B moved with it. The bound port computes and persists
-    the worklist and returns its summary; with no port bound (or no worklist applicable, every
-    unconverted leaf) the sync result is exactly what it was. It runs after the completed journal is
-    published, so nothing it does may fail the sync: any failure here -- reading the contract, the
-    port itself -- leaves the summary out and the completed result as it was.
+    Reload the saved contract so the worklist uses the bases the sync recorded or retained.
+    After journal publication, the bound port computes and persists an applicable worklist and
+    returns its summary. An unbound port or an inapplicable worklist produces no summary.
     """
 
     try:

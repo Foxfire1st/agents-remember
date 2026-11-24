@@ -347,8 +347,7 @@ class QueueFixture:
             git(self.memory, "add", "memory.md", "knowledge/layout.json")
         else:
             git(self.memory, "add", "memory.md")
-        # The base commit pairs the memory line with the code base (Code-Commit trailer), so
-        # the invariant gate can read the pairing on converted fixtures (MIK-R46 rule 8).
+        # This commit is the recorded memory base for the converted gate fixtures.
         git(
             self.memory,
             "commit",

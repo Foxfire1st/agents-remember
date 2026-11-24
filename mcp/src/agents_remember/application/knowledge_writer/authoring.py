@@ -176,11 +176,9 @@ class Authoring(RepointRowAuthoring):
     # The persisted worklist's onboarding items' covered sources by subject (MIK-R53 rule 1).
     onboarding_sources: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     # The persisted worklist's onboarding items' counted change by subject (MIK-R53 rule 2):
-    # the gate's own base, which the writer's ``updated`` check follows instead of own HEAD
-    # when no paired base is named.
+    # the gate's comparison when the writer's updated-row check cannot read the recorded base.
     onboarding_counted: Mapping[str, bool] = field(default_factory=dict)
-    # The leaf's paired memory base commit (the gate's K_B): the card comparison's base, which
-    # a persisted worklist flag never overrides (MIK-R53 rule 2); ``None`` keeps own HEAD.
+    # The leaf's recorded memory base for a fresh card comparison.
     memory_base: str | None = None
     coordination_root: Path | None = None
     # The stamp of this operation's caller, resolved once by the write's route.

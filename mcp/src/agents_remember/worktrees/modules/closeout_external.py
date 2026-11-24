@@ -464,7 +464,11 @@ def leaf_pair_refusal(
         paired_code=PairedCode(repository=code_repository, commit=code_commit),
         leaf_publication=LeafPublication(memory_commit, tuple(bases), frozen=frozen),
     ) or leaf_gate_refusal(
-        contract, code_tree=code_tree, memory_tree=memory_tree, persist_worklist=persist_worklist
+        contract,
+        code_tree=code_tree,
+        memory_tree=memory_tree,
+        persist_worklist=persist_worklist,
+        memory_commit=memory_commit,
     )
 
 

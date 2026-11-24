@@ -1,3 +1,4 @@
+import type { PluginThemeColors } from "@getpaseo/plugin";
 import type { PluginClientContext, PluginScreenProps } from "@getpaseo/plugin/client";
 import { useEffect } from "react";
 import { View } from "react-native";
@@ -71,7 +72,14 @@ export default function contribute(client: PluginClientContext) {
       accent: "#ffb330",
       mutedForeground: "#95a0ab",
       ring: "#44e7ef",
-    },
+      // Match the fills and faint text that Paseo used before it began deriving them.
+      sidebar: "#070e16",
+      sidebarHover: "#0f171f",
+      sidebarSelected: "#1a222b",
+      surface3: "#262f38",
+      surface4: "#44e7ef",
+      foregroundExtraMuted: "#44e7ef",
+    } satisfies Required<PluginThemeColors>,
   });
   client.addScreen({ id: OPEN_SCREEN_ID, title: "Opening", Component: OpenTarget });
 

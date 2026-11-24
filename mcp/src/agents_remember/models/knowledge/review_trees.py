@@ -153,6 +153,11 @@ class ReviewTreeComparisonRecord(KnowledgeModel):
             and self.converted_base == other.converted_base
         )
 
+    def same_live_comparison(self, other: ReviewTreeComparisonRecord) -> bool:
+        """Whether a captured live view can reuse the record and its worklist binding."""
+
+        return self.memory_base.commit == other.memory_base.commit and self.same_trees(other)
+
 
 class ReviewKnowledgeSide(KnowledgeModel):
     """One memory side as the reviewer read it: its tree, its state and its index's state.

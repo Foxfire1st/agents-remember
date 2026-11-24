@@ -523,7 +523,7 @@ def test_mixed_formats_are_an_incomplete_side_never_a_vacuous_pass(leaf: Leaf) -
         persisted = json.loads(Path(found[1]).read_text(encoding="utf-8"))
         assert persisted["state"] == "incomplete" and persisted["items"] == []
 
-    marker.unlink()  # K_C unconverted; K_B (the official line) is converted
+    marker.unlink()  # K_C is unconverted and the recorded K_B is converted.
     refused_and_incomplete("K_C is unconverted")
     git(leaf.memory, "rm", "-q", "--cached", "knowledge/layout.json")
     leaf.memory_base = commit(leaf.memory, {}, trailer=leaf.code_base)  # K_B unconverted now
@@ -596,10 +596,9 @@ def test_unreadable_history_and_unestablished_sides_are_findings_never_a_pass(
         code_blobs=worktree_code_blobs(leaf.code, [A]),
     )
     assert not incomplete.ok and "pairing: none" in incomplete.repair_findings()[0]["message"]
-    # A base no official memory commit pairs with (MIK-R07 rule 0) is an incomplete side, named.
-    git(leaf.code, "checkout", "-q", "--orphan", "elsewhere")
-    stranger = commit(leaf.code, {"new.py": "N = 1\n"})
-    leaf.code_base = stranger
+    # The recorded memory base cannot be read.
+    stranger = "0" * 40
+    leaf.memory_base = stranger
     sides = leaf_onboarding_trace_sides(load_contract(leaf.contract()))
     assert sides is not None and sides.incomplete is not None and stranger in sides.incomplete
     (finding,) = onboarding_trace_result(

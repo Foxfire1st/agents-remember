@@ -138,8 +138,8 @@ Agents Remember keeps its own files in the host's home under `<home>/agents-reme
 | `plugin-loaded.json` | which plug-in files and which embed list the running plug-in loaded | the install |
 | `runtime.lock`, `start-outcome.json` | the lock that lets one install or start run at a time, and the result of the last start | installs and starts |
 | `config-previous.json` | the host's configuration as it was before a change of the provider entries; present only until the host accepted the change | the install |
-| `role-agents.json` | for each started role agent, its role, its task and the path of its report file; the plug-in reads them | `role_start` |
-| `host-activity.json` | what the host's agents do, for the dashboard | the plug-in |
+| `role-agents.json` | each registered role agent's role, task and report path; a closed session keeps its record | Agents Remember's Python registration and dashboard reconciliation |
+| `host-activity.json` | the host activity the dashboard reads, including `closed` for a resumable session and `ended` with `archivedAt` for an archive | the plug-in |
 | `acp-providers.json` | which harnesses the host runs over the Agent Client Protocol | the plug-in |
 | `provider-limits.json` | the provider limits: for each usage report of the host that shows a used-up limit of a [model provider](../concepts.md#model-provider) account, the time work may resume; and for each role agent, the reports that its last usage read named | the product |
 | `turn-ends.jsonl` | one JSON line for each message the plug-in sent back to an agent, each line it sent to a parent agent and each turn end it left alone | the plug-in |

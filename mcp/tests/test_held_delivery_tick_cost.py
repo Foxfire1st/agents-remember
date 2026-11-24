@@ -189,6 +189,26 @@ def test_a_new_stamped_end_still_makes_exactly_one_usage_read(tmp_path: Path, mo
     assert tick.reads == [[AGENT]]
 
 
+def test_a_close_releases_the_turn_wait_without_triggering_a_usage_read(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = _config(tmp_path)
+    _register(config, [AGENT])
+    _publish(
+        config, {AGENT: {"state": "closed", "eventAt": NOW.isoformat(), "runningSubagents": 1}}
+    )
+    deliveries: list[list[str]] = []
+    monkeypatch.setattr(held, "deliver_ended_turns", lambda _config, ids: deliveries.append(ids))
+    tick = _Ticker(config)
+
+    tick()
+    tick()
+
+    assert deliveries == [[AGENT]]
+    assert tick.reads == []
+    assert activity.running_subagents(cast(McpRuntimeConfig, config), AGENT) == 0
+
+
 def test_a_written_publication_is_read_again(tmp_path: Path, monkeypatch) -> None:
     """The cache is bound to the content: a new publication is a new input."""
 

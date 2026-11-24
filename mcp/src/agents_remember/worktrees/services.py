@@ -297,6 +297,15 @@ class DirectGateVerdict:
     source: DirectGateSource | None = None
 
 
+@dataclass(frozen=True)
+class CandidateTrees:
+    """Exact code and memory trees, with the memory commit when judging a committed pair."""
+
+    code: str
+    memory: str
+    memory_commit: str | None = None
+
+
 class KnowledgeGatePort(Protocol):
     """MIK-R09: the mandatory invariant gate at every route that commits or lands memory.
 
@@ -307,9 +316,8 @@ class KnowledgeGatePort(Protocol):
     def leaf_refusal(
         self,
         contract: WorktreeContract,
+        candidate: CandidateTrees,
         *,
-        code_tree: str,
-        memory_tree: str,
         parent_memory_tip: str | None,
         persist_worklist: bool = True,
     ) -> str | None: ...

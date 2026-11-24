@@ -139,6 +139,7 @@
 //            with an open session: reading the timeline of a closed session makes the runtime
 //            resume it.
 //
+//   role-registry  {agentIds?: string[]} -> {serverId, agents, complete, absent?, exactReads?}
 //   agents-live  {}
 //            -> {serverId, agentIds: string[], complete: boolean}
 //            The ids of the agents the runtime holds that are not archived, from one listing read
@@ -261,7 +262,7 @@
 
 import { failure, nonEmpty, optionalText, requiredText, serverIdOf } from './paseo_bridge_primitives.mjs'
 import { openWorkspace } from './paseo_workspaces.mjs'
-import { listLiveAgents } from './paseo_live_agents.mjs'
+import { listLiveAgents, readRoleRegistry } from './paseo_live_agents.mjs'
 import { sendExtras } from './paseo_send_attachments.mjs'
 import { readFileSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -284,6 +285,7 @@ const COMMANDS = {
   'presenter-cancel': presenterCancel,
   'agent-cancel': cancelSeat,
   'agents-live': listLiveAgents,
+  'role-registry': readRoleRegistry,
   'agent-resume': resumeAgent,
   'agent-send': sendToAgent,
   'agent-has-message': agentHasMessage,

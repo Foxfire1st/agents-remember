@@ -5,14 +5,18 @@ import json
 import select
 import shutil
 import subprocess
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import patch
 
-from agents_remember.cli import paseo_warmup
+import pytest
+from agents_remember.cli import paseo_warmup, role_registry_recovery
 from agents_remember.cli.paseo_status import HostStartIdentity, LiveAgents
 from agents_remember.cli.paseo_warmup_state import WarmupTracker
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleSelection
 from agents_remember.observer.task_entries import task_state
 from agents_remember.serving import _app_lifespan as serving
@@ -22,22 +26,28 @@ from agents_remember.serving.paseo.paseo_plugin_files import (
     plugin_source_root,
     publish_role_agent,
     read_role_agents,
+    role_agents_path,
 )
 from agents_remember.serving.projections.host_activity import HostActivityInput
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+from test_paseo_role_agents import ACTIVE, HEALED, UNRECORDED, _host_view, _receipt, runtime_config
 from test_paseo_status import StatusTestCase as _StatusTestCase
 
 _PUBLISHER_DRIVER = """
 const [source, home] = process.argv.slice(1);
 const { HostActivityPublisher } = await import(source + '/host_activity.ts');
 const { readRoleAgents } = await import(source + '/role_agents.ts');
-const { writeFileSync } = await import('node:fs');
+const { renameSync, writeFileSync } = await import('node:fs');
 const { createInterface } = await import('node:readline');
+const target = home + '/agents-remember/host-activity.json';
 let publisher;
 for await (const line of createInterface({input: process.stdin})) {
   const step = JSON.parse(line);
   if (step.boot) publisher = new HostActivityPublisher(() => readRoleAgents(home),
-    publication => writeFileSync(home + '/agents-remember/host-activity.json', JSON.stringify(publication)),
+    publication => {
+      writeFileSync(target + '.tmp', JSON.stringify(publication));
+      renameSync(target + '.tmp', target);
+    },
     () => new Date().toISOString(), step.boot);
   if (step.agents) await publisher.reconcile({ agents: { async list() { return {
     entries: step.agents.map(agent => ({agent: {pendingPermissions: [], ...agent}})),
@@ -88,6 +98,168 @@ class _HostPublisher:
                 self.process.communicate()
 
 
+def _reconciled_publication(
+    publisher: _HostPublisher, home: Path, agents: tuple[str, ...], sequence: int
+) -> dict[str, object]:
+    publisher.step(
+        agents=[
+            {
+                "id": agent_id,
+                "status": "running",
+                "activeTurn": {"startedAt": "2026-11-23T12:00:00Z"},
+            }
+            for agent_id in agents
+        ]
+    )
+    publication = json.loads(role_agents_path(home).with_name("host-activity.json").read_text())
+    return {"serverId": "host", "publication": {**publication, "reconcile": sequence}}
+
+
+@pytest.mark.parametrize("failure", ["inventory", "boot-changed"])
+def test_dashboard_retries_unqualified_registry_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    home = tmp_path / "host"
+    config = runtime_config(tmp_path, home)
+    _receipt(config, HEALED, "leaf")
+    home.joinpath("agents-remember").mkdir(parents=True)
+    calls: list[str] = []
+    with closing(_HostPublisher(tmp_path, home)) as publisher:
+        publisher.step(boot="first")
+
+        def bridge(
+            _config: McpRuntimeConfig, command: str, payload: dict[str, object]
+        ) -> dict[str, object]:
+            calls.append(command)
+            assert payload == {}
+            if command == "role-registry":
+                if calls.count(command) == 1:
+                    return {"complete": False} if failure == "inventory" else _host_view()
+                return _host_view(HEALED)
+            if failure == "boot-changed" and calls.count(command) == 1:
+                publisher.step(boot="second")
+            return _reconciled_publication(publisher, home, (HEALED,), 1)
+
+        monkeypatch.setattr(role_registry_recovery, "bridge_call", bridge)
+        reader = HostActivityInput(
+            role_registry_recovery.RoleRegistryActivityReader(), lambda: True
+        )
+        first = reader.read(config)
+        assert not first.known
+        assert HEALED not in read_role_agents(home)
+
+        publisher.step(event="agent.turn_started", id=HEALED)
+        repaired = reader.read(config)
+        assert repaired.known
+        assert [agent.agent_id for agent in repaired.agents] == [HEALED]
+        assert repaired.agents[0].activity.state == "in-turn"
+        expected = ["role-registry"]
+        if failure == "boot-changed":
+            expected.append("host-activity-snapshot")
+        assert calls == [*expected, "role-registry", "host-activity-snapshot"]
+
+
+@pytest.mark.parametrize(
+    "trigger", ["host-event", "event-during-inventory", "plugin-boot", "dashboard-start"]
+)
+def test_incomplete_recovery_retries_only_on_independent_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, trigger: str
+) -> None:
+    home = tmp_path / "host"
+    config = runtime_config(tmp_path, home)
+    _receipt(config, HEALED, "leaf")
+    role_agents_path(home).parent.mkdir(parents=True)
+    calls: list[str] = []
+    inventory_complete = False
+    with closing(_HostPublisher(tmp_path, home)) as publisher:
+        publisher.step(boot="first")
+
+        def bridge(
+            _config: McpRuntimeConfig, command: str, payload: dict[str, object]
+        ) -> dict[str, object]:
+            calls.append(command)
+            assert payload == {}
+            if command == "host-activity-snapshot":
+                return _reconciled_publication(publisher, home, (HEALED,), 1)
+            assert command == "role-registry"
+            if inventory_complete:
+                return _host_view(HEALED)
+            if trigger == "event-during-inventory":
+                publisher.step(event="agent.turn_started", id=HEALED)
+            return {"serverId": "host", "complete": False, "agents": []}
+
+        monkeypatch.setattr(role_registry_recovery, "bridge_call", bridge)
+        reader = HostActivityInput(
+            role_registry_recovery.RoleRegistryActivityReader(), lambda: True
+        )
+        assert not reader.read(config).known
+        assert HEALED not in read_role_agents(home)
+        if trigger != "event-during-inventory":
+            for _ in range(3):
+                assert not reader.read(config).known
+            assert calls.count("role-registry") == 1
+        inventory_complete = True
+        if trigger == "host-event":
+            publisher.step(event="agent.turn_started", id=HEALED)
+        elif trigger == "plugin-boot":
+            publisher.step(boot="second")
+        elif trigger == "dashboard-start":
+            reader = HostActivityInput(
+                role_registry_recovery.RoleRegistryActivityReader(), lambda: True
+            )
+        snapshot = reader.read(config)
+        assert snapshot.known
+        assert snapshot.boot_id == ("second" if trigger == "plugin-boot" else "first")
+        assert [agent.agent_id for agent in snapshot.agents] == [HEALED]
+        assert read_role_agents(home)[HEALED]["reportPath"] == "/from-receipt.md"
+        assert calls == ["role-registry", "role-registry", "host-activity-snapshot"]
+
+
+def test_dashboard_heals_a_missing_seat_before_each_boot_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "host"
+    config = runtime_config(tmp_path, home)
+    home.joinpath("agents-remember").mkdir(parents=True)
+    calls: list[str] = []
+    live = (HEALED, UNRECORDED)
+    sequence = 7
+    with closing(_HostPublisher(tmp_path, home)) as publisher:
+
+        def bridge(
+            _config: McpRuntimeConfig, command: str, payload: dict[str, object]
+        ) -> dict[str, object]:
+            calls.append(command)
+            assert payload == {}
+            if command == "role-registry":
+                return _host_view(*live)
+            return _reconciled_publication(publisher, home, live, sequence)
+
+        monkeypatch.setattr(role_registry_recovery, "bridge_call", bridge)
+        reader = HostActivityInput(
+            role_registry_recovery.RoleRegistryActivityReader(), lambda: True
+        )
+        for boot, restored in (("first", HEALED), ("second", ACTIVE)):
+            _receipt(config, restored, "leaf")
+            assert restored not in read_role_agents(home)
+            publisher.step(boot=boot)
+            snapshot = reader.read(config)
+            assert snapshot.known and snapshot.boot_id == boot
+            assert {agent.agent_id for agent in snapshot.agents} == set(live) - {UNRECORDED}
+            assert snapshot.ignored_agents == 1
+            published = json.loads(
+                role_agents_path(home).with_name("host-activity.json").read_text()
+            )
+            assert published["ignoredEvents"] == 1
+            assert UNRECORDED not in published["agents"]
+            assert UNRECORDED not in read_role_agents(home)
+            assert read_role_agents(home)[restored]["reportPath"] == "/from-receipt.md"
+            live = (HEALED, ACTIVE, UNRECORDED)
+            sequence = 1
+
+    assert calls == ["role-registry", "host-activity-snapshot"] * 2
+
+
 class TestRoleRevivalRegistration(_StatusTestCase):
     def test_warmup_driver_after_the_new_boots_listing(self):
         self._restart_then_reopen("listing-first")
@@ -110,7 +282,7 @@ class TestRoleRevivalRegistration(_StatusTestCase):
         publication = home / "agents-remember/host-activity.json"
         publisher.step(boot="B1", agents=[{"id": agent_id, "status": "idle"}])
         publisher.step(event="agent.closed", id=agent_id)
-        assert json.loads(publication.read_text())["agents"][agent_id]["state"] == "ended"
+        assert json.loads(publication.read_text())["agents"][agent_id]["state"] == "closed"
         agent["status"] = "closed"  # The persisted session after the old host shut down.
         publisher.step(boot="B2")
         assert json.loads(publication.read_text()) == {
@@ -130,8 +302,8 @@ class TestRoleRevivalRegistration(_StatusTestCase):
             assert agent_id in read_role_agents(home)
             if order != "listing-first":
                 publisher.step(agents=[{"id": agent_id, "status": "closed"}])
-            assert json.loads(publication.read_text())["agents"][agent_id] == {"state": "ended"}
-            # A different launch races the in-flight resume and its stale close.
+            assert json.loads(publication.read_text())["agents"][agent_id] == {"state": "closed"}
+            # A different launch races the in-flight resume of the closed seat.
             publish_role_agent(home, "concurrent-launch", expected)
             assert agent_id in read_role_agents(home)
             return resume(payload)
@@ -158,20 +330,25 @@ class TestRoleRevivalRegistration(_StatusTestCase):
         assert snapshot.known
         state = task_state("inProgress", [row.activity for row in snapshot.agents], host_known=True)
         assert state.activity == "works"
-        self._assert_end_reclaimers(publisher, home, agent_id, expected)
+        self._assert_archive_reclaims(publisher, home, agent_id, expected)
 
     @staticmethod
-    def _assert_end_reclaimers(publisher, home, agent_id, expected):
-        # Later native ends reclaim the registration, even after successful reopening.
+    def _assert_archive_reclaims(publisher, home, agent_id, expected):
         now = datetime.now(UTC)
-        for event in ("agent.closed", "agent.archived"):
-            publisher.step(event=event, id=agent_id, at=(now + timedelta(seconds=1)).isoformat())
-            publish_role_agent(home, "next-launch", expected)
-            assert agent_id not in read_role_agents(home)
-            publish_role_agent(home, agent_id, expected)
-            now += timedelta(seconds=2)
+        publisher.step(event="agent.closed", id=agent_id, at=now.isoformat())
+        publish_role_agent(home, "next-launch", expected)
+        assert agent_id in read_role_agents(home)
+
         publisher.step(boot="B3", agents=[{"id": agent_id, "status": "closed"}])
         publish_role_agent(home, "new-boot-launch", expected)
+        assert agent_id in read_role_agents(home)
+
+        archived_at = now + timedelta(seconds=1)
+        publisher.step(event="agent.archived", id=agent_id, at=archived_at.isoformat())
+        publisher.step(
+            event="agent.closed", id=agent_id, at=(archived_at + timedelta(seconds=1)).isoformat()
+        )
+        publish_role_agent(home, "post-archive-launch", expected)
         assert agent_id not in read_role_agents(home)
 
     def _drive_restart_warmup(self, request, agent_id):

@@ -8,12 +8,12 @@ The worklist remains isolated in the package's child process.
 (:func:`agents_remember.application.knowledge_gate.memo.memo_key`) plus the comparison's base trees:
 
 * the exact captured code tree C and memory tree K_C (content-addressed Git tree IDs);
-* the contract's identity: its path and the SHA-256 of its bytes, which carry B and every branch;
-* the parent line's memory tip (the line K_B pairs on) and the leaf's own memory ``HEAD``;
+* the contract's identity: its path and the SHA-256 of its bytes, which carry the base pair and branch names;
+* the parent line's memory tip and the leaf's own memory ``HEAD``;
 * the SHA-256 of the leaf's task document (its maintenance scope and declared effects);
 * the bytes of the task documents the lookup actually consumed for this leaf (``task_reads``);
 * the build that computed it (``measuring_build_stamp``);
-* the code base tree, K_B's tree, and the tree K_B is compared as (its conversion when K_B is
+* the code base tree, K_B's commit and tree, and the tree K_B is compared as (its conversion when K_B is
   unconverted), exactly as the comparison record names them;
 * the exact JSON bytes the strict task lookup parsed while establishing that request identity.
 
@@ -103,7 +103,7 @@ class LeafViewKey:
 
     gate: gate_memo.GateMemoKey
     code_base: str
-    memory_base: str
+    memory_base: tuple[str | None, str]
     memory_before: str
     task_root: str
     task_reads: tuple[tuple[str, str], ...]
@@ -150,7 +150,7 @@ def leaf_view_key(contract: WorktreeContract, trees: ReviewTrees) -> LeafViewKey
     except (RuntimeError, OSError, subprocess.SubprocessError):
         return None
     if parent_tip is None:
-        return None  # the line K_B pairs on cannot be named, so the view is not a function of a key
+        return None  # the parent memory tip is part of the shared gate key
     with recorded_reads() as reads:
         gate = gate_memo.memo_key(
             contract,
@@ -164,7 +164,7 @@ def leaf_view_key(contract: WorktreeContract, trees: ReviewTrees) -> LeafViewKey
     return LeafViewKey(
         gate=gate,
         code_base=record.code_base.tree,
-        memory_base=record.memory_base.tree,
+        memory_base=(record.memory_base.commit, record.memory_base.tree),
         memory_before=trees.before.wire.tree,
         task_root=contract.task_root.resolve().as_posix(),
         task_reads=_task_reads(contract.task_root.resolve().as_posix(), reads),

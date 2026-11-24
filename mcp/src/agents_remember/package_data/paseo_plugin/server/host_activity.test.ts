@@ -74,12 +74,43 @@ test("host transitions preserve permission waits through turn end and individual
   h.publisher.note("agent.permission_requested", "known", TIME, "p3");
   h.publisher.note("agent.permission_resolved", "known", TIME, "p3");
   assert.equal(h.latest().agents.known.state, "in-turn");
-  for (const event of ["agent.archived", "agent.closed"] as const) {
-    h.publisher.note(event, "known");
-    assert.equal(h.latest().agents.known.state, "ended");
-    h.publisher.note("agent.created", "known");
-    assert.equal(h.latest().agents.known.state, "idle");
-  }
+  h.publisher.note("agent.archived", "known");
+  assert.equal(h.latest().agents.known.state, "ended");
+  h.publisher.note("agent.created", "known");
+  assert.equal(h.latest().agents.known.state, "idle");
+});
+
+test("a host listing keeps a closed seat visible and its next turn counts as work", async () => {
+  const h = harness();
+  await h.publisher.reconcile(reader([agent({ status: "closed" })]));
+  assert.deepEqual(h.latest().agents.known, { state: "closed" });
+  assert.equal(h.latest().ignoredEvents, 0);
+
+  h.publisher.note("agent.turn_started", "known");
+  assert.deepEqual(h.latest().agents.known, { state: "in-turn", eventAt: TIME });
+});
+
+test("closing a seat clears its prompt and the next turn opens it", async () => {
+  const h = harness();
+  h.publisher.note("agent.turn_started", "known");
+  h.publisher.note("agent.permission_requested", "known", TIME, "prompt");
+
+  h.publisher.note("agent.closed", "known");
+  assert.deepEqual(h.latest().agents.known, { state: "closed", eventAt: TIME });
+
+  h.publisher.note("agent.turn_started", "known");
+  assert.deepEqual(h.latest().agents.known, { state: "in-turn", eventAt: TIME });
+});
+
+test("a close following archive preserves the archive state and time", async () => {
+  const h = harness();
+  const archive = { state: "ended", eventAt: TIME, archivedAt: TIME };
+  await h.publisher.reconcile(reader([agent({ status: "closed", archivedAt: TIME })]));
+  assert.deepEqual(h.latest().agents.known, archive);
+
+  h.publisher.note("agent.archived", "known", TIME);
+  h.publisher.note("agent.closed", "known", "2026-10-15T00:02:00Z");
+  assert.deepEqual(h.latest().agents.known, archive);
 });
 
 test("events during the full listing win; all pages are read and event time survives reconnect", async () => {

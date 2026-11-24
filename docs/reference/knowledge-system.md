@@ -217,8 +217,13 @@ the review fact is no gate.
 
 A task's [worklist](../concepts.md#worklist-and-knowledge-gate) compares four sides: the base code
 tree, the base memory tree, the candidate code tree and the candidate memory tree (the
-[candidate](../concepts.md#candidate) is what the task wants to commit). It records the knowledge
-the changes reach, the facts for each item and any declared planned effects. Each item has a
+[candidate](../concepts.md#candidate) is what the task wants to commit). For a leaf, the base
+trees come from the commits in its [worktree contract](../concepts.md#worktree-contract).
+The recorded memory base must be an ancestor of the memory worktree's HEAD for a live
+comparison, or of the candidate memory commit when judging a pair of commits.
+
+The worklist records the knowledge the changes reach, the facts for each item and any
+declared planned effects. Each item has a
 kind: `touched_invariant` and `stale_invariant` for invariants, `reached_family` and
 `family_route_condition` for families and their routes, `unexplained_hunk` and `unexplained_file`
 for source changes that no knowledge explains, `onboarding_trace` for cards and route overviews,

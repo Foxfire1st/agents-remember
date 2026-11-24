@@ -240,7 +240,7 @@ def _kinds(document: dict[str, Any]) -> set[tuple[str, str]]:
     return {(item["kind"], item["subject"]) for item in document["items"]}
 
 
-def test_a_leaf_pairs_k_b_by_trailer_follows_its_sync_and_persists_beside_its_contract(
+def test_a_leaf_reads_its_recorded_base_pair_and_persists_beside_its_contract(
     leaf: Leaf,
 ) -> None:
     # The official memory line moves on: a later code commit and a memory commit naming it.
@@ -255,7 +255,7 @@ def test_a_leaf_pairs_k_b_by_trailer_follows_its_sync_and_persists_beside_its_co
     contract = leaf.contract()
     document = leaf_worklist(load_contract(contract))
     assert document is not None and document["state"] == "complete"
-    # B is the fork point: K_B is the memory commit naming it, not the later one.
+    # Both bases are still the recorded fork points.
     assert document["pairing"]["memoryBase"]["commit"] == leaf.memory_base
     assert document["pairing"]["base"]["commit"] == leaf.code_base
     assert ("touched_invariant", "INV-AAAAAA") in _kinds(document)
@@ -272,26 +272,25 @@ def test_a_leaf_pairs_k_b_by_trailer_follows_its_sync_and_persists_beside_its_co
     assert persisted == document
     assert not (leaf.memory / WORKLIST_FILE_NAME).exists()
 
-    # After a sync the base is the later code commit, so K_B is the later memory commit.
+    # A participating sync records both later commits.
+    leaf.memory_base = later_memory
     synced = leaf_worklist(load_contract(leaf.contract(base=later_code)))
     assert synced is not None
     assert synced["pairing"]["memoryBase"]["commit"] == later_memory
     touched = next(item for item in synced["items"] if item["kind"] == "touched_invariant")
     assert touched["facts"]["record"]["changed"] is False
-    # A base no memory commit names directly pairs with the newest one naming an ancestor.
+    # A code-only sync advances B while retaining the recorded memory base.
     newest = commit(leaf.code, {"pkg/c.py": "Y = 2\n"})
     ancestor = leaf_worklist(load_contract(leaf.contract(base=newest)))
     assert ancestor is not None
     assert ancestor["pairing"]["memoryBase"]["commit"] == later_memory
 
 
-def test_a_base_no_memory_commit_pairs_with_is_incomplete_naming_the_pairing(leaf: Leaf) -> None:
-    git(leaf.code, "checkout", "-q", "--orphan", "elsewhere")
-    stranger = commit(leaf.code, {"z.py": "Z = 0\n"})
-    git(leaf.code, "checkout", "-q", "main")
-    document = leaf_worklist(load_contract(leaf.contract(base=stranger)))
+def test_a_missing_recorded_memory_base_is_named_incomplete(leaf: Leaf) -> None:
+    leaf.memory_base = ""
+    document = leaf_worklist(load_contract(leaf.contract()))
     assert document is not None and document["state"] == "incomplete"
-    assert document["incomplete"][0]["input"] == "pairing"
+    assert document["incomplete"][0]["input"] == "K_B"
 
 
 def test_the_task_documents_maintenance_scope_classifies_every_entry(leaf: Leaf) -> None:
@@ -550,7 +549,7 @@ def test_a_proof_authored_through_the_writer_raises_its_invariant_when_its_test_
     )
     assert report.state == "written", report.render()
     (proof,) = json.loads((leaf.memory / f"onboarding/{test_file}.json").read_text())["proves"]
-    commit(leaf.memory, {}, trailer=code_commit)
+    leaf.memory_base = commit(leaf.memory, {}, trailer=code_commit)
     (leaf.code / test_file).write_text(test_source.replace("land(1) == 1", "land(2) == 2"))
     document = leaf_worklist(load_contract(leaf.contract(base=code_commit)))
     assert document is not None and document["state"] == "complete"

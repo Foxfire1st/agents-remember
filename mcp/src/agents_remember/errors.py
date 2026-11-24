@@ -19,6 +19,10 @@ class AgentsRememberError(ValueError):
     """Base class for all Agents Remember domain errors."""
 
 
+class RecordedMemoryBaseError(AgentsRememberError):
+    """The recorded memory base cannot serve the candidate being compared."""
+
+
 class LockCapabilityError(AgentsRememberError):
     """The resource filesystem cannot provide the required exclusive file lock."""
 

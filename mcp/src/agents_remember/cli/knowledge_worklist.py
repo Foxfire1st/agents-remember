@@ -7,10 +7,10 @@
                                        [--maintenance-scope] [--owner LEAF] [--output FILE]
                                        [--cache-dir DIR] [--coordination-root DIR]
 
-``--contract`` computes a leaf's worklist from its series contract exactly as the curator's
-memory-quality run does, and persists it beside the contract. The explicit form names the four sides
-directly (K_B is taken as given, not searched by trailer), for evidence runs on scratch copies; it
-writes only ``--output`` when named. The command prints the worklist as JSON.
+``--contract`` computes a leaf's worklist using the code and memory base commits recorded in its
+series contract, as the curator's memory-quality run does. It persists the worklist beside the
+contract. The explicit form accepts all four sides for evidence runs on scratch copies and writes
+only the named ``--output`` file. The command prints the worklist as JSON.
 
 Exit status: 0 for a complete worklist, 1 for an incomplete one, 2 when no worklist applies (both
 memory sides are unconverted, or the contract is not a leaf's).

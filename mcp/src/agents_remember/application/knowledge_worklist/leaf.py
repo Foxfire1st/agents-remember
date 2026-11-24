@@ -2,19 +2,16 @@
 
 **Sides (MIK-R07 rule 0).**
 
-* **B** -- the contract's code base commit: the official-line commit the leaf last synced from (a
-  managed sync advances it), or its fork point before any sync.
-* **K_B** -- the memory tree of the most recent commit of the official memory line
-  (``memory_source_branch``) whose ``Code-Commit`` trailer names B or an ancestor of B, read through
-  ``kernel/memory_attribution.py``. When K_B is unconverted and K_C is converted, K_B is its
-  conversion: MIK-R24 rule 7's converted base, at the base's own paired code commit
-  (:class:`GitBaseConverter`).
+* **B** -- the contract's recorded code base commit.
+* **K_B** -- the tree of the contract's recorded memory base commit, an ancestor of the judged
+  memory commit or the live memory worktree's HEAD. When K_B is unconverted and K_C is converted,
+  K_B is its conversion at its own readable ``Code-Commit`` trailer or at B.
 * **C** -- the code worktree captured as a tree, uncommitted changes included, through the shipped
   private-index capture.
 * **K_C** -- the memory worktree captured the same way (the index's directory capture).
 
-The worklist records the pairing it used. A side that cannot be read, or a K_B that no memory commit
-pairs with, makes the run ``incomplete`` naming it (MIK-R08 rule 4).
+The worklist records the pairing it used. A side that cannot be established makes the run
+``incomplete`` and names the missing input.
 
 **Applicability.** The worklist exists where K_B or K_C holds the layout marker (MIK-R09 rule 6). A
 leaf whose two memory sides are both unconverted gets no worklist and keeps its existing gate.
@@ -60,7 +57,6 @@ from agents_remember.application.knowledge_worklist.leaf_completion import (
     worklist_over,
 )
 from agents_remember.application.knowledge_worklist.leaf_inputs import (
-    CandidateTrees,
     CapturedBase,
     ExplicitSides,
 )
@@ -70,6 +66,10 @@ from agents_remember.application.knowledge_worklist.onboarding_trace import (
 from agents_remember.application.knowledge_worklist.planned_effects import (
     Declaration,
     declarations_from,
+)
+from agents_remember.application.knowledge_worklist.recorded_base import (
+    RecordedMemoryBaseError,
+    recorded_memory_base,
 )
 from agents_remember.application.knowledge_worklist.unexplained import (
     CoverageUnreadable,
@@ -84,7 +84,6 @@ from agents_remember.kernel.git_command import (
     read_git_tree_bytes,
     run_git,
 )
-from agents_remember.kernel.memory_attribution import MemoryAttributionError, attributed_commits
 from agents_remember.kernel.recorded_reads import observed_text
 from agents_remember.memory.conversion.base import pinned_version
 from agents_remember.memory.knowledge_index import (
@@ -101,6 +100,7 @@ from agents_remember.models.knowledge_files.documents import KNOWLEDGE_ROOT, LAY
 from agents_remember.tasks.leaf_decisions import LeafDocumentUnresolved, strict_leaf_doc
 from agents_remember.worktrees.knowledge_validation import LayoutProbeError, has_layout_marker
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
+from agents_remember.worktrees.services import CandidateTrees
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 __all__ = [
@@ -220,35 +220,6 @@ def _memory_snapshot(repository: Path, where: str | Path, name: str) -> MemoryTr
         return git_tree_snapshot(repository, where)
     except (MemoryTreeError, OSError, ValueError) as error:
         raise _Unreadable(name, f"the memory tree {where} cannot be read: {error}") from error
-
-
-def paired_memory_commit(
-    memory_repository: Path, official_line: str, code_repository: Path, base: str
-) -> str:
-    """K_B's commit: the newest official-line memory commit whose trailer names B or an ancestor."""
-
-    ancestors = _git(code_repository, "rev-list", base)
-    reachable = set((ancestors or "").split())
-    try:
-        history = attributed_commits(memory_repository, tip=official_line)
-    except MemoryAttributionError as error:
-        raise _Unreadable("pairing", str(error)) from error
-    for commit in history:
-        named = commit.code_commit
-        if named is None:
-            continue
-        full = (
-            named
-            if named in reachable
-            else _git(code_repository, "rev-parse", "--verify", "--quiet", f"{named}^{{commit}}")
-        )
-        if full is not None and full in reachable:
-            return commit.memory_commit
-    raise _Unreadable(
-        "pairing",
-        f"no commit of the official memory line {official_line!r} carries a Code-Commit trailer "
-        f"naming the code base {base} or one of its ancestors",
-    )
 
 
 @dataclass(frozen=True)
@@ -412,18 +383,23 @@ def _leaf_converted(
     candidate: CandidateTrees | None,
     base: CapturedBase | None = None,
 ) -> bool:
-    """The cheap applicability probe: K_C, or the official line K_B pairs on, holds the marker."""
+    """The cheap applicability probe: K_C or K_B holds the converted marker."""
 
     assert contract.memory_worktree is not None
     if candidate is not None:
         in_candidate = _holds_marker(memory_repository, candidate.memory)
     else:
         in_candidate = (contract.memory_worktree / LAYOUT_MARKER_PATH).is_file()
-    return in_candidate or (
-        _holds_marker(memory_repository, base.read_tree)
-        if base is not None
-        else _official_converted(memory_repository, contract.memory_source_branch)
-    )
+    if in_candidate:
+        return True
+    if base is not None:
+        return _holds_marker(memory_repository, base.read_tree)
+    if not contract.memory_base_commit:
+        raise RecordedMemoryBaseError("the leaf contract has no recorded memory.base_commit")
+    try:
+        return _holds_marker(memory_repository, contract.memory_base_commit)
+    except LayoutProbeError as error:
+        raise RecordedMemoryBaseError(str(error)) from error
 
 
 def leaf_gate_applies(contract: WorktreeContract, candidate: CandidateTrees) -> bool:
@@ -454,14 +430,21 @@ def leaf_worklist(
     memory_repository = contract.memory_repo_path or contract.memory_worktree
     try:
         converted = _leaf_converted(contract, memory_repository, candidate, base)
-    except LayoutProbeError as error:  # never taken for unconverted memory
+        memory_base = (
+            base.memory
+            if base is not None
+            else recorded_memory_base(
+                contract, memory_commit=None if candidate is None else candidate.memory_commit
+            )
+        )
+    except (LayoutProbeError, RecordedMemoryBaseError) as error:
         document: dict[str, Any] | None = incomplete_worklist(
-            Incomplete("layout marker", str(error)), owner=contract.leaf_id or None, pairing=None
+            _missing(error), owner=contract.leaf_id or None, pairing=None
         )
     else:
         if not converted:
             return None  # cheap applicability probe before any capture: nothing is converted
-        document = _leaf_document(contract, memory_repository, candidate, base)
+        document = _leaf_document(contract, memory_repository, candidate, memory_base, base)
     path = worklist_path(contract)
     if persist and document is not None and path is not None:
         persist_worklist(path, document)
@@ -472,6 +455,7 @@ def _leaf_document(
     contract: WorktreeContract,
     memory_repository: Path,
     candidate: CandidateTrees | None,
+    memory_base: str,
     base: CapturedBase | None = None,
 ) -> dict[str, Any] | None:
     """The worklist over the contract's sides, once the leaf is known to be converted."""
@@ -480,22 +464,10 @@ def _leaf_document(
     try:
         expected_effects = leaf_expected_effects(contract)
         maintenance_scope = leaf_maintenance_scope(contract)
-        memory_base = (
-            base.memory
-            if base is not None
-            else paired_memory_commit(
-                memory_repository,
-                contract.memory_source_branch,
-                contract.code_repo_path,
-                contract.code_base_commit,
-            )
-        )
     except LeafDocumentUnresolved as error:
         return incomplete_worklist(
             Incomplete("leaf task document", str(error)), owner=owner, pairing=None
         )
-    except (_Unreadable, subprocess.SubprocessError) as error:
-        return incomplete_worklist(_missing(error), owner=owner, pairing=None)
     assert contract.memory_worktree is not None
     return worklist_over(
         contract,
@@ -520,7 +492,11 @@ def _leaf_document(
 def _missing(error: BaseException) -> Incomplete:
     """The input an unreadable side names, or ``git`` for a Git call that failed or timed out."""
 
-    return error.missing if isinstance(error, _Unreadable) else git_failure(error)
+    if isinstance(error, RecordedMemoryBaseError):
+        return Incomplete("K_B", str(error))
+    if isinstance(error, LayoutProbeError):
+        return Incomplete("layout marker", str(error))
+    return git_failure(error)
 
 
 def _trace_request(
@@ -542,20 +518,12 @@ def _trace_request(
     )
 
 
-def _trace_gate_converted(
-    contract: WorktreeContract, memory_repository: Path, candidate: Path
-) -> bool:
-    """K_C's directory, or the official line K_B pairs on, holds the marker (Git failure raises)."""
+def _trace_gate_converted(memory_repository: Path, candidate: Path, memory_base: str) -> bool:
+    """K_C's directory or the recorded K_B holds the marker."""
 
     if (candidate / LAYOUT_MARKER_PATH).is_file():
         return True
-    return _official_converted(memory_repository, contract.memory_source_branch)
-
-
-def _official_converted(memory_repository: Path, official_line: str) -> bool:
-    """Whether the official memory line's tip holds the layout marker (K_B may then be converted)."""
-
-    return bool(official_line) and _holds_marker(memory_repository, official_line)
+    return _holds_marker(memory_repository, memory_base)
 
 
 def _holds_marker(memory_repository: Path, treeish: str) -> bool:

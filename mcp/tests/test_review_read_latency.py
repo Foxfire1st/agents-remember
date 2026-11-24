@@ -374,11 +374,13 @@ def test_the_recheck_still_refuses_a_candidate_that_moved_while_the_review_was_c
 
 
 def _unconverted_base(world: World) -> dict[str, bytes]:  # noqa: F811
-    """The official line's base is unconverted (legacy onboarding only); the leaf is converted."""
+    """The recorded base is unconverted and the leaf candidate has converted."""
 
     legacy_code = commit(world.code, {"pkg/c.py": "C = 1\n"})
     git(world.memory, "rm", "-q", "-r", "knowledge")
-    commit(world.memory, {"onboarding/legacy.md": "# legacy\n"}, legacy_code)
+    world.memory_base = commit(world.memory, {"onboarding/legacy.md": "# legacy\n"}, legacy_code)
+    git(world.memory_worktree, "merge", "-q", "--ff-only", "main")
+    commit(world.memory_worktree, converted_memory(world.code, legacy_code), trailer=legacy_code)
     world.code_base = legacy_code
     world.contract()
     world.edit()
@@ -407,8 +409,8 @@ def test_a_converted_base_tree_git_holds_is_not_written_again(world: World) -> N
         assert convert.call_count == 1  # that resolution took the tree from the record
         # The view's key names the tree K_B is compared as: its conversion, not K_B's own tree.
         key = leaf_view_key(contract, trees)
-        assert key is not None and key.memory_before == base.tree != key.memory_base
-        assert key.memory_base == trees.record.memory_base.tree
+        assert key is not None and key.memory_before == base.tree != key.memory_base[1]
+        assert key.memory_base == (trees.record.memory_base.commit, trees.record.memory_base.tree)
 
         # Every later read of the same inputs uses the recorded tree, once Git confirmed it: no
         # tree is written, no converted file is loaded, and the answer is the same. The
@@ -443,7 +445,7 @@ def test_a_converted_base_tree_git_holds_is_not_written_again(world: World) -> N
         recorded = json.loads(latest().read_text())
         for field, other in (
             ("version", "0"),
-            ("commit", world.memory_base),
+            ("commit", git(world.memory, "rev-parse", "HEAD~1")),
             ("code_commit", git(world.code, "rev-parse", "HEAD~1")),
         ):
             changed = json.loads(json.dumps(recorded))
@@ -758,7 +760,7 @@ def test_the_view_memo_is_bounded_by_count_not_by_age_and_never_answers_another_
     assert key.gate.leaf_memory_head == git(world.memory_worktree, "rev-parse", "HEAD")
     assert (key.code_base, key.memory_base, key.memory_before) == (
         trees.record.code_base.tree,
-        trees.record.memory_base.tree,
+        (trees.record.memory_base.commit, trees.record.memory_base.tree),
         trees.before.wire.tree,
     )
     parts = LeafViewParts(ReviewWorklistView(source="computed", state="complete"))
@@ -791,7 +793,7 @@ def test_the_view_memo_is_bounded_by_count_not_by_age_and_never_answers_another_
     with mock.patch.object(review_leaf_view_memo, "head_commit", side_effect=RuntimeError("no")):
         assert leaf_view_key(contract, trees) is None
     with mock.patch.object(review_leaf_view_memo, "parent_memory_tip", return_value=None):
-        assert leaf_view_key(contract, trees) is None  # the line K_B pairs on cannot be named
+        assert leaf_view_key(contract, trees) is None  # the parent memory tip cannot be named
 
 
 # -- rule 6: never a stale answer ---------------------------------------------------------------------

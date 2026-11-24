@@ -30,6 +30,7 @@ import {
   cleanupSeatWaits,
   createTurnEndedTracker,
   noteAgentArchived,
+  noteAgentClosed,
   notePermissionRequested,
   notePermissionResolved,
   noteTurnEnded,
@@ -108,12 +109,16 @@ async function readHostState(
                 return typeof value === "string" && value !== "" ? value : null;
               })()
             : null;
+        const archived = Boolean(agent["archivedAt"]);
+        const closed = agent["status"] === "closed";
+        const open = !archived && !closed;
         states.push({
           id: agent["id"],
           parentAgentId,
-          inTurn: Boolean(agent["activeTurn"]),
-          permissionWait: Array.isArray(agent["pendingPermissions"]) && agent["pendingPermissions"].length > 0,
-          archived: Boolean(agent["archivedAt"]) || agent["status"] === "closed",
+          inTurn: open && Boolean(agent["activeTurn"]),
+          permissionWait: open && Array.isArray(agent["pendingPermissions"]) && agent["pendingPermissions"].length > 0,
+          archived,
+          closed,
         });
       }
       const next = page.pageInfo?.nextCursor ?? undefined;
@@ -257,6 +262,7 @@ export function registerParentWakeEvents(
           { sendMessage: (id, text) => context.paseo.agents.ref(id).send(text, { activeTurnBehavior: "steer" }) },
           // A line held for a departed parent is re-resolved at this send.
           readRoleAgents(process.env.PASEO_HOME),
+          { readHost: () => readHostState(context.paseo) },
         );
       } catch (error) {
         console.error("agents-remember permission_resolved handler failed", error);
@@ -268,11 +274,9 @@ export function registerParentWakeEvents(
     noteAgentArchived(event.agent.id, turns);
   });
 
-  // L184-R1-F09: close is the other terminal lifecycle path, and it is the one the
-  // wake tracker did not hear. It is treated as archive, as the host's own listing
-  // does (`status === "closed"` is archived), so no deferred resume survives it.
+  // A close ends the seat's own waits. Its parent lines can still reopen this seat.
   server.addHook("agent.close.after", async (event) => {
-    noteAgentArchived(event.agent.id, turns);
+    noteAgentClosed(event.agent.id, turns);
   });
 
   // MIK-R183 rule 8: the plugin's cleanup clears every pending wait, so a reload starts
