@@ -1,9 +1,9 @@
 """MIK-R190 rule 10: what a held-message drain owes a limited recipient.
 
-A message to a recipient whose provider usage report is exhausted waits out the reset,
-and waiting out a limit must cost no host read. The one read a drain still owes is for
-a recipient the publication shows ``ended``: an archive ends its waiting messages, a
-closed session keeps them, and that reading is paid once per ``ended`` stamp.
+A message to a recipient whose provider usage report is exhausted waits out the reset
+without a routine host read. A recipient the publication shows as ``ended`` gets one
+host read per stamp. A confirmed archive or absence ends its waiting messages. A
+closed session keeps them waiting.
 
 Both decisions are policy, so both live here rather than in the held-message store's
 own module (rule 19): that module owns the store and the drain, this one decides when
@@ -45,7 +45,7 @@ def pause_for_provider_limit(batch: _DrainBatch) -> None:
 
     An ``ended`` publication triggers one host confirmation per stamp. A confirmed
     archive or absence ends the waiting messages as not delivered. A closed session
-    waits for the provider reset without a host read.
+    keeps them waiting for the provider reset without another read for that stamp.
     """
 
     limit = provider_limit_hold(batch.config, batch.agent_id)
@@ -85,8 +85,8 @@ def pause_for_provider_limit(batch: _DrainBatch) -> None:
 def ended_stamp(config: McpRuntimeConfig, agent_id: str) -> str | None:
     """Rule 10's stamp for an ``ended`` recipient: its own `eventAt`, else the boot id.
 
-    Archive confirmation is gated by this state. If the publication carries no
-    event time, the boot ID bounds confirmation to one read in that boot.
+    Host confirmation of the recipient's state requires this stamp. If the publication
+    carries no event time, the boot ID bounds confirmation to one read in that boot.
     """
 
     directory = activity_directory(config)

@@ -597,6 +597,7 @@ _TASK_DOC_WRITE_KEPT = frozenset(
     {
         "ok",
         "updated",
+        "warning",
         "status",
         "code",
         "error",
