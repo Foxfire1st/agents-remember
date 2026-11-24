@@ -311,6 +311,8 @@ unit-regression = [
   "mcp/tests/test_leaf_handover_review_rounds.py",
   "mcp/tests/test_leaf_retirement_wording.py",
   "mcp/tests/test_leaf_worktree_watch.py",
+  "mcp/tests/test_lean_card_citations.py",
+  "mcp/tests/test_lean_symbol_anchors.py",
   "mcp/tests/test_lifecycle_operation_journal_retired.py",
   "mcp/tests/test_lifecycle_operation_model_helpers.py",
   "mcp/tests/test_lifecycle_operation_public_boundary.py",

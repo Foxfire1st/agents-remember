@@ -33,10 +33,13 @@ import re
 import threading
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Mapping
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 from agents_remember.kernel.memory_graph import retained_graph_bytes
 from agents_remember.models.knowledge.base import GIT_OBJECT_PATTERN
+
+if TYPE_CHECKING:
+    from agents_remember.memory_quality.style.citations.extents import Extent
 
 __all__ = [
     "BLOB_DEFINITIONS",
@@ -192,8 +195,8 @@ class BoundedMemo[K: Hashable, V]:
             return len(self._entries)
 
 
-# One blob's defining names, each with its distinct ``(start, end)`` extents in document order.
-Definitions = Mapping[str, tuple[tuple[int, int], ...]]
+# One blob's defining names, with their extents and scope information in document order.
+type Definitions = Mapping[str, tuple[Extent, ...]]
 
 
 def _lines_weight(lines: tuple[str, ...]) -> int:

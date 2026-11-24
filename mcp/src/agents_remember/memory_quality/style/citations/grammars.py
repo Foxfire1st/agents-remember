@@ -1,15 +1,20 @@
-"""Parse citation definitions and extents with tree-sitter.
+"""Read the definitions and extents that citation symbols name.
 
-Supported suffixes are Python, JavaScript, JSX, TypeScript, TSX, MJS, CJS, MTS, and CTS.
-A declared grammar that cannot load raises ``GrammarUnavailableError``; unsupported
-suffixes use occurrence matching and therefore cannot prove a pure move.
+Python, JavaScript, JSX, TypeScript, TSX, MJS, CJS, MTS, and CTS use tree-sitter.
+A declared grammar that cannot load raises ``GrammarUnavailableError``. Lean uses the
+built-in declaration scanner. Unsupported suffixes use occurrence matching and
+therefore cannot prove a pure move.
 
 Definitions include Python functions, classes, and assignments plus JavaScript/TypeScript
 functions, classes, methods, fields, variable bindings, interfaces, types, enums,
 namespaces, ambient signatures, and interface members. Extents include attached
 decorators/exports/ambient declarations.
 
-False-positive boundaries:
+Lean binds named declarations by their full and written names, with full names taking
+precedence. Extents include leading documentation, attributes and command wrappers
+that belong to the declaration.
+
+Tree-sitter false-positive boundaries:
 
 1. A trailing comment inside a syntax node remains part of its extent.
 2. Local bindings are definitions, so a common local name may resolve ambiguously.
@@ -37,14 +42,20 @@ from tree_sitter import Language, Node, Parser, Tree
 
 from agents_remember.errors import GrammarUnavailableError
 from agents_remember.kernel.request_memo import request_owner
-from agents_remember.memory_quality.style.citations import test_case_ranges, test_cases
+from agents_remember.memory_quality.style.citations import (
+    lean_declarations,
+    test_case_ranges,
+    test_cases,
+)
 
 PYTHON = "python"
 TYPESCRIPT = "typescript"
 TSX = "tsx"
 JAVASCRIPT = "javascript"
+LEAN = "lean"
 
 SUFFIX_GRAMMARS = {
+    ".lean": LEAN,
     ".py": PYTHON,
     ".ts": TYPESCRIPT,
     ".mts": TYPESCRIPT,
@@ -140,6 +151,8 @@ class Binding:
     span: tuple[int, int]
     declaration: int
     test_case: bool = False
+    full_name: str | None = None
+    scope_uncertain: bool = False
 
 
 @dataclass(frozen=True)
@@ -196,7 +209,7 @@ def _parse_source(grammar: str, lines: Sequence[str]) -> _ParsedSource:
 
 
 def grammar_of(path: str) -> str | None:
-    """The grammar that reads ``path``, or ``None`` when nothing does."""
+    """The definition reader's language key, or ``None`` for an unsupported path."""
     return SUFFIX_GRAMMARS.get(PurePosixPath(path).suffix.lower())
 
 
@@ -288,14 +301,15 @@ def bindings(path: str, lines: Sequence[str]) -> dict[str, list[Binding]]:
     """Every name ``path`` binds, with both its widened extent and its declaration line.
 
     One walk answers both, so a caller needing the declaration line does not re-parse the file.
-    The declaration line is the first line of the UNWIDENED construct: for a decorated
-    definition that is the ``def``/``class`` line, and for every other construct -- including an
-    exported TypeScript declaration, whose ``export`` keyword shares the declaration's own first
-    line -- it is the extent's start.
+    The declaration line starts the construct itself. It can follow a Python decorator
+    or a Lean declaration prefix. For an exported TypeScript declaration, ``export``
+    shares the declaration's first line.
     """
     grammar = grammar_of(path)
     if grammar is None:
         return {}
+    if grammar == LEAN:
+        return _lean_bindings(lines)
     source = _parsed_source(path, grammar, lines)
     reader = _python_names if grammar == PYTHON else _script_names
     wrappers = PYTHON_WRAPPERS if grammar == PYTHON else SCRIPT_WRAPPERS
@@ -313,6 +327,29 @@ def bindings(path: str, lines: Sequence[str]) -> dict[str, list[Binding]]:
         for name in names:
             found.setdefault(name, []).append(binding)
     return found
+
+
+def _lean_bindings(lines: Sequence[str]) -> dict[str, list[Binding]]:
+    full: dict[str, list[Binding]] = {}
+    possible: dict[str, list[Binding]] = {}
+    written: dict[str, list[Binding]] = {}
+    for declaration in lean_declarations.declarations(lines):
+        binding = Binding(
+            span=(declaration.start, declaration.end),
+            declaration=declaration.declaration,
+            full_name=declaration.full_name,
+            scope_uncertain=declaration.full_name is None,
+        )
+        if declaration.full_name is not None:
+            full.setdefault(declaration.full_name, []).append(binding)
+        else:
+            for name in declaration.possible_full_names:
+                possible.setdefault(name, []).append(binding)
+        written.setdefault(declaration.written_name, []).append(binding)
+    # Use exact names before written aliases, and established names before possible ones.
+    written.update(possible)
+    written.update(full)
+    return written
 
 
 def test_case_refusal(path: str, lines: Sequence[str], name: str) -> str | None:

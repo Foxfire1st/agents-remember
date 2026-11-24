@@ -64,9 +64,24 @@ Write the evidence as a table with these column names, leaving a blank line betw
 
 The examples show syntax; replace them with checked claims and actual evidence. `Finding` states what the cited evidence establishes. For same-repository claims, cite the source, test, configuration or artifact actually present in the paired code tree.
 
-Use plain `path:start-end` in `Source` for a line range, rather than a Markdown link or a bare line number. In `Anchor`, write a backticked identifier, a backticked heading or a double-quoted literal the cited range contains. An identifier becomes a symbol anchor when the extractor finds it exactly once in a cited file. Other anchor text remains in the note, backed by the range; the Curator still checks its truth.
+Use plain `path:start-end` in `Source` for a line range, rather than a Markdown link or a bare line number.
+In `Anchor`, write a backticked identifier, a backticked heading or a double-quoted literal the cited range contains.
+The extractor tries plain identifiers in source order against files cited with line ranges.
+It creates a symbol anchor at the first unique match. Other anchor text remains in the note,
+backed by the range. The Curator still checks its truth.
 
-A bare repository-relative path names the whole file. For evidence outside the paired code tree, supply a bare, whitespace-free Uniform Resource Locator (URL) containing `://` in `Source`, such as a revision-specific document or source URL. The fixer accepts that as an external document target. A neighbouring repository's path, an absolute path or `../` does not name a file in the paired code tree. Preserve the external source's real identity instead of inventing a local anchor.
+For a named Lean declaration, cite the `.lean` file and write the name as it appears in the
+declaration or its full namespace-qualified name, such as `Geometry.distance`. Use the full name
+when a written name matches several verified declarations. If uncertain scope makes both name
+forms unverifiable, leave `Anchor` blank and cite the declaration as `path:start-end` in `Source`.
+The extractor tries extended Lean names, such as dotted or quoted names, against the row’s cited
+Lean files, including bare Lean paths.
+
+Separate multiple anchors or sources with `;`. For example, an `Anchor` cell can hold
+`` `Geometry.distance`; `distance` `` beside `math.py:10-16; Geometry.lean:20-25` in `Source`.
+
+A bare repository-relative path names the whole file, including when an extended Lean name resolves
+there. For evidence outside the paired code tree, supply a bare, whitespace-free Uniform Resource Locator (URL) containing `://` in `Source`, such as a revision-specific document or source URL. The fixer accepts that as an external document target. A neighbouring repository's path, an absolute path or `../` does not name a file in the paired code tree. Preserve the external source's real identity instead of inventing a local anchor.
 
 When both `Anchor` and `Source` are empty or “n/a”, the row becomes prose, not a reference. Use that form only when there is no evidence to cite; it does not establish a checked claim.
 

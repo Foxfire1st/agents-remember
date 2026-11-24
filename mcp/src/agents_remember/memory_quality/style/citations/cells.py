@@ -25,13 +25,25 @@ def unescaped(cell: str) -> str:
     return cell.replace("\\|", "|")
 
 
-def parse_row(line: int, anchor_cell: str, source_cell: str) -> model.Claim:
-    anchors, skipped = model.anchors_in(unescaped(anchor_cell))
-    citations, malformed = model.citations_in(unescaped(source_cell))
+def parse_row(
+    line: int,
+    anchor_cell: str,
+    source_cell: str,
+    *,
+    reader: model.CitationReader = model.CitationReader.LIVE,
+) -> model.Claim:
+    sources = model.citations_in(unescaped(source_cell))
+    paths = (
+        model.local_path(source if isinstance(source, str) else source.path) for source in sources
+    )
+    source_paths = tuple(dict.fromkeys(path for path in paths if path is not None))
+    cited_grammars = frozenset(reader.grammar_of(path) for path in source_paths)
+    anchors, skipped = model.anchors_in(unescaped(anchor_cell), cited_grammars=cited_grammars)
     return model.Claim(
         line=line,
         anchors=anchors,
-        citations=citations,
-        malformed=malformed,
+        citations=tuple(source for source in sources if isinstance(source, model.Citation)),
+        malformed=tuple(source for source in sources if isinstance(source, str)),
         unchecked_spans=skipped,
+        source_paths=source_paths,
     )

@@ -4,9 +4,9 @@ C is the leaf's current code candidate, including uncommitted changes, captured 
 rule 0) through the shipped private-index capture. An anchor records the blob the path holds in C and
 the ``content`` identity of the located bytes (:mod:`...models.knowledge_files.anchor_content`):
 
-* ``symbol`` -- the one extent the shipped extractor binds for the name. A name bound more than once,
-  bound nowhere, or in a language the extractor has no grammar for does not resolve: the writer never
-  guesses between definitions or accepts a mention;
+* ``symbol`` -- the one extent the shipped extractor binds for the name. Lean accepts
+  a full name or a unique name as written, with full names taking precedence. A
+  symbol resolves only when a supported reader binds a single definition;
 * ``line_range`` -- the recorded lines, which must be lines the blob holds;
 * ``file`` -- every byte.
 
@@ -188,9 +188,10 @@ def _range(path: str, locator: Mapping[str, Any], data: bytes) -> tuple[int, int
 def _symbol_range(path: str, name: str, data: bytes) -> tuple[int, int]:
     """The one extent the shipped extractor binds for ``name`` in these bytes."""
 
-    if not grammars.parsed(path):
+    grammar = grammars.grammar_of(path)
+    if grammar is None:
         raise AnchorResolutionError(
-            f"{path!r} is in a language the shipped extractor has no grammar for, so a definition "
+            f"the shipped extractor has no grammar or scanner for {path!r}, so a definition "
             f"of {name!r} cannot be told from a mention; cite a line_range or the file instead"
         )
     try:
@@ -198,22 +199,27 @@ def _symbol_range(path: str, name: str, data: bytes) -> tuple[int, int]:
     except UnicodeDecodeError as error:
         raise AnchorResolutionError(f"{path!r} is not valid UTF-8: {error}") from error
     try:
-        spans = _bound_spans(name, path, lines)
+        bound = extents.definitions(path, lines)
+        spans = extents.qualified_spans(name, bound, grammar=grammar)
     except GrammarUnavailableError as error:
         raise AnchorResolutionError(f"the grammar for {path!r} is unavailable: {error}") from error
     if not spans:
+        if grammar == grammars.LEAN and extents.uncertain_lean_scope(name, bound):
+            raise AnchorResolutionError(
+                f"{name!r} in {path!r} has an uncertain Lean scope. Cite a line_range instead."
+            )
         refusal = grammars.test_case_refusal(path, lines, name)
         raise AnchorResolutionError(refusal or f"{path!r} at C does not define {name!r}")
     if len(spans) != 1:
         where = ", ".join(f"{start}-{end}" for start, end in spans)
+        remedy = "qualify the name or cite a line_range"
+        if grammar == grammars.LEAN:
+            full_names = dict.fromkeys(one.full_name for one in bound[name] if one.full_name)
+            if len(full_names) > 1:
+                choices = ", ".join(repr(full_name) for full_name in full_names)
+                remedy = f"use a full name ({choices}) or cite a line_range"
         raise AnchorResolutionError(
             f"{name!r} is bound more than once in {path!r} at C (lines {where}); a symbol anchor "
-            "names one construct, so qualify the name or cite a line_range"
+            f"names one construct, so {remedy}"
         )
     return spans[0]
-
-
-def _bound_spans(name: str, path: str, lines: list[str]) -> tuple[tuple[int, int], ...]:
-    """The distinct extents binding ``name`` (one rule: :func:`extents.qualified_spans`)."""
-
-    return extents.qualified_spans(name, extents.definitions(path, lines))

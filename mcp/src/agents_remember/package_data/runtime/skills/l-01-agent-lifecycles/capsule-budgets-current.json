@@ -6233,7 +6233,7 @@
         "reference/coordination/shared/requirement-design.md": 637,
         "reference/coordination/shared/seat-recovery.md": 281,
         "reference/coordination/shared/third-rejected-round.md": 253,
-        "reference/curator/card-formats-and-citations.md": 1816,
+        "reference/curator/card-formats-and-citations.md": 1934,
         "reference/curator/card-sentence-decisions.md": 344,
         "reference/curator/change-routing.md": 193,
         "reference/curator/coherence-judgments.md": 249,
@@ -6478,8 +6478,8 @@
         "sha256": "f304cbbd3f0a635da3f3124db3744aa1e8beb4118f5c66d37cf9a91bb472c082"
       },
       "skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md": {
-        "size_words": 1816,
-        "sha256": "7cbfccff0f53947408d511c8af439e1b14ebc65ad0eeb25ed33f7b97b8a04fa6"
+        "size_words": 1934,
+        "sha256": "d81d1c2c198e53fa9d9bf4a342d013472daeffd829e82a2a2b4a2e95570c8db4"
       },
       "skills/l-01-agent-lifecycles/reference/curator/card-sentence-decisions.md": {
         "size_words": 344,
@@ -6717,7 +6717,7 @@
       "reference/coordination/shared/requirement-design.md": "sha256:f2d88180a31916cd671ba62e58b720ea92071c993d321b4aacc8c9e63fc7a46a",
       "reference/coordination/shared/seat-recovery.md": "sha256:062b3893433cc314402a206843ccd5dd514353bb9216356a85ea36252b898ef0",
       "reference/coordination/shared/third-rejected-round.md": "sha256:f304cbbd3f0a635da3f3124db3744aa1e8beb4118f5c66d37cf9a91bb472c082",
-      "reference/curator/card-formats-and-citations.md": "sha256:7cbfccff0f53947408d511c8af439e1b14ebc65ad0eeb25ed33f7b97b8a04fa6",
+      "reference/curator/card-formats-and-citations.md": "sha256:d81d1c2c198e53fa9d9bf4a342d013472daeffd829e82a2a2b4a2e95570c8db4",
       "reference/curator/card-sentence-decisions.md": "sha256:863cb4688aa375d1303459951d9ddb9d69ec9833d42d62238aa18dc9d776263c",
       "reference/curator/change-routing.md": "sha256:a17858f4a703d3287bab8e9f93bb1e1583eb59ce74cc9ff64aa1657b89cbfd49",
       "reference/curator/coherence-judgments.md": "sha256:07d09eaf62642c3b3688e53c7df42ebffb491f915fba382d33e4e91a3c0e9439",

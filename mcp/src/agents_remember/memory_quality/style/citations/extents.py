@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -11,6 +11,10 @@ from dataclasses import dataclass, field
 from agents_remember.memory_quality.style.citations import grammars
 
 DEFINITION = "definition"
+LEAN_SCOPE_EXPLANATION = (
+    "An unclassified token could be a scope name, a command declared in this file, "
+    "or an imported command. Cite a line range."
+)
 
 
 # Re-exported so nothing outside :mod:`grammars` has to know a suffix to ask whether a
@@ -30,6 +34,8 @@ class Extent:
     # line is about that construct. ``None`` for every other kind, where the two coincide.
     declaration: int | None = None
     test_case: bool = False
+    full_name: str | None = None
+    scope_uncertain: bool = False
 
 
 @dataclass
@@ -66,7 +72,7 @@ def definitions(path: str, lines: Sequence[str]) -> dict[str, list[Extent]]:
 
     Assignments and declarators count, not only ``def`` and ``class``: an earlier
     measurement of this surface collected definitions only and read badly, because these
-    documents cite module-level constants constantly. A file in a language with no grammar,
+    documents cite module-level constants constantly. A file in an unsupported language,
     and a construct too broken to parse, bind nothing and drop to occurrence matching
     rather than failing the run -- the tree holds source written for other dialects and
     none of it is this check's business. A grammar that will not LOAD is the other case
@@ -94,6 +100,8 @@ def _definitions(path: str, lines: Sequence[str]) -> dict[str, list[Extent]]:
                 kind=DEFINITION,
                 declaration=binding.declaration,
                 test_case=binding.test_case,
+                full_name=binding.full_name,
+                scope_uncertain=binding.scope_uncertain,
             )
             for binding in items
         ]
@@ -107,14 +115,25 @@ def source_lines(data: bytes) -> list[str]:
     return data.decode("utf-8", errors="surrogateescape").split("\n")
 
 
-def qualified_spans(name: str, bound: dict[str, list[Extent]]) -> tuple[tuple[int, int], ...]:
+def uncertain_lean_scope(name: str, bound: Mapping[str, Sequence[Extent]]) -> bool:
+    """Whether the exact Lean lookup includes a declaration with uncertain scope."""
+
+    return any(extent.scope_uncertain for extent in bound.get(name, ()))
+
+
+def qualified_spans(
+    name: str, bound: dict[str, list[Extent]], *, grammar: str | None = None
+) -> tuple[tuple[int, int], ...]:
     """The distinct extents binding ``name`` in one file's :func:`definitions`.
 
-    ``Holder.method`` is the ``method`` defined inside a ``Holder`` definition, so a same-named
+    Lean names resolve through the exact keys supplied by the scanner.
+    For other languages, ``Holder.method`` names the ``method`` inside a ``Holder``, so a same-named
     method of another class in the file does not make the name ambiguous. A symbol anchor names one
     construct only when exactly one span comes back; the curator writer (MIK-R12) and the
     conversion (MIK-R24) both bind symbols through this one rule.
     """
+    if grammar == grammars.LEAN and uncertain_lean_scope(name, bound):
+        return ()
     if name in bound:
         spans = tuple((extent.start, extent.end) for extent in bound[name])
         return (
@@ -122,6 +141,8 @@ def qualified_spans(name: str, bound: dict[str, list[Extent]]) -> tuple[tuple[in
             if any(extent.test_case for extent in bound[name])
             else tuple(dict.fromkeys(spans))
         )
+    if grammar == grammars.LEAN:
+        return ()
     parts = [part for part in name.split(".") if part]
     if not parts or any(part not in bound for part in parts):
         return ()
