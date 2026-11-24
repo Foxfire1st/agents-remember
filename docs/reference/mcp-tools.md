@@ -52,9 +52,11 @@ Fitting outcome and next-action fields appear before the locator. Counts and oth
 fields follow it. If a declared value cannot fit whole, the guard omits it and, when there is
 room, adds its name and measured size to `cut.omittedFields` as `field` and `sizeTokens`.
 A fitting omission keeps its place before the guard considers the next declared field.
-`droppedFields` still counts omissions when their names and sizes cannot fit. The guard also
-fits `error`, shortened when needed (`errorCut`), and other numbers, booleans and short texts
-as space permits.
+`droppedFields` still counts omissions when their names and sizes cannot fit. The guard fits
+`error` first, then `warning`, then other numbers, booleans and short texts as space permits.
+Error and warning texts are limited to 600 characters and shortened further to fit the token
+budget. `errorCut` and `warningCut` mark shortened text. When no warning text fits,
+`warningCut` still marks its presence in the whole result.
 
 Every cut answer ends with one last field, `cut`: it says that the answer was cut and names the file
 that holds the whole result (`log`), with `readIt` telling the reader to read the rest there. Where
@@ -609,6 +611,9 @@ caller must know something, for example a missing requirement file. A start of a
 the addresses of the dashboard and of the chat (`dashboardAddress`, `chatAddress`, each with a
 detail field) and a `nextAction`.
 
+In a short start answer, the warning puts missing requirement filenames before other notices
+so the names fit first. `warningCut` marks shortened warning text.
+
 Every other outcome answers with its `status`, its `detail` and a `nextAction`. The status `held`
 means that the role agent takes its first turn with the first message addressed to it. The status
 `rejected` means that the launch is closed and `agentId` names no usable role agent. After the
@@ -650,7 +655,7 @@ A recipient that is in a turn takes the message into its running turn only where
 steer the recipient's harness; the answer then says `taken: "steered"`. For every other harness
 the message is held with the reason `recipient-in-turn`, and the turn goes on. Where the host
 replaced the running turn all the same, the answer says `taken: "replaced"` and carries a
-`warning`.
+`warning`. In a short message answer, `warningCut` marks shortened warning text.
 
 ### Holds and refusals
 
