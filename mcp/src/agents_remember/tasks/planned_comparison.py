@@ -334,9 +334,15 @@ def compose_explainer_send_message(
     return "\n".join(sections) if sections else message
 
 
-def revision_row_of(manifest: FrameManifest, *, agreed: int | None) -> dict[str, Any]:
+def revision_row_of(
+    manifest: FrameManifest,
+    *,
+    agreed: int | None,
+    inventory: str | None = None,
+    inventory_omitted: str | None = None,
+) -> dict[str, Any]:
     number = manifest.revision
-    return {
+    row: dict[str, Any] = {
         "revision": number,
         "binding": serialize_frame_binding(manifest.binding),
         "label": (
@@ -351,6 +357,11 @@ def revision_row_of(manifest: FrameManifest, *, agreed: int | None) -> dict[str,
         "agreed": number == agreed,
         "pinned": number == agreed,
     }
+    if inventory is not None:
+        row["inventory"] = inventory
+    elif inventory_omitted is not None:
+        row["inventoryOmitted"] = inventory_omitted
+    return row
 
 
 def manifest_parts(manifest: FrameManifest) -> list[dict[str, Any]]:

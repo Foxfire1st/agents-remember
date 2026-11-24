@@ -1,40 +1,42 @@
-"""The model-free readiness check a revision passes before it becomes ready (MIK-R104 rule 14).
+"""The model-free readiness check a revision passes before it becomes ready.
 
 A revision is published as ready only after the product has *loaded* it once without a model. What
 "loaded" means here is the part this host can establish itself, from the exact bytes it is about to
 publish:
 
 * the entrypoint exists, is text, and parses as one HTML document;
-* every subresource the page names -- ``href``, ``src``, ``srcset``, ``poster`` and CSS ``url()`` /
-  ``@import`` -- is an admitted asset of this same revision, and every asset the manifest carries is
-  reachable by a path that cannot leave the revision's own prefix. A page that requests the network,
-  another revision, a task report, a source checkout or a ``..`` path is not ready;
-* every evidence reference the page cites is one the admitted packet carries. A reference the packet
-  does not carry would open nothing, so it is a failed check rather than a limitation;
-* the page is usable with reduced motion: no autoplaying or looping media, every audio and video
-  element carries controls a reader can use, and declared animation or transition styles are
-  accompanied by a ``prefers-reduced-motion: reduce`` rule.
+* every subresource the page names -- HTML/SVG ``href``, ``src``, ``srcset``, ``poster``, inline
+  styles/scripts, CSS ``url()`` and ``@import``, and non-kit JavaScript imports -- is an admitted
+  asset of this same revision, and every ``kit/...`` asset matches the shipped kit byte-for-byte.
+  A page that requests the network, another revision, a task report, a source checkout or a ``..``
+  path is not ready;
+* every evidence reference the page cites in HTML/SVG markup is one the admitted packet carries. A
+  reference the packet does not carry would open nothing, so it is a failed check rather than a
+  limitation;
+* HTML audio and video elements do not autoplay or loop and carry controls a reader can use.
 
 The check says nothing about how good the explanation is, and it does not replace the browser
-isolation proof: rule 10 proves the boundary a page executes inside, rule 14 proves the page itself
-is complete and self-contained. It is also not a rendering check -- it never starts a browser and
-never starts a model.
-
-Generated scripts run in the browser's sandboxed frame (D331), so a page that carries a ``<script>``
-is *not* failed here. This check is static: it resolves references, refuses network requests, requires
-a reduced-motion rule and checks the evidence binding, and it says so in its notes rather than
-pretending to have executed the page.
+isolation proof or prospective browser load. It is static: it resolves references, verifies kit
+bytes, refuses network requests, checks HTML media controls, and checks static evidence bindings,
+noting when scripts are present rather than pretending to execute them.
 """
 
 from __future__ import annotations
 
-import posixpath
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any, Literal
 
 from agents_remember.application.review_evidence_claims import resolve_claim
+from agents_remember.canvas.kit import KIT_CONTRACT_PREFIX
+from agents_remember.canvas.kit_references import (
+    extract_references,
+    is_external_reference,
+    is_ignored_reference,
+    resolve_reference,
+    verify_kit_assets,
+)
 from agents_remember.canvas.parts import WHOLE_PAGE_PART, PartEntry, PartMap, derive_part_map
 from agents_remember.models.knowledge.review_evidence import (
     ClaimBasis,
@@ -50,24 +52,16 @@ __all__ = [
     "evidence_reference_state",
 ]
 
-#: One expression for the three ways an asset reference appears in HTML or CSS.
-_REFERENCE = re.compile(
-    r"""(?:href|src|poster)\s*=\s*["']([^"']*)["']|url\(\s*["']?([^"')]*)["']?\s*\)""",
-    re.IGNORECASE,
-)
-_SRCSET = re.compile(r"""srcset\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
 #: The HTML attribute grammar allows a double-quoted, single-quoted or unquoted value; the gate reads
 #: all three, because a page that names an unadmitted reference must not become invisible by leaving
-#: the quotes out (L104-A5). ``data-evidence-claim`` is not this attribute: a claim mark carries a
-#: claim id and belongs to the part map (:mod:`agents_remember.canvas.parts`).
+#: the quotes out. ``data-evidence-claim`` is not this attribute: a claim mark carries a claim id and
+#: belongs to the part map (:mod:`agents_remember.canvas.parts`).
 _EVIDENCE = re.compile(
     r"""data-evidence\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"']+))""", re.IGNORECASE
 )
 _SCRIPT = re.compile(r"<script\b", re.IGNORECASE)
-_MOTION = re.compile(r"@keyframes|animation\s*:|transition\s*:", re.IGNORECASE)
-_REDUCED_MOTION = re.compile(r"prefers-reduced-motion", re.IGNORECASE)
-_ABSOLUTE = re.compile(r"^(?:[a-z][a-z0-9+.\-]*:|//)", re.IGNORECASE)
-_IGNORED = ("#", "?", "data:")
+_HTML_MEDIA = (".html", ".htm")
+_EVIDENCE_MEDIA = (".html", ".htm", ".svg")
 
 
 class _MediaTags(HTMLParser):
@@ -143,20 +137,6 @@ class ReadinessReport:
         }
 
 
-def _references(text: str) -> list[str]:
-    found: list[str] = []
-    for match in _REFERENCE.finditer(text):
-        value = match.group(1) if match.group(1) is not None else match.group(2)
-        if value:
-            found.append(value.strip())
-    for match in _SRCSET.finditer(text):
-        for entry in match.group(1).split(","):
-            candidate = entry.strip().split(maxsplit=1)[0]
-            if candidate:
-                found.append(candidate)
-    return found
-
-
 def _evidence_references(text: str) -> list[str]:
     """Every evidence reference in one document, quoted or not."""
 
@@ -166,19 +146,6 @@ def _evidence_references(text: str) -> list[str]:
         if value:
             found.append(value)
     return found
-
-
-def _resolve(referrer: str, reference: str) -> str | None:
-    """The asset path a reference names inside the revision, or ``None`` when it leaves it."""
-
-    if reference.startswith(_IGNORED) or not reference:
-        return None
-    base = posixpath.dirname(referrer)
-    bare = reference.split("#", maxsplit=1)[0].split("?", maxsplit=1)[0]
-    joined = posixpath.normpath(posixpath.join(base, bare))
-    if joined.startswith("../") or joined == ".." or joined.startswith("/"):
-        return None
-    return joined
 
 
 def _check_entry(assets: dict[str, bytes], entrypoint: str) -> ReadinessCheck:
@@ -194,58 +161,40 @@ def _check_entry(assets: dict[str, bytes], entrypoint: str) -> ReadinessCheck:
     return ReadinessCheck("entrypoint", "passed", f"{entrypoint!r} is one admitted UTF-8 document")
 
 
-#: Which documents name subresources at all. A JavaScript bundle is not one: it may hold
-#: ``src="..."`` inside a selector or a template string, and reading that as a request would refuse a
-#: legitimate library bundle the kit ships (L104-B13). HTML and SVG name references in attributes; CSS
-#: names them in ``url()`` only.
-_REFERENCE_MEDIA = (".html", ".htm", ".svg", ".css")
-
-
-def _names_references(path: str) -> bool:
-    return path.lower().endswith(_REFERENCE_MEDIA)
-
-
 def _offending(assets: dict[str, bytes]) -> tuple[list[str], list[str]]:
     """Every reference that leaves the revision, and every one that names no admitted asset."""
 
     outside: list[str] = []
     missing: list[str] = []
     for path, payload in sorted(assets.items()):
-        if not _names_references(path):
-            continue
-        try:
-            text = payload.decode("utf-8")
-        except UnicodeDecodeError:
-            continue
-        for reference in _references(text):
-            # A reference that leaves the revision is refused: that is the published page's
-            # isolation in the browser, one of the three things MIK-R211 v4 rule 3 keeps.
-            if _ABSOLUTE.match(reference):
+        for reference in extract_references(path, payload):
+            if is_ignored_reference(reference):
+                continue
+            if is_external_reference(reference):
                 outside.append(f"{path} -> {reference}")
                 continue
-            target = _resolve(path, reference)
+            target = resolve_reference(path, reference)
             if target is None:
-                if not reference.startswith(_IGNORED):
-                    outside.append(f"{path} -> {reference}")
+                outside.append(f"{path} -> {reference}")
             elif target not in assets:
                 missing.append(f"{path} -> {reference}")
     return outside, missing
 
 
 def _check_assets(assets: dict[str, bytes]) -> ReadinessCheck:
+    kit_problems = verify_kit_assets(assets)
     outside, missing = _offending(assets)
+    problems: list[str] = []
+    if kit_problems:
+        problems.append("; ".join(kit_problems))
     if outside:
-        return ReadinessCheck(
-            "admitted-assets",
-            "failed",
-            "the page requests something outside its own admitted assets: " + "; ".join(outside),
+        problems.append(
+            "the page requests something outside its own admitted assets: " + "; ".join(outside)
         )
     if missing:
-        return ReadinessCheck(
-            "admitted-assets",
-            "failed",
-            "the page names assets the revision does not carry: " + "; ".join(missing),
-        )
+        problems.append("the page names assets the revision does not carry: " + "; ".join(missing))
+    if problems:
+        return ReadinessCheck("admitted-assets", "failed", "; ".join(problems))
     return ReadinessCheck(
         "admitted-assets",
         "passed",
@@ -268,7 +217,9 @@ def evidence_reference_state(packet: EvidencePacket, reference: str) -> str | No
 
 def _check_evidence(assets: dict[str, bytes], packet: EvidencePacket) -> ReadinessCheck:
     seen: list[str] = []
-    for payload in assets.values():
+    for path, payload in sorted(assets.items()):
+        if path.startswith(KIT_CONTRACT_PREFIX) or not path.lower().endswith(_EVIDENCE_MEDIA):
+            continue
         try:
             text = payload.decode("utf-8")
         except UnicodeDecodeError:
@@ -465,33 +416,32 @@ def _collections_built(packet: EvidencePacket, kind: str) -> bool:
     )
 
 
-def _check_motion(assets: dict[str, bytes]) -> ReadinessCheck:
-    text = "\n".join(payload.decode("utf-8", errors="ignore") for payload in assets.values())
-    tags = _media_tags(text)
+def _check_media_controls(assets: dict[str, bytes]) -> ReadinessCheck:
+    tags: list[tuple[str, dict[str, str]]] = []
+    for path, payload in sorted(assets.items()):
+        if path.startswith(KIT_CONTRACT_PREFIX) or not path.lower().endswith(_HTML_MEDIA):
+            continue
+        tags.extend(_media_tags(payload.decode("utf-8", errors="ignore")))
     if any("autoplay" in attrs for _tag, attrs in tags):
         return ReadinessCheck(
-            "reduced-motion", "failed", "the page autoplays media a reader cannot stop"
+            "media-controls", "failed", "the page autoplays media a reader cannot stop"
         )
     if any("loop" in attrs for _tag, attrs in tags):
         return ReadinessCheck(
-            "reduced-motion", "failed", "the page loops media a reader cannot stop"
+            "media-controls", "failed", "the page loops media a reader cannot stop"
         )
     without_controls = [_media_label(tag, attrs) for tag, attrs in tags if "controls" not in attrs]
     if without_controls:
         return ReadinessCheck(
-            "reduced-motion",
+            "media-controls",
             "failed",
             "the page plays audio or video without controls a reader can use: "
             + without_controls[0],
         )
-    if _MOTION.search(text) and not _REDUCED_MOTION.search(text):
-        return ReadinessCheck(
-            "reduced-motion",
-            "failed",
-            "the page animates without a prefers-reduced-motion: reduce rule",
-        )
     return ReadinessCheck(
-        "reduced-motion", "passed", "declared motion is paired with a reduced-motion rule"
+        "media-controls",
+        "passed",
+        "HTML media elements carry reader controls without autoplay or looping",
     )
 
 
@@ -513,7 +463,7 @@ def check_page(
         _check_assets(assets),
         _check_evidence(assets, packet),
         parts_check,
-        _check_motion(assets),
+        _check_media_controls(assets),
     )
     notes: list[str] = []
     entry_text = assets[entrypoint].decode("utf-8", errors="ignore")

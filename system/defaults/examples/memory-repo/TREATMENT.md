@@ -9,15 +9,16 @@ in `DESIGN.md`.
 
 ## Intent
 
-The reader understands the change from the essay first, and works its figures where a figure helps:
-stepping a sequence, switching a condition, tracing a path, comparing before and after on one
-input. Every statement shows what it rests on.
+The essay and its driven figures explain the change together: the page reads in full without its
+animations, and the central mechanism is shown by at least one figure the reader drives—stepping a
+sequence, switching a condition, tracing a path, morphing code or testing inputs in a sandbox.
+Every statement shows what it rests on.
 
 Each figure is built from this comparison's own material: its hunks, records and trees, the real
 call chain, the conditions the code checks. An illustration that would fit any change explains
-none. A page reads in full without its animations.
+none.
 
-The essay is the plan; the static page is the same explanation with motion or script off.
+The markup holds the full explanation so the static page still reads with motion or script off.
 
 ## Who reads, and in what order
 
@@ -26,15 +27,15 @@ documentation, with the code a click away and none of its context. Tell it in th
 reader who stops early still holds a true picture:
 
 1. **The answer.** A title stating what the change does or answering the question; a lede of at
-   most four sentences: before, now, for whom. Beneath it, the map when it helps: the whole change
-   as one figure whose regions open to their detail; when no figure helps, the lede carries the
-   whole and the essay goes on.
+   most four sentences: before, now, for whom. Beneath it, an overview map when it clarifies the
+   whole change as regions that open to their detail.
 2. **What it means for the rules.** Which invariants changed, weakened, strengthened or stayed,
-   and why. Where the page has figures, selecting one lights its code and its place in them.
-3. **How it works now.** The mechanism, before and after. A figure appears only where it helps
-   this part of the essay; the prose carries the mechanism when no picture does.
+   and why. Selecting a rule lights its code and its place in the figures.
+3. **How it works now.** The central mechanism, before and after, shown by at least one figure the
+   reader drives from `TECHNIQUES.md` (for a planned binding, the intended mechanism, marked
+   intended), paired with concise prose that reads in full on its own.
 4. **Where to look first.** Ordered entry points into the code, one reason each, each opening its
-   excerpt in place where the page has excerpts. Say that the order is yours.
+   highlighted excerpt in place. Say that the order is yours.
 5. **What stayed the same.** The guarantees a reader might fear were touched.
 6. **Risks and open questions,** marked as your reading, in a table the reader can filter.
 7. **Not covered.** What was not read, not comparable or unavailable.
@@ -44,10 +45,12 @@ one.
 
 ## How the essay and its figures work
 
-- **Text first.** The essay carries the content; a figure supports one of its parts. A part with
-  no useful figure keeps its text alone.
-- **Drive.** A part about mechanism may have a figure the reader drives: step, scrub, toggle a
-  condition, switch before and after on one input, or select a node to trace its path.
+- **Prose and figures together.** The essay reads in full without animations, and the central
+  mechanism is carried by at least one driven figure. Secondary parts stay in prose when a figure
+  adds nothing.
+- **Drive.** Show a mechanism through a figure the reader drives: step, scrub, morph code, toggle
+  a condition, switch before and after on one input, test a rule in a sandbox, or select a node to
+  trace its path.
 - **Link.** A claim, its code lines and its figure nodes are one thing in three places: hover or
   focus on one lights the others, a click pins, Escape clears.
 - **Descend.** A ladder of abstraction: the whole change, a part, its hunk. Detail opens in place
@@ -104,21 +107,21 @@ figure labels and step counts. No web fonts.
 
 ## Motion and response
 
-A figure responds; it does not perform. A control shows its effect at once, and motion is how one
-state becomes the next: an order, a propagation, a sequence, a block moving. It starts on the
-reader's act (one first-view reveal excepted), leads the eye to one place and stops on its final
-state.
+Motion clarifies how one state becomes the next: an order, a propagation, a code morph, a sequence
+or a measured change. A control shows its effect at once, and every moving figure stays inside
+these bounds:
 
-Motion never:
-
-- decorates, idles, loops, or moves beside prose being read;
-- carries anything the still form lacks;
-- moves the layout, text or scroll position under the reader: a figure's box is reserved before
-  it draws, and detail opens below the control that opened it;
-- plays in two figures at once;
-- takes over scrolling: a part told by scrolling also has step controls.
-
-Every moving figure pauses, steps and scrubs from the keyboard and ends on its final state.
+- **Bounded playback.** A scripted figure plays once when it comes into view or on the reader's
+  act, leads the eye to one place, and stops on its final state without looping. Run one figure at
+  a time.
+- **Separate from the dashboard's quiet switch.** An explanation page is viewed apart from the
+  dashboard: no reduced-motion or quiet-mode check applies to it, and the dashboard's reduced-motion
+  setting and quiet switch do not apply to it.
+- **Stable layout.** Reserve each figure's box before it draws, and open detail below the control
+  that opened it so surrounding text and scroll position stay put. A part driven by scrolling also
+  provides step controls.
+- **Complete still form.** The markup holds the same content and steps as the moving figure.
+- **Keyboard control.** Every moving figure pauses, steps and scrubs from the keyboard.
 
 ## Honest figures
 
@@ -140,14 +143,15 @@ Every moving figure pauses, steps and scrubs from the keyboard and ends on its f
 - No name or logo of the tool that wrote the page; the page speaks for the repository.
 - No WebGL or shaders by default; HTML, CSS, SVG and Canvas2D suffice.
 
-## Still, reduced, narrow
+## Still, narrow and keyboard
 
 **Still form.** The markup, before any script runs, holds the whole explanation: each figure's
 steps as an ordered list, both sides of every switch, every rung open; a canvas figure has a
 markup twin. Script turns it into the driven figure and never adds content the still form lacks.
 
-**Reduced motion.** No transitions, no autoplay; every control still works and every highlight
-still links. Figures open on their final state with their steps listed.
+**Dashboard quiet switch.** The dashboard's reduced-motion setting and quiet switch apply to the
+dashboard application, not to explanation pages. No reduced-motion or quiet-mode check applies to
+an explanation page.
 
 **Narrow.** 600–700px is a normal width. Below 560px: one column, before above after, a sticky
 figure becomes a figure above each step, labels shortened, tables as key/value rows, code wrapped.

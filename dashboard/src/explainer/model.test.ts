@@ -83,12 +83,17 @@ describe('the column selects the explainer or its placeholder (rule 1)', () => {
     expect(columnSelection('building')).toBe('explainer');
   });
 
-  it('gives the form the column while he has it open, and the placeholder after Retire', () => {
-    const live = { kind: 'state' as const, value: state({ seat: 'live' }) };
-    expect(phaseOf(live, true)).toBe('first-request');
+  it('gives the form the column only while no seat is live or closed, and the placeholder after Retire', () => {
+    const empty = { kind: 'state' as const, value: state() };
+    expect(phaseOf(empty, true)).toBe('first-request');
     expect(columnSelection('first-request')).toBe('placeholder');
+    const live = { kind: 'state' as const, value: state({ seat: 'live' }) };
+    expect(phaseOf(live, true)).toBe('live');
+    const closed = { kind: 'state' as const, value: state({ seat: 'closed' }) };
+    expect(phaseOf(closed, true)).toBe('closed');
     const retired = { kind: 'state' as const, value: state({ retiredAt: '2026-10-19T15:12:00Z' }) };
     expect(phaseOf(retired, false)).toBe('retired');
+    expect(phaseOf(retired, true)).toBe('first-request');
     expect(columnSelection('retired')).toBe('placeholder');
   });
 

@@ -15,7 +15,6 @@ import type { ReactNode } from 'react';
 
 import { css } from '../../../../styled-system/css';
 import { trayStore } from '../../../tray/trayStore';
-import { useShouldAnimate } from '../../engine-room/useShouldAnimate';
 import type { TrayPickInput } from '../../../tray/types';
 import {
   CanvasRefusal,
@@ -702,12 +701,11 @@ function useStalePartsMessenger(
   return { staleStats, onReady, markNotReady };
 }
 
-/** The same bound document receives the current effects policy after load and on changes. */
+/** The bound document receives its session binding once after load. */
 function useFrameBinding(
   session: CanvasSession | null,
   frameRef: React.RefObject<HTMLIFrameElement | null>,
 ) {
-  const effects = useShouldAnimate();
   const loadedSession = useRef<string | null>(null);
   const send = useCallback(() => {
     if (!session || loadedSession.current !== session.session) return;
@@ -718,11 +716,10 @@ function useFrameBinding(
         session: session.session,
         revision: session.revision,
         comparison: session.comparison,
-        effects,
       },
       '*',
     );
-  }, [session, frameRef, effects]);
+  }, [session, frameRef]);
   const loaded = useCallback(() => {
     loadedSession.current = session?.session ?? null;
     send();
@@ -730,9 +727,6 @@ function useFrameBinding(
   const departed = useCallback(() => {
     loadedSession.current = null;
   }, []);
-  useEffect(() => {
-    send();
-  }, [send]);
   return { loaded, departed };
 }
 

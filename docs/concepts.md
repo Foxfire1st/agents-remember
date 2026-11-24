@@ -856,13 +856,15 @@ it; one heading of the dashboard calls it the explainer's environment. The **bin
 explainer is the comparison that the explainer's workspace was built for. The button "Retire chat"
 retires the explainer: the host archives its chat, and the workspace is deleted.
 
-The workspace holds the task document and the requirement packets it names in `inputs/`.
-The `reports.md` manifest lists the source paths and SHA-256 digests of the selected leaf's
-reports, which the explainer reads in place. The staged work in `stages/` records what the
-explainer read, the chosen changes, their parts, one self-contained explanation per part,
-the essay and the visual plan. The page is built from the essay; a visual is made only where it
-helps a part of the essay, and the page reads in full without its animations. Neither `inputs/` nor
-`stages/` is published with the page.
+The workspace holds the task document and the requirement packets it names in `inputs/`, working
+kit starters in `starters/`, and a synthetic reference page in `exemplar/`. The `reports.md`
+manifest in `inputs/` lists the source paths and SHA-256 digests of the selected leaf's reports,
+which the explainer reads in place. The staged work in `stages/` records what the explainer read,
+the chosen changes, their parts, one self-contained explanation per part, the essay and the visual
+plan. The page is built from the essay and its figures: it reads in full without its animations,
+and at least one interactive figure the reader drives shows the central mechanism of the change
+(marked intended on a planned binding). None of `inputs/`, `stages/`, `starters/` or `exemplar/` is
+published with the page.
 
 ### Canvas host
 
@@ -872,8 +874,10 @@ under `/canvas/page/<session>/`. It is not the host: it runs no role agent.
 ### Presentation kit
 
 The presentation kit is the set of pinned libraries that Agents Remember ships for the pages of
-the explainer. The explainer's workspace holds the kit in the folder `kit/`, and a page loads a
-kit file from its own revision, without the network.
+the explainer. The explainer's workspace holds the kit in `kit/` beside runnable starters in
+`starters/` and a synthetic reference page in `exemplar/`. A page uses the kit by reference under
+revision-root paths (`kit/<library>/<version>/...`), and `render` carries every referenced file
+with its notices into the published revision automatically, without the network.
 
 ### Revision
 
@@ -882,8 +886,8 @@ the task keeps a new numbered revision. The revisions of a task share a size lim
 publication beyond it is refused until the user removes old revisions. The revision that the user
 agreed to before work started is marked "agreed" and cannot be removed. A retained revision is one
 that the user has not removed. A revision's assets may include a video rendered from code (`.webm`
-or `.mp4`); it plays only on the reader's act, has controls, never loops or autoplays, and with
-reduced motion shows a still frame with its steps listed.
+or `.mp4`); it plays only on the reader's act, has controls, never loops or autoplays, and pairs
+with a still form and listed steps.
 
 ### Grade
 

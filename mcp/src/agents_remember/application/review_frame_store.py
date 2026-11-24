@@ -42,9 +42,29 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application import review_frame_usage as _usage
 from agents_remember.application.review_evidence_adapter import require_intended_packet
 from agents_remember.application.review_evidence_packet import comparison_reference
+from agents_remember.application.review_frame_inventory import (
+    prepare_revision_inventory_staging,
+    write_staged_revision_inventory,
+)
+from agents_remember.application.review_frame_paths import (
+    ASSETS_DIRECTORY,
+    DRAFT_NAME,
+    DRAFTS_DIRECTORY,
+    FRAMES_DIRECTORY,
+    MANIFEST_DIGEST_NAME,
+    MANIFEST_NAME,
+    READY_POINTER,
+    RECLAMATION_NAME,
+    RECLAMATION_RECEIPT,
+    REVISIONS_DIRECTORY,
+    TASK_LOCK_NAME,
+    task_lock_resource,
+)
 from agents_remember.application.review_frame_read import read_frame_bytes
+from agents_remember.application.review_frame_usage import escaped as _escaped
 from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.kernel.canonical_json import canonical_json_bytes
 from agents_remember.kernel.file_lock import (
@@ -87,6 +107,7 @@ from agents_remember.tasks.task_paths import slugify
 __all__ = [
     "FRAMES_DIRECTORY",
     "RECLAMATION_RECEIPT",
+    "TASK_LOCK_NAME",
     "AgreedRevision",
     "FramePublication",
     "FrameRemoval",
@@ -106,21 +127,9 @@ __all__ = [
     "reopen_frame",
     "resolve_agreed_revision",
     "revision_manifest",
+    "task_lock",
     "usage",
 ]
-
-FRAMES_DIRECTORY = "review-frames"
-READY_POINTER = "ready.json"
-REVISIONS_DIRECTORY = "revisions"
-DRAFTS_DIRECTORY = "drafts"
-MANIFEST_NAME = "manifest.json"
-MANIFEST_DIGEST_NAME = "manifest.sha256"
-ASSETS_DIRECTORY = "assets"
-DRAFT_NAME = "draft.json"
-RECLAMATION_NAME = "reclaimed.json"
-TASK_LOCK_NAME = ".frames.lock"
-# The record that survives an archived task's reclamation, beside its other durable reports.
-RECLAMATION_RECEIPT = "review-frames-reclaimed.json"
 
 _TASK_DOCUMENT_NAMES = frozenset({"task.json", "task.md"})
 # A leaf's task document is a small JSON control file. This read bound keeps a damaged one from
@@ -246,24 +255,6 @@ class FrameSnapshot:
         return None if payload is None else payload.decode("utf-8", "replace")
 
 
-def _escaped(root: Path, target: Path) -> bool:
-    """Whether ``target`` leaves ``root`` physically, through ``..`` or a symlinked component."""
-
-    resolved = target.resolve()
-    if resolved != root and root not in resolved.parents:
-        return True
-    probe = root
-    try:
-        relative = target.relative_to(root)
-    except ValueError:
-        return True
-    for part in relative.parts:
-        probe = probe / part
-        if probe.is_symlink():
-            return True
-    return False
-
-
 def guard_frame_id(frame_id: str) -> str:
     """One frame id as one path segment, refusing anything that could leave the area."""
 
@@ -278,16 +269,19 @@ def frames_area(task_root: Path, leaf_id: str) -> Path:
     return durable_reports_root(Path(task_root)) / FRAMES_DIRECTORY / slugify(leaf_id)
 
 
-def _task_lock(scope: FrameScope) -> Path:
+def task_lock(scope: FrameScope) -> Path:
     """The one lock a task's frame store takes: every leaf's publication, cleanup and archive.
 
     A leaf-scoped lock cannot exclude an archive that walks the task's whole area, which is how an
     active publisher lost its bytes. The lock therefore sits at the area root that every leaf shares.
     """
 
-    resource = scope.area.parent / TASK_LOCK_NAME
+    resource = task_lock_resource(scope.area.parent)
     scope.guard(lock_path_for(resource), label="store lock")
     return resource
+
+
+_task_lock = task_lock
 
 
 def _task_area(scope: FrameScope) -> Path:
@@ -533,44 +527,27 @@ def _revisions(frame_dir: Path) -> list[tuple[int, Path]]:
 
 
 def _size(path: Path) -> int:
-    if _escaped(Path(path.anchor), path):
-        raise FrameRefused(f"the store path {path} is not physically inside its admitted area")
-    if path.is_file():
-        return path.stat().st_size
-    size = 0
-    for item in path.rglob("*"):
-        if _escaped(path, item):
-            raise FrameRefused(f"the store child {item} is not physically inside its admitted area")
-        if item.is_file():
-            size += item.stat().st_size
-    return size
+    return _usage.directory_size(path, refuse=FrameRefused)
+
+
+def _revision_size(revision_dir: Path) -> int:
+    return _usage.revision_usage_bytes(revision_dir, refuse=FrameRefused)
 
 
 def _lineage_usage(frame_dir: Path) -> dict[str, int]:
     """This lineage's bytes, including its metadata and its drafts (rules 8, 10)."""
 
-    revisions = sum(_size(directory) for _number, directory in _revisions(frame_dir))
-    drafts = sum(_draft_usage(directory) for directory in _draft_directories(frame_dir))
-    pointer = _size(frame_dir / READY_POINTER) if (frame_dir / READY_POINTER).is_file() else 0
-    reclamation = (
-        _size(frame_dir / RECLAMATION_NAME) if (frame_dir / RECLAMATION_NAME).is_file() else 0
+    return _usage.lineage_usage(
+        frame_dir,
+        revisions=_revisions(frame_dir),
+        draft_directories=_draft_directories(frame_dir),
+        read_draft=read_draft_path,
+        refuse=FrameRefused,
     )
-    return {
-        "revisions": revisions,
-        "drafts": drafts,
-        "metadata": pointer + reclamation,
-        "total": revisions + drafts + pointer + reclamation,
-    }
 
 
 def _draft_usage(directory: Path) -> int:
-    draft = read_draft_path(directory)
-    reserved = (
-        sum(asset.byte_size for asset in draft.assets)
-        if draft and draft.state != "published"
-        else 0
-    )
-    return _size(directory) + reserved
+    return _usage.draft_usage_bytes(directory, read_draft=read_draft_path, refuse=FrameRefused)
 
 
 def _draft_directories(frame_dir: Path) -> list[Path]:
@@ -585,19 +562,7 @@ def _draft_directories(frame_dir: Path) -> list[Path]:
 def _area_usage(area: Path) -> int:
     """The whole task area's bytes, one lineage at a time, metadata included (rule 8)."""
 
-    if not area.is_dir():
-        return 0
-    total = 0
-    for leaf in area.iterdir():
-        if _escaped(area, leaf):
-            raise FrameRefused(f"the task store path {leaf} is not physically inside its area")
-        if leaf.is_dir():
-            for frame in leaf.iterdir():
-                if _escaped(area, frame):
-                    raise FrameRefused(f"the frame {frame} is not physically inside its area")
-                if frame.is_dir():
-                    total += _lineage_usage(frame)["total"]
-    return total
+    return _usage.area_usage(area, lineage_bytes=_lineage_usage, refuse=FrameRefused)
 
 
 def _check_capacity(  # noqa: PLR0913 - one write's costs and the exact objects it replaces
@@ -608,7 +573,7 @@ def _check_capacity(  # noqa: PLR0913 - one write's costs and the exact objects 
     replacing_draft: str | None,
     reclaiming: tuple[int, ...] = (),
     replacing_metadata: tuple[str, ...] = (),
-) -> None:
+) -> int:
     """Refuse a write that would exceed a lineage or task ceiling, before any mutation (rule 8)."""
 
     freed = 0
@@ -620,7 +585,7 @@ def _check_capacity(  # noqa: PLR0913 - one write's costs and the exact objects 
         freed += _size(path) if path.is_file() else 0
     for number in reclaiming:
         reclaimed = scope.frame_dir / REVISIONS_DIRECTORY / str(number)
-        freed += _size(reclaimed) if reclaimed.is_dir() else 0
+        freed += _revision_size(reclaimed) if reclaimed.is_dir() else 0
     task_after = _area_usage(_task_area(scope)) - freed + revision_bytes
     if task_after > limits.task_bytes:
         raise FrameRefused(
@@ -630,6 +595,7 @@ def _check_capacity(  # noqa: PLR0913 - one write's costs and the exact objects 
             "moved; the revision that is pinned is never offered",
             reason="frame-store-full",
         )
+    return task_after
 
 
 def _leaf_document_stem(task_root: Path, leaf_id: str) -> str | None:
@@ -663,6 +629,7 @@ def publish_revision(  # noqa: PLR0913 - one publication states a draft's own in
     part_map: tuple[FramePart, ...] = (),
     binding_source: Callable[[], FrameBinding | None] | None = None,
     interaction_coverage: FrameInteractionCoverage | None = None,
+    advisory_inventory: Mapping[str, Any] | None = None,
 ) -> FramePublication:
     """Admit and record one new ready revision, atomically and idempotently (rules 3, 8, 9, 14).
 
@@ -726,6 +693,7 @@ def publish_revision(  # noqa: PLR0913 - one publication states a draft's own in
             part_map=part_map,
             binding_source=binding_source,
             interaction_coverage=interaction_coverage,
+            advisory_inventory=advisory_inventory,
         )
 
 
@@ -743,6 +711,7 @@ def _publish_locked(  # noqa: PLR0913 - the admission's own decided inputs
     part_map: tuple[FramePart, ...] = (),
     binding_source: Callable[[], FrameBinding | None] | None = None,
     interaction_coverage: FrameInteractionCoverage | None = None,
+    advisory_inventory: Mapping[str, Any] | None = None,
 ) -> FramePublication:
     """The validated publication, executed only after every admission check has passed."""
 
@@ -836,7 +805,7 @@ def _publish_locked(  # noqa: PLR0913 - the admission's own decided inputs
         json.loads(_published_draft(draft, revision, created_at).model_dump_json(by_alias=True))
     )
     reclamation_bytes = 0
-    _check_capacity(
+    task_after = _check_capacity(
         scope,
         limits,
         revision_bytes=(
@@ -851,7 +820,10 @@ def _publish_locked(  # noqa: PLR0913 - the admission's own decided inputs
         reclaiming=planned,
         replacing_metadata=(READY_POINTER, RECLAMATION_NAME) if planned else (READY_POINTER,),
     )
-    _write_revision(scope, revision, assets, encoded)
+    staged_inventory = prepare_revision_inventory_staging(
+        advisory_inventory, used_after_publish=task_after, limit_bytes=limits.task_bytes
+    )
+    _write_revision(scope, revision, assets, encoded, staged_inventory=staged_inventory)
     atomic_write_bytes(
         scope.frame_dir / READY_POINTER,
         _canonical(
@@ -971,7 +943,12 @@ def _entries(assets: Mapping[str, bytes]) -> tuple[FrameAsset, ...]:
 
 
 def _write_revision(
-    scope: FrameScope, revision: int, assets: Mapping[str, bytes], encoded: bytes
+    scope: FrameScope,
+    revision: int,
+    assets: Mapping[str, bytes],
+    encoded: bytes,
+    *,
+    staged_inventory: tuple[str, bytes] | None = None,
 ) -> None:
     """Write one revision beside the others; only a complete directory is promoted."""
 
@@ -989,6 +966,7 @@ def _write_revision(
         atomic_write_bytes(
             staging / MANIFEST_DIGEST_NAME, hashlib.sha256(encoded).hexdigest().encode()
         )
+        write_staged_revision_inventory(staging, staged_inventory)
         os.replace(staging, root / str(revision))
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
@@ -1679,7 +1657,8 @@ def _remove_locked(scope: FrameScope, wanted: tuple[int, ...], moment: str) -> F
             reason="revision-lineage-needed",
         )
     sizes = {
-        number: _size(scope.frame_dir / REVISIONS_DIRECTORY / str(number)) for number in wanted
+        number: _revision_size(scope.frame_dir / REVISIONS_DIRECTORY / str(number))
+        for number in wanted
     }
     digests = _removal_digests(scope.frame_dir, wanted)
     _record_reclamation(
@@ -1921,7 +1900,7 @@ def cleanup_frames(area: Path, *, dry_run: bool = False, now: str | None = None)
                 f"the supplied area {area} is not a real path: a symlinked ancestor is held, not "
                 "normalized away"
             )
-    with exclusive_file_lock(area.parent / TASK_LOCK_NAME, "review frame store"):
+    with exclusive_file_lock(task_lock_resource(area.parent), "review frame store"):
         for frame in sorted(area.iterdir()):
             if not frame.is_dir():
                 continue
@@ -2062,7 +2041,7 @@ def reclaim_task_frames(
                 }
             )
             return outcome
-    with exclusive_file_lock(area / TASK_LOCK_NAME, "review frame store"):
+    with exclusive_file_lock(task_lock_resource(area), "review frame store"):
         found = _archived_frames(area, outcome, keep)
         prior = _prior_archive(receipt)
         intent = _archive_receipt(

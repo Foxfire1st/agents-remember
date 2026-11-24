@@ -354,6 +354,12 @@ def test_the_seat_state_reads_the_hosts_own_agent_view(
 
     views = {
         "running": {"id": "a", "status": "running", "archivedAt": None, "turnActive": True},
+        "initializing": {
+            "id": "a",
+            "status": "initializing",
+            "archivedAt": None,
+            "turnActive": False,
+        },
         # Open, no turn: the host keeps the session open and the page shows it as live.
         "idle": {
             "id": "a",
@@ -405,6 +411,7 @@ def test_the_seat_state_reads_the_hosts_own_agent_view(
     host = _host(tmp_path, bridge=bridge)
     expected = {
         "running": "live",
+        "initializing": "live",
         "idle": "live",
         "closed": "closed",
         "never": "missing",
@@ -416,6 +423,7 @@ def test_the_seat_state_reads_the_hosts_own_agent_view(
         seen[name] = host.seat_state(name)
     assert seen == expected
     assert host.in_turn("running") is True
+    assert host.in_turn("initializing") is True
     assert host.in_turn("closed") is False
 
 

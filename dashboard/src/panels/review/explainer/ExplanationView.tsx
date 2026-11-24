@@ -44,6 +44,7 @@ import {
   defaultComparePair,
   coldRegenerateItems,
   defaultShownRevision,
+  inventoryOmittedText,
   kindLabel,
   orderRevisions,
   phaseOf,
@@ -540,10 +541,15 @@ function FrameMeta({ state, revision, rows, details, controls, slot }: {
   controls?: React.ReactNode;
   slot?: 'left' | 'right';
 }) {
+  const summary = standfirstText(state, revision, rows);
   return <>
-    <span className={standfirstInline} data-testid="explanation-standfirst">
+    <span
+      className={standfirstInline}
+      data-testid="explanation-standfirst"
+      title={`Written by the explainer${summary}`}
+    >
       <span className={who}>✦ Written by the explainer</span>
-      {standfirstText(state, revision, rows)}
+      {summary}
     </span>
     {slot === 'right' ? null : controls}
     {slot === 'right' ? null : details}
@@ -582,7 +588,17 @@ function CompareColumn({
         onEvidence={props.onEvidence}
         meta={<FrameMeta state={revState} revision={revision} rows={model.rows} slot={slot} details={props.headerDetails} controls={<RevisionControls model={model} />} />}
       />
+      <InventoryOmittedNotice reason={inventoryOmittedText(revState, revision, model.rows)} />
     </div>
+  );
+}
+
+function InventoryOmittedNotice({ reason }: { reason: string | null }) {
+  if (!reason) return null;
+  return (
+    <p className={standfirst} data-testid="explanation-inventory-omitted">
+      {reason}
+    </p>
   );
 }
 
@@ -610,6 +626,7 @@ function SingleSavedPage({
   const row = model.rows.find((r) => r.revision === shown);
   const stale = staleParts(state);
   const binding = row ? row.binding : (state?.binding ?? null);
+  const omitted = inventoryOmittedText(state, shown, model.rows);
   return (
     <>
       <RevisionFrame
@@ -625,6 +642,7 @@ function SingleSavedPage({
         onEvidence={props.onEvidence}
         meta={<FrameMeta state={state} revision={shown} rows={model.rows} details={props.headerDetails} controls={<RevisionControls model={model} />} />}
       />
+      <InventoryOmittedNotice reason={omitted} />
       <RetiredNotice retired={state?.retired} />
     </>
   );

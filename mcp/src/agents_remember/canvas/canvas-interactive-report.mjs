@@ -1,33 +1,31 @@
-/** D565: full-motion observations accompany render; they never decide publication.
+/** Interactive observations accompany render; they never decide publication.
  *
  * A run observes every pass to its end. It has no clock of its own guessing at the work: it stops
  * only when the load process's own time limit (the caller's --time-limit) is too near to finish one
- * more control and still answer -- measured on L183 and L191, all five passes take 74-120 s, well
- * inside it. A run that does stop is never a silent cut (MIK-R211 v5): every pass and control it
- * did not reach is named in the report, and the next render of the same draft resumes it -- passes
- * already complete are carried, controls already visited keep their status and pictures, and only
- * the rest are visited.
+ * more control and still answer. A run that does stop is never a silent cut: every
+ * pass and control it did not reach is named in the report, and the next render of the same draft
+ * resumes it -- passes already complete are carried, controls already visited keep their status and
+ * pictures, and only the rest are visited.
  */
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
-/** One action's own bound (click, key, picture) and a page load's: an action that takes longer is
- * that control's error, never a wait. */
+/** Action timeout is kept tight per control while screenshot timeout allows canvas/Shiki painting. */
 const ACTION_MS = 1500;
+const SCREENSHOT_MS = 5000;
 const LOAD_MS = 10000;
 /** What a run keeps free before the load's time limit: a pass's page load, one control and its
  * picture, and the answer, so a stop always ends in a written report. */
-export const RESERVE_MS = LOAD_MS + 2 * ACTION_MS + 2000;
+export const RESERVE_MS = LOAD_MS + ACTION_MS + SCREENSHOT_MS + 2000;
 const MODES = [
-  { width: 1280, method: "click", effects: true },
-  { width: 1280, method: "keyboard", effects: true },
-  { width: 390, method: "click", effects: true },
-  { width: 390, method: "keyboard", effects: true },
-  { width: 1280, method: "keyboard", effects: false },
+  { width: 1280, method: "click" },
+  { width: 1280, method: "keyboard" },
+  { width: 390, method: "click" },
+  { width: 390, method: "keyboard" },
 ];
 
-function passName({ width, method, effects }) {
-  return `${width}-${effects ? method : `effects-off-${method}`}`;
+function passName({ width, method }) {
+  return `${width}-${method}`;
 }
 
 /** Whose the limit is, in the words every report and stop carries: the browser load process's own
@@ -69,14 +67,12 @@ function keyboardKey(control) {
 }
 
 async function observePass(browser, url, directory, mode, run) {
-  const { width, method, effects } = mode;
+  const { width, method } = mode;
   const { deadline, limitSeconds, comparison, earlier } = run;
   const report = {
     width,
     height: 720,
     method,
-    reducedMotion: "no-preference",
-    effects,
     errors: [],
     controls: [],
     pictures: [],
@@ -84,7 +80,6 @@ async function observePass(browser, url, directory, mode, run) {
   };
   const context = await browser.newContext({
     viewport: { width, height: 720 },
-    reducedMotion: "no-preference",
   });
   try {
     const page = await context.newPage();
@@ -116,7 +111,6 @@ async function observePass(browser, url, directory, mode, run) {
         session: "prospective-diagnostic",
         revision: 0,
         comparison,
-        effects,
       },
     );
     const controls = await page.locator(CONTROLS).elementHandles();
@@ -157,7 +151,7 @@ async function observePass(browser, url, directory, mode, run) {
       const name = `${passName(mode)}-${suffix}.png`;
       await page.screenshot({
         path: join(directory, name),
-        timeout: ACTION_MS,
+        timeout: SCREENSHOT_MS,
       });
       report.pictures.push(name);
     };
@@ -166,12 +160,7 @@ async function observePass(browser, url, directory, mode, run) {
       const control = report.controls[index];
       if (control.status !== "unvisited") continue;
       if (Date.now() >= deadline) {
-        const left = report.controls.filter(
-          (one) => one.status === "unvisited",
-        ).length;
-        report.errors.push(
-          `${left} control(s) not visited: ${notReached(limitSeconds)}`,
-        );
+        report.notReached = notReached(limitSeconds);
         break;
       }
       try {
@@ -198,14 +187,6 @@ async function observePass(browser, url, directory, mode, run) {
         control.error = error.message;
       }
     }
-    report.motion = await page.evaluate(() => ({
-      animations: document
-        .getAnimations()
-        .filter((animation) => animation.playState === "running").length,
-      playing: [...document.querySelectorAll("audio,video")].filter(
-        (media) => !media.paused && !media.ended,
-      ).length,
-    }));
     report.complete = !report.controls.some(
       (control) => control.status === "unvisited",
     );
@@ -217,18 +198,32 @@ async function observePass(browser, url, directory, mode, run) {
   return report;
 }
 
-/** The earlier run's pass for ``mode``, tagged with the run folder its pictures lie in.
- *  A pass the earlier run never started saw no controls, so there is nothing of it to resume. */
+/** The earlier run's pass for ``mode``, projected to the current pass schema and tagged with the
+ *  run folder its pictures lie in. A pass the earlier run never started saw no controls, so there
+ *  is nothing of it to resume; legacy passes recorded with ``effects: false`` are ignored. */
 function earlierPass(resume, mode) {
   const found = (resume?.passes ?? []).find(
     (pass) =>
       pass.width === mode.width &&
       pass.method === mode.method &&
-      pass.effects === mode.effects,
+      pass.effects !== false,
   );
-  return found?.controls?.length
-    ? { ...found, run: found.run ?? resume.run }
-    : null;
+  if (!found?.controls?.length) return null;
+  return {
+    width: found.width,
+    height: found.height ?? 720,
+    method: found.method,
+    errors: Array.isArray(found.errors) ? found.errors : [],
+    controls: found.controls,
+    pictures: Array.isArray(found.pictures) ? found.pictures : [],
+    complete: Boolean(found.complete),
+    ...(found.notReached ? { notReached: found.notReached } : {}),
+    ...(found.resumedFrom ? { resumedFrom: found.resumedFrom } : {}),
+    ...(Array.isArray(found.earlierPictures)
+      ? { earlierPictures: found.earlierPictures }
+      : {}),
+    run: found.run ?? resume.run,
+  };
 }
 
 /** Observe every pass, resuming ``resume`` (the earlier run's report of the same draft) if given.
@@ -271,7 +266,8 @@ export async function interactiveReport(
         report.passes.push({
           ...mode,
           complete: false,
-          errors: [`pass not visited: ${notReached(limitSeconds)}`],
+          errors: [],
+          notReached: notReached(limitSeconds),
           controls: earlier?.controls ?? [],
           pictures: [],
           ...(earlier ? { resumedFrom: earlier.run } : {}),

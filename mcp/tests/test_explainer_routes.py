@@ -1151,3 +1151,41 @@ def test_the_state_label_names_the_revisions_own_comparison() -> None:
     # A revision with no comparison of its own, and no revision at all, keep the live label.
     assert _labelled_for_the_revision(record, manifest(None))["label"] == "#37"
     assert _labelled_for_the_revision(record, None)["label"] == "#37"
+
+
+def test_build_and_state_return_host_workspace_id_from_provenance(tmp_path: Path) -> None:
+    """POST /build and GET /state return Paseo's workspaceId rather than the filesystem path."""
+
+    class _ProvenanceHost(_Host):
+        def create_seat(self, *, agent_id, workspace, title, capsule, labels) -> None:
+            super().create_seat(
+                agent_id=agent_id,
+                workspace=workspace,
+                title=title,
+                capsule=capsule,
+                labels=labels,
+            )
+            prov = workspace / "instructions" / "seat-provenance.json"
+            prov.parent.mkdir(parents=True, exist_ok=True)
+            prov.write_text(json.dumps({"workspaceId": "wks_paseo_42"}), encoding="utf-8")
+
+        def seat_state(self, agent_id: str) -> str:
+            del agent_id
+            return "live"
+
+    runtime, _root, code, memory = _world(tmp_path)
+    bound = _bound(_comparison(code, memory, 7))
+    client = _client(_deps(runtime, bound, host=_ProvenanceHost()))
+    workspace = leaf_workspace(runtime, REPO, TASK, LEAF)
+
+    built = client.post(_url("/build"), json={"requestId": "req-ws", "message": "explain"}).json()
+    assert built["state"] == "ok"
+    assert built["workspaceId"] == "wks_paseo_42"
+    assert built["seat"]["workspaceId"] == "wks_paseo_42"
+    assert built["workspace"] == str(workspace)
+
+    state = client.get(_url("/state")).json()
+    assert state["state"] == "ok"
+    assert state["workspaceId"] == "wks_paseo_42"
+    assert state["explainer"]["workspaceId"] == "wks_paseo_42"
+    assert state["workspace"] == str(workspace)

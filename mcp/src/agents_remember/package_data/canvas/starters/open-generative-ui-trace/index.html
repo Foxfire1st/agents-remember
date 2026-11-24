@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trace a path starter — OpenGenerativeUI</title>
+  <style id="ogui-kit-styles"></style>
+  <style>
+    :root {
+      --bg: oklch(0.160 0.02 250);
+      --raised: oklch(0.200 0.02 250);
+      --well: oklch(0.115 0.012 245);
+      --rule: oklch(0.300 0.02 250);
+      --ink: oklch(0.920 0.03 90);
+      --muted: oklch(0.700 0.02 250);
+      --spine: oklch(0.850 0.13 200);
+      --current: oklch(0.820 0.16 75);
+      --new: oklch(0.880 0.16 165);
+      --gone: oklch(0.670 0.22 25);
+      --current-wash: oklch(0.820 0.16 75 / 0.14);
+      --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+      /* Map OpenGenerativeUI diagram tokens onto the dark treatment palette. */
+      --p: var(--ink);
+      --s: var(--muted);
+      --t: var(--rule);
+      --bg2: var(--well);
+      --b: var(--rule);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .page {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 32px 24px 48px;
+    }
+
+    .section-label {
+      margin: 0 0 8px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--spine);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.45rem;
+      line-height: 1.3;
+      font-weight: 650;
+    }
+
+    .lede {
+      margin: 0 0 24px;
+      max-width: 78ch;
+      font-size: 1.04rem;
+      color: var(--muted);
+    }
+
+    figure {
+      margin: 0;
+      background: var(--raised);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      padding: 16px;
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--current);
+      outline-offset: 2px;
+    }
+
+    .diagram-shell {
+      background: var(--well);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      padding: 12px;
+    }
+
+    svg.trace-svg {
+      display: block;
+      width: 100%;
+      max-width: 720px;
+      margin: 0 auto;
+      height: auto;
+    }
+
+    svg.trace-svg text.th {
+      font: 600 12px var(--font-mono);
+      fill: var(--ink);
+    }
+
+    svg.trace-svg text.ts {
+      font: 400 11px var(--font-mono);
+      fill: var(--muted);
+    }
+
+    svg.trace-svg text.t {
+      font: 400 11px var(--font-mono);
+      fill: var(--spine);
+    }
+
+    svg.trace-svg .box > rect {
+      fill: var(--raised);
+      stroke: var(--rule);
+      stroke-width: 1.25;
+      rx: 6;
+      ry: 6;
+    }
+
+    svg.trace-svg .arr {
+      stroke: var(--muted);
+      stroke-width: 1.5;
+      fill: none;
+    }
+
+    svg.trace-svg .leader {
+      stroke: var(--spine);
+      stroke-width: 1;
+      stroke-dasharray: 4 3;
+      fill: none;
+    }
+
+    svg.trace-svg .node {
+      cursor: pointer;
+    }
+
+    svg.trace-svg .node:hover {
+      opacity: 1;
+    }
+
+    svg.trace-svg .node:focus-visible {
+      outline: none;
+    }
+
+    svg.trace-svg .node:focus-visible > rect {
+      stroke: var(--current);
+      stroke-width: 2;
+    }
+
+    /* Linked highlight states: immediate, no transition. */
+    figure.has-active [data-link] {
+      opacity: 0.45;
+    }
+
+    figure.has-active [data-link].is-active,
+    figure.has-active [data-link].is-pinned {
+      opacity: 1;
+    }
+
+    svg.trace-svg .node.is-active > rect,
+    svg.trace-svg .node.is-pinned > rect {
+      stroke: var(--current);
+      stroke-width: 2;
+      fill: oklch(0.240 0.03 80);
+    }
+
+    svg.trace-svg .arr.is-active {
+      stroke: var(--current);
+      stroke-width: 2;
+    }
+
+    .pin-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--rule);
+      background: var(--well);
+      min-height: 48px;
+    }
+
+    .pin-detail {
+      margin: 0;
+      font-size: 13px;
+      color: var(--ink);
+    }
+
+    .pin-clear {
+      min-height: 40px;
+      padding: 6px 12px;
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      background: var(--raised);
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .pin-clear:hover {
+      border-color: var(--current);
+    }
+
+    .linked-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .hop-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 8px;
+    }
+
+    .hop-item {
+      min-height: 44px;
+      padding: 10px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--rule);
+      background: var(--well);
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .hop-item.is-active {
+      border-color: var(--current);
+      background: var(--current-wash);
+    }
+
+    .hop-item.is-pinned {
+      outline: 2px solid var(--current);
+      outline-offset: 0;
+    }
+
+    .hop-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: baseline;
+      margin-bottom: 4px;
+    }
+
+    .hop-index {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--current);
+    }
+
+    .hop-file {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--spine);
+    }
+
+    .code-panel {
+      background: var(--well);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      padding: 10px;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.55;
+      overflow-x: auto;
+      display: grid;
+      gap: 2px;
+    }
+
+    .code-line {
+      width: 100%;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 40px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      cursor: pointer;
+    }
+
+    .code-line:hover {
+      background: var(--current-wash);
+    }
+
+    .code-line.is-active {
+      background: var(--current-wash);
+    }
+
+    .code-line.is-pinned {
+      outline: 2px solid var(--current);
+      outline-offset: -1px;
+    }
+
+    .code-src {
+      font-family: inherit;
+      font-size: inherit;
+    }
+
+    .ln {
+      color: var(--muted);
+      user-select: none;
+      min-width: 24px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .key-hint {
+      margin: 12px 0 0;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    figcaption {
+      margin-top: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 720px) {
+      .linked-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 560px) {
+      .page { padding: 20px 14px 32px; }
+      figure { padding: 12px; }
+      .diagram-shell { padding: 8px; }
+      .pin-clear, .code-line { min-height: 44px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page" data-part="main" data-part-title="Trace a path starter">
+    <p class="section-label">Starter · Trace a path</p>
+    <h1>Link a call-chain diagram to prose claims and code lines</h1>
+    <p class="lede">
+      OpenGenerativeUI diagram classes structure the inline SVG while a shared <code>data-link</code> attribute
+      connects each hop to its claim and code lines. Hover or focus previews; click or Enter pins; Escape clears.
+    </p>
+
+    <figure id="fig-trace-path" data-technique="trace-a-path">
+      <div class="diagram-shell">
+        <svg class="trace-svg" viewBox="0 0 560 272" role="img" aria-label="Four-hop retry call chain">
+          <defs>
+            <marker id="trace-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 1 1 L 9 5 L 1 9 z" fill="currentColor"></path>
+            </marker>
+          </defs>
+
+          <path class="arr" data-edge="hop-1" d="M 252 56 L 302 56" marker-end="url(#trace-arrow)"></path>
+          <path class="arr" data-edge="hop-2" d="M 426 100 L 426 124 L 134 124 L 134 166" marker-end="url(#trace-arrow)"></path>
+          <path class="arr" data-edge="hop-3" d="M 252 216 L 302 216" marker-end="url(#trace-arrow)"></path>
+
+          <path class="leader" d="M 190 172 L 190 150 L 222 150"></path>
+          <text class="t" x="228" y="154">clamps at 80% of lease</text>
+
+          <g class="box node" tabindex="0" role="button" aria-pressed="false" data-link="hop-1" aria-label="Hop 1: enqueue">
+            <rect x="16" y="12" width="236" height="88"></rect>
+            <text class="th" x="32" y="48">1. enqueue</text>
+            <text class="ts" x="32" y="72">enqueue.ts:18</text>
+          </g>
+
+          <g class="box node" tabindex="0" role="button" aria-pressed="false" data-link="hop-2" aria-label="Hop 2: runWorker">
+            <rect x="308" y="12" width="236" height="88"></rect>
+            <text class="th" x="324" y="48">2. runWorker</text>
+            <text class="ts" x="324" y="72">worker.ts:44</text>
+          </g>
+
+          <g class="box node" tabindex="0" role="button" aria-pressed="false" data-link="hop-3" aria-label="Hop 3: computeRetryDelay">
+            <rect x="16" y="172" width="236" height="88"></rect>
+            <text class="th" x="32" y="208">3. computeRetryDelay</text>
+            <text class="ts" x="32" y="232">retry.ts:12</text>
+          </g>
+
+          <g class="box node" tabindex="0" role="button" aria-pressed="false" data-link="hop-4" aria-label="Hop 4: requeueWithDelay">
+            <rect x="308" y="172" width="236" height="88"></rect>
+            <text class="th" x="324" y="208">4. requeueWithDelay</text>
+            <text class="ts" x="324" y="232">enqueue.ts:52</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="linked-grid">
+        <ol class="hop-list">
+          <li class="hop-item" tabindex="0" role="button" aria-pressed="false" data-link="hop-1">
+            <div class="hop-head">
+              <span class="hop-index">Hop 1</span>
+              <span class="hop-file">src/queue/enqueue.ts:18</span>
+            </div>
+            <span>Assigns a 30 s lease and initialises attempt count to 1.</span>
+          </li>
+          <li class="hop-item" tabindex="0" role="button" aria-pressed="false" data-link="hop-2">
+            <div class="hop-head">
+              <span class="hop-index">Hop 2</span>
+              <span class="hop-file">src/queue/worker.ts:44</span>
+            </div>
+            <span>Catches transient worker failure and requests the next delay.</span>
+          </li>
+          <li class="hop-item" tabindex="0" role="button" aria-pressed="false" data-link="hop-3">
+            <div class="hop-head">
+              <span class="hop-index">Hop 3</span>
+              <span class="hop-file">src/queue/retry.ts:12</span>
+            </div>
+            <span>Clamps exponential backoff to 80% of leaseMs and applies full jitter.</span>
+          </li>
+          <li class="hop-item" tabindex="0" role="button" aria-pressed="false" data-link="hop-4">
+            <div class="hop-head">
+              <span class="hop-index">Hop 4</span>
+              <span class="hop-file">src/queue/enqueue.ts:52</span>
+            </div>
+            <span>Writes the bounded delay back into the visible-at timestamp.</span>
+          </li>
+        </ol>
+
+        <div class="code-panel" aria-label="Linked call-chain excerpt">
+          <button type="button" class="code-line" data-link="hop-1" aria-pressed="false"><span class="ln">18</span><code class="code-src">queue.push({ id, attempt: 1, leaseMs: 30_000 });</code></button>
+          <button type="button" class="code-line" data-link="hop-2" aria-pressed="false"><span class="ln">44</span><code class="code-src">const delayMs = computeRetryDelay(job.attempt, baseMs, job.leaseMs);</code></button>
+          <button type="button" class="code-line" data-link="hop-3" aria-pressed="false"><span class="ln">12</span><code class="code-src">const ceiling = Math.floor(leaseMs * 0.8);</code></button>
+          <button type="button" class="code-line" data-link="hop-3" aria-pressed="false"><span class="ln">13</span><code class="code-src">const capped = Math.min(ceiling, baseMs * 2 ** (attempt - 1));</code></button>
+          <button type="button" class="code-line" data-link="hop-3" aria-pressed="false"><span class="ln">14</span><code class="code-src">return Math.round(random() * capped);</code></button>
+          <button type="button" class="code-line" data-link="hop-4" aria-pressed="false"><span class="ln">52</span><code class="code-src">queue.schedule(job.id, now + delayMs, job.attempt + 1);</code></button>
+        </div>
+      </div>
+
+      <div class="pin-bar">
+        <p id="trace-status" class="pin-detail" aria-live="polite">
+          No hop pinned. Hover or focus any node, claim, or code line to preview its link.
+        </p>
+        <button type="button" id="btn-clear-pin" class="pin-clear" hidden>Clear pin</button>
+      </div>
+
+      <p class="key-hint">Keys: Tab focuses nodes, hops, or code lines; Enter or Space pins; Escape clears the pin.</p>
+      <figcaption>Drawn from the synthetic starter code above, not a recorded run. Styled with kit/open-generative-ui/0.1.0-8391a94/open-generative-ui-kit.js.</figcaption>
+    </figure>
+  </main>
+
+  <script type="module">
+    import { SVG_CLASSES_CSS, THEME_CSS } from './kit/open-generative-ui/0.1.0-8391a94/open-generative-ui-kit.js';
+
+    document.getElementById('ogui-kit-styles').textContent = `${THEME_CSS}\n${SVG_CLASSES_CSS}`;
+
+    const DETAILS = {
+      'hop-1': 'Hop 1 (enqueue · src/queue/enqueue.ts:18): inserts the job with leaseMs = 30_000 and attempt = 1.',
+      'hop-2': 'Hop 2 (runWorker · src/queue/worker.ts:44): catches the error and delegates delay calculation with the job lease.',
+      'hop-3': 'Hop 3 (computeRetryDelay · src/queue/retry.ts:12-14): caps backoff at 0.8 * leaseMs and samples full jitter.',
+      'hop-4': 'Hop 4 (requeueWithDelay · src/queue/enqueue.ts:52): schedules the retry inside the active lease window.',
+    };
+
+    const EDGE_ORDER = ['hop-1', 'hop-2', 'hop-3', 'hop-4'];
+    const figure = document.getElementById('fig-trace-path');
+    const statusLine = document.getElementById('trace-status');
+    const clearBtn = document.getElementById('btn-clear-pin');
+    const linked = [...figure.querySelectorAll('[data-link]')];
+    const edges = [...figure.querySelectorAll('[data-edge]')];
+
+    let pinnedKey = null;
+    let previewKey = null;
+    let lastPinnedEl = null;
+    let suppressFocusPreview = false;
+
+    function applyHighlight() {
+      const activeKey = previewKey || pinnedKey;
+      figure.classList.toggle('has-active', Boolean(activeKey));
+
+      const activeIdx = activeKey ? EDGE_ORDER.indexOf(activeKey) : -1;
+      for (const el of linked) {
+        const key = el.dataset.link;
+        el.classList.toggle('is-active', key === activeKey);
+        el.classList.toggle('is-pinned', key === pinnedKey);
+        if (el.tagName === 'BUTTON' || el.getAttribute('role') === 'button') {
+          el.setAttribute('aria-pressed', String(key === pinnedKey));
+        }
+      }
+      for (const edge of edges) {
+        const idx = EDGE_ORDER.indexOf(edge.dataset.edge);
+        edge.classList.toggle('is-active', activeIdx > 0 && idx < activeIdx);
+      }
+
+      clearBtn.hidden = !pinnedKey;
+      if (pinnedKey) {
+        statusLine.textContent = `Pinned — ${DETAILS[pinnedKey]}`;
+      } else if (previewKey) {
+        statusLine.textContent = `Preview — ${DETAILS[previewKey]}`;
+      } else {
+        statusLine.textContent = 'No hop pinned. Hover or focus any node, claim, or code line to preview its link.';
+      }
+    }
+
+    function togglePin(key, triggerEl) {
+      if (pinnedKey === key) {
+        pinnedKey = null;
+      } else {
+        pinnedKey = key;
+        lastPinnedEl = triggerEl || figure.querySelector(`[data-link="${key}"]`);
+      }
+      previewKey = null;
+      applyHighlight();
+    }
+
+    function clearPin(restoreFocus = false) {
+      const fallback = figure.querySelector('.trace-svg .node, .code-line, .hop-item');
+      const target = lastPinnedEl && lastPinnedEl.isConnected ? lastPinnedEl : fallback;
+      pinnedKey = null;
+      previewKey = null;
+      if (restoreFocus && target && typeof target.focus === 'function') {
+        suppressFocusPreview = true;
+        target.focus();
+        suppressFocusPreview = false;
+      }
+      applyHighlight();
+    }
+
+    for (const el of linked) {
+      const key = el.dataset.link;
+      el.addEventListener('mouseenter', () => { previewKey = key; applyHighlight(); });
+      el.addEventListener('mouseleave', () => { previewKey = null; applyHighlight(); });
+      el.addEventListener('focus', () => {
+        if (suppressFocusPreview) return;
+        previewKey = key;
+        applyHighlight();
+      });
+      el.addEventListener('blur', () => { previewKey = null; applyHighlight(); });
+      el.addEventListener('click', () => togglePin(key, el));
+      if (el.tagName !== 'BUTTON') {
+        el.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            togglePin(key, el);
+          }
+        });
+      }
+    }
+
+    clearBtn.addEventListener('click', () => clearPin(true));
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && (pinnedKey || previewKey)) {
+        const activeInside =
+          document.activeElement === clearBtn ||
+          (document.activeElement instanceof Node && figure.contains(document.activeElement));
+        clearPin(activeInside);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -67,8 +67,10 @@ carry their own `LICENSE` / provenance note at the entry root.
 
 ## How a page loads the kit
 
-The kit lives in `package_data/canvas/kit/` and is addressed by a page **relative to its own
-revision**, under the prefix `kit/`:
+The kit lives in `package_data/canvas/kit/` (copied into every explainer workspace as `kit/` for
+inspection) and is used **by reference** from a page under relative paths whose POSIX normalization
+from the referring file lands under `kit/<library>/<version>/...` at the revision root (for example
+`./kit/...` from a root-level script or `../kit/...` from a nested file such as `sub/app.js`):
 
 ```html
 <link rel="stylesheet" href="kit/shiki/4.5.0/magic-move.css">
@@ -89,9 +91,32 @@ morph.code = 'function f(a) { return a + 1 }'
 document.body.append(morph)
 ```
 
-A revision that uses the kit carries the kit files it names as admitted assets under the same
-relative paths; nothing else changes. The consequences, all of them properties of the shipped
-bytes rather than promises:
+Reference discovery (`canvas/kit_references.py`) scans non-kit draft files relative to each
+referrer:
+
+- **HTML and SVG** (`.html`, `.htm`, `.svg`): `href`, `xlink:href`, `src`, `poster`, `srcset`,
+  inline `style` attributes, inline `<style>` blocks and inline JavaScript `<script>` blocks.
+- **CSS** (`.css`): `url(...)` and `@import`, ignoring comments.
+- **JavaScript and ESM** (`.js`, `.mjs`): static `import`, `export ... from`, and string-literal
+  dynamic `import(...)`, parsed with `tree-sitter-javascript` so imports inside comments or ordinary
+  string literals are never matched.
+
+When `render()` loads and publishes a draft, it resolves every reference that lands under
+`kit/<library>/<version>/...` and **carries the referenced kit files together with their entry
+attribution, dependency licences and companion files automatically** from the shipped kit. The
+explainer does not copy kit files into `drafts/assets/kit/`: carried files are staged outside
+`drafts/assets/` for publication and listed in `kitAssets` in `renders/run-NNN/report.json` and
+in `render()`'s answer when it fits within `render()`'s 1,000-token reply bound (otherwise
+`kitAssets` stays in `report.json` and the reply records a `moved` pointer with `part`, `to`,
+and `total`; see [Render reply bound and overflow](canvas-host.md#render-reply-bound-and-overflow)).
+
+If a draft already places files under `drafts/assets/kit/`, `canvas.kit_references.verify_kit_assets`
+checks every one against the shipped kit's manifest byte length and SHA-256 digest. Unknown paths or
+modified bytes under `kit/` fail readiness with guidance to put changed or custom copies outside
+`kit/` rather than modifying a kit file in place.
+
+The consequences of the shipped bundles, all of them properties of the bytes on disk rather than
+promises:
 
 - **No network.** The Shiki bundle contains no call of `fetch`, `XMLHttpRequest`, `WebSocket` or a
   beacon, and no URL of any scheme: the text `https?://` stands only inside the regular expressions
@@ -108,9 +133,40 @@ bytes rather than promises:
 - **No import map.** The bundles are self-contained, so a page needs no `<script type="importmap">`.
   The import map that the OpenGenerativeUI source exports (`IMPORTMAP`: three, gsap, d3 and chart.js
   from `esm.sh`) is deliberately not part of the kit — see below.
-- **Relative paths only.** The page's own `href`/`src` values are `kit/...` and `page.*`; the
-  readiness check resolves them inside the revision, and a `../`, absolute or `//host` reference
-  fails it.
+- **Contained relative paths only.** References resolve relative to the referring file using
+  standard POSIX path normalization (`resolve_reference` in `canvas/kit_references.py`, called by
+  `canvas/readiness.py`). A nested file such as `sub/app.js` may reference
+  `../kit/<library>/<version>/...` as long as the normalized path lands inside the revision root
+  (`kit/<library>/<version>/...`); any path that escapes above the revision root (for example
+  `../../outside`), absolute URL, or `//host` reference fails readiness.
+
+## Starters and exemplar
+
+The product ships runnable kit examples alongside the kit itself and copies both folders into every
+explainer workspace when the workspace is built or updated:
+
+- **`package_data/canvas/starters/`** (copied into the workspace as `starters/`): `README.md` (kit
+  reference rules, kit patterns, technique slugs, and accessibility baseline) plus four
+  standalone passing starters, one for each kit library:
+  - `shiki-magic-move/` (`code-morph`, Shiki `4.5.0`): Before/After segmented switch,
+    `<shiki-magic-move>` token transition, and still form showing both snippets, before above after.
+  - `motion-canvas-step-through/` (`step-through`, Motion Canvas `3.17.2`): four-step keyframed 2D
+    canvas scene via `createKit`, `renderFrame`, and `paint`, deactivating `Player`'s idle loop
+    after each draw, with Back/Play/Next, scrubber, keyboard shortcuts, and ordered step list.
+  - `open-generative-ui-trace/` (`trace-a-path` with `linked-highlight`, OpenGenerativeUI
+    `0.1.0-8391a94`): inline SVG call chain styled with `THEME_CSS` and `SVG_CLASSES_CSS`,
+    `data-link` linked highlight across diagram, claims, and code, click-to-pin, and `Escape` to
+    clear.
+  - `ar-video-measured/` (`before-and-after`, `ar-video` `23fd71bf`): pure `Frame = f(t)` Canvas2D
+    bar comparison using `col()`, `ease.outCubic`, `clamp`, `lerp`, and `tween`, with a Linear/Log
+    scale switch, Replay button, and tabular still form.
+- **`package_data/canvas/exemplar/`** (copied into the workspace as `exemplar/`): a complete
+  synthetic reference page ("Retry jitter cap in a job queue", `index.html`, `exemplar.css`,
+  `exemplar.js`) combining all four kit libraries with `code-excerpt` and `sandbox` (six techniques
+  in total: `code-excerpt`, `code-morph`, `step-through`, `trace-a-path`, `sandbox`, and
+  `before-and-after`). The page explicitly marks itself as a made-up change demonstrating
+  techniques, layout, still forms, keyboard controls, and narrow-viewport stacking — never recorded
+  evidence.
 
 ## What is not shipped, and why
 
@@ -125,40 +181,41 @@ bytes rather than promises:
 
 ## Verification
 
-Static (no browser, no model). The command runs from the root of a development checkout;
+The commands run from the root of a development checkout;
 [Development environment](https://github.com/Foxfire1st/agents-remember/blob/main/CONTRIBUTING.md#development-environment)
 creates its `mcp/.venv`:
 
 ```sh
-mcp/.venv/bin/python -m pytest mcp/tests/test_canvas_kit.py -q
+mcp/.venv/bin/python -m pytest mcp/tests/test_canvas_kit.py mcp/tests/test_canvas_kit_references.py mcp/tests/test_canvas_starters_exemplar.py -q
 ```
 
-Nine tests cover: the four named entries and the refusal of Remotion; byte and SHA-256 accounting for
-every file with nothing unaccounted on disk; each entry's license text containing the recorded
-quotation; each bundled package having its license; no network primitive or absolute load in any
-bundle; each bundle carrying the symbols it claims; a page assembled from Shiki + ar-video passing
-`agents_remember.canvas.readiness.check_page` with no network references and no template; a plain
-page with no kit at all still passing; and the exact reference set inside the Motion Canvas bundle.
-
-No test or script of the repository runs the kit in a browser by itself. The render path checks a
-kit page in a browser: the prospective browser load, the load of the draft that `render`, the
-explainer's tool, runs before it publishes
-([Readiness before a revision becomes ready](canvas-host.md#readiness-before-a-revision-becomes-ready)),
-opens the exact selected assets in Chromium before anything is published (see below).
+- **Static kit and reference tests** (`mcp/tests/test_canvas_kit.py`,
+  `mcp/tests/test_canvas_kit_references.py`): cover the four named entries and the refusal of
+  Remotion; byte and SHA-256 accounting for every file with nothing unaccounted on disk; each
+  entry's license text containing the recorded quotation; each bundled package having its license;
+  no network primitive or absolute load in any bundle; each bundle carrying the symbols it claims;
+  HTML/SVG, CSS, and tree-sitter JS/MJS reference extraction and resolution; automatic carrying of
+  referenced kit files and their notices; refusal of unknown or modified files under `kit/`; a plain
+  page with no kit still passing; and the exact reference set inside the Motion Canvas bundle.
+- **Browser runtime tests** (`mcp/tests/test_canvas_starters_exemplar.py`): run each of the four
+  starters and the exemplar through automatic kit carrying, static readiness, the real Chromium
+  prospective load
+  ([Readiness before a revision becomes ready](canvas-host.md#readiness-before-a-revision-becomes-ready)),
+  and revision inventory reporting.
 
 ## Known limits
 
-- **Static readiness is not execution.** It scans markup/styles rather than JavaScript error
-  strings. The prospective browser load checks the exact selected assets before publication,
-  including references inserted into the rendered DOM. The Motion Canvas documentation strings
-  are not subresource requests; its reference inventory remains pinned by `test_canvas_kit.py`.
-- **The revision must carry what it uses.** `canvas.kit.kit_assets` verifies the pinned bytes and
-  includes the selected entry's attribution, dependency licenses and provenance. The existing
-  `text/plain` type admits the `LICENSE` file names of the libraries unchanged. The canvas host serves those files
-  only through that revision's session prefix, with the same integrity checks as other assets.
-- **No standalone runtime witness.** No model-free witness exercises the four entries in a
-  browser. A kit page is exercised in a browser only by the prospective load of the page that uses
-  it; nothing proves every feature of the libraries.
+- **Static readiness is not execution.** It parses markup, styles, and JavaScript import statements
+  rather than executing scripts. The prospective browser load runs the exact selected assets in
+  Chromium before publication, checking runtime errors, foreign requests, rendered evidence
+  attributes, and visible rendered paint. The Motion Canvas documentation strings are not
+  subresource requests; its reference inventory remains pinned by `test_canvas_kit.py`.
+- **Kit files under `kit/` are immutable.** `render()` carries referenced kit files automatically
+  with `canvas.kit.kit_assets`, including each selected entry's attribution, dependency licenses,
+  and companion files, and `canvas.kit_references.verify_kit_assets` refuses any modified copy
+  inside `kit/`. The existing `text/plain` type admits the `LICENSE` file names of the libraries
+  unchanged, and the canvas host serves those files only through that revision's session prefix with
+  the same integrity checks as other assets.
 - **Rebuilding is manual.** The manifest records the exact esbuild command and entry for each
   bundle, but the repository holds no npm dependency for them. Shiki and Motion Canvas are built
   from the npm packages of their pinned versions, OpenGenerativeUI and ar-video from their own

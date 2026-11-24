@@ -40,6 +40,7 @@ from typing import Any
 
 from agents_remember.canvas.explainer_paths import (
     DRAFTS_DIRECTORY,
+    EXEMPLAR_DIRECTORY,
     EXPLAINER_FRAME,
     FRAMES_DIRECTORY,
     INPUTS_DIRECTORY,
@@ -49,6 +50,7 @@ from agents_remember.canvas.explainer_paths import (
     REVISIONS_DIRECTORY,
     SCRATCH_DIRECTORY,
     STAGES_DIRECTORY,
+    STARTERS_DIRECTORY,
     copy_folder,
     copy_revision,
     ensure_leaf_workspace,
@@ -120,6 +122,9 @@ ASSIGNMENT_NAME = "assignment.txt"
 ASSIGNMENT_MD_NAME = "assignment.md"
 EVIDENCE_NAME = "evidence.json"
 GRANTS_NAME = "grants.json"
+_PACKAGE_CANVAS_ROOT = Path(__file__).resolve().parent.parent / "package_data" / "canvas"
+STARTERS_ROOT = _PACKAGE_CANVAS_ROOT / STARTERS_DIRECTORY
+EXEMPLAR_ROOT = _PACKAGE_CANVAS_ROOT / EXEMPLAR_DIRECTORY
 
 
 @dataclass(frozen=True)
@@ -507,23 +512,52 @@ def _selected_report_receipt(
     return None
 
 
+def _copy_package_folder(source: Path, destination: Path, *, root: Path, label: str) -> int:
+    """Refresh one shipped read-only package folder in the workspace when present."""
+
+    if not source.is_dir() or source.is_symlink():
+        return 0
+    guard_explainer_path(destination, root=root, label=label)
+    if destination.is_dir() and not destination.is_symlink():
+        if first_nested_symlink(destination) is not None:
+            raise PathRefused(f"{label} holds a symlink at {destination}")
+        shutil.rmtree(destination)
+    return copy_folder(source, destination, root=root)
+
+
 def _copy_documents(run: EnvironmentRun, workspace: Path, reporter: _Progress) -> None:
     """Copy in what the explainer needs, as a task agent's documents are (MIK-R211 v5 rule 3).
 
-    The task's reference notes for the leaf, the kit files and every published revision are plain
-    folder copies. The draft starts as a copy of the latest revision when it holds nothing yet, so a
-    new revision starts from the published one rather than from an empty page. A planned binding has
-    no changed trees to read; the plan itself -- the packets the task document names and its
-    declared planned effects -- is written into ``planned/`` as content.
+    The task's reference notes for the leaf, the kit files, shipped starters and exemplar, and every
+    published revision are plain folder copies. The draft starts as a copy of the latest revision
+    when it holds nothing yet (excluding carried ``kit/`` files), so a new revision starts from the
+    published one rather than from an empty page. A planned binding has no changed trees to read;
+    the plan itself -- the packets the task document names and its declared planned effects -- is
+    written into ``planned/`` as content.
     """
 
     ref = run.ref
     root = workspace.parent
     kit = _copy_kit(workspace, root=root)
+    starters = _copy_package_folder(
+        STARTERS_ROOT, workspace / STARTERS_DIRECTORY, root=root, label="explainer starters"
+    )
+    exemplar = _copy_package_folder(
+        EXEMPLAR_ROOT, workspace / EXEMPLAR_DIRECTORY, root=root, label="explainer exemplar"
+    )
     try:
         task = task_root(ref.config, ref.repository_id, ref.task)
     except PathRefused:
-        reporter.step("documents", reference=0, kit=kit, revisions=0, planned=0, inputs=0)
+        reporter.step(
+            "documents",
+            reference=0,
+            kit=kit,
+            starters=starters,
+            exemplar=exemplar,
+            revisions=0,
+            planned=0,
+            inputs=0,
+        )
         return
     reference = task / "notes" / "reference" / ref.leaf_id
     notes = (
@@ -545,12 +579,14 @@ def _copy_documents(run: EnvironmentRun, workspace: Path, reporter: _Progress) -
     started = False
     if revisions and not any(item.is_file() for item in draft.rglob("*")):
         latest = workspace / REVISIONS_DIRECTORY / str(revisions[-1][0]) / "assets"
-        copy_folder(latest, draft, root=root)
+        copy_folder(latest, draft, root=root, skip_top_level=(KIT_DIRECTORY,))
         started = True
     reporter.step(
         "documents",
         reference=notes,
         kit=kit,
+        starters=starters,
+        exemplar=exemplar,
         revisions=len(revisions),
         planned=planned,
         inputs=inputs,

@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Retry jitter cap in a job queue — Explainer kit exemplar</title>
+  <link rel="stylesheet" href="kit/shiki/4.5.0/magic-move.css">
+  <style id="ogui-kit-styles"></style>
+  <link rel="stylesheet" href="exemplar.css">
+</head>
+<body>
+  <main class="page">
+    <section class="part" data-part="answer" data-part-title="Retry jitter cap overview">
+      <p class="section-label">Exemplar · All four kit libraries</p>
+      <h1>Retry jitter cap in a job queue</h1>
+
+      <aside class="exemplar-banner" aria-label="Illustrative exemplar notice">
+        <span class="mark mark--reading">exemplar · made-up change</span>
+        <p>
+          <strong>This change is made up.</strong> It demonstrates six interactive explainer techniques and all four
+          pinned kit libraries (<code>shiki</code>, <code>motion-canvas</code>, <code>open-generative-ui</code>,
+          <code>ar-video</code>). It is not an explainer page bound to a comparison, and every code snippet and
+          number below is illustrative rather than recorded evidence.
+        </p>
+      </aside>
+
+      <p class="lede">
+        Capping exponential backoff at 80% of the queue lease and sampling full jitter keeps retrying workers
+        inside their lease window and breaks lockstep retry storms.
+      </p>
+
+      <p class="prose">
+        In this illustrative queue, each worker holds a 30 s lease while processing a job. Previously,
+        <span class="code-link">src/queue/retry.ts:12</span> doubled the base delay without a ceiling, so a job
+        failing five times waited 64 s—more than twice its own lease <span class="mark mark--reading">illustrative</span>.
+        The queue expired the lease mid-wait and handed the same job to a second worker, causing duplicate runs.
+        The change adds a lease-derived ceiling of <code>0.8 * leaseMs</code> and samples uniformly across
+        <code>[0, capped]</code> <span class="mark">model rule</span>.
+      </p>
+    </section>
+
+    <section class="part" data-part="excerpt" data-part-title="Highlighted code excerpt">
+      <p class="section-label">1 · Code excerpt</p>
+      <h2>Bounding the delay inside <code>computeRetryDelay()</code></h2>
+      <p class="prose">
+        Two lines carry the policy change in <span class="code-link">src/queue/retry.ts:12-22</span>: computing
+        <code>ceiling</code> from the active lease and clamping the exponential term before multiplying by
+        <code>random()</code> <span class="mark mark--reading">illustrative</span>. Unchanged validation lines above
+        and below remain folded until opened in place.
+      </p>
+
+      <figure id="fig-code-excerpt" data-technique="code-excerpt">
+        <div class="figure-bar">
+          <span class="figure-meta">src/queue/retry.ts · illustrative diff</span>
+          <button type="button" id="btn-toggle-context" class="action-btn" aria-expanded="false">
+            Show 6 unchanged lines
+          </button>
+        </div>
+
+        <div id="excerpt-code" class="excerpt-shell" data-code-excerpt="highlighted" role="region" aria-label="Highlighted diff of computeRetryDelay">
+          <div class="excerpt-group excerpt-context" data-context="top" hidden>
+            <div class="diff-line" data-kind="ctx"><span class="diff-ln">6</span><span class="diff-sign"> </span><code class="diff-src">const LEASE_SAFETY_RATIO = 0.8;</code></div>
+            <div class="diff-line" data-kind="ctx"><span class="diff-ln">7</span><span class="diff-sign"> </span><code class="diff-src"></code></div>
+            <div class="diff-line" data-kind="ctx"><span class="diff-ln">8</span><span class="diff-sign"> </span><code class="diff-src">export function validateAttempt(attempt: number): number {</code></div>
+            <div class="diff-line" data-kind="ctx"><span class="diff-ln">9</span><span class="diff-sign"> </span><code class="diff-src">  return Math.max(1, Math.floor(attempt));</code></div>
+            <div class="diff-line" data-kind="ctx"><span class="diff-ln">10</span><span class="diff-sign"> </span><code class="diff-src">}</code></div>
+          </div>
+
+          <div class="diff-fold-notice" id="fold-notice">6 unchanged context lines folded (lines 6–10 and 24)</div>
+
+          <div class="excerpt-group">
+            <div class="diff-line" data-kind="ctx"><span class="diff-ln">12</span><span class="diff-sign"> </span><code class="diff-src">export function computeRetryDelay(</code></div>
+            <div class="diff-line" data-kind="ctx"><span class="diff-ln">13</span><span class="diff-sign"> </span><code class="diff-src">  attempt: number,</code></div>
+            <div class="diff-line" data-kind="ctx"><span class="diff-ln">14</span><span class="diff-sign"> </span><code class="diff-src">  baseMs: number,</code></div>
+            <div class="diff-line" data-kind="add"><span class="diff-ln">15</span><span class="diff-sign">+</span><code class="diff-src">  leaseMs: number,</code></div>
+            <div class="diff-line" data-kind="add"><span class="diff-ln">16</span><span class="diff-sign">+</span><code class="diff-src">  random: () =&gt; number = Math.random,</code></div>
+            <div class="diff-line" data-kind="ctx"><span class="diff-ln">17</span><span class="diff-sign"> </span><code class="diff-src">): number {</code></div>
+            <div class="diff-line" data-kind="del"><span class="diff-ln">18</span><span class="diff-sign">−</span><code class="diff-src">  const backoff = baseMs * Math.pow(2, attempt - 1);</code></div>
+            <div class="diff-line" data-kind="del"><span class="diff-ln">19</span><span class="diff-sign">−</span><code class="diff-src">  return Math.round(backoff);</code></div>
+            <div class="diff-line" data-kind="add"><span class="diff-ln">18</span><span class="diff-sign">+</span><code class="diff-src">  const safeAttempt = validateAttempt(attempt);</code></div>
+            <div class="diff-line" data-kind="add"><span class="diff-ln">19</span><span class="diff-sign">+</span><code class="diff-src">  const ceiling = Math.floor(leaseMs * LEASE_SAFETY_RATIO);</code></div>
+            <div class="diff-line" data-kind="add"><span class="diff-ln">20</span><span class="diff-sign">+</span><code class="diff-src">  const raw = baseMs * Math.pow(2, safeAttempt - 1);</code></div>
+            <div class="diff-line" data-kind="add"><span class="diff-ln">21</span><span class="diff-sign">+</span><code class="diff-src">  const capped = Math.min(ceiling, raw);</code></div>
+            <div class="diff-line" data-kind="add"><span class="diff-ln">22</span><span class="diff-sign">+</span><code class="diff-src">  return Math.round(random() * capped);</code></div>
+            <div class="diff-line" data-kind="ctx"><span class="diff-ln">23</span><span class="diff-sign"> </span><code class="diff-src">}</code></div>
+          </div>
+
+          <div class="excerpt-group excerpt-context" data-context="bottom" hidden>
+            <div class="diff-line" data-kind="ctx"><span class="diff-ln">24</span><span class="diff-sign"> </span><code class="diff-src">// Exported to src/queue/worker.ts for transient failure retries.</code></div>
+          </div>
+        </div>
+
+        <p id="excerpt-status" class="state-line" aria-live="polite">
+          Showing changed hunk (lines 12–23) with 6 unchanged lines folded.
+        </p>
+        <p class="key-hint">Keys: Enter or Space toggles unchanged context lines.</p>
+        <figcaption>Highlighted with Shiki (<code>github-dark</code>) via <code>kit/shiki/4.5.0/shiki-kit.js</code>.</figcaption>
+      </figure>
+    </section>
+
+    <section class="part" data-part="morph" data-part-title="Before and after code morph">
+      <p class="section-label">2 · Code morph</p>
+      <h2>How the retry function transforms</h2>
+      <p class="prose">
+        Switch between the uncapped implementation and the lease-capped jitter version to follow which tokens
+        stay intact and where the lease ceiling enters the calculation.
+      </p>
+
+      <figure id="fig-code-morph" data-technique="code-morph">
+        <div class="figure-bar">
+          <span class="figure-meta">src/queue/retry.ts · before / after morph</span>
+          <div class="segmented" role="group" aria-label="Code morph state">
+            <button type="button" id="morph-before" aria-pressed="false" tabindex="-1" data-state="before">Before</button>
+            <button type="button" id="morph-after" aria-pressed="true" tabindex="0" data-state="after">After</button>
+          </div>
+        </div>
+
+        <div id="morph-still" class="still-snippets">
+          <div class="still-block" data-state="before">
+            <h3>Before — uncapped exponential backoff</h3>
+            <pre><code>export function computeRetryDelay(attempt: number, baseMs: number): number {
+  const backoff = baseMs * Math.pow(2, attempt - 1);
+  return Math.round(backoff);
+}</code></pre>
+          </div>
+          <div class="still-block is-selected" data-state="after">
+            <h3>After — lease-capped full jitter</h3>
+            <pre><code>export function computeRetryDelay(
+  attempt: number,
+  baseMs: number,
+  leaseMs: number,
+  random: () =&gt; number = Math.random,
+): number {
+  const ceiling = Math.floor(leaseMs * 0.8);
+  const capped = Math.min(ceiling, baseMs * Math.pow(2, attempt - 1));
+  return Math.round(random() * capped);
+}</code></pre>
+          </div>
+        </div>
+
+        <div id="morph-stage" class="morph-stage" hidden aria-label="Animated code morph"></div>
+
+        <p id="morph-status" class="state-line" aria-live="polite">
+          <span class="state-tag">After</span>
+          Backoff is clamped to 80% of leaseMs and multiplied by a uniform random factor.
+        </p>
+        <p class="key-hint">Keys: Left and Right arrows switch Before and After while the switch has focus.</p>
+        <figcaption>Token transition powered by <code>kit/shiki/4.5.0/shiki-kit.js</code> and <code>magic-move.css</code>.</figcaption>
+      </figure>
+    </section>
+
+    <section class="part" data-part="sequence" data-part-title="Four-step retry lifecycle">
+      <p class="section-label">3 · Step-through</p>
+      <h2>One failing job from error to lease-safe requeue</h2>
+      <p class="prose">
+        Walk through attempt 5 on a 30.0 s lease with a 4.0 s base delay. Without a ceiling the raw exponential
+        delay reaches 64.0 s and expires the lease; clamping to 24.0 s and sampling jitter (<code>r = 0.48</code>)
+        schedules the retry at 11.5 s with 18.5 s of lease remaining.
+      </p>
+
+      <figure id="fig-step-through" data-technique="step-through" tabindex="0" aria-label="Four-step retry lifecycle">
+        <div class="canvas-shell canvas-shell--mc">
+          <canvas id="mc-canvas" width="880" height="320" aria-hidden="true"></canvas>
+        </div>
+
+        <div class="controls">
+          <button type="button" id="mc-back" class="action-btn">Back</button>
+          <button type="button" id="mc-play" class="action-btn" aria-pressed="false">Play</button>
+          <button type="button" id="mc-next" class="action-btn">Next</button>
+          <input type="range" id="mc-scrubber" class="scrubber" min="1" max="4" step="1" value="4" aria-label="Step selector">
+          <span id="mc-count" class="step-count">4 / 4</span>
+        </div>
+
+        <p id="mc-status" class="state-line" aria-live="polite">
+          Step 4 of 4: requeue schedules attempt 6 at 11.5 s (r = 0.48), inside the 30.0 s lease (src/queue/enqueue.ts:52).
+        </p>
+        <p class="key-hint">Keys: Left / Right step, Space plays or pauses, Home / End jump to first or last step while figure has focus.</p>
+
+        <ol class="step-list" id="mc-step-list">
+          <li class="step-item" data-step="1" data-state="past">
+            <span class="step-num">01</span>
+            <span>Worker attempt 5 fails on a 30.0 s lease and enters the retry handler.</span>
+            <span class="step-loc">runWorker · src/queue/worker.ts:44</span>
+          </li>
+          <li class="step-item" data-step="2" data-state="past">
+            <span class="step-num">02</span>
+            <span>Raw exponential backoff computes 64.0 s, 34.0 s past lease expiry.</span>
+            <span class="step-loc">computeRetryDelay · src/queue/retry.ts:20</span>
+          </li>
+          <li class="step-item" data-step="3" data-state="past">
+            <span class="step-num">03</span>
+            <span>Lease clamp bounds the upper limit to 24.0 s (80% of leaseMs).</span>
+            <span class="step-loc">computeRetryDelay · src/queue/retry.ts:21</span>
+          </li>
+          <li class="step-item" data-step="4" data-state="current">
+            <span class="step-num">04</span>
+            <span>Full jitter (r = 0.48) draws 11.5 s and requeues attempt 6 with 18.5 s of lease remaining.</span>
+            <span class="step-loc">requeue · src/queue/enqueue.ts:52</span>
+          </li>
+        </ol>
+
+        <figcaption>Keyframed 2D scene rendered on demand with <code>kit/motion-canvas/3.17.2/motion-canvas-kit.js</code>.</figcaption>
+      </figure>
+    </section>
+
+    <section class="part" data-part="trace" data-part-title="Call chain with linked highlight">
+      <p class="section-label">4 · Trace a path</p>
+      <h2>Tracing a retry from enqueue to requeue</h2>
+      <p class="prose">
+        Every node in the six-hop call chain links directly to its claim and code line through a page-internal
+        <code>data-link</code> key. Hover or focus previews the chain; clicking or pressing Enter pins one hop
+        so you can inspect its exact lines without losing context.
+      </p>
+
+      <figure id="fig-trace-path" data-technique="trace-a-path">
+        <div class="diagram-shell">
+          <svg class="trace-svg" viewBox="0 0 640 292" role="img" aria-label="Six-hop job queue retry call chain">
+            <defs>
+              <marker id="exemplar-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 1 1 L 9 5 L 1 9 z" fill="currentColor"></path>
+              </marker>
+            </defs>
+
+            <!-- Row 1 horizontal edges -->
+            <path class="arr" data-edge="enqueue" d="M 196 60 L 222 60" marker-end="url(#exemplar-arrow)"></path>
+            <path class="arr" data-edge="worker" d="M 412 60 L 438 60" marker-end="url(#exemplar-arrow)"></path>
+            <!-- Stepped edge from failure (Row 1 right) to retryPolicy (Row 2 left) -->
+            <path class="arr" data-edge="failure" d="M 536 108 L 536 132 L 104 132 L 104 178" marker-end="url(#exemplar-arrow)"></path>
+            <!-- Row 2 horizontal edges -->
+            <path class="arr" data-edge="retryPolicy" d="M 196 232 L 222 232" marker-end="url(#exemplar-arrow)"></path>
+            <path class="arr" data-edge="clampToLease" d="M 412 232 L 438 232" marker-end="url(#exemplar-arrow)"></path>
+
+            <!-- Leader annotation for the clamp node -->
+            <path class="leader" d="M 320 184 L 320 160 L 352 160"></path>
+            <text class="t" x="358" y="164">bounds delay ≤ 0.8 × leaseMs</text>
+
+            <!-- Row 1 nodes -->
+            <g class="box node" tabindex="0" role="button" aria-pressed="false" data-link="enqueue" aria-label="Hop 1: enqueue">
+              <rect x="12" y="12" width="184" height="96"></rect>
+              <text class="th" x="26" y="51">1. enqueue</text>
+              <text class="ts" x="26" y="75">enqueue.ts:18</text>
+            </g>
+
+            <g class="box node" tabindex="0" role="button" aria-pressed="false" data-link="worker" aria-label="Hop 2: worker">
+              <rect x="228" y="12" width="184" height="96"></rect>
+              <text class="th" x="242" y="51">2. worker</text>
+              <text class="ts" x="242" y="75">worker.ts:38</text>
+            </g>
+
+            <g class="box node" tabindex="0" role="button" aria-pressed="false" data-link="failure" aria-label="Hop 3: failure">
+              <rect x="444" y="12" width="184" height="96"></rect>
+              <text class="th" x="458" y="51">3. failure</text>
+              <text class="ts" x="458" y="75">worker.ts:44</text>
+            </g>
+
+            <!-- Row 2 nodes -->
+            <g class="box node" tabindex="0" role="button" aria-pressed="false" data-link="retryPolicy" aria-label="Hop 4: retryPolicy">
+              <rect x="12" y="184" width="184" height="96"></rect>
+              <text class="th" x="26" y="223">4. retryPolicy</text>
+              <text class="ts" x="26" y="247">retry.ts:12</text>
+            </g>
+
+            <g class="box node" tabindex="0" role="button" aria-pressed="false" data-link="clampToLease" aria-label="Hop 5: clampToLease">
+              <rect x="228" y="184" width="184" height="96"></rect>
+              <text class="th" x="242" y="223">5. clampToLease</text>
+              <text class="ts" x="242" y="247">retry.ts:19-22</text>
+            </g>
+
+            <g class="box node" tabindex="0" role="button" aria-pressed="false" data-link="requeue" aria-label="Hop 6: requeue">
+              <rect x="444" y="184" width="184" height="96"></rect>
+              <text class="th" x="458" y="223">6. requeue</text>
+              <text class="ts" x="458" y="247">enqueue.ts:52</text>
+            </g>
+          </svg>
+        </div>
+
+        <div class="linked-grid">
+          <ol class="hop-list">
+            <li class="hop-item" tabindex="0" role="button" aria-pressed="false" data-link="enqueue">
+              <div class="hop-head">
+                <span class="hop-index">1 · enqueue</span>
+                <span class="hop-file">src/queue/enqueue.ts:18</span>
+              </div>
+              <span>Stores the job with a 30 s lease and attempt counter set to 1.</span>
+            </li>
+            <li class="hop-item" tabindex="0" role="button" aria-pressed="false" data-link="worker">
+              <div class="hop-head">
+                <span class="hop-index">2 · worker</span>
+                <span class="hop-file">src/queue/worker.ts:38</span>
+              </div>
+              <span>Claims the lease and executes the job handler inside a try/catch block.</span>
+            </li>
+            <li class="hop-item" tabindex="0" role="button" aria-pressed="false" data-link="failure">
+              <div class="hop-head">
+                <span class="hop-index">3 · failure</span>
+                <span class="hop-file">src/queue/worker.ts:44</span>
+              </div>
+              <span>Catches a retryable error while the lease is still active.</span>
+            </li>
+            <li class="hop-item" tabindex="0" role="button" aria-pressed="false" data-link="retryPolicy">
+              <div class="hop-head">
+                <span class="hop-index">4 · retryPolicy</span>
+                <span class="hop-file">src/queue/retry.ts:12</span>
+              </div>
+              <span>Receives attempt, baseMs, and leaseMs from the failing worker.</span>
+            </li>
+            <li class="hop-item" tabindex="0" role="button" aria-pressed="false" data-link="clampToLease">
+              <div class="hop-head">
+                <span class="hop-index">5 · clampToLease</span>
+                <span class="hop-file">src/queue/retry.ts:19-22</span>
+              </div>
+              <span>Caps raw backoff at 80% of leaseMs and multiplies by full jitter.</span>
+            </li>
+            <li class="hop-item" tabindex="0" role="button" aria-pressed="false" data-link="requeue">
+              <div class="hop-head">
+                <span class="hop-index">6 · requeue</span>
+                <span class="hop-file">src/queue/enqueue.ts:52</span>
+              </div>
+              <span>Schedules the next visibility timestamp before lease expiry.</span>
+            </li>
+          </ol>
+
+          <div class="code-panel" data-code-excerpt="highlighted" aria-label="Linked call-chain lines">
+            <button type="button" class="code-line" data-link="enqueue" aria-pressed="false"><span class="ln">18</span><code class="code-src">queue.push({ id, attempt: 1, leaseMs: 30_000 });</code></button>
+            <button type="button" class="code-line" data-link="worker" aria-pressed="false"><span class="ln">38</span><code class="code-src">const job = queue.claim(workerId);</code></button>
+            <button type="button" class="code-line" data-link="failure" aria-pressed="false"><span class="ln">44</span><code class="code-src">} catch (err) { if (!isRetryable(err)) throw err;</code></button>
+            <button type="button" class="code-line" data-link="retryPolicy" aria-pressed="false"><span class="ln">12</span><code class="code-src">const delayMs = computeRetryDelay(job.attempt, baseMs, job.leaseMs);</code></button>
+            <button type="button" class="code-line" data-link="clampToLease" aria-pressed="false"><span class="ln">19</span><code class="code-src">const ceiling = Math.floor(leaseMs * 0.8);</code></button>
+            <button type="button" class="code-line" data-link="clampToLease" aria-pressed="false"><span class="ln">21</span><code class="code-src">const capped = Math.min(ceiling, raw);</code></button>
+            <button type="button" class="code-line" data-link="clampToLease" aria-pressed="false"><span class="ln">22</span><code class="code-src">return Math.round(random() * capped);</code></button>
+            <button type="button" class="code-line" data-link="requeue" aria-pressed="false"><span class="ln">52</span><code class="code-src">queue.requeue(job.id, now + delayMs, job.attempt + 1);</code></button>
+          </div>
+        </div>
+
+        <div class="pin-bar">
+          <p id="trace-status" class="pin-detail" aria-live="polite">
+            No hop pinned. Hover or focus any node, claim, or code line to preview its link.
+          </p>
+          <button type="button" id="trace-clear" class="action-btn" hidden>Clear pin</button>
+        </div>
+
+        <p class="key-hint">Keys: Tab focuses nodes, hops, or code lines; Enter or Space pins; Escape clears the pin.</p>
+        <figcaption>Drawn from the illustrative code on this page, not a recorded run. Uses <code>kit/open-generative-ui/0.1.0-8391a94/open-generative-ui-kit.js</code>.</figcaption>
+      </figure>
+    </section>
+
+    <section class="part" data-part="sandbox" data-part-title="Interactive retry model">
+      <p class="section-label">5 · Sandbox &amp; branch switch</p>
+      <h2>Explore when the lease ceiling takes over</h2>
+      <p class="prose">
+        Adjust attempt count, base delay, and lease ceiling—or choose one of the three branch presets—to see
+        which branch of <code>computeRetryDelay()</code> decides the delay <span class="mark mark--reading">illustrative model · reading</span>.
+      </p>
+
+      <figure id="fig-sandbox" data-technique="sandbox">
+        <div class="figure-bar">
+          <div class="segmented" role="tablist" aria-label="Branch presets">
+            <button type="button" role="tab" aria-selected="false" tabindex="-1" data-preset="under">Under 80% budget</button>
+            <button type="button" role="tab" aria-selected="true" tabindex="0" data-preset="exceeds">Clamped to 80% cap</button>
+            <button type="button" role="tab" aria-selected="false" tabindex="-1" data-preset="zero">Zero jitter</button>
+          </div>
+          <button type="button" id="sb-reset" class="action-btn">Reset</button>
+        </div>
+
+        <div class="sandbox-controls">
+          <label class="slider-field">
+            <span class="slider-head"><span>Attempt</span><output id="out-attempt" for="in-attempt">5</output></span>
+            <input type="range" id="in-attempt" min="1" max="8" step="1" value="5">
+          </label>
+          <label class="slider-field">
+            <span class="slider-head"><span>Base delay</span><output id="out-base" for="in-base">4.0 s</output></span>
+            <input type="range" id="in-base" min="0.5" max="4.0" step="0.5" value="4.0">
+          </label>
+          <label class="slider-field">
+            <span class="slider-head"><span>Lease ceiling</span><output id="out-lease" for="in-lease">30 s</output></span>
+            <input type="range" id="in-lease" min="10" max="60" step="5" value="30">
+          </label>
+        </div>
+
+        <div class="sandbox-readout" id="sb-readout">
+          <div class="metric-card">
+            <span class="metric-label">Raw exponential</span>
+            <strong class="metric-val" id="val-raw">64.0 s</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">80% lease budget</span>
+            <strong class="metric-val" id="val-budget">24.0 s</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Clamped cap</span>
+            <strong class="metric-val metric-val--spine" id="val-cap">24.0 s</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label" id="lbl-sampled">Sampled delay (r = 0.48)</span>
+            <strong class="metric-val metric-val--new" id="val-sampled">11.5 s</strong>
+          </div>
+        </div>
+
+        <div class="branch-banner" id="sb-branch">
+          <span class="mark mark--reading">illustrative model</span>
+          <span id="sb-branch-text">Branch taken: Clamped to 80% of lease (64.0 s raw &gt; 24.0 s budget). Safe: sampled 11.5 s finishes inside the 30 s lease.</span>
+        </div>
+
+        <p id="sb-status" class="state-line" aria-live="polite">
+          Attempt 5, base 4.0 s, lease 30 s, r = 0.48 → clamped cap 24.0 s, sampled 11.5 s.
+        </p>
+        <p class="key-hint">Keys: Left / Right arrows switch presets on tabs or adjust the focused slider; Enter activates Reset.</p>
+
+        <div class="worked-cases" aria-label="Three worked cases">
+          <div class="worked-card">
+            <h3>Case A · Under 80% budget</h3>
+            <p>Attempt 2, base 2.0 s, lease 30 s, r = 0.48 → raw 4.0 s stays below 24.0 s budget; jitter samples 1.9 s within 0–4.0 s.</p>
+          </div>
+          <div class="worked-card">
+            <h3>Case B · Clamped to 80% cap</h3>
+            <p>Attempt 5, base 4.0 s, lease 30 s, r = 0.48 → raw 64.0 s exceeds lease; ceiling clamps to 24.0 s and samples 11.5 s (18.5 s of lease left).</p>
+          </div>
+          <div class="worked-card">
+            <h3>Case C · Zero jitter</h3>
+            <p>Attempt 4, base 2.0 s, lease 20 s, r = 0.00 → clamped to 16.0 s, zero-jitter draw schedules immediate 0.0 s retry.</p>
+          </div>
+        </div>
+
+        <figcaption>Illustrative model following lines 18–22 of <code>src/queue/retry.ts</code> above, marked as reading.</figcaption>
+      </figure>
+    </section>
+
+    <section class="part" data-part="outcome" data-part-title="Illustrative before and after">
+      <p class="section-label">6 · Measured before and after</p>
+      <h2>Illustrative effect on retry wait and duplicate runs</h2>
+      <p class="prose">
+        Canvas2D renders each frame directly from time (<code>Frame = f(t)</code>) using the <code>ar-video</code>
+        palette and <code>ease.outCubic</code>. Switch metrics to compare illustrative p99 retry wait and
+        duplicate-run rate.
+      </p>
+
+      <figure id="fig-measured-outcome" data-technique="before-and-after">
+        <div class="figure-bar">
+          <span id="outcome-headline" class="gap-headline">p99 retry wait: 48.0 s → 6.0 s (8x lower)</span>
+          <div class="controls-inline">
+            <div class="segmented" role="tablist" aria-label="Outcome metric">
+              <button type="button" role="tab" aria-selected="true" tabindex="0" data-metric="wait">Retry wait</button>
+              <button type="button" role="tab" aria-selected="false" tabindex="-1" data-metric="dupes">Duplicate runs</button>
+            </div>
+            <button type="button" id="outcome-replay" class="action-btn">Replay</button>
+          </div>
+        </div>
+
+        <div class="canvas-shell canvas-shell--outcome" id="outcome-shell">
+          <canvas id="outcome-canvas" width="880" height="220" aria-hidden="true"></canvas>
+        </div>
+
+        <p id="outcome-status" class="state-line" aria-live="polite">
+          Illustrative p99 retry wait: 48.0 s before → 6.0 s after (8x lower).
+        </p>
+        <p class="key-hint">Keys: Left and Right arrows switch metric tabs; Enter replays the grow animation.</p>
+
+        <table class="still-table">
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th>Before</th>
+              <th>After</th>
+              <th>Gap</th>
+              <th>Basis</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-label="Metric">p99 retry wait</td>
+              <td data-label="Before" class="val-before">48.0 s</td>
+              <td data-label="After" class="val-after">6.0 s</td>
+              <td data-label="Gap">8x lower (−42.0 s)</td>
+              <td data-label="Basis">illustrative exemplar figure</td>
+            </tr>
+            <tr>
+              <td data-label="Metric">Duplicate-run rate</td>
+              <td data-label="Before" class="val-before">14%</td>
+              <td data-label="After" class="val-after">0%</td>
+              <td data-label="Gap">eliminated (−14 pp)</td>
+              <td data-label="Basis">illustrative exemplar figure</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <figcaption>Illustrative comparison rendered with <code>kit/ar-video/23fd71bf/ar-video-vocabulary.js</code>.</figcaption>
+      </figure>
+    </section>
+
+    <section class="part part--limits" data-part="limits" data-part-title="Not covered">
+      <p class="section-label">Not covered</p>
+      <h2>Scope of this exemplar</h2>
+      <p class="prose">
+        This page is a synthetic reference demonstrating layout, kit wiring, still forms, keyboard controls,
+        and narrow-viewport stacking. No real repository code, test run, benchmark report,
+        or knowledge record was read to produce these figures.
+      </p>
+    </section>
+  </main>
+
+  <script type="module" src="exemplar.js"></script>
+</body>
+</html>

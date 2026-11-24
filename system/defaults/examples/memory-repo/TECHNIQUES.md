@@ -8,7 +8,8 @@ isolation.
 
 Every technique a page uses, with its numbers and still form. Colours are the treatment's roles.
 Each row names its kit part (`kit/<name>/<version>/`) or plain DOM, SVG, CSS or Canvas2D. The rows
-the reader drives come first; a part uses one only where it helps its explanation.
+the reader drives come first. Show the change's central mechanism with at least one driven figure
+from this table; secondary parts may stay in prose when no figure adds clarity.
 
 ## Shared numbers
 
@@ -27,13 +28,13 @@ the reader drives come first; a part uses one only where it helps its explanatio
 - **Selection:** hover or focus previews, click or Enter pins, Escape clears; one pin at a time.
 - **State line:** a sentence under each driven figure naming its state, `aria-live="polite"`.
 - **Time:** a moving figure is a function of its time ("Frame = f(t)", `VOCABULARY.md` in the same
-  folder); the scrubber sets t; reduced motion shows the final frame.
+  folder); the scrubber sets t; the still form shows the final frame.
 - **Linking key:** a page-internal attribute such as `data-link` ties a claim, its code lines and
   its figure nodes; the host's `data-part` and `data-evidence-claim` are not reused for it.
 
 ## Techniques
 
-| Technique | Shows | Drawn as | Numbers | Still, reduced, narrow | Status |
+| Technique | Shows | Drawn as | Numbers | Still and narrow | Status |
 |---|---|---|---|---|---|
 | Linked highlight | what a claim, its lines and its figure node share | DOM and SVG on the linking key: hover or focus on one lights the others in `current`, dims the rest; a click pins. | at once; others at 45%; pin: 2px `current` outline | the claim names its lines and nodes in text; narrow: a pin opens the lines below the claim | default |
 | Step-through | a sequence in time: a request's life, a sync, a failure path | Numbered steps on the step controls; current `current`, past `ink`, future `muted`; the state line names function and file:line. Keyframed scenes: Motion Canvas (`kit/motion-canvas/3.17.2/`, `renderFrame` at t); otherwise SVG. | 280ms a change; ≤ 12 steps; Play dwells 2.4s | ordered list, a line and small state per step | default |
@@ -44,12 +45,12 @@ the reader drives come first; a part uses one only where it helps its explanatio
 | Code morph | one hunk becoming another under the reader's switch | Shiki's magic-move (`kit/shiki/4.5.0/`): kept tokens slide, new ones fade in, removed ones fade out; driven by the before/after switch or a scrubber over revisions. | 360ms, `inOutCubic`; hunks ≤ 24 lines sharing most tokens | both snippets, before above after | default |
 | Ladder of abstraction | the whole change, then a part, then its hunk | DOM and SVG. Top rung: the change's parts (invariants, modules) as boxes with their real changed-line counts; a click descends in place; a breadcrumb climbs back. | ≤ 12 boxes a rung, 3 rungs; opens in 240ms, height reserved | nested list, all rungs open | default |
 | Table | like facts: risks, invariants, files | Header 11px mono capitals, `muted`; 1px row rules; grades as `reading` marks. Chips above filter by kind or grade and keep their counts; "n of m shown"; a header sorts. | ≤ 5 chips; 8 rows, then "show all" | all rows; key/value rows below 560px | default |
-| Code excerpt | the lines a claim is about | Shiki (`kit/shiki/4.5.0/`, `github-dark`) in a `raised` block, path and revision above; added + on a 12% `new` wash, removed − on a 12% `gone` wash; unchanged stretches fold into "n unchanged lines", opening in place. | ≤ 24 lines open | long lines wrap, hanging indent | default |
-| Claim and basis mark | what a statement rests on | A mono label after the claim, named by the evidence rules: solid `rule` border for the record, dashed `reading` for the explainer's reading and grades, dotted for intended, none for open or unavailable. Its link: path and lines, `spine`, dotted underline; hover lights the lines. A legend above the title. | marks 11px, 3px corners; links 0.85em | same | default |
+| Code excerpt | the lines a claim is about | Shiki (`kit/shiki/4.5.0/`, `github-dark`) in a `raised` block, path and revision above; added + on a 12% `new` wash, removed − on a 12% `gone` wash; unchanged stretches fold into "n unchanged lines", opening in place. Inline links from prose to the excerpt keep the line rhythm without tall row-breaking buttons. | ≤ 24 lines open | long lines wrap, hanging indent | default |
+| Claim and basis mark | what a statement rests on | An inline mono label after the claim that keeps the prose's line rhythm (compact baseline pill, never a tall row-breaking button), named by the evidence rules: solid `rule` border for the record, dashed `reading` for the explainer's reading and grades, dotted for intended, none for open or unavailable. Its link: inline path and lines, `spine`, dotted underline; hover lights the lines. A legend above the title. | marks 11px, 1px–2px vertical pad, 3px corners; links 0.85em | same | default |
 | Moved block | code or a responsibility that moved | On Next or the switch, the block leaves a dashed ghost and travels on a curve to its destination; changed lines are marked after it lands. | 420ms, `inOutCubic`; ghost 30%; ≤ 5 moves, stagger 120ms | origin "moved to →", destination "moved from ←" | default |
 | Scrollytelling | a sequence told in prose steps beside one figure | The figure sticks at the top of its part (`position: sticky`); a step reaching the middle of the frame (IntersectionObserver) sets the figure's step; the step controls do the same. | ≤ 8 steps; figure ≤ 60% of the frame's height | final figure, steps listed; below 560px a figure above each step | optional |
 | Scrubbable number | how a bound in the code shapes behaviour, such as a batch size | A number in the prose with a dotted `spine` underline: drag or ←/→ changes it within the code's range, and what depends on it follows; the caption names the lines computed from, as `reading`. | ≤ 2 a part | the code's value plus two worked values | optional |
-| Sandbox | the code's rule applied to a case the reader builds | The reader adds or removes a few items (a root, an ended generation, a link); the page applies the rule and shows the outcome; a reset. A model of named lines, marked `reading`. | ≤ 8 items | three worked cases side by side, one figure each | optional |
+| Sandbox | the code's rule applied to a case the reader builds, when a change introduces a rule, a parser or a state machine | The reader adds or removes a few items (a root, an ended generation, a link); the page applies the rule and shows the outcome; a reset. A model of named lines, marked `reading`. | ≤ 8 items | three worked cases side by side, one figure each | default (developer decision D931) |
 | Term popover | a domain term's meaning where it is used | A dotted-underlined term shows a one-line meaning and its memory record on hover or focus. | one line | a short glossary at the part's end | optional |
 | Repository tree | where the changed files sit | The vocabulary's radial tree in Canvas2D with its camera (`Proj`, `orbitKeys`), changed files lit; drag or arrow keys orbit; a lit file opens its excerpt. Only when structure is the point. | one camera move, ≤ 1.2s | indented tree, changed files marked | optional |
 | Reveal order | the order to read a figure on first view | The open-generative-ui first-render stagger on one figure's elements, never the page: fade in, rising 8px. | 400ms ease-out; stagger 60ms; sixth on together; once | all shown, numbered | optional: was default; a step-through shows order better |
@@ -66,5 +67,6 @@ scanlines, grain, dust, title slams, console typing, music cuts).
 The table is kept through tasks; the explainer does not edit it. When a page needed a missing
 technique, or a number did not hold, the explainer proposes the change in its report, as a row with
 the page where it served. A task adds it as `optional`, and a later one makes it `default` once it
-has served a second page. A replaced technique is marked `retired` with its successor and reason,
-never deleted, so no page brings it back. Nothing lives only in a chat.
+has served a second page; a row also becomes `default` on the developer's decision, named in the
+row. A replaced technique is marked `retired` with its successor and reason, never deleted, so no
+page brings it back. Nothing lives only in a chat.
