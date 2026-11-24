@@ -6199,7 +6199,7 @@
         "orchestrator/recovery": 2157,
         "manager/orientation": 3466,
         "manager/review": 3148,
-        "manager/curation": 3300,
+        "manager/curation": 3299,
         "manager/coordination": 4562,
         "manager/authorized-closeout": 2984,
         "manager/recovery": 2813,
@@ -6207,7 +6207,7 @@
         "worker/implementation": 3538,
         "worker/recovery": 2593,
         "curator/orientation": 3926,
-        "curator/curation": 4424,
+        "curator/curation": 4423,
         "curator/recovery": 3234,
         "reviewer/orientation": 3855,
         "reviewer/review": 4195,
@@ -6236,7 +6236,7 @@
         "reference/curator/card-formats-and-citations.md": 1816,
         "reference/curator/card-sentence-decisions.md": 344,
         "reference/curator/change-routing.md": 193,
-        "reference/curator/coherence-judgments.md": 249,
+        "reference/curator/coherence-judgments.md": 353,
         "reference/curator/current-prose-and-history.md": 228,
         "reference/curator/encountered-records.md": 244,
         "reference/curator/family-obligations.md": 223,
@@ -6398,8 +6398,8 @@
         "sha256": "e080d75e7e2c8b4bb001bed45b7095c6f2a5861f6088e7d3283256ed34bfdc7d"
       },
       "skills/l-01-agent-lifecycles/operations/curation.md": {
-        "size_words": 1730,
-        "sha256": "1857e1beb8ca9269588a3c811ad6b395f112edd2e0ddc81dc5bbb03b504b5a3a"
+        "size_words": 1729,
+        "sha256": "cc9d8feff01ce8f45d541bc6f486c47d8489ff0065635e7b9bf8cbd61b9befe2"
       },
       "skills/l-01-agent-lifecycles/operations/implementation.md": {
         "size_words": 1290,
@@ -6490,8 +6490,8 @@
         "sha256": "a17858f4a703d3287bab8e9f93bb1e1583eb59ce74cc9ff64aa1657b89cbfd49"
       },
       "skills/l-01-agent-lifecycles/reference/curator/coherence-judgments.md": {
-        "size_words": 249,
-        "sha256": "07d09eaf62642c3b3688e53c7df42ebffb491f915fba382d33e4e91a3c0e9439"
+        "size_words": 353,
+        "sha256": "d9d4353f91c95f9d5e27aec506303c86d39c852e8f8c518ebc8974e9037ea1f0"
       },
       "skills/l-01-agent-lifecycles/reference/curator/current-prose-and-history.md": {
         "size_words": 228,
@@ -6699,7 +6699,7 @@
       "operations/bootstrap.md": "sha256:c988052b9a104b4206086b55f10178c308a38eebe091cac422d7b5976a73b96f",
       "operations/closeout.md": "sha256:0d42dc6e8fefde7dc9d349da15fa0e5b0cabf48e5393d7b93daa2c6ec40ccf8e",
       "operations/coordination.md": "sha256:e080d75e7e2c8b4bb001bed45b7095c6f2a5861f6088e7d3283256ed34bfdc7d",
-      "operations/curation.md": "sha256:1857e1beb8ca9269588a3c811ad6b395f112edd2e0ddc81dc5bbb03b504b5a3a",
+      "operations/curation.md": "sha256:cc9d8feff01ce8f45d541bc6f486c47d8489ff0065635e7b9bf8cbd61b9befe2",
       "operations/implementation.md": "sha256:d469d2dc23df72eb45627493074e2c93b70f5974c41016e9a1a143df08b1ab82",
       "operations/orientation.md": "sha256:3120f8aea8dbc2fafb10fd9722e54e4e58c03f87dbe630a343e44bdb87f5cd30",
       "operations/planning.md": "sha256:44ad84e9bca975aef237b6215e8a53f8cb279aee861e73f76cbe5d1b864d330b",
@@ -6720,7 +6720,7 @@
       "reference/curator/card-formats-and-citations.md": "sha256:7cbfccff0f53947408d511c8af439e1b14ebc65ad0eeb25ed33f7b97b8a04fa6",
       "reference/curator/card-sentence-decisions.md": "sha256:863cb4688aa375d1303459951d9ddb9d69ec9833d42d62238aa18dc9d776263c",
       "reference/curator/change-routing.md": "sha256:a17858f4a703d3287bab8e9f93bb1e1583eb59ce74cc9ff64aa1657b89cbfd49",
-      "reference/curator/coherence-judgments.md": "sha256:07d09eaf62642c3b3688e53c7df42ebffb491f915fba382d33e4e91a3c0e9439",
+      "reference/curator/coherence-judgments.md": "sha256:d9d4353f91c95f9d5e27aec506303c86d39c852e8f8c518ebc8974e9037ea1f0",
       "reference/curator/current-prose-and-history.md": "sha256:5715af2f9084a039826ea608fad21e54829e261e28be27a993aa6c6b10902211",
       "reference/curator/encountered-records.md": "sha256:3fefd82dfb08692310928635d6b0d4981314c1783fb264e053a229ea87d854a6",
       "reference/curator/family-obligations.md": "sha256:c0c559f82a60f18bec5323046940341169b94ae22612ae40fcdca1ec326a302d",

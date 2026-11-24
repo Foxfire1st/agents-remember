@@ -615,7 +615,8 @@ LOOP_GATE_REASON = (
 CURATION_POLICY_STATEMENTS: dict[str, tuple[str, ...]] = {
     "skills/l-01-agent-lifecycles/operations/curation.md": (
         COMPLETE_CURATION_RULE,
-        "Run `prepare`, then `publish`, then `validate`.",
+        "After preparation succeeds, `publish` with one judgment per candidate "
+        "or none for an empty set, then `validate`",
         "Run the complete curation check set and report each check as passed, failed, blocked "
         "or not run, with its exact command and scope:",
         "The full `memory_quality_check` operation on `agents-remember-task`.",

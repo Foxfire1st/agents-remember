@@ -943,22 +943,22 @@ def test_the_integrity_check_runs_the_validator_and_bounds_its_listing(
         len(expected.refusals),
         len(expected.reports),
     )
-    # Rule 3's half beside it: the reported roots and counts name the same result.
-    validation = reported["validation"]
-    assert (reported["memoryRoot"], reported["codeRoot"]) == (
+    # The whole report names the roots and counts even when the short form omits them.
+    whole_validation = whole["validation"]
+    assert (whole["memoryRoot"], whole["codeRoot"]) == (
         str(root),
         code.as_posix(),
     )
     assert (
-        validation["ok"],
-        validation["refusalCount"],
-        validation["reportCount"],
+        whole_validation["ok"],
+        whole_validation["refusalCount"],
+        whole_validation["reportCount"],
     ) == (
         False,
         len(expected.refusals),
         len(expected.reports),
     )
-    assert sum(one["count"] for one in validation["byRule"]) == len(expected.violations)
+    assert sum(one["count"] for one in whole_validation["byRule"]) == len(expected.violations)
     # The answer keeps the first findings up to the status entry cap with the
     # full count; the whole result with every finding is resolved above
     # (MIK-R110 rule 6, status-answer ruling). Refusals list first, so
