@@ -523,7 +523,11 @@ def test_the_cache_reuses_rebuilds_and_loses_nothing_when_deleted(
     cache.directory.mkdir(parents=True)
     with cache.for_directory(memory) as from_nothing:
         assert from_nothing.invariant(REVIEW_INVARIANT).value == answer
-    assert sorted(p.name for p in cache.directory.iterdir()) == [path.name, f"{path.name}.used"]
+    assert {p.name for p in cache.directory.iterdir()} == {
+        ".build.lock",
+        path.name,
+        f"{path.name}.used",
+    }
 
 
 def test_old_and_excess_index_files_are_evicted(memory: Path, tmp_path: Path) -> None:

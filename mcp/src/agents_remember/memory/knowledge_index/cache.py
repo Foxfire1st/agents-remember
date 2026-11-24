@@ -7,8 +7,10 @@
 * **What.** ``<loaded-source-digest>--<tree-key>.sqlite``, one per build and key.
   A file present for the key, of this index format and
   built for that key, is reused; any other file at that name is rebuilt. A build writes a temporary
-  file in the same directory and renames it into place, so a reader never sees a half-built index
-  and two concurrent builds of one key both end with a whole file.
+  file in the same directory and renames it into place, so a reader never sees a half-built index.
+  On a miss, callers in one process share the result of one build per destination. Cold lookups
+  take one lock per cache directory and recheck for reuse after entering it. If exclusion is
+  unavailable or the lock wait reaches 60 seconds, the build still runs once within its process.
   A process without a loaded source digest never reuses a file; its private namespace is unique
   and its files remain available to readers that reopen the dataset, under the same eviction.
 * **Freshness.** A lookup against a working tree recomputes the tree's key first
@@ -19,21 +21,32 @@
   preserving the index bytes and timestamps for readers. Existing markerless indexes retain
   their recorded mtime until first reuse creates the marker. The file just built or opened is
   never evicted; the byte budget still counts the SQLite files.
+  Eviction also prunes temporary files whose builders are known to be gone. If a builder's
+  process cannot be checked or another live process has taken its PID, its file stays until
+  that process is known to have ended.
 
-Deleting the directory, or any file in it, loses nothing: every index is rebuilt from its tree.
+SQLite indexes can be rebuilt from their source trees. Keep ``.build.lock`` and the cache directory
+in place while any process can use the cache.
 """
 
 from __future__ import annotations
 
 import contextlib
 import os
+import re
 import stat
+import threading
 import time
+from collections.abc import Callable
+from concurrent.futures import Future
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Final
 from uuid import uuid4
 
+from agents_remember.errors import LockCapabilityError
+from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge_index.build import BuildReport, build_index
 from agents_remember.memory.knowledge_index.query import IndexMismatchError, KnowledgeIndex
@@ -50,11 +63,18 @@ from agents_remember.serving.build_info import process_serving_build
 # beside the runtime's other untracked state; the coordination root is not a Git working tree).
 CACHE_DIRECTORY_PARTS: Final = ("runtime", "knowledge-index")
 # Eviction defaults (chosen): a file unused for 14 days goes first, then the oldest files until the
-# directory holds at most 1 GiB. A converted real memory tree indexes to about 2 MB.
+# directory holds at most 1 GiB of SQLite indexes.
 DEFAULT_MAX_AGE_SECONDS: Final = 14 * 24 * 60 * 60
 DEFAULT_MAX_BYTES: Final = 1024 * 1024 * 1024
 _SUFFIX: Final = ".sqlite"
 _USAGE_SUFFIX: Final = ".used"
+_BUILD_LOCK_RESOURCE: Final = ".build"
+_BUILD_LOCK_WAIT_SECONDS: Final = 60
+_TEMP_NAME = re.compile(r"\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.([1-9][0-9]*)\.[0-9]+\.tmp")
+_builds: dict[Path, Future[None]] = {}
+_builds_guard = threading.Lock()
+_active_temps: set[Path] = set()
+_active_temps_guard = threading.Lock()
 
 
 def default_cache_directory(coordination_root: Path) -> Path:
@@ -82,6 +102,27 @@ def _open_cached_index(path: Path, key: str) -> KnowledgeIndex | None:
         return KnowledgeIndex(path, expected_key=key)
     except IndexMismatchError:
         return None
+
+
+def _claim_build(destination: Path) -> tuple[Future[None], bool]:
+    with _builds_guard:
+        completion = _builds.get(destination)
+        if completion is not None:
+            return completion, False
+        pending: Future[None] = Future()
+        _builds[destination] = pending
+        return pending, True
+
+
+def _complete_build(
+    destination: Path, completion: Future[None], error: BaseException | None
+) -> None:
+    with _builds_guard:
+        del _builds[destination]
+        if error is None:
+            completion.set_result(None)
+        else:
+            completion.set_exception(error)
 
 
 @dataclass(frozen=True)
@@ -130,11 +171,7 @@ class KnowledgeIndexCache:
     def for_directory(self, directory: Path) -> KnowledgeIndex:
         """Open the index of a working-tree directory's current captured state."""
 
-        key = directory_key(directory)
-        index = self._reuse(key)
-        if index is not None:
-            return index
-        return self._build(directory_snapshot(directory))
+        return self._lookup(directory_key(directory), partial(directory_snapshot, directory))
 
     def for_git_tree(self, repository: Path, revision: str) -> KnowledgeIndex:
         """Open the index of the Git tree ``revision`` names, read through Git objects."""
@@ -145,15 +182,14 @@ class KnowledgeIndexCache:
         )
         if resolved.returncode != 0:
             raise MemoryTreeError(f"{revision!r} names no Git tree in {repository}")
-        index = self._reuse(resolved.stdout.strip())
-        if index is not None:
-            return index
-        return self._build(git_tree_snapshot(repository, revision))
+        key = resolved.stdout.strip()
+        return self._lookup(key, partial(git_tree_snapshot, repository, key))
 
     def evict(self, *, keep: Path | None = None) -> list[Path]:
-        """Remove files unused past ``max_age``, then the oldest until the cache fits ``max_bytes``."""
+        """Remove unused and excess indexes, and prune abandoned build files."""
 
         self._prune_usage()
+        self._prune_temporary()
         now = time.time()
         files = sorted(
             (path for path in self.directory.glob(f"*{_SUFFIX}") if path != keep),
@@ -176,6 +212,52 @@ class KnowledgeIndexCache:
 
     # -- internals -------------------------------------------------------------------------------
 
+    def _lookup(self, key: str, capture: Callable[[], MemoryTreeSnapshot]) -> KnowledgeIndex:
+        if self._build_digest is None:
+            return self._build(capture())
+        while True:
+            index = self._reuse(key)
+            if index is not None:
+                return index
+            destination = self.path_for(key)
+            completion, is_builder = _claim_build(destination)
+            if not is_builder:
+                completion.result()
+                continue
+            try:
+                result = self._build_cold(key, capture)
+            except BaseException as error:
+                _complete_build(destination, completion, error)
+                raise
+            _complete_build(destination, completion, None)
+            if isinstance(result, KnowledgeIndex):
+                return result
+            # A working tree can change between the first key and the byte capture.
+            # Its snapshot belongs to a different flight, and other callers keep their own key.
+            key = result.key
+            capture = partial(_captured_snapshot, result)
+
+    def _build_cold(
+        self, key: str, capture: Callable[[], MemoryTreeSnapshot]
+    ) -> KnowledgeIndex | MemoryTreeSnapshot:
+        with contextlib.ExitStack() as lock:
+            # The timeout is a capability-error subclass. Both leave the local flight in charge.
+            with contextlib.suppress(LockCapabilityError):
+                lock.enter_context(
+                    exclusive_file_lock(
+                        self.directory / _BUILD_LOCK_RESOURCE,
+                        "knowledge index build",
+                        deadline=time.monotonic() + _BUILD_LOCK_WAIT_SECONDS,
+                    )
+                )
+            index = self._reuse(key)
+            if index is not None:
+                return index
+            snapshot = capture()
+            if snapshot.key != key:
+                return snapshot
+            return self._build(snapshot)
+
     def _reuse(self, key: str) -> KnowledgeIndex | None:
         if self._build_digest is None:
             return None
@@ -190,11 +272,17 @@ class KnowledgeIndexCache:
     def _build(self, snapshot: MemoryTreeSnapshot) -> KnowledgeIndex:
         destination = self.path_for(snapshot.key)
         temporary = self.directory / f".{snapshot.key}.{os.getpid()}.{time.monotonic_ns()}.tmp"
+        with _active_temps_guard:
+            _active_temps.add(temporary)
         try:
             report = build_index(snapshot, temporary)
             os.replace(temporary, destination)
         finally:
-            _unlink(temporary)
+            try:
+                _unlink(temporary)
+            finally:
+                with _active_temps_guard:
+                    _active_temps.remove(temporary)
         self.last_outcome = CacheOutcome(key=snapshot.key, reused=False, report=report)
         _touch_usage(destination)
         self.evict(keep=destination)
@@ -207,6 +295,30 @@ class KnowledgeIndexCache:
             if not index.is_file():
                 with contextlib.suppress(OSError):
                     _unlink(marker)
+
+    def _prune_temporary(self) -> None:
+        for temporary in self.directory.glob(".*.tmp"):
+            owner = _TEMP_NAME.fullmatch(temporary.name)
+            if owner is not None and _builder_is_gone(temporary, int(owner[1])):
+                with contextlib.suppress(OSError):
+                    _unlink(temporary)
+
+
+def _captured_snapshot(snapshot: MemoryTreeSnapshot) -> MemoryTreeSnapshot:
+    return snapshot
+
+
+def _builder_is_gone(temporary: Path, pid: int) -> bool:
+    with _active_temps_guard:
+        if temporary in _active_temps:
+            return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except (OSError, OverflowError):
+        pass
+    return False
 
 
 def _usage_path(path: Path) -> Path:
