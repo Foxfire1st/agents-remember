@@ -17,6 +17,7 @@ from typing import Any
 from unittest import mock
 
 import pytest
+from agents_remember.application.knowledge_gate import evaluate_leaf_gate
 from agents_remember.application.knowledge_worklist import (
     ITEM_KINDS,
     base_cache,
@@ -25,6 +26,7 @@ from agents_remember.application.knowledge_worklist import (
     satisfying_row,
 )
 from agents_remember.application.knowledge_worklist.code import CodeTrees
+from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
 from agents_remember.application.knowledge_worklist.onboarding_trace import (
     TraceSideRequest,
     onboarding_trace_sides,
@@ -43,6 +45,7 @@ from agents_remember.memory_quality.reference_state import fix_references
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.knowledge_files.history import HistoryFile
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
+from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.modules.onboarding import (
     OnboardingTraceInputs,
     onboarding_trace_gate_for_context,
@@ -402,6 +405,56 @@ def test_a_missing_trace_is_one_named_repair_finding_and_the_closeout_refuses(le
     assert "onboarding/pkg/overview.md" in result.refusal()
 
 
+@pytest.mark.parametrize("row_origin", ["writer", "seeded"])
+def test_an_updated_workflow_card_satisfies_the_closeout_gate(leaf: Leaf, row_origin: str) -> None:
+    source = ".github/workflows/quality.yml"
+    subject = f"onboarding:{source}"
+    sidecar = {"schema": "ar-onboarding-file/v1", "path": source, "references": {}, "realizes": []}
+    leaf.code_base = commit(leaf.code, {source: "name: Quality\n"})
+    leaf.memory_base = commit(
+        leaf.memory,
+        {
+            "system/settings.md": "# Settings\n",
+            "system/settings.json": '{"onboarding":{"pathRules":{"include":'
+            '{"paths":[".github/workflows/**"]}}},"version":2}',
+            f"onboarding/{source}.md": "# Quality\n",
+            f"onboarding/{source}.json": canonical_text(sidecar),
+        },
+        trailer=leaf.code_base,
+    )
+    (leaf.code / source).write_text("name: Source quality\n", encoding="utf-8")
+    (leaf.memory / f"onboarding/{source}.md").write_text("# Source quality\n", encoding="utf-8")
+    rows = [
+        {"subject": subject, "disposition": "updated", "reason": "Records the new workflow name."},
+        {"subject": "onboarding:overview", "disposition": "no_impact", "reason": "Same route."},
+    ]
+    sources = [{"path": source, "blob": worktree_code_blobs(leaf.code, [source])[source]}]
+    history = leaf.memory / f"knowledge/history/{LEAF}.json"
+    if row_origin == "writer":
+        report = leaf.write(rows)
+        assert report.state == "written", report.render()
+    else:
+        history.parent.mkdir(parents=True)
+        seeded = [
+            {"id": f"ROW-{index:06d}", "items": [], "sources": sources, **row}
+            for index, row in enumerate(rows)
+        ]
+        document = {"schema": "ar-history/v1", "leaf": LEAF, "closed": False, "rows": seeded}
+        history.write_text(canonical_text(document), encoding="utf-8")
+    candidate = CandidateTrees(
+        code=worktree_candidate_tree(leaf.code, leaf.root / "code-index"),
+        memory=worktree_candidate_tree(leaf.memory, leaf.root / "memory-index"),
+    )
+    gate = evaluate_leaf_gate(
+        load_contract(leaf.contract()), candidate, parent_memory_tip=leaf.memory_base
+    )
+    assert gate is not None and gate.ok, None if gate is None else gate.refusal()
+    card = next(item for item in gate.worklist["items"] if item["subject"] == subject)
+    row = next(row for row in json.loads(history.read_text())["rows"] if row["subject"] == subject)
+    assert row["sources"] == sources
+    assert card["facts"]["countedChange"] and card["satisfiedBy"] == row["id"]
+
+
 def test_the_writers_mechanical_anchor_update_is_not_a_trace(leaf: Leaf) -> None:
     # Lines are inserted above Y: C's line-range anchor moves; its content does not.
     (leaf.code / C).write_text("# lead\n\n\nY = 2\n", encoding="utf-8")
@@ -656,18 +709,15 @@ def test_the_conversion_itself_counts_for_nothing_at_the_converting_leaf(tmp_pat
     before = items()
     (cached,) = cache.glob("*.json.gz")  # the worklist's cache now holds the gate's Markdown too
     held = json.loads(gzip.decompress(cached.read_bytes()))
-    assert held["format"] == "knowledge-worklist-base/v2" and f"onboarding/{A}.md" in held["files"]
+    assert held["format"] == "knowledge-worklist-base/v3" and f"onboarding/{A}.md" in held["files"]
     with mock.patch.object(base_cache, "converted_base", side_effect=AssertionError("reconvert")):
         assert items() == before  # the second run reads the cache
-    # A v1 file at the same key (JSON only, no Markdown) is ignored and rewritten as v2 (N3): read
-    # as a base, it would make every card look new and the gate pass vacuously.
-    key = held["key"]
-    v1 = {"format": "knowledge-worklist-base/v1", "key": key, "files": {}}
-    cached.write_bytes(gzip.compress(json.dumps(v1).encode()))
-    assert items() == before and before[f"onboarding:{A}"].open
-    assert (
-        json.loads(gzip.decompress(cached.read_bytes()))["format"] == "knowledge-worklist-base/v2"
-    )
+    # Older projections omit Markdown or dot directories. Neither can decide what changed.
+    for version in (1, 2):
+        old = {"format": f"knowledge-worklist-base/v{version}", "key": held["key"], "files": {}}
+        cached.write_bytes(gzip.compress(json.dumps(old).encode()))
+        assert items() == before and before[f"onboarding:{A}"].open
+        assert json.loads(gzip.decompress(cached.read_bytes())) == held
     assert (memory / f"onboarding/{A}.md").read_text() != _legacy_card(A, head, "Lands values.")
     assert before[f"onboarding:{A}"].open  # the mechanical conversion is not a trace
     assert before["onboarding:pkg/overview"].open

@@ -191,27 +191,45 @@ def test_validator_lists_record_and_sidecar_requirement_endpoints_without_refusi
 
 def test_git_trees_are_read_exactly_and_the_route_index_cache_is_ignored(tmp_path: Path) -> None:
     memory = tmp_path / "memory"
+    source = ".github/workflows/quality.yml"
+    card = f"onboarding/{source}.md"
+    sidecar = f"onboarding/{source}.json"
     files = {
         **fixture_tree_files(),
         INVARIANT: fixture_tree_files()[INVARIANT].replace(b"\n", b"\r\n"),
-        "onboarding/mcp/overview.index.json": b"{}",
+        "onboarding/.github/workflows/overview.index.json": b"{}",
         "README.md": b"# not knowledge\n",
         "onboarding/.git-blame-ignore-revs.md": b"# dot-named card\n",
-        "onboarding/.ar-index/cache.json": b"{}",
+        card: b"# Quality workflow\n\nSee [1].\n",
+        sidecar: encode(
+            {
+                "schema": "ar-onboarding-file/v1",
+                "path": source,
+                "references": {},
+                "realizes": [],
+            }
+        ),
     }
     commit = _repository(memory, files)
 
     snapshot = knowledge_tree_from_git(memory, commit)
 
     assert snapshot.files[INVARIANT] == files[INVARIANT]
-    assert "onboarding/mcp/overview.index.json" not in snapshot.files
+    assert "onboarding/.github/workflows/overview.index.json" not in snapshot.files
     assert "README.md" not in snapshot.files
     assert "onboarding/.git-blame-ignore-revs.md" in snapshot.files
-    assert "onboarding/.ar-index/cache.json" not in snapshot.files
+    assert snapshot.files[card] == files[card]
+    assert snapshot.files[sidecar] == files[sidecar]
     assert knowledge_tree_from_directory(memory).files == snapshot.files
     assert snapshot.converted
     blob = git(memory, "rev-parse", f"{commit}:{INVARIANT}")
     assert read_git_blobs_bytes(memory, [blob, blob]) == {blob: files[INVARIANT]}
+
+    report = validate_tree(snapshot, bases=[snapshot], code=code())
+    [marker] = [finding for finding in report.refusals if finding.rule == "R22.3-markers"]
+    assert marker.path == card
+    assert marker.field == "line 3"
+    assert marker.message == f"marker [1] has no reference in {sidecar}"
 
 
 def test_the_commit_route_adapter_refuses_naming_every_violation(

@@ -112,7 +112,7 @@ def _children(
 
 
 def _code_name(name: str) -> str | None:
-    if name in {"overview.md", "overview.json"} or name.endswith(".index.json"):
+    if name in {"overview.md", "overview.json"}:
         return None
     for suffix in (".md", ".json"):
         if name.endswith(suffix):
@@ -211,7 +211,6 @@ def _memory_paths(selection: ReaderSelection, directory: str) -> Pathnames:
         except FileNotFoundError:
             return paths
         for here, directories, files in os.walk(root, onerror=_raise_walk_error):
-            directories[:] = [name for name in directories if not name.startswith(".")]
             paths.files.update(
                 (Path(here) / name).relative_to(selection.memory_root).as_posix() for name in files
             )
@@ -220,9 +219,6 @@ def _memory_paths(selection: ReaderSelection, directory: str) -> Pathnames:
                 for name in directories
             )
     paths.files = {path for path in paths.files if not is_excluded_from_knowledge(path)}
-    paths.directories = {
-        path for path in paths.directories if not is_excluded_from_knowledge(f"{path}/_")
-    }
     return paths
 
 

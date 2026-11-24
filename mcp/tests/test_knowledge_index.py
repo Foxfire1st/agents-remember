@@ -22,6 +22,7 @@ from agents_remember.memory.knowledge_index import (
     MemoryTreeError,
     directory_key,
     directory_snapshot,
+    git_tree_snapshot,
     is_indexed_path,
 )
 from agents_remember.models.knowledge_files import canonical_text
@@ -37,10 +38,12 @@ from knowledge_index_test_support import (
     SIBLING_INVARIANT,
     SIBLING_PATHS,
     TEST_PATH,
+    anchor,
     commit_all,
     git,
     init_repository,
     rewrite_in_the_second_of_the_index_write,
+    write_document,
     write_review_tree,
 )
 
@@ -551,10 +554,11 @@ def test_old_and_excess_index_files_are_evicted(memory: Path, tmp_path: Path) ->
 
 
 def test_the_cache_is_never_placed_inside_a_git_working_tree(memory: Path) -> None:
+    cache_directory = memory / "cache"
     with pytest.raises(MemoryTreeError, match="inside a Git working tree"):
-        KnowledgeIndexCache(memory / ".ar-index")
-    assert "ar-index" not in git(memory, "status", "--porcelain", "--untracked-files=all")
-    assert not (memory / ".ar-index").exists()
+        KnowledgeIndexCache(cache_directory)
+    assert "cache" not in git(memory, "status", "--porcelain", "--untracked-files=all")
+    assert not cache_directory.exists()
     with pytest.raises(MemoryTreeError, match="inside a Git working tree"):
         KnowledgeIndexCache(memory / "deep" / "er" / "cache")
     assert not (memory / "deep").exists()
@@ -657,12 +661,43 @@ def test_the_command_reports_the_index_and_exits_by_state(
     assert json.loads(capsys.readouterr().out)["key"] == git(memory, "rev-parse", "HEAD^{tree}")
 
 
-def test_the_index_reads_the_files_the_validator_reads() -> None:
+def test_the_index_reads_the_files_the_validator_reads(
+    memory: Path, cache: KnowledgeIndexCache
+) -> None:
     """The index shares MIK-R22's exclusion rule, less the census files MIK-R20 owns."""
 
+    source = ".github/workflows/quality.yml"
+    sidecar = f"onboarding/{source}.json"
+    card = f"onboarding/{source}.md"
+    write_document(
+        memory,
+        sidecar,
+        {
+            "schema": "ar-onboarding-file/v1",
+            "path": source,
+            "references": {},
+            "realizes": [
+                {
+                    "id": "RLZ-D0T001",
+                    "invariant": REVIEW_INVARIANT,
+                    "anchor": anchor("quality"),
+                    "role": "enforcement",
+                    "rationale": "The quality workflow runs the required checks.",
+                }
+            ],
+        },
+    )
+    (memory / card).write_text("# Quality workflow\n", encoding="utf-8")
+    commit_all(memory)
+
+    for snapshot in (directory_snapshot(memory), git_tree_snapshot(memory, "HEAD")):
+        assert snapshot.files[sidecar] == (memory / sidecar).read_bytes()
+        assert snapshot.files[card] == (memory / card).read_bytes()
+    with cache.for_git_tree(memory, "HEAD") as index:
+        assert index.state.state == "complete", index.state.problems
+        assert index.entry_sidecar("RLZ-D0T001") == sidecar
+
     assert is_indexed_path("knowledge/invariants/INV-RVW001-x.json")
-    assert is_indexed_path("onboarding/.github/workflows/ci.yml.json") is False
-    assert is_indexed_path("onboarding/src/.hidden/a.py.json") is False
     assert is_indexed_path("onboarding/src/overview.index.json") is False
     assert is_indexed_path("knowledge/census/C1/inventory.json") is False
     assert is_indexed_path("onboarding/src/a.py.md") is False

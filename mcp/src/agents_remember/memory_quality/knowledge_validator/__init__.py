@@ -59,6 +59,7 @@ from agents_remember.memory_quality.knowledge_validator.trees import (
     CodeTree,
     KnowledgeTree,
     code_tree_from_git,
+    is_excluded_from_knowledge,
     knowledge_tree_from_directory,
     knowledge_tree_from_git,
 )
@@ -80,6 +81,7 @@ __all__ = [
     "ValidationRule",
     "Violation",
     "code_tree_from_git",
+    "is_excluded_from_knowledge",
     "knowledge_tree_from_directory",
     "knowledge_tree_from_git",
     "merge_reported_rule_ids",
