@@ -43,11 +43,9 @@ PROVIDER_LIMIT_STAMP_KEY = "providerLimitEndedStamp"
 def pause_for_provider_limit(batch: _DrainBatch) -> None:
     """MIK-R190 rule 10: a limited recipient pauses the drain before any host read.
 
-    One host read is still owed when the publication shows the recipient ``ended``,
-    and then only once per ``ended`` stamp: an archive ends its messages as not
-    delivered, as today, while a closed session keeps them waiting with no further
-    read on later sweeps. A recipient the publication does not show as ended costs
-    no bridge process at all, and a recipient that is not limited returns here.
+    An ``ended`` publication triggers one host confirmation per stamp. A confirmed
+    archive or absence ends the waiting messages as not delivered. A closed session
+    waits for the provider reset without a host read.
     """
 
     limit = provider_limit_hold(batch.config, batch.agent_id)
@@ -87,9 +85,8 @@ def pause_for_provider_limit(batch: _DrainBatch) -> None:
 def ended_stamp(config: McpRuntimeConfig, agent_id: str) -> str | None:
     """Rule 10's stamp for an ``ended`` recipient: its own `eventAt`, else the boot id.
 
-    A closed session is published ``ended`` without an archive time, so the boot id
-    stands in for it. A recipient the publication does not show as ended has no
-    stamp, and its drain makes no host read.
+    Archive confirmation is gated by this state. If the publication carries no
+    event time, the boot ID bounds confirmation to one read in that boot.
     """
 
     directory = activity_directory(config)

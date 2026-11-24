@@ -255,8 +255,13 @@ change-to-knowledge worklist and the findings of the knowledge gate. `knowledge_
 the validator and returns that task's latest persisted worklist; it does not
 replace a fresh memory-quality check.
 
-The worklist binds the base trees, the code and the memory before the change, to the candidate
-trees, the code and the memory that the closeout would commit.
+The worklist compares the trees of the base commits recorded in the leaf's worktree
+contract with the candidate trees that closeout would commit. A sync from the contract's
+source line records the incoming memory tip as the memory base when memory participates.
+A sync with `sync_source="repository-default"` can bring changes from the default branches
+into the candidate while keeping both recorded bases. The worklist counts the incoming
+changes that differ from those bases as part of the task's changes.
+
 The closeout preview and publication routes judge the exact candidate trees,
 recomputing the knowledge gate rather than trusting a saved worklist. A
 `knowledge-gate-refused` result names repair findings; the Curator repairs memory

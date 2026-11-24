@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from agents_remember.application.knowledge_gate.direct import direct_source, direct_verdict
 from agents_remember.application.knowledge_gate.gate import evaluate_leaf_gate
 from agents_remember.application.knowledge_gate.landing import landing_refusal
-from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
 from agents_remember.worktrees.services import (
+    CandidateTrees,
     DirectGateSource,
     DirectGateVerdict,
     LandingGateRequest,
@@ -25,15 +25,14 @@ class KnowledgeGate:
     def leaf_refusal(
         self,
         contract: WorktreeContract,
+        candidate: CandidateTrees,
         *,
-        code_tree: str,
-        memory_tree: str,
         parent_memory_tip: str | None,
         persist_worklist: bool = True,
     ) -> str | None:
         result = evaluate_leaf_gate(
             contract,
-            CandidateTrees(code=code_tree, memory=memory_tree),
+            candidate,
             parent_memory_tip=parent_memory_tip,
             persist_worklist=persist_worklist,
         )

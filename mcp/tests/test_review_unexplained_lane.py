@@ -57,10 +57,13 @@ from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.serving.review_trees import ReviewTreesQuery, register_review_trees_route
 from agents_remember.worktrees.services import reset_worktree_services
 from agents_remember_test_support.testing.review_git_trees import (
+    CODE_FILE,
+    CODE_V1,
     LEAF,
     MASTER,
     REPO,
     World,
+    commit,
 )
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -706,10 +709,13 @@ def _long_paths_are_typed_refusals(world: World) -> None:  # noqa: F811
 
 
 def test_a_dataset_review_entry_carries_no_attribution(world: World) -> None:  # noqa: F811
-    for repository in (world.memory, world.memory_worktree):
-        _git(repository, "rm", "-q", "-r", "knowledge")
-        _git(repository, "commit", "-q", "-m", "unconverted")
-    world.edit()
+    _git(world.memory, "rm", "-q", "-r", "knowledge")
+    world.memory_base = commit(world.memory, {})
+    _git(world.memory_worktree, "merge", "-q", "--ff-only", world.memory_base)
+    world.contract()
+    (world.code_worktree / CODE_FILE).write_text(
+        CODE_V1.replace("return value", "return value + 0"), encoding="utf-8"
+    )
     assert read_review_intent_summary(world.config, REPO, MASTER, LEAF).attribution is None
 
 

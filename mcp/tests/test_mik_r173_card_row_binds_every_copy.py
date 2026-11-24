@@ -102,8 +102,7 @@ def _card(world: World, source: str) -> None:
 def _grouped_leaf(world: World, *, deleted: bool) -> WorktreeContract:
     """The two identical copies at the code base, then deleted (or reworded) at C, with the card.
 
-    The card's memory commit names the code base in its ``Code-Commit`` trailer, so the leaf's own
-    worklist pairs the two sides as a landed leaf's do.
+    The contract records the code and memory commits that the leaf's worklist compares against.
     """
 
     write(world.code, {path: BODY for path in GROUP})

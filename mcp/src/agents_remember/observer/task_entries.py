@@ -107,12 +107,10 @@ def task_state(
 ) -> TaskState:
     """Terminal/planned stage wins; only a whole host observation can say paused.
 
-    MIK-R190 rule 4: an agent works when it is in a turn (``in-turn`` or
-    ``permission``) or when it has a running provider subagent and has not ended —
-    which is what Paseo's own workspace list shows. Rule 13 adds the task's
-    provider limit beside it, from the one limited-fact file. A task none of whose
-    agents works, but one of whose seats has a declared wait still to be checked,
-    is ``waiting`` rather than ``paused``: its seats name what they wait for.
+    An agent works when it is in a turn (``in-turn`` or ``permission``) or
+    when its open session has a running provider subagent. A task with no
+    working agents is ``waiting`` while a seat's declared wait still has a check
+    to come. Otherwise it is ``paused``, with a provider limit when one applies.
     """
 
     stage = _STAGES[status]
@@ -161,7 +159,7 @@ def agent_waits(agent: PublishedAgentActivity, now: datetime) -> bool:
     """
 
     wait = agent.declaredWait
-    if wait is None or wait.checkDueAt is None or agent.state == "ended":
+    if wait is None or wait.checkDueAt is None or not agent.has_open_session:
         return False
     return now < wait.checkDueAt + WAIT_CHECK_GRACE
 
@@ -188,7 +186,7 @@ def _waiting_seats(seats: Iterable[TaskAgentActivity], now: datetime) -> list[Wa
 
 
 def agent_works(agent: PublishedAgentActivity) -> bool:
-    """MIK-R190 rule 4: in a turn, or with a running subagent and not ended.
+    """An agent works in a turn or while its open session has a running subagent.
 
     The one definition of "this agent is working": the task state, the stall predicate
     (MIK-R200 rule 4) and the pause suppression all read it here.
@@ -196,7 +194,7 @@ def agent_works(agent: PublishedAgentActivity) -> bool:
 
     if agent.state in {"in-turn", "permission"}:
         return True
-    return agent.state != "ended" and (agent.runningSubagents or 0) > 0
+    return agent.has_open_session and (agent.runningSubagents or 0) > 0
 
 
 def _event_of(agent: PublishedAgentActivity) -> datetime | None:
@@ -204,7 +202,7 @@ def _event_of(agent: PublishedAgentActivity) -> datetime | None:
 
     if agent.state in {"in-turn", "permission"}:
         return agent.eventAt
-    if agent.state != "ended" and (agent.runningSubagents or 0) > 0:
+    if agent.has_open_session and (agent.runningSubagents or 0) > 0:
         return agent.subagentsSince or agent.eventAt
     return agent.eventAt
 

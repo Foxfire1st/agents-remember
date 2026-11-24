@@ -127,7 +127,7 @@ export interface PendingSeatWake extends SeatWakeWait {
   readonly epoch: number;
   readonly seatEpoch: number;
   /** Rule 4/5: the act the wait ends with, run only after the host's state allows it. */
-  readonly deliver: () => Promise<void>;
+  readonly deliver: (states: HostStates) => Promise<void>;
   timer: unknown;
   readonly finish: () => void;
 }
@@ -241,6 +241,8 @@ export interface TurnEndedTracker {
   readonly claimed: Set<HeldLine>;
   /** Agents the host reported archived: a line for them has nowhere to go as it is. */
   readonly archived: Set<string>;
+  /** Closed sessions end their own work, while staying eligible to receive a parent line. */
+  readonly closed: Set<string>;
   /** Agents seen to start a turn here, oldest first, so the newest Manager is current. */
   readonly started: string[];
   /** Agents named in the host log once for a missing agent-list record. */
@@ -261,8 +263,8 @@ export interface TurnEndedTracker {
    * can send, schedule or restore a count after it.
    */
   epoch: number;
-  /** The same generation, per seat: a turn of the seat bumps its own entry. */
-  readonly seatEpoch: Map<string, number>;
+  /** Per-seat generations for turn intake and for seat-owned waits. */
+  readonly seatEpoch: Map<string, SeatGeneration>;
   /**
    * Rule 3: how far the seat's timeline had grown at the last end this build
    * saw, so a message steered into a running turn does not split that turn.
@@ -450,6 +452,7 @@ export function createTurnEndedTracker(
     held: [],
     claimed: new Set(),
     archived: new Set(),
+    closed: new Set(),
     started: [],
     notedMissing: new Set(),
     silentEnds: new Map(),
@@ -1004,7 +1007,10 @@ export interface HostAgentState {
   readonly inTurn: boolean;
   readonly permissionWait: boolean;
   readonly archived: boolean;
+  readonly closed?: boolean;
 }
+
+type HostStates = ReadonlyMap<string, HostAgentState> | null;
 
 /**
  * Rule 3/4: the host's agent state at one moment. `null` means it could not be
@@ -1061,11 +1067,23 @@ function permissionNow(
 
 function archivedNow(
   agentId: string,
-  states: Map<string, HostAgentState> | null,
+  states: HostStates,
   tracker: TurnEndedTracker,
 ): boolean {
-  const state = states === null ? undefined : states.get(agentId);
-  return state === undefined ? tracker.archived.has(agentId) : state.archived;
+  return tracker.archived.has(agentId) || states?.get(agentId)?.archived === true;
+}
+
+function inactiveSeatReason(agentId: string, states: HostStates, tracker: TurnEndedTracker): "archived" | "closed" | null {
+  if (archivedNow(agentId, states, tracker)) return "archived";
+  return tracker.closed.has(agentId) || states?.get(agentId)?.closed === true ? "closed" : null;
+}
+
+function seatWakeBlocked(seat: string, states: Map<string, HostAgentState> | null, tracker: TurnEndedTracker): string | null {
+  const inactive = inactiveSeatReason(seat, states, tracker);
+  if (inactive !== null) return inactive;
+  if (permissionNow(seat, states, tracker)) return "permission-wait";
+  if (inTurnNow(seat, states, tracker)) return "in-a-turn";
+  return runningSubagentsNow(tracker, seat) > 0 ? "subagent-running" : null;
 }
 
 /**
@@ -1098,7 +1116,8 @@ export function notSilentReason(
 ): string | null {
   if (outcome !== "completed") return `outcome-${outcome ?? "unknown"}`;
   if (handoff) return "hand-off";
-  if (archivedNow(agent.id, states, tracker)) return "archived";
+  const inactive = inactiveSeatReason(agent.id, states, tracker);
+  if (inactive !== null) return inactive;
   if (permissionNow(agent.id, states, tracker)) return "permission-wait";
   // MIK-R190 rule 5: the seat's own provider subagent is still running, so this
   // end is not silent and no seat message follows at once.
@@ -1396,8 +1415,8 @@ function limitedUntilNow(tracker: TurnEndedTracker, agentId: string, now: Date):
  * idle or in a turn — a line delivered into a limit starts a turn that ends at
  * once on it, which is the "messaging an agent that cannot respond" of row 178.
  */
-function parentMayTakeLineNow(parent: string, tracker: TurnEndedTracker, now: Date): boolean {
-  if (tracker.permissionWait.has(parent)) return false;
+function parentMayTakeLineNow(parent: string, tracker: TurnEndedTracker, now: Date, states: HostStates): boolean {
+  if (archivedNow(parent, states, tracker) || tracker.permissionWait.has(parent)) return false;
   if (limitedUntilNow(tracker, parent, now) !== null) return false;
   if (!tracker.inTurn.has(parent)) return true;
   const provider = tracker.providerOf.get(parent) ?? UNKNOWN;
@@ -1429,12 +1448,13 @@ function currentManagerOf(
   records: Readonly<Record<string, TurnEndedFacts>>,
   tracker: TurnEndedTracker,
   excluded: readonly string[],
+  states: HostStates = null,
 ): string | null {
   const master = masterOf(task);
   let current: string | null = null;
   for (const [id, facts] of Object.entries(records)) {
     if (facts.role !== "manager" || masterOf(facts.task) !== master) continue;
-    if (tracker.archived.has(id) || excluded.includes(id)) continue;
+    if (archivedNow(id, states, tracker) || excluded.includes(id)) continue;
     if (current === null || tracker.started.lastIndexOf(id) >= tracker.started.lastIndexOf(current)) {
       current = id;
     }
@@ -1448,14 +1468,15 @@ function resolveWakeParent(
   facts: TurnEndedFacts,
   records: Readonly<Record<string, TurnEndedFacts>>,
   tracker: TurnEndedTracker,
+  states: HostStates,
 ): { readonly id: string; readonly facts: TurnEndedFacts } | null {
   const parentId = agent.parentAgentId;
   if (parentId === null) return null;
   const recorded = records[parentId];
-  if (recorded !== undefined && !tracker.archived.has(parentId)) {
+  if (recorded !== undefined && !archivedNow(parentId, states, tracker)) {
     return { id: parentId, facts: recorded };
   }
-  const manager = currentManagerOf(facts.task, records, tracker, [agent.id, parentId]);
+  const manager = currentManagerOf(facts.task, records, tracker, [agent.id, parentId], states);
   if (manager === null) return null;
   const managerFacts = records[manager];
   if (managerFacts === undefined) return null;
@@ -1476,10 +1497,23 @@ function rememberParent(tracker: TurnEndedTracker, child: string, parent: string
   }
 }
 
-/** Bump the seat's generation, inside its cap: rule 4's invalidation for one seat. */
-function bumpSeatEpoch(tracker: TurnEndedTracker, seat: string): void {
+interface SeatGeneration {
+  readonly turn: number;
+  readonly work: number;
+}
+
+const INITIAL_SEAT_GENERATION: SeatGeneration = { turn: 0, work: 0 };
+
+function seatGeneration(tracker: TurnEndedTracker, seat: string): SeatGeneration {
+  return tracker.seatEpoch.get(seat) ?? INITIAL_SEAT_GENERATION;
+}
+
+/** Closing voids the seat's own work. Starting a turn or archiving also voids turn intake. */
+function bumpSeatEpoch(tracker: TurnEndedTracker, seat: string, transition: "start" | "close" | "archive"): void {
+  const previous = seatGeneration(tracker, seat);
+  const turn = transition === "close" ? previous.turn : previous.turn + 1;
   tracker.seatEpoch.delete(seat);
-  tracker.seatEpoch.set(seat, (tracker.seatEpoch.get(seat) ?? 0) + 1);
+  tracker.seatEpoch.set(seat, { turn, work: previous.work + 1 });
   while (tracker.seatEpoch.size > TURN_ENDED_SILENT_LIMIT) {
     const oldest = tracker.seatEpoch.keys().next();
     if (oldest.done === true) break;
@@ -1493,12 +1527,13 @@ export function noteTurnStarted(
   now: () => Date = () => new Date(),
 ): void {
   tracker.inTurn.add(agent.id);
-  bumpSeatEpoch(tracker, agent.id);
+  bumpSeatEpoch(tracker, agent.id, "start");
   if (typeof agent.provider === "string" && agent.provider !== "") {
     rememberProvider(tracker, agent.id, agent.provider);
   }
   tracker.permissionWait.delete(agent.id);
   tracker.archived.delete(agent.id);
+  tracker.closed.delete(agent.id);
   // MIK-R183 rule 4: a turn of the seat beginning inside the wait cancels the
   // send-back and the end is not counted; the row is written for rule 7.
   cancelSeatWake(tracker, agent.id, "a turn of the seat started", now);
@@ -1531,39 +1566,39 @@ export function notePermissionRequested(agentId: string, tracker: TurnEndedTrack
   tracker.permissionWait.add(agentId);
 }
 
-/**
- * An agent is archived. What waits for it moves to the alternate its line
- * names (MIK-R172 rule 5), and is dropped when that too is gone.
- *
- * MIK-R190 rules 11, 12 and 15 / CS-6: an agent that is archived or closed also
- * owes no deferred action — its armed resume goes with its timer, and so does any
- * reset flush armed for it as a parent — so a terminal seat cannot leave a timer
- * behind it for the rest of a limit.
- */
+function stopSeatWork(agentId: string, tracker: TurnEndedTracker, reason: string, now: () => Date): void {
+  tracker.inTurn.delete(agentId);
+  tracker.permissionWait.delete(agentId);
+  const declared = tracker.declarations.get(agentId);
+  if (declared !== undefined) {
+    tracker.declarations.delete(agentId);
+    appendEndedRows(tracker, agentId, declared, declaredNames(declared), reason, now);
+  }
+  cancelSeatWake(tracker, agentId, reason, now);
+  cancelSubagentLeftAlone(tracker, agentId);
+  cancelLimitResume(tracker, agentId, now, `${reason} before the resume`);
+  if (declared !== undefined) announceWait(tracker, agentId);
+}
+
+/** Closure stops seat-owned work. Parent lines and their reset flush remain owed. */
+export function noteAgentClosed(agentId: string, tracker: TurnEndedTracker, now: () => Date = () => new Date()): void {
+  if (tracker.archived.has(agentId)) return;
+  rememberDeparted(tracker.closed, agentId);
+  bumpSeatEpoch(tracker, agentId, "close");
+  stopSeatWork(agentId, tracker, "the seat was closed", now);
+}
+
+/** Archive also moves a parent's held lines to its alternate and drops lines about that seat. */
 export function noteAgentArchived(
   agentId: string,
   tracker: TurnEndedTracker,
   now: () => Date = () => new Date(),
 ): void {
   rememberDeparted(tracker.archived, agentId);
+  tracker.closed.delete(agentId);
   tracker.providerOf.delete(agentId);
-  tracker.inTurn.delete(agentId);
-  tracker.permissionWait.delete(agentId);
-  // An archived seat's declared wait ends with it — each wait it
-  // declared, helpers or a background process.
-  const declared = tracker.declarations.get(agentId);
-  if (declared !== undefined) {
-    tracker.declarations.delete(agentId);
-    appendEndedRows(tracker, agentId, declared, declaredNames(declared), "the seat was archived", now);
-  }
-  const pendingCheck = tracker.waits.get(agentId);
-  if (pendingCheck !== undefined && isWaitCheck(pendingCheck.kind)) {
-    tracker.waits.delete(agentId);
-    stopTimer({}, pendingCheck.timer);
-    pendingCheck.finish();
-  }
-  if (declared !== undefined) announceWait(tracker, agentId);
-  cancelLimitResume(tracker, agentId, now, "the seat was archived before the resume");
+  bumpSeatEpoch(tracker, agentId, "archive");
+  stopSeatWork(agentId, tracker, "the seat was archived", now);
   dropLimitFlush(tracker, agentId);
   const kept: HeldLine[] = [];
   for (const line of tracker.held) {
@@ -1632,11 +1667,13 @@ export async function flushHeldLines(
   sender: TurnEndedSender,
   records?: Readonly<Record<string, TurnEndedFacts>>,
   scheduling: TurnEndScheduling = {},
+  states?: HostStates,
 ): Promise<FlushOutcome> {
   // L172-R4-F02: an earlier turn-end callback may still be sending when a later
   // one arrives. The later flush waits for the earlier one, so delivery order is
   // the turn-end order and a later line can never overtake an earlier one that is
   // already in flight.
+  const epoch = tracker.epoch;
   const previous = tracker.flushing;
   let release!: () => void;
   const mine = new Promise<void>((resolve) => {
@@ -1645,7 +1682,12 @@ export async function flushHeldLines(
   tracker.flushing = mine;
   if (previous !== null) await previous;
   try {
-    return await flushOnce(tracker, sender, records, scheduling);
+    if (tracker.epoch !== epoch || tracker.held.length === 0) return { sent: [], failed: [], dropped: [] };
+    const observed = states === undefined && scheduling.readHost !== undefined
+      ? await readHostStates(scheduling.readHost)
+      : states ?? null;
+    if (tracker.epoch !== epoch) return { sent: [], failed: [], dropped: [] };
+    return await flushOnce(tracker, sender, records, scheduling, observed);
   } finally {
     if (tracker.flushing === mine) tracker.flushing = null;
     release();
@@ -1655,9 +1697,11 @@ export async function flushHeldLines(
 async function flushOnce(
   tracker: TurnEndedTracker,
   sender: TurnEndedSender,
-  records?: Readonly<Record<string, TurnEndedFacts>>,
-  scheduling: TurnEndScheduling = {},
+  records: Readonly<Record<string, TurnEndedFacts>> | undefined,
+  scheduling: TurnEndScheduling,
+  states: HostStates,
 ): Promise<FlushOutcome> {
+  const epoch = tracker.epoch;
   const now = clockOf(scheduling);
   // A held line whose parent has gone moves to the current Manager of its
   // master, at the moment of sending rather than at the moment it was owed, so
@@ -1665,7 +1709,7 @@ async function flushOnce(
   if (records !== undefined) {
     const rebound: HeldLine[] = [];
     for (const line of tracker.held) {
-      const parentKnown = records[line.parent] !== undefined && !tracker.archived.has(line.parent);
+      const parentKnown = records[line.parent] !== undefined && !archivedNow(line.parent, states, tracker);
       if (parentKnown) {
         rebound.push(line);
         continue;
@@ -1673,10 +1717,10 @@ async function flushOnce(
       const task = line.task ?? "";
       const alternate = line.alternate ?? null;
       const alternateKnown =
-        alternate !== null && records[alternate] !== undefined && !tracker.archived.has(alternate);
+        alternate !== null && records[alternate] !== undefined && !archivedNow(alternate, states, tracker);
       const manager =
         (alternateKnown ? alternate : null) ??
-        currentManagerOf(task, records, tracker, [line.subject, line.parent]);
+        currentManagerOf(task, records, tracker, [line.subject, line.parent], states);
       if (manager === null) {
         // No current Manager yet: the line stays owed, not dropped.
         rebound.push(line);
@@ -1688,7 +1732,7 @@ async function flushOnce(
         line: line.line,
         task: line.task,
         seq: line.seq,
-        alternate: currentManagerOf(task, records, tracker, [line.subject, manager]),
+        alternate: currentManagerOf(task, records, tracker, [line.subject, manager], states),
       });
     }
     tracker.held.splice(0, tracker.held.length, ...rebound);
@@ -1696,7 +1740,7 @@ async function flushOnce(
   keepTurnEndOrder(tracker);
   const claimed = tracker.held.filter(
     (line) =>
-      !childrenInTurn(line.subject, tracker) && parentMayTakeLineNow(line.parent, tracker, now()),
+      !childrenInTurn(line.subject, tracker) && parentMayTakeLineNow(line.parent, tracker, now(), states),
   );
   // MIK-R190 rule 12 / L184-R1-F06: every limited parent with a line waiting gets
   // its one reset timer here, before this flush decides it can send anything. A
@@ -1730,7 +1774,7 @@ async function flushOnce(
     const readyNow = new Set(
       valid.filter(
         (line) =>
-          !childrenInTurn(line.subject, tracker) && parentMayTakeLineNow(parent, tracker, now()),
+          !childrenInTurn(line.subject, tracker) && parentMayTakeLineNow(parent, tracker, now(), states),
       ),
     );
     requeue.push(...valid.filter((line) => !readyNow.has(line)));
@@ -1745,7 +1789,8 @@ async function flushOnce(
       // L172-R4-F01: the previous message of this same batch may have started a
       // turn in a parent that does not steer. The gate is asked again at every
       // actual send, and what could not be sent stays owed, in order.
-      if (!parentMayTakeLineNow(parent, tracker, now())) {
+      if (tracker.epoch !== epoch) return { sent, failed, dropped };
+      if (!parentMayTakeLineNow(parent, tracker, now(), states)) {
         for (const unsent of batches.messages.slice(index)) requeue.push(...unsent.lines);
         break;
       }
@@ -1759,6 +1804,7 @@ async function flushOnce(
       }
     }
   }
+  if (tracker.epoch !== epoch) return { sent, failed, dropped };
   for (const line of claimed) tracker.claimed.delete(line);
   if (requeue.length > 0) tracker.held.push(...requeue);
   keepTurnEndOrder(tracker);
@@ -1870,6 +1916,8 @@ export interface TurnEndScheduling {
   readonly now?: () => Date;
   readonly setTimeout?: (callback: () => void, delayMs: number) => unknown;
   readonly clearTimeout?: (handle: unknown) => void;
+  /** The host's agent state, absent when the decision is driven by events alone. */
+  readonly readHost?: HostStateReader;
 }
 
 /** The options one `agent.turn_ended` event carries into the decision. */
@@ -1878,8 +1926,6 @@ export interface TurnEndOptions extends TurnEndScheduling {
   readonly outcome?: string | null;
   /** The ended turn's id, which scopes the rows the decision reads. */
   readonly turnId?: string | null;
-  /** Rule 3/4: the host's agent state; absent in a test that drives the events alone. */
-  readonly readHost?: HostStateReader;
 }
 
 function clockOf(scheduling: TurnEndScheduling): () => Date {
@@ -1994,7 +2040,7 @@ function scheduleWaitCheck(
   declared: DeclaredWait,
   tracker: TurnEndedTracker,
   sender: TurnEndedSender,
-  scheduling: TurnEndScheduling & { readonly readHost?: HostStateReader },
+  scheduling: TurnEndScheduling,
 ): SeatWakeWait | undefined {
   const { facts, ordinal } = declared;
   const now = clockOf(scheduling);
@@ -2024,7 +2070,7 @@ function scheduleWaitCheck(
     kind,
     facts,
     epoch: tracker.epoch,
-    seatEpoch: tracker.seatEpoch.get(agent.id) ?? 0,
+    seatEpoch: seatGeneration(tracker, agent.id).work,
     // The seat reads its progress report in its own chat; the rows record the
     // check that went out, not the report.
     deliver: async () => {
@@ -2072,7 +2118,7 @@ function rearmWaitCheck(
     ...wait,
     dueAt: now().getTime() + delayMs,
     epoch: tracker.epoch,
-    seatEpoch: tracker.seatEpoch.get(wait.seat) ?? 0,
+    seatEpoch: seatGeneration(tracker, wait.seat).work,
     timer: undefined,
     done,
     finish,
@@ -2107,7 +2153,7 @@ async function deliverSeatWake(
   tracker.waits.delete(wait.seat);
   const states = await readHostStates(readHost);
   // Rule 4: a turn start or a shutdown between the timer and this act voids it.
-  if (tracker.epoch !== wait.epoch || (tracker.seatEpoch.get(wait.seat) ?? 0) !== wait.seatEpoch) return;
+  if (tracker.epoch !== wait.epoch || seatGeneration(tracker, wait.seat).work !== wait.seatEpoch) return;
   // Rule 11: a limited seat gets nothing — no seat message and, from the third end
   // on, no marked line — and the end is not counted. One resume is armed at its
   // provider's `until` plus the lag.
@@ -2120,9 +2166,7 @@ async function deliverSeatWake(
   if (limited !== null) {
     const terminal = hostFactsUnavailable(readHost, states, wait.seat)
       ? "host-state-unavailable"
-      : archivedNow(wait.seat, states, tracker)
-        ? "archived"
-        : null;
+      : inactiveSeatReason(wait.seat, states, tracker);
     if (terminal !== null) {
       appendSkipRows(tracker, wait, terminal, now);
       return;
@@ -2141,15 +2185,7 @@ async function deliverSeatWake(
   }
   const skipped = hostFactsUnavailable(readHost, states, wait.seat)
     ? "host-state-unavailable"
-    : archivedNow(wait.seat, states, tracker)
-      ? "archived"
-      : permissionNow(wait.seat, states, tracker)
-        ? "permission-wait"
-        : inTurnNow(wait.seat, states, tracker)
-          ? "in-a-turn"
-          : runningSubagentsNow(tracker, wait.seat) > 0
-            ? "subagent-running"
-            : null;
+    : seatWakeBlocked(wait.seat, states, tracker);
   if (skipped !== null) {
     appendSkipRows(tracker, wait, skipped, now);
     // MIK-R216 rule 5: a check the seat cannot take now because it waits for a
@@ -2162,7 +2198,7 @@ async function deliverSeatWake(
     return;
   }
   try {
-    await wait.deliver();
+    await wait.deliver(states);
   } catch (error) {
     // The act writes its own row where it knows more; this is the last resort, and
     // the end is not counted because nothing reached anyone.
@@ -2214,7 +2250,7 @@ function armLimitResume(
     ordinal: wait.ordinal,
     until,
     epoch: tracker.epoch,
-    seatEpoch: tracker.seatEpoch.get(wait.seat) ?? 0,
+    seatEpoch: seatGeneration(tracker, wait.seat).work,
     scheduling,
     ...(readHost === undefined ? {} : { readHost }),
     timer: undefined as unknown,
@@ -2254,7 +2290,7 @@ async function fireLimitResume(
 ): Promise<void> {
   if (tracker.resumes.get(resume.seat) !== resume) return;
   tracker.resumes.delete(resume.seat);
-  if (tracker.epoch !== resume.epoch || (tracker.seatEpoch.get(resume.seat) ?? 0) !== resume.seatEpoch) {
+  if (tracker.epoch !== resume.epoch || seatGeneration(tracker, resume.seat).work !== resume.seatEpoch) {
     return;
   }
   // L184-R1-F13: the role record is read at this action's own moment, as the
@@ -2283,20 +2319,12 @@ async function fireLimitResume(
   // L184-R1-F09: a deferred send asks the same safety gates as any other send —
   // the host's own state, read at this moment and never polled.
   const states = await readHostStates(resume.readHost);
-  if (tracker.epoch !== resume.epoch || (tracker.seatEpoch.get(resume.seat) ?? 0) !== resume.seatEpoch) {
+  if (tracker.epoch !== resume.epoch || seatGeneration(tracker, resume.seat).work !== resume.seatEpoch) {
     return;
   }
   const skipped = hostFactsUnavailable(resume.readHost, states, resume.seat)
     ? "host-state-unavailable"
-    : archivedNow(resume.seat, states, tracker)
-      ? "archived"
-      : permissionNow(resume.seat, states, tracker)
-        ? "permission-wait"
-        : inTurnNow(resume.seat, states, tracker)
-          ? "in-a-turn"
-          : runningSubagentsNow(tracker, resume.seat) > 0
-            ? "subagent-running"
-            : null;
+    : seatWakeBlocked(resume.seat, states, tracker);
   if (skipped !== null) {
     tracker.append(
       turnEndRow("send-skipped", resume.facts, resume.seat, resume.ordinal, skipped, isoWithOffset(now())),
@@ -2344,8 +2372,8 @@ function scheduleSeatWake(
   ordinal: number,
   tracker: TurnEndedTracker,
   sender: TurnEndedSender,
-  scheduling: TurnEndScheduling & { readonly readHost?: HostStateReader },
-  deliver: (message: string) => Promise<void>,
+  scheduling: TurnEndScheduling,
+  deliver: (message: string, states: HostStates) => Promise<void>,
 ): SeatWakeWait | undefined {
   const now = clockOf(scheduling);
   // Rule 4's budget: past the cap this end sheds its own wake rather than grow
@@ -2382,8 +2410,8 @@ function scheduleSeatWake(
     kind,
     facts,
     epoch: tracker.epoch,
-    seatEpoch: tracker.seatEpoch.get(agent.id) ?? 0,
-    deliver: () => deliver(message),
+    seatEpoch: seatGeneration(tracker, agent.id).work,
+    deliver: (states) => deliver(message, states),
     timer: undefined,
     done,
     finish,
@@ -2411,10 +2439,11 @@ async function noteParentLine(
   tracker: TurnEndedTracker,
   sender: TurnEndedSender,
   sequence: number,
-  mark?: { readonly ordinal: number; readonly at: string },
-  scheduling: TurnEndScheduling = {},
+  mark: { readonly ordinal: number; readonly at: string } | undefined,
+  scheduling: TurnEndScheduling,
+  states: HostStates,
 ): Promise<TurnEndedOutcome> {
-  const target = resolveWakeParent(agent, facts, records, tracker);
+  const target = resolveWakeParent(agent, facts, records, tracker, states);
   if (target === null) return { kind: "none" };
   if (turnHasReturnToParent(own, target.id, target.facts)) return { kind: "none" };
   const base = composeTurnEndedLine(agent.id, facts, lastLineOfTurn(own));
@@ -2422,10 +2451,10 @@ async function noteParentLine(
   if (mark !== undefined) {
     tracker.append(turnEndRow("marked-parent-line", facts, agent.id, mark.ordinal, "silent end in a row", mark.at));
   }
-  const alternate = currentManagerOf(facts.task, records, tracker, [agent.id, target.id]);
+  const alternate = currentManagerOf(facts.task, records, tracker, [agent.id, target.id], states);
   const pushed: HeldLine = { subject: agent.id, parent: target.id, line, task: facts.task, alternate, seq: sequence };
   tracker.held.push(pushed);
-  const outcome = await flushHeldLines(tracker, sender, records, scheduling);
+  const outcome = await flushHeldLines(tracker, sender, records, scheduling, states);
   const stillHeld = tracker.held.some((held) => held === pushed);
   if (stillHeld) return { kind: "held", parent: target.id };
   // A restart that began one of the agent's own while the line waited behind
@@ -2482,12 +2511,14 @@ export async function noteTurnEnded(
   // Rule 4: this intake belongs to a generation of the seat and of the process; a
   // turn start or a shutdown during the awaits below voids everything it would do.
   const epoch = tracker.epoch;
-  const seatEpoch = tracker.seatEpoch.get(agent.id) ?? 0;
+  const generation = seatGeneration(tracker, agent.id);
   const obsolete = (): boolean =>
-    tracker.epoch !== epoch || (tracker.seatEpoch.get(agent.id) ?? 0) !== seatEpoch;
+    tracker.epoch !== epoch || seatGeneration(tracker, agent.id).work !== generation.work;
+  const intakeObsolete = (): boolean =>
+    tracker.epoch !== epoch || seatGeneration(tracker, agent.id).turn !== generation.turn;
   // The host's state at this end (rule 3), read once beside the events.
   const states = await readHostStates(options.readHost);
-  if (obsolete()) return { kind: "none" };
+  if (intakeObsolete()) return { kind: "none" };
   // The ended turn's own rows: those after this build's previous end of the
   // seat, so a steered message does not split the turn, and an earlier turn's
   // return or text answers for this one no longer (L172-R1-F01).
@@ -2499,8 +2530,8 @@ export async function noteTurnEnded(
     tracker.turnMarks.delete(oldest.value);
   }
   const own = slice.rows;
-  await flushHeldLines(tracker, sender, records, options);
-  if (obsolete()) return { kind: "none" };
+  await flushHeldLines(tracker, sender, records, options, states);
+  if (intakeObsolete()) return { kind: "none" };
 
   const isSeat = TURN_ENDED_SEAT_ROLES.has(facts.role);
   const handoff = turnHasHandoff(own);
@@ -2519,15 +2550,18 @@ export async function noteTurnEnded(
       facts,
       subagents: declaresSubagentWait(own),
       background: readBackgroundDeclaration(lastAssistantText(own)),
-      archived: archivedNow(agent.id, states, tracker),
+      archived: inactiveSeatReason(agent.id, states, tracker) !== null,
     },
     { now, stopTimer: (handle) => stopTimer(options, handle), limit: TURN_ENDED_SILENT_LIMIT, helperCheckMs: SUBAGENT_WAIT_CHECK_MS },
   );
   if (opened !== null) {
     // A declared turn with a hand-off still gives the parent what a hand-off
     // gives; without one it gives the parent nothing, no line of either kind.
-    if (handoff) await noteParentLine(agent, facts, own, records, tracker, sender, sequence, undefined, options);
-    // After each declared end, whatever opened that turn.
+    const parentLine: TurnEndedOutcome = handoff
+      ? await noteParentLine(agent, facts, own, records, tracker, sender, sequence, undefined, options, states)
+      : { kind: "none" };
+    // The parent send can span a close, unload, or a replacement declaration.
+    if (obsolete() || tracker.declarations.get(agent.id) !== opened) return parentLine;
     scheduleWaitCheck(agent, opened, tracker, sender, options);
     announceWait(tracker, agent.id);
     return { kind: "declared", seat: agent.id, ordinal: opened.ordinal };
@@ -2554,11 +2588,11 @@ export async function noteTurnEnded(
     }
     // Rule 4: without the host's facts the plugin does not send; the parent's line
     // is the safe act, as for any end rule 3 leaves alone.
-    return noteParentLine(agent, facts, own, records, tracker, sender, sequence, undefined, options);
+    return noteParentLine(agent, facts, own, records, tracker, sender, sequence, undefined, options, states);
   }
   if (!isSeat) {
     if (permissionNow(agent.id, states, tracker)) return { kind: "none" };
-    return noteParentLine(agent, facts, own, records, tracker, sender, sequence, undefined, options);
+    return noteParentLine(agent, facts, own, records, tracker, sender, sequence, undefined, options, states);
   }
 
   // A silent end: one 60-second wait, whatever the count. The first two ends wake
@@ -2595,15 +2629,15 @@ function seatWakeDelivery(
   sender: TurnEndedSender,
   options: TurnEndOptions,
   obsolete: () => boolean,
-): (message: string) => Promise<void> {
+): (message: string, states: HostStates) => Promise<void> {
   const now = clockOf(options);
   const markedLine = ordinal > TURN_ENDED_SENT_BACK_LIMIT;
-  return async (message: string): Promise<void> => {
+  return async (message: string, states: HostStates): Promise<void> => {
     if (markedLine) {
       await noteParentLine(agent, facts, own, records, tracker, sender, sequence, {
         ordinal,
         at: isoWithOffset(now()),
-      }, options);
+      }, options, states);
       // Rule 4/8: a boundary during the line's own delivery restores no count.
       if (obsolete()) return;
       rememberSilentEnd(tracker, agent.id, ordinal);
@@ -2691,6 +2725,8 @@ function rememberSubagentLeftAlone(
 export function cleanupSeatWaits(tracker: TurnEndedTracker, scheduling: TurnEndScheduling = {}): void {
   // Rule 8: the boundary voids in-flight work as well as installed timers.
   tracker.epoch += 1;
+  tracker.held.length = 0;
+  tracker.claimed.clear();
   tracker.seatEpoch.clear();
   for (const [seat, wait] of [...tracker.waits]) {
     tracker.waits.delete(seat);
@@ -2726,7 +2762,8 @@ export async function notePermissionResolved(
   tracker: TurnEndedTracker,
   sender: TurnEndedSender,
   records?: Readonly<Record<string, TurnEndedFacts>>,
+  scheduling: TurnEndScheduling = {},
 ): Promise<FlushOutcome> {
   tracker.permissionWait.delete(agentId);
-  return flushHeldLines(tracker, sender, records);
+  return flushHeldLines(tracker, sender, records, scheduling);
 }

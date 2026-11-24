@@ -9,19 +9,6 @@ from agents_remember.application.knowledge_worklist.planned_effects import Decla
 
 
 @dataclass(frozen=True)
-class CandidateTrees:
-    """C and K_C given as Git trees, the exact candidate a gate evaluates (MIK-R09).
-
-    ``code`` is a tree of the leaf's code repository and ``memory`` a tree of its memory repository,
-    both already written to their object stores (the closeout's own candidate captures). Given them,
-    the worklist reads exactly those trees instead of capturing the two worktrees again.
-    """
-
-    code: str
-    memory: str
-
-
-@dataclass(frozen=True)
 class CapturedBase:
     """The review's already paired B/K_B, including the immutable tree K_B is read as."""
 

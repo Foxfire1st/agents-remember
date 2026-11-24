@@ -101,12 +101,15 @@ The apply never overwrites a record of the task's memory that differs. The candi
 `knowledge_write`. Judgment rows of the source are reading aids only: **history files never
 travel**.
 
-The apply writes the selected units and the missing records, and it generates the route indexes
-again. It then validates the exact resulting tree of the memory worktree against the memory base
-of the task, paired with the official code, with the [validator](../concepts.md#validator) as the
-tool `knowledge_write` uses it: a finding of a rule that refuses a commit but not a write is only
-reported. When the validation refuses, the answer lists the violations, and the apply restores the
-memory worktree byte for byte, with the edits that were there before.
+Before writing, the apply checks that the receiving task's recorded memory base is readable and
+is an ancestor of the receiving memory worktree's HEAD. If it cannot establish that base, it
+returns `carryover-failed`. The apply writes the selected units and missing records, then
+regenerates the route indexes. The validator and worklist both compare the resulting memory
+tree against the recorded base. The [validator](../concepts.md#validator) uses the official code
+and applies the same policy as `knowledge_write`. A finding for a rule that refuses a commit
+but permits a write is reported. When validation refuses a write, the answer lists the
+violations and the apply restores the memory worktree byte for byte, including the edits that
+were there before.
 
 The apply commits nothing.
 

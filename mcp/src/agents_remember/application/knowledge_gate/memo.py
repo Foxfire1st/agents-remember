@@ -7,8 +7,9 @@ inputs reproduces the identical verdict. The memo keeps that verdict, keyed by e
 evaluation reads:
 
 * the exact captured code tree C and memory tree K_C (content-addressed Git tree IDs);
-* the contract's identity: its path and the SHA-256 of its bytes, which carry B and every branch;
-* the parent line's memory tip, the validator's comparison base and the line K_B pairs on;
+* the contract's identity: its path and the SHA-256 of its bytes, which carry the base pair;
+* the recorded memory base and the memory commit that must contain it;
+* the parent line's memory tip, the validator's comparison base;
 * the SHA-256 of the leaf's task document (its maintenance scope and declared effects);
 * the build that produced the verdict (``measuring_build_stamp``).
 
@@ -78,6 +79,8 @@ class GateMemoKey:
     leaf_memory_head: str | None
     task_document: str
     build: str
+    memory_base_commit: str
+    memory_candidate_commit: str | None
 
 
 @dataclass(frozen=True)
@@ -124,8 +127,8 @@ def memo_key(
 ) -> GateMemoKey | None:
     """The key of one evaluation, or ``None`` when an input cannot be identified (no memo then).
 
-    The verdict reads two memory commits beside the candidate: the parent line's tip (the
-    validator's base) and the leaf's own ``HEAD`` (whose closed history files are frozen).
+    The validator reads the parent tip and the leaf's HEAD. The worklist establishes ancestry
+    against the judged pair's memory commit or that same HEAD when it computes a fresh verdict.
     """
 
     try:
@@ -143,6 +146,8 @@ def memo_key(
         leaf_memory_head=leaf_memory_head,
         task_document=_digest(document),
         build=build,
+        memory_base_commit=contract.memory_base_commit,
+        memory_candidate_commit=candidate.memory_commit or leaf_memory_head,
     )
 
 

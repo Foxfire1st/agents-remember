@@ -762,7 +762,7 @@ def test_onboarding_satisfying_row_requires_current_row_not_counted_alone() -> N
     assert "disposition no_impact" in text
 
 
-# rule 2 (round 3): the writer compares the leaf's paired base, not its own HEAD ---------------
+# The writer's card comparison uses the leaf's recorded base. -----------------------------
 
 CARD_MD = f"onboarding/{CODE_FILE}.md"
 CARD_SIDECAR = f"onboarding/{CODE_FILE}.json"
@@ -942,7 +942,7 @@ def _write_paired_with_worklist(world: Any, *, memory_base: str | None, counted:
 def test_stale_counted_flag_does_not_override_the_known_leaf_base(tmp_path: Path) -> None:
     """F04 round 4: a persisted true flag loses to a candidate that matches K_B.
 
-    The worklist was computed before the leaf restored the card; the known paired base
+    The worklist was computed before the leaf restored the card; the known recorded base
     decides, so the writer refuses the row as the fresh gate would.
     """
 
@@ -954,11 +954,16 @@ def test_stale_counted_flag_does_not_override_the_known_leaf_base(tmp_path: Path
     assert not [row for row in report.rows if row.disposition == "updated"]
     assert any("counted change" in problem.render() for problem in report.problems)
 
+    # When only the persisted comparison is readable, its true flag decides.
+    unavailable = _write_paired_with_worklist(world, memory_base="9" * 40, counted=True)
+    assert unavailable.state == "planned"
+    assert len([row for row in unavailable.rows if row.disposition == "updated"]) == 1
+
 
 def test_stale_uncounted_flag_does_not_override_the_known_leaf_base(tmp_path: Path) -> None:
     """F04 round 4: a persisted false flag loses to a candidate that differs from K_B.
 
-    The worklist was computed before the leaf re-edited the card; the known paired base
+    The worklist was computed before the leaf re-edited the card; the known recorded base
     decides, so the writer authors the row as the fresh gate would.
     """
 
