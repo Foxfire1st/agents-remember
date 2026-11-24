@@ -776,14 +776,29 @@ def _l111_task_doc_largest(operation: str) -> dict[str, Any]:
 
 
 def _l111_role_start_largest() -> dict[str, Any]:
-    """The largest start: missing requirement files ride the warning."""
-    missing = ", ".join(f"requirements/req-{index:03d}.md" for index in range(25))
+    """The missing-requirement-file start captured from the deep fixture."""
+    root = (
+        "/home/worker/projects/ar-coordination/worktrees/agents-remember/"
+        "17_a-role-start-warns-about-absent-requirement-files-ar/scratch/worker/"
+        "0dfd57f7-1b4b-4b71-ac30-20698eaca57f/base-copy-with-a-deep-repository-location/"
+        "first-report-warning-measurement/role-start-fixture-source/"
+        "fixture-tmp-for-real-answer-location/tmppdurl5yv"
+    )
+    request_id = "b1c9f95d-3f6d-4908-9ca2-a072bb25d305"
     return {
         "ok": True,
-        "agentId": "0dfd57f7-1b4b-4b71-ac30-20698eaca57f",
-        "handoverArtifactPath": "role-reports/worker/0dfd57f7/handover.md",
-        "handoverFilePath": "role-reports/worker/0dfd57f7/handover.json",
-        "warning": f"The leaf names requirement files that do not exist: {missing}.",
+        "agentId": "3ee8acf6-07e7-4f93-b26d-006456c1a61c",
+        "handoverArtifactPath": (
+            "/tmp/arh-wefjm_50/projects/.agents-remember/handover-locators/"
+            f"{request_id}/{request_id}.handover.txt"
+        ),
+        "handoverFilePath": f"{root}/reports/{request_id}.handover.json",
+        "warning": (
+            "Task document copies missing: master/requirements/ABSENT.md. "
+            "The start succeeds; the next task_doc write on the leaf document refreshes "
+            "the copies once the files exist."
+        ),
+        "log": f"{root}/coordination/logs/mcp/ar-tools-2026-11-23/160159696851-role_start-469a8ebf.json",
     }
 
 

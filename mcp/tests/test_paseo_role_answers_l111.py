@@ -17,12 +17,17 @@ from unittest.mock import patch
 from agents_remember.application import tool_response as response
 from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.application.tool_response import complete_tool_response
+from agents_remember.cli import paseo_role_tools
 from agents_remember.cli import role_launch_preparation as preparation
+from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.mcp.tools.role_agents import role_message_payload
 from agents_remember.models.role_agents import RoleMessageCall
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tokens import count_response_tokens as count
-from agents_remember.models.tools.tool_answer import LOG_ERROR_LINE_UNWRITABLE
+from agents_remember.models.tools.tool_answer import (
+    LOG_ERROR_LINE_UNWRITABLE,
+    TOOL_ANSWER_EXCEPTIONS,
+)
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from test_paseo_role_tools import RoleToolsTestCase, binding, selection_of
@@ -127,6 +132,37 @@ class RoleStartAnswerTests(RoleToolsTestCase):
         answer = self._answer(rejected)
         self.assertEqual((answer["ok"], answer["status"]), (False, "rejected"))
         self.assertIn("new request id", answer["nextAction"])
+
+    def test_short_start_warning_keeps_the_missing_file_before_a_long_step_up_notice(self) -> None:
+        missing_file = "master/requirements/ABSENT.md"
+        step_up_notice = "The review count could not be read. " + "Invalid review record. " * 350
+        choose_defaults = preparation.selected_defaults
+
+        def unreadable_review(*args: Any) -> dict[str, Any]:
+            return {**choose_defaults(*args), "stepUpWarning": step_up_notice}
+
+        def handover_with_missing_file(request: RoleHandoverRequest) -> dict[str, Any]:
+            handover = self.compile_handover(request)
+            return {**handover, "taskDocumentFiles": {"missingCopies": [missing_file]}}
+
+        with (
+            patch.object(preparation, "selected_defaults", side_effect=unreadable_review),
+            patch.object(preparation, "_compile_handover", side_effect=handover_with_missing_file),
+        ):
+            whole = self.start(self.architect, "worker")
+        self.assertTrue(whole["ok"])
+        self.assertIn(step_up_notice, whole["warning"])
+        self.assertIn(missing_file, whole["warning"])
+
+        answer = self._answer(whole)
+        self.assertTrue(answer["ok"])
+        self.assertTrue(answer["overflow"])
+        self.assertIn(missing_file, answer["warning"])
+        self.assertTrue(answer["warningCut"])
+        self.assertTrue(whole["warning"].startswith(answer["warning"]))
+        self.assertEqual(answer["cut"]["log"], answer["log"])
+        whole_back = json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
+        self.assertEqual(whole_back["warning"], whole["warning"])
 
 
 class RoleMessageAnswerTests(RoleToolsTestCase):
@@ -354,3 +390,27 @@ class RoleWaitPrefixTests(RoleMessageAnswerTests):
         self.assertLessEqual(count(bad), 4000)
         whole_back = json.loads(Path(bad["log"]).read_text(encoding="utf-8"))
         self.assertEqual(whole_back["text"], text)
+
+
+class RoleMessageWarningTests(RoleToolsTestCase):
+    def test_short_message_answer_keeps_a_fitting_warning(self) -> None:
+        _request, worker = self.started(status="idle", taken="replaced")
+        link_notice = "The workspace could not link the recipient's message file."
+        call = RoleMessageCall(text="report your plan", agent_id=worker)
+        arguments = {"text": call.text, "agent_id": worker}
+        # Lower only the tool bound to exercise overflow at any fixture path length.
+        with (
+            patch.dict(TOOL_ANSWER_EXCEPTIONS, {("role_message", None): (1, "test overflow")}),
+            patch.object(paseo_role_tools, "_ensure_recipient_link", return_value=link_notice),
+            patch.dict(os.environ, self.architect.environment()),
+            tool_call_context("role_message", arguments, config=self.config),
+        ):
+            answer = role_message_payload(self.config, call)
+        self.assertTrue(answer["ok"])
+        self.assertTrue(answer["overflow"])
+        self.assertEqual(answer["cut"]["log"], answer["log"])
+        whole = json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
+        self.assertIn("cancelled", whole["warning"])
+        self.assertIn(link_notice, whole["warning"])
+        self.assertEqual(answer["warning"], whole["warning"])
+        self.assertNotIn("warningCut", answer)

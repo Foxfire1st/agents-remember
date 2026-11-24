@@ -41,20 +41,20 @@ def missing_copies_receipt_warning(
     MIK-R111 rule 3, failure behavior: the start succeeds, and INDEX.json, the answer and the
     handover name the missing file. The handover names it through
     ``taskDocumentFiles.missingCopies``; this carries it onto the receipt, from which the start
-    answer reads its warning.
+    answer reads its warning. The missing names precede any step-up notice so the short answer
+    sees them first.
     """
 
     missing = document_files.get("missingCopies") if isinstance(document_files, dict) else None
     if not missing:
         return {"warning": step_up_warning} if step_up_warning else {}
     names = ", ".join(str(name) for name in missing)
-    return {
-        "warning": (
-            f"{step_up_warning + ' ' if step_up_warning else ''}Task document copies missing: {names}. The start succeeds; the "
-            "next task_doc write on the leaf document refreshes the copies once "
-            "the files exist."
-        )
-    }
+    notice = (
+        f"Task document copies missing: {names}. The start succeeds; the "
+        "next task_doc write on the leaf document refreshes the copies once "
+        "the files exist."
+    )
+    return {"warning": f"{notice} {step_up_warning}" if step_up_warning else notice}
 
 
 def with_caller_harness(
