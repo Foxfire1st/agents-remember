@@ -168,7 +168,9 @@ def test_inventory_rows_carry_their_governing_onboarding_route() -> None:
         "onboarding/mcp/src/deep/x.py.md",
         "onboarding/mcp/src/deep/x.py.json",
         "onboarding/mcp/overview.index.json",
-        "onboarding/.ar-index/cache.md",
+        "onboarding/.github/workflows/quality.yml.md",
+        "onboarding/.github/workflows/quality.yml.json",
+        "onboarding/.github/workflows/overview.index.json",
         "knowledge/layout.json",
     ]
     inventory = build_inventory(
@@ -182,6 +184,8 @@ def test_inventory_rows_carry_their_governing_onboarding_route() -> None:
         ("top.txt", "."),
     ]
     assert [(row.path, row.route) for row in inventory.artifacts] == [
+        ("onboarding/.github/workflows/quality.yml.json", "."),
+        ("onboarding/.github/workflows/quality.yml.md", "."),
         ("onboarding/mcp/overview.md", "mcp"),
         ("onboarding/mcp/src/deep/x.py.json", "mcp"),
         ("onboarding/mcp/src/deep/x.py.md", "mcp"),

@@ -327,9 +327,9 @@ def test_a_dot_named_card_and_its_sidecar_are_validated() -> None:
 
     assert line.startswith("onboarding/.git-blame-ignore-revs.md: line 3:")
     assert "has no reference in onboarding/.git-blame-ignore-revs.json" in line  # sidecar read
-    assert is_excluded_from_knowledge("onboarding/.ar-index/overview.json")
     assert is_excluded_from_knowledge("onboarding/mcp/overview.index.json")
     assert not is_excluded_from_knowledge("onboarding/.git-blame-ignore-revs.json")
+    assert not is_excluded_from_knowledge("onboarding/.github/workflows/quality.yml.json")
 
 
 # --------------------------------------------------------------------------------------------------

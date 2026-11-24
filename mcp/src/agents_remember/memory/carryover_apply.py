@@ -25,6 +25,7 @@ from agents_remember.memory.conversion.base import pinned_version
 from agents_remember.memory_quality.knowledge_validator import (
     KnowledgeTree,
     code_tree_from_git,
+    is_excluded_from_knowledge,
     knowledge_tree_from_directory,
     knowledge_tree_from_git,
     validate_tree,
@@ -104,7 +105,7 @@ def _check_payloads(payloads: Mapping[str, bytes]) -> None:
         )
         if not (document or record) or path.suffix not in {".md", ".json"}:
             raise ValueError(f"carryover payload is not a document or record: {relative}")
-        if relative.endswith(".index.json") or any(part.startswith(".") for part in parts[:-1]):
+        if is_excluded_from_knowledge(relative):
             raise ValueError(f"carryover payload is derived or hidden: {relative}")
         partner = path.with_suffix(".json" if path.suffix == ".md" else ".md").as_posix()
         if partner not in payloads and (document or path.suffix == ".md"):

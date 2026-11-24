@@ -48,19 +48,9 @@ class KnowledgeTreeReadError(ValueError):
 
 
 def is_excluded_from_knowledge(relative: str) -> bool:
-    """Answer whether a relative path is outside knowledge: a route-index cache, or in a hidden
-    directory (``.ar-index``).
+    """Answer whether a relative path names a generated route-index cache."""
 
-    Only *directories* are hidden this way. A dot-named file is a knowledge file like any other --
-    ``onboarding/.git-blame-ignore-revs.md`` is the card of the code repository's
-    ``.git-blame-ignore-revs`` -- so no file escapes validation by its name. The validator and
-    ``agents-remember knowledge-format`` share this one predicate.
-    """
-
-    directories = relative.split("/")[:-1]
-    return relative.endswith(ROUTE_INDEX_CACHE_SUFFIX) or any(
-        part.startswith(".") for part in directories
-    )
+    return relative.endswith(ROUTE_INDEX_CACHE_SUFFIX)
 
 
 def is_knowledge_path(path: str) -> bool:
@@ -234,7 +224,7 @@ def knowledge_tree_from_directory(root: Path, *, label: str | None = None) -> Kn
         if not base.is_dir():
             continue
         for directory, directories, names in os.walk(base):
-            directories[:] = sorted(name for name in directories if not name.startswith("."))
+            directories.sort()
             for name in sorted(names):
                 full = Path(directory) / name
                 relative = full.relative_to(root).as_posix()

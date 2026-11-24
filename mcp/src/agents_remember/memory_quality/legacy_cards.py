@@ -15,6 +15,8 @@ import re
 from pathlib import Path
 from typing import Final
 
+from agents_remember.memory_quality.knowledge_validator.trees import is_excluded_from_knowledge
+
 __all__ = ["find_legacy_cards"]
 
 _LEGACY_TABLE_ROW: Final = re.compile(r"^\s*\|")
@@ -66,13 +68,13 @@ def find_legacy_cards(memory_root: Path) -> list[str]:
         return []
     found: list[str] = []
     for path in sorted(onboarding.rglob("*.md")):
-        relative = path.relative_to(memory_root)
-        if not path.is_file() or any(part.startswith(".") for part in relative.parts):
+        relative = path.relative_to(memory_root).as_posix()
+        if not path.is_file() or is_excluded_from_knowledge(relative):
             continue
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
         if _is_legacy_card(text):
-            found.append(relative.as_posix())
+            found.append(relative)
     return found

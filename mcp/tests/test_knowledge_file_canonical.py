@@ -84,32 +84,63 @@ def test_formatter_refuses_input_it_cannot_reformat_without_changing_content(
         format_bytes(payload)
 
 
+@pytest.mark.parametrize(
+    ("relative_tree", "relative_operand"),
+    [
+        pytest.param("memory", ".", id="ordinary-root"),
+        pytest.param("memory", "onboarding/..", id="equivalent-operand"),
+        pytest.param("memory", "..", id="contains-memory-root"),
+        pytest.param("knowledge/memory", ".", id="unrelated-knowledge-ancestor"),
+        pytest.param("onboarding/memory", ".", id="unrelated-onboarding-ancestor"),
+    ],
+)
 def test_knowledge_format_command_checks_rewrites_and_skips_caches(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    relative_tree: str,
+    relative_operand: str,
 ) -> None:
-    tree = tmp_path / "memory"
+    tree = tmp_path / relative_tree
     (tree / "knowledge").mkdir(parents=True)
     (tree / "onboarding" / "mcp").mkdir(parents=True)
-    (tree / ".ar-index").mkdir()
+    (tree / "system").mkdir()
+    (tree / ".git").mkdir()
     messy = tree / "knowledge" / "layout.json"
     messy.write_text('{"conversion":"1","schema":"ar-memory-layout/v2"}', encoding="utf-8")
     canonical = tree / "onboarding" / "mcp" / "overview.json"
     canonical.write_text(format_text('{"schema":"ar-onboarding-route/v1"}'), encoding="utf-8")
     cache = tree / "onboarding" / "mcp" / "overview.index.json"
     cache.write_text('{"b":1,"a":2}', encoding="utf-8")
-    hidden = tree / ".ar-index" / "x.json"
-    hidden.write_text('{"b":1}', encoding="utf-8")
+    hidden = tree / "onboarding" / ".github" / "workflows" / "quality.yml.json"
+    hidden.parent.mkdir(parents=True)
+    hidden.write_text('{"path":".github/workflows/quality.yml"}', encoding="utf-8")
+    hidden_knowledge = tree / "knowledge" / ".source" / "card.json"
+    hidden_knowledge.parent.mkdir()
+    hidden_knowledge.write_text('{"visible":true}', encoding="utf-8")
+    settings = tree / "system" / "settings.json"
+    settings.write_text('{"version":2}', encoding="utf-8")
+    git_metadata = tree / ".git" / "fixture.json"
+    git_bytes = b'{"preserve":true}'
+    git_metadata.write_bytes(git_bytes)
     before = messy.read_bytes()
 
     assert main(["knowledge-format", "--check", str(tree)]) == 1
     assert messy.read_bytes() == before, "--check writes nothing"
-    assert f"not canonical {messy}" in capsys.readouterr().out
+    findings = capsys.readouterr().out
+    for path in (messy, hidden, hidden_knowledge, settings):
+        assert f"not canonical {path}" in findings
 
-    assert main(["knowledge-format", str(tree)]) == 0
+    assert main(["knowledge-format", "--check", str(tree / "onboarding")]) == 1
+    assert capsys.readouterr().out.strip() == f"not canonical {hidden}"
+
+    assert main(["knowledge-format", str(tree / relative_operand)]) == 0
     assert is_canonical(messy.read_bytes())
     assert json.loads(messy.read_bytes()) == json.loads(before)
     assert cache.read_text(encoding="utf-8") == '{"b":1,"a":2}', "the route-index cache is skipped"
-    assert hidden.read_text(encoding="utf-8") == '{"b":1}', "hidden directories are skipped"
+    assert is_canonical(hidden.read_bytes())
+    assert is_canonical(hidden_knowledge.read_bytes())
+    assert is_canonical(settings.read_bytes())
+    assert git_metadata.read_bytes() == git_bytes
     assert main(["knowledge-format", "--check", str(tree)]) == 0
 
     broken = tree / "knowledge" / "broken.json"
@@ -120,3 +151,39 @@ def test_knowledge_format_command_checks_rewrites_and_skips_caches(
         "unparseable input is untouched"
     )
     assert "invalid" in capsys.readouterr().out
+
+
+def test_knowledge_format_preserves_dot_directories_outside_memory_roots(tmp_path: Path) -> None:
+    marker = tmp_path / "knowledge" / "layout.json"
+    marker.parent.mkdir()
+    marker.write_text('{"conversion":"1","schema":"ar-memory-layout/v2"}', encoding="utf-8")
+    operand = tmp_path / "system"
+    original = b'{"preserve":true}'
+    sentinels = [
+        operand / root_name / ".private" / "config.json"
+        for root_name in ("knowledge", "onboarding")
+    ]
+    for path in sentinels:
+        path.parent.mkdir(parents=True)
+        path.write_bytes(original)
+    settings = operand / "settings.json"
+    settings.write_bytes(b'{"ordinary":true}')
+
+    assert main(["knowledge-format", str(operand)]) == 0
+
+    assert is_canonical(settings.read_bytes())
+    assert [path.read_bytes() for path in sentinels] == [original, original]
+
+
+def test_knowledge_format_prunes_dot_directories_in_unconverted_memory(tmp_path: Path) -> None:
+    card = tmp_path / "knowledge" / ".private" / "card.json"
+    card.parent.mkdir(parents=True)
+    original = b'{"preserve":true}'
+    card.write_bytes(original)
+    settings = tmp_path / "settings.json"
+    settings.write_bytes(b'{"ordinary":true}')
+
+    assert main(["knowledge-format", str(tmp_path)]) == 0
+
+    assert is_canonical(settings.read_bytes())
+    assert card.read_bytes() == original
