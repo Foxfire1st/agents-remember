@@ -408,6 +408,23 @@ firstAtom followingAtom
 """
 
 
+ALIASES = """\
+namespace Outer
+public alias total :=
+  original
+/-- Directions of the equivalence. -/
+@[simp]
+private alias ⟨forward,
+  reverse⟩ :=
+  equivalence
+externalCommand
+alias ⟨_, _root_.Global.right⟩ := equivalence
+alias ⟨«left, :=», _⟩ := equivalence
+def after := 1
+end Outer
+"""
+
+
 @pytest.fixture(scope="module")
 def code(tmp_path_factory: pytest.TempPathFactory) -> CodeSnapshot:
     root = tmp_path_factory.mktemp("lean-symbols")
@@ -423,6 +440,7 @@ def code(tmp_path_factory: pytest.TempPathFactory) -> CodeSnapshot:
             "Apostrophes.lean": APOSTROPHES,
             "Headers.lean": HEADERS,
             "CommandBoundaries.lean": COMMAND_BOUNDARIES,
+            "Aliases.lean": ALIASES,
             "NamedEnds.lean": NAMED_ENDS,
             "WrappedEnd.lean": WRAPPED_END,
             "ScopeLabels.lean": SCOPE_LABELS,
@@ -594,6 +612,26 @@ def test_lean_pinned_commands_end_active_declarations(
     for name, line in {"before": 1, "after": 3, "final": 5}.items():
         with subtests.test(name=name):
             _assert_span(code, "CommandBoundaries.lean", name, (line, line))
+
+
+def test_lean_alias_names_resolve_at_their_command_extents(
+    code: CodeSnapshot, subtests: pytest.Subtests
+) -> None:
+    path = "Aliases.lean"
+    found = extents.definitions(path, ALIASES.splitlines())
+    expected = {
+        "Outer.total": (2, 2, 3),
+        "Outer.forward": (4, 6, 8),
+        "Outer.reverse": (4, 6, 8),
+        "Global.right": (10, 10, 10),
+        "Outer.«left, :=»": (11, 11, 11),
+        "Outer.after": (12, 12, 12),
+    }
+    for name, (first, keyword, last) in expected.items():
+        with subtests.test(name=name):
+            _assert_span(code, path, name, (first, last))
+            assert [span.declaration for span in found[name]] == [keyword]
+    _assert_undefined(code, path, "_")
 
 
 def test_lean_named_ends_close_the_matching_scope_suffix(

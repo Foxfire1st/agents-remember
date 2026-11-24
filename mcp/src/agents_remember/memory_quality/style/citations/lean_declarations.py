@@ -7,6 +7,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 
+from agents_remember.memory_quality.style.citations.lean_aliases import AliasHeader
 from agents_remember.memory_quality.style.citations.lean_lex import LeanLine, code_lines
 from agents_remember.memory_quality.style.citations.lean_names import LeanName, read_name
 from agents_remember.memory_quality.style.citations.lean_scopes import Scopes
@@ -15,6 +16,7 @@ from agents_remember.memory_quality.style.citations.lean_tokens import ScopeToke
 _DECLARATIONS = frozenset(
     [
         "abbrev",
+        "alias",
         "axiom",
         "class",
         "coinductive",
@@ -305,23 +307,29 @@ class _NameHeader:
     declaration: int
     indent: int
     priority: _InstancePriority | None
+    alias: AliasHeader | None = None
 
-    def read(self, text: str) -> tuple[bool, LeanName | None]:
+    def read(self, text: str) -> tuple[LeanName, ...] | None:
+        if self.alias is not None:
+            return self.alias.read(text)
         text = text.lstrip()
         if self.priority is not None:
             finished, remaining = self.priority.consume(text)
             if not finished:
-                return False, None
+                return None
             self.priority = None
             if remaining is None:
-                return True, None
+                return ()
             text = remaining
         if self.head == "class":
             following, end = _head(text, 0)
             if following in {"abbrev", "inductive"}:
                 self.head = following
                 text = text[end:].lstrip()
-        return (True, read_name(text)) if text else (False, None)
+        if not text:
+            return None
+        name = read_name(text)
+        return (name,) if name is not None else ()
 
 
 def _named_declaration(
@@ -386,7 +394,7 @@ class _Scan:
             or self.scopes.at_member_indent(indent)
         )
 
-    def _retain_prefix(self, line: int) -> LeanDeclaration | None:
+    def _retain_prefix(self, line: int) -> tuple[LeanDeclaration, ...]:
         self.prefix = self.prefix if self.prefix is not None else line
         return self.finish()
 
@@ -425,33 +433,38 @@ class _Scan:
         self.scopes.open(head, indent, name, tentative=head == "section" and may_be_command)
         return False
 
-    def _read_name(self, line: LeanLine, header: _NameHeader, start: int) -> None:
-        finished, name = header.read(line.code[start:])
-        self.pending_name = None if finished else header
-        if name is None:
-            return
+    def _read_name(
+        self, line: LeanLine, header: _NameHeader, start: int
+    ) -> tuple[LeanDeclaration, ...]:
+        names = header.read(line.code[start:])
+        self.pending_name = header if names is None else None
+        if not names:
+            return ()
         if header.head == "namespace":
-            self.scopes.open("namespace", header.indent, name, tentative=False)
+            self.scopes.open("namespace", header.indent, names[0], tentative=False)
+        elif header.alias is not None:
+            # The target identifier ends the alias; no continuation can extend its range.
+            return tuple(_named_declaration(line, name, header, self.scopes) for name in names)
         else:
-            self.active = _named_declaration(line, name, header, self.scopes)
+            self.active = _named_declaration(line, names[0], header, self.scopes)
+        return ()
 
-    def _continue_pending_name(self, line: LeanLine) -> bool:
+    def _continue_pending_name(self, line: LeanLine) -> tuple[LeanDeclaration, ...] | None:
         header = self.pending_name
         if header is None:
-            return False
+            return None
         if (
             (header.priority is None or header.priority.stage == _PriorityStage.OPEN)
             and line.indent <= header.indent
             and self._recognized(line, _parse_command(line.code, 0))
         ):
             self.pending_name = None
-            return False
-        self._read_name(line, header, 0)
-        return True
+            return None
+        return self._read_name(line, header, 0)
 
-    def finish(self) -> LeanDeclaration | None:
+    def finish(self) -> tuple[LeanDeclaration, ...]:
         result, self.active = self.active, None
-        return result
+        return (result,) if result is not None else ()
 
     def _continue(self, line: LeanLine) -> None:
         if line.significant and self.active is not None:
@@ -475,7 +488,7 @@ class _Scan:
         elif not self.pending_import:
             self.has_unknown_imports = True
 
-    def _start(self, line: LeanLine, command: _Command) -> LeanDeclaration | None:
+    def _start(self, line: LeanLine, command: _Command) -> tuple[LeanDeclaration, ...]:
         previous = self.finish()
         if command.head == "import":
             self._read_import(line.code[command.argument :])
@@ -490,8 +503,9 @@ class _Scan:
                 line.number,
                 line.indent,
                 _InstancePriority() if command.head == "instance" else None,
+                AliasHeader() if command.head == "alias" else None,
             )
-            self._read_name(line, header, command.argument)
+            previous += self._read_name(line, header, command.argument)
         elif _WRAP.search(line.code) and command.head not in _SCOPE_HEADS:
             self.wrapped = True
             self._retain_prefix(line.number)
@@ -502,19 +516,19 @@ class _Scan:
         self.wrapped = False
         return previous
 
-    def _command_line(self, line: LeanLine) -> LeanDeclaration | None:
+    def _command_line(self, line: LeanLine) -> tuple[LeanDeclaration, ...]:
         previous_depth = self.attribute_depth
         command = _parse_command(line.code, previous_depth)
         self.attribute_depth = command.attribute_depth
         if self.module_header and command.head == "prelude":
             self.tokens.use_prelude()
-            return None
+            return ()
         if not command.head and command.prefix:
             return self._retain_prefix(line.number)
         if self._recognized(line, command):
             return self._start(line, command)
         self._continue(line)
-        return None
+        return ()
 
     def visit(self, line: LeanLine) -> Iterator[LeanDeclaration]:
         if self.pending_import:
@@ -522,7 +536,9 @@ class _Scan:
             return
         if self._continue_scope_label(line):
             return
-        if self._continue_pending_name(line):
+        pending = self._continue_pending_name(line)
+        if pending is not None:
+            yield from pending
             return
         eligible = self._at_command_indent(line.indent) and not line.starts_in_literal
         if not eligible:
@@ -531,12 +547,10 @@ class _Scan:
         if line.comment == "module":
             self.prefix = None
             self.wrapped = False
-            if previous := self.finish():
-                yield previous
-        elif line.comment == "declaration" and (previous := self._retain_prefix(line.number)):
-            yield previous
-        if previous := self._command_line(line):
-            yield previous
+            yield from self.finish()
+        elif line.comment == "declaration":
+            yield from self._retain_prefix(line.number)
+        yield from self._command_line(line)
 
 
 def declarations(lines: Sequence[str]) -> Iterator[LeanDeclaration]:
@@ -546,5 +560,4 @@ def declarations(lines: Sequence[str]) -> Iterator[LeanDeclaration]:
     scanner = _Scan(ScopeTokens(lines, lexed))
     for line in _joined_names(iter(lexed)):
         yield from scanner.visit(line)
-    if last := scanner.finish():
-        yield last
+    yield from scanner.finish()
