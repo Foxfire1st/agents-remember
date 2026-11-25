@@ -1177,6 +1177,8 @@ class CuratorInstructionWordingTests(unittest.TestCase):
         for role in LAUNCHER_ROLES:
             with self.subTest(role=role):
                 tools = manifest["roles"][role]["tools"]
-                self.assertIn("role_message", tools)
+                # The seven lifecycle roles message each other; the setup seat speaks with the
+                # developer and messages no role agent.
+                self.assertEqual("role_message" in tools, role != "bootstrap")
                 self.assertEqual("role_start" in tools, role in STARTERS)
                 self.assertEqual(set(tools) - set(PUBLIC_TOOLS), set())

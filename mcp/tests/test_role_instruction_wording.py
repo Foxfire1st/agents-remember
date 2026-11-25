@@ -365,13 +365,16 @@ class InstructionFileWordingTests(unittest.TestCase):
         self.assertEqual(
             manifest["roles"]["investigator"]["tools"],
             [
+                "server_info",
                 "context_packet",
                 "read_ar_files",
-                "role_message",
-                "knowledge_diff",
-                "knowledge_read",
-                "task_doc",
+                "memory_quality_check",
                 "worktree_status",
+                "task_doc",
+                "role_message",
+                "knowledge_read",
+                "knowledge_diff",
+                "knowledge_integrity_check",
             ],
         )
         router = read(LIFECYCLE / "SKILL.md")
