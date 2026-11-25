@@ -15,9 +15,11 @@ Each case protects one part of the contract:
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import json
 import os
 import sys
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +42,8 @@ from agents_remember.models.tools.role_tool_scope import (
 from agents_remember.models.tools.tool_schema_compaction import compact_tool_schema
 from mcp.client.stdio import stdio_client
 from mcp.server.fastmcp.exceptions import ToolError
+from packaging.requirements import Requirement
+from packaging.version import Version
 
 from mcp import ClientSession, StdioServerParameters
 
@@ -483,3 +487,37 @@ def test_a_real_stdio_manager_session_lists_32_compacted_tools_and_validates_cal
         assert "title" not in tool.inputSchema
     assert bad_coherence.isError is True
     assert bad_control.isError is True
+
+
+def test_installed_mcp_meets_declared_floor_and_server_lists_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Installed mcp meets mcp/pyproject.toml's floor (>=1.30.0,<2) and serves tools."""
+
+    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    dependencies = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))["project"][
+        "dependencies"
+    ]
+    mcp_reqs = [Requirement(dep) for dep in dependencies if Requirement(dep).name.lower() == "mcp"]
+    assert len(mcp_reqs) == 1
+    specifier = mcp_reqs[0].specifier
+    floors = [Version(spec.version) for spec in specifier if spec.operator == ">="]
+    ceilings = [Version(spec.version) for spec in specifier if spec.operator == "<"]
+    assert len(floors) == 1
+    assert floors[0] >= Version("1.30.0")
+    assert Version("2") in ceilings
+
+    installed = Version(importlib.metadata.version("mcp"))
+    assert installed >= floors[0]
+    assert installed in specifier
+    assert hasattr(server_module.FastMCP, "remove_tool")
+
+    config, _ = _world(tmp_path)
+    unbound = create_server(config)
+    unbound_names = tuple(tool.name for tool in asyncio.run(unbound.list_tools()))
+    assert unbound_names == PUBLIC_TOOLS
+
+    _bind(monkeypatch, _binding("worker"))
+    scoped = create_server(config)
+    scoped_names = tuple(tool.name for tool in asyncio.run(scoped.list_tools()))
+    assert scoped_names == tools_for_role("worker")

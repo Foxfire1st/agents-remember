@@ -97,6 +97,17 @@ if (typeof Element !== "undefined" && typeof Element.prototype.scrollIntoView !=
   Element.prototype.scrollIntoView = () => {};
 }
 
+// jsdom 25 omits CSS.escape; React Aria calls it when building attribute selectors for
+// meta-tag and collection lookups. Escape non-identifier characters for selector safety.
+if (typeof globalThis.CSS === "undefined" || typeof globalThis.CSS.escape !== "function") {
+  const escapeCssIdent = (value: string): string =>
+    String(value).replace(/([^\w-])/g, "\\$1");
+  globalThis.CSS = {
+    ...(globalThis.CSS ?? {}),
+    escape: escapeCssIdent,
+  } as typeof CSS;
+}
+
 // SVG geometry APIs jsdom omits or stubs-to-throw — GSAP's DrawSVG / MotionPath (engine-room timeline)
 // call getBBox / getTotalLength / getPointAtLength when the effects-on path builds the GSAP context (the
 // EnclosureProcessMap GSAP-gate test). Assign inert stubs across the SVG prototype chain so the plugins
