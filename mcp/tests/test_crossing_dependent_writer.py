@@ -10,17 +10,12 @@ from agents_remember.application.knowledge_writer.code_anchors import CodeSnapsh
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.tools.knowledge import WriteToolRequest, knowledge_write_payload
 from agents_remember.models.knowledge_files.documents import record_path
-from agents_remember.worktrees.sync_transaction_authority import side_locations
-from agents_remember.worktrees.worktree_contract import (
-    ContractTask,
-    RepoBranchPlan,
-    WorktreeContract,
-    default_series_contract,
-    write_contract,
-)
+from agents_remember.worktrees.sync_transaction_authority import side_record
+from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 from knowledge_writer_test_support import (
     CODE_FILE,
     World,
+    build_crossing_world,
     build_world,
     canonical,
     commit_all,
@@ -59,23 +54,11 @@ def _open_crossing(world: World, dependent: str) -> tuple[WorktreeContract, Path
         "origin": {"task": "CROSSING", "leaf": "CROSSING-L1"},
     }
     write(world.memory, {record: canonical(base_record)})
-    memory_base = commit_all(world.memory, "Record the document")
-    series = default_series_contract(
-        ContractTask(
-            name="crossing",
-            repo_name="agents-remember",
-            coordination_root=world.root,
-            workflow_kind="light-task",
-            memory_mode="external",
-        ),
-        code=RepoBranchPlan(world.code, "main", "main", code_commit),
-        memory=RepoBranchPlan(world.memory, "main", "master-work", memory_base),
-        task_root=world.task_root,
-    )
-    write_contract(series.contract_path, series)
-    memory = side_locations(series, "memory")[1]
-    memory.parent.mkdir(parents=True)
-    git(world.memory, "worktree", "add", "-q", "-b", "master-work", str(memory))
+    commit_all(world.memory, "Record the document")
+    parked = build_crossing_world(world)
+    write_contract(parked.contract.contract_path, parked.contract)
+    assert parked.record.code.resultHead == code_commit
+    memory = parked.memory
     own = {
         **base_record,
         "revision": 2,
@@ -87,24 +70,25 @@ def _open_crossing(world: World, dependent: str) -> tuple[WorktreeContract, Path
         "confirmed": {**confirmation, "statement": "Landing records both trees."},
     }
     write(memory, {record: canonical(own)})
-    commit_all(memory, "Update the confirmation on the master line")
+    # Keep the open crossing history outside the local branch commit.
+    git(memory, "add", "--", record)
+    git(memory, "commit", "-q", "-m", "Update the confirmation on the master line")
     write(world.memory, {record: canonical(incoming)})
     commit_all(world.memory, "Update the confirmation on the source line")
     with pytest.raises(AssertionError, match="fixture git merge"):
         git(memory, "merge", "--no-commit", "main")
-    assert git(memory, "ls-files", "-u", "--", record)
+    assert len(git(memory, "ls-files", "-u", "--", record).splitlines()) == 3
     git(memory, "checkout", "--ours", "--", record)
-    crossing = f"{series.task_id}-crossing-1"
-    history = f"knowledge/history/{crossing}.json"
-    write(
-        memory,
-        {
-            history: canonical(
-                {"schema": "ar-history/v1", "crossing": crossing, "closed": False, "rows": []}
-            )
-        },
+    incoming_head = git(memory, "rev-parse", "MERGE_HEAD")
+    memory_side = side_record(parked.contract, "memory", incoming_head).model_copy(
+        update={
+            "state": "resolution-required",
+            "crossingHistoryOwner": parked.owner,
+            "conflictFiles": (record,),
+        }
     )
-    return series, memory, crossing
+    parked.store.write(parked.record.model_copy(update={"memory": memory_side}))
+    return parked.contract, memory, parked.owner
 
 
 def test_a_crossing_plans_the_resolution_of_a_conflicted_dependent(tmp_path: Path) -> None:
@@ -151,7 +135,9 @@ def test_a_crossing_plans_the_resolution_of_a_conflicted_dependent(tmp_path: Pat
     snapshot = CodeSnapshot.at_commit(world.code, "refs/heads/main")
     assert snapshot.commit == git(world.code, "rev-parse", "refs/heads/main^{commit}")
     assert plan["owner"] == crossing
-    assert plan["codeTree"] == git(world.code, "rev-parse", "refs/heads/main^{tree}")
+    assert (
+        plan["codeTree"] == snapshot.tree == git(world.code, "rev-parse", "refs/heads/main^{tree}")
+    )
     report = json.loads(Path(plan["reportPath"]).read_text(encoding="utf-8"))
     (updated,) = report["records"]
     assert (updated["kind"], updated["id"], updated["action"], updated["revision"]) == (
