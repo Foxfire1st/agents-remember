@@ -48,7 +48,7 @@ from agents_remember.models.role_launcher import (
     RoleAgentOverride,
     RoleSelection,
 )
-from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
+from agents_remember.models.tools.role_tool_scope import tools_for_role
 from agents_remember.worktrees import role_reports
 from agents_remember.worktrees.modules import cleanup as worktree_cleanup
 from agents_remember.worktrees.modules.args import WorktreeArgs
@@ -681,8 +681,8 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
             "reviewer",
             "curator",
         )
-        granted_tools = {"claude": ("server_info",), "codex": PUBLIC_TOOLS, "pi": ()}
         for role in roles:
+            granted_tools = {"claude": ("server_info",), "codex": tools_for_role(role), "pi": ()}
             references = ROLE_REFS[role]
             documents = {
                 key: resolved_document(self.config, ref, key) for key, ref in references.items()

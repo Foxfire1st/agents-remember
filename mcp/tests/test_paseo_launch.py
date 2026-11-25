@@ -41,7 +41,7 @@ from agents_remember.models.role_launcher import (
     RoleResultRequest,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
+from agents_remember.models.tools.role_tool_scope import tools_for_role
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document import TaskEnclosureRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
@@ -422,7 +422,8 @@ class LaunchToolApprovalTests(PaseoLaunchTestCase):
         created = next(call for kind, call in self.runtime.launch_calls() if kind == "agent-create")
         self.assertEqual(set(created["mcpServers"]), {TOOL_SERVER_NAME})
         grants = [
-            {"kind": "mcp", "server": TOOL_SERVER_NAME, "tool": name} for name in PUBLIC_TOOLS
+            {"kind": "mcp", "server": TOOL_SERVER_NAME, "tool": name}
+            for name in tools_for_role("worker")
         ]
         self.assertEqual(created.get("toolPolicy"), {"preapproved": grants})
         self.assertEqual(self.receipt(request)["assignmentReadGrant"]["preapproved"], grants)

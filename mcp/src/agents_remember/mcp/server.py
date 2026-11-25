@@ -42,6 +42,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.kernel.request_memo import request_memo_scope
 from agents_remember.memory_quality.style.citations.extents import definition_scope
+from agents_remember.models.tools.role_tool_scope import tools_for_role
 from agents_remember.serving.build_currentness import build_currentness
 from agents_remember.serving.server_registry import register_server
 
@@ -130,7 +131,14 @@ class AgentsRememberMCP(FastMCP):
             ) as worker_cancellation,
         ):
             launched = getattr(self, "_explainer_binding", None)
-            if launched is not None and name in EXPLAINER_SURFACE:
+            if (
+                launched is not None
+                and name in EXPLAINER_SURFACE
+                # MIK-R186 @ v2 rule 3: the guard belongs to the explainer tools this process
+                # still serves. A tool a role or malformed-binding narrowing removed is no
+                # longer registered, and its call must take the ordinary unknown-tool path.
+                and self._tool_manager.get_tool(name) is not None
+            ):
                 # MIK-R186 @ v2 rule 3 sentences 3-4: each of the explainer's own tools checks that the
                 # caller is the seat the server was launched for, and answers a forged or replaced seat
                 # as data. AR's general tools answer the seat as they answer any agent (MIK-R211 v5).
@@ -377,6 +385,40 @@ def _worktree_services(config: McpRuntimeConfig) -> Any:
     return composed.build_default_worktree_services(leaf_agent_archive=LeafAgentArchive(config))
 
 
+def _bound_role_tools(explainer_present: bool) -> frozenset[str] | None:
+    """The tools a role-bound process may serve; ``None`` keeps the whole registered roster.
+
+    An unbound process serves every public tool, and so does an explainer-only launch, whose four
+    tools are added to that roster. A role binding narrows the server to its own allowlist, plus
+    the explainer's four when the same process also serves an explainer seat. A binding that is
+    present but unreadable is not a role: the process keeps the existing no-launched-instructions
+    start and serves only ``server_info``, whose answer names what the binding got wrong.
+    """
+
+    try:
+        binding = read_agent_binding()
+    except ValueError:
+        return frozenset({"server_info"})
+    if binding is None:
+        return None
+    allowed = set(tools_for_role(binding.role))
+    if explainer_present:
+        allowed.update(EXPLAINER_SURFACE)
+    return frozenset(allowed)
+
+
+def _scope_server_tools(server: FastMCP, allowed: frozenset[str]) -> None:
+    """Remove every registered tool outside ``allowed``, keeping the survivors' order.
+
+    ``remove_tool`` is FastMCP's public operation: removal is the only change, so the surviving
+    tools keep their registration order, schemas and annotations.
+    """
+
+    for name in tuple(server._tool_manager._tools):
+        if name not in allowed:
+            server.remove_tool(name)
+
+
 def create_server(config: McpRuntimeConfig) -> Any:
     install_compact_content()
     # MIK-R204 @ v1 rule 3: the worktree services are an operation collaborator, not discovery work. The
@@ -396,18 +438,25 @@ def create_server(config: McpRuntimeConfig) -> Any:
     # that decides which families a server advertises. MIK-R211 v5 rule 3: a launch that bound this
     # process as an explainer seat gets AR's general tools, as a task agent has them, and the
     # explainer's own four; an invalid binding refuses service instead of serving an unbound seat.
-    binding = read_explainer_binding(config)
+    explainer = read_explainer_binding(config)
     for register_tools in TOOL_REGISTRARS:
         register_tools(server, config)
-    if binding is not None:
+    if explainer is not None:
         # MIK-R186 @ v2 rule 3: the binding names the seat this process serves, and the dispatch checks
         # each explainer tool's call against it.
-        server._explainer_binding = binding
-        register_explainer_surface(server, config, binding)
+        server._explainer_binding = explainer
+        register_explainer_surface(server, config, explainer)
     # MIK-R109 rule 7: the one list of read-only marks rides on the advertised
     # annotations, applied here so every family is covered and an unlisted
-    # tool breaks creation instead of shipping unmarked.
+    # tool breaks creation instead of shipping unmarked. It runs over the whole
+    # registered surface, before any role narrowing, so a tool excluded for this
+    # role is still classified.
     apply_read_only_marks(server)
+    # The role binding narrows what this process advertises and dispatches, after every tool has
+    # been registered and marked: the surviving tools keep their order, schemas and annotations.
+    allowed = _bound_role_tools(explainer_present=explainer is not None)
+    if allowed is not None:
+        _scope_server_tools(server, allowed)
     return server
 
 

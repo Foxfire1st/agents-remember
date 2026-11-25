@@ -52,7 +52,7 @@ from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
+from agents_remember.models.tools.role_tool_scope import tools_for_role
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document import TaskEnclosureRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
@@ -1073,7 +1073,7 @@ class R71FolderAndGrantTests(unittest.TestCase):
 
     def test_r71_launch_builder_grants_its_task_server_tools_by_provider(self) -> None:
         context = resolve_role_launch_context(self.config, RoleSelection(role="architect"))
-        granted_tools = {"claude": ("server_info",), "codex": PUBLIC_TOOLS}
+        granted_tools = {"claude": ("server_info",), "codex": tools_for_role("architect")}
         for provider in ("claude", "codex", "pi", "hermes"):
             launch = RoleLaunch(
                 agent_id=str(uuid.uuid4()),
