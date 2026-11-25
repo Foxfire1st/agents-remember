@@ -8,22 +8,25 @@ import { EventRiver } from './EventRiver';
 import { formatEventTime } from './eventSummary';
 
 // The Event River list is virtualized (TanStack), which mounts only the rows whose positions fall
-// inside the scroll viewport. TanStack measures the viewport and rows from offsetWidth/offsetHeight,
+// inside the scroll viewport. TanStack measures the viewport and rows from client/offset sizes,
 // which jsdom reports as 0 (no layout), so nothing would mount. Give every box a non-zero size so a
 // real viewport + measured rows let the newest window of rows mount and be asserted; off-screen rows
 // stay virtualized out (the no-cap behaviour is asserted via the retained count in the header).
 const sizedBox: Record<string, PropertyDescriptor | undefined> = {};
+const SIZED_PROPS = [
+  ['clientHeight', 600],
+  ['clientWidth', 320],
+  ['offsetHeight', 600],
+  ['offsetWidth', 320],
+] as const;
 beforeAll(() => {
-  for (const [prop, value] of [
-    ['offsetHeight', 600],
-    ['offsetWidth', 320],
-  ] as const) {
+  for (const [prop, value] of SIZED_PROPS) {
     sizedBox[prop] = Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop);
     Object.defineProperty(HTMLElement.prototype, prop, { configurable: true, get: () => value });
   }
 });
 afterAll(() => {
-  for (const prop of ['offsetHeight', 'offsetWidth']) {
+  for (const [prop] of SIZED_PROPS) {
     const original = sizedBox[prop];
     if (original) Object.defineProperty(HTMLElement.prototype, prop, original);
   }
