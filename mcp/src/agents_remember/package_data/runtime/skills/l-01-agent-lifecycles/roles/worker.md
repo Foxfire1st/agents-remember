@@ -28,7 +28,7 @@ If a task fact seems absent, read the named canonical task and requirement using
 
 A parent agent is optional: a Worker started from the dashboard has none and needs none. Before asking a question, follow [Ask for a developer decision](../operations/orientation.md#ask-for-a-developer-decision) for the reporting recipient and parentless route: send questions requiring the developer's decision to your parent with `role_message` on `agents-remember-task`, or ask in your own chat when you have no parent.
 
-Before editing source, call `knowledge_read` on `agents-remember-task` with `view="source_context"` for each file you will edit; read [knowledge use]({{detail:reference/knowledge/use.md}}#worker-read-before-editing-and-after-a-test-fails) to interpret the result: attributed records, related code and proof evidence.
+Before editing a source file, call `read_ar_files` on `agents-remember-task`. Compact rows give card status and any brief path with saved freshness. Fuller replies can include rule text. Open the saved brief when available with your file tool for conditions and exclusions. For a record you need whole, call `knowledge_read` on `agents-remember-task` with `view="source_context"`; read [knowledge use]({{detail:reference/knowledge/use.md}}#worker-read-before-editing-and-after-a-test-fails) to interpret the result: attributed records, related code and proof evidence.
 
 For code changes, read `system/coding-guidelines.md` under `workspace.memoryRoot` in full, where it exists, before the first source edit, and follow it for every line of source code, tests and product messages. When code work goes to a helper, tell it to do the same before its first edit.
 

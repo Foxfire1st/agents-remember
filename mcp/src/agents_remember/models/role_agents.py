@@ -151,9 +151,29 @@ class RoleEnvironmentPreparation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enclosure: Literal["created", "found", "not-applicable"]
     workspace: Literal["created", "found", "opened"] | None = None
+    briefsProblem: str | None = None
     # L188-B02: a cold start reports what the first run did; the field was produced and not declared,
     # so the report was lost at the boundary that validates this model.
     firstRun: dict[str, Any] | None = None
+
+
+class ProductMessageReport(BaseModel):
+    """What became of the product's start message to a Reviewer or Curator.
+
+    ``state`` is ``delivered``, ``held`` (waiting for the recipient, ``heldMessageId`` names it),
+    ``refused`` or ``not-sent`` (it could not be made); ``problem`` says why for the last two.
+    ``file`` is the moment's file with every touched rule in words; ``messageFile`` the filed
+    message.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    recipientAgentId: str
+    moment: Literal["review-start", "curator-start"]
+    state: Literal["delivered", "held", "refused", "not-sent"]
+    file: str | None = None
+    messageFile: str | None = None
+    heldMessageId: str | None = None
+    problem: str | None = None
 
 
 class RoleStartResponse(ToolResponse):
@@ -202,6 +222,8 @@ class RoleStartResponse(ToolResponse):
     choices: dict[str, Any] | None = None
     warning: str | None = None
     taskDocumentFiles: dict[str, Any] | None = None
+    # The start message of a Reviewer or Curator started directly.
+    productMessage: ProductMessageReport | None = None
 
 
 class RoleMessageResponse(ToolResponse):

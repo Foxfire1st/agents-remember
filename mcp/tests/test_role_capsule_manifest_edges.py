@@ -810,9 +810,8 @@ KNOWLEDGE_USE_CONSUMERS = {
         "implementation",
         (
             (
-                "Before editing source, call `knowledge_read` on "
-                '`agents-remember-task` with `view="source_context"` for each '
-                "file you will edit; read [knowledge use]"
+                "For a record you need whole, call `knowledge_read` on "
+                '`agents-remember-task` with `view="source_context"`; read [knowledge use]'
             ),
             (
                 "Before diagnosing a failing test, call `knowledge_read` on "
@@ -824,19 +823,19 @@ KNOWLEDGE_USE_CONSUMERS = {
     "reviewer": (
         "review",
         (
-            "When inspecting changes, call `knowledge_read` on `agents-remember-task` for each changed file; read [knowledge use]",
+            "Call `knowledge_read` on `agents-remember-task` for the changed files' records you need whole; read [knowledge use]",
         ),
     ),
     "investigator": (
         "orientation",
         (
-            "Before investigating repository code, call `knowledge_read` on `agents-remember-task` for the files involved; read [knowledge use]",
+            "Call `knowledge_read` on `agents-remember-task` for the records you need whole; read [knowledge use]",
         ),
     ),
     "curator": (
         "curation",
         (
-            "Before checking code and memory, call `knowledge_read` on `agents-remember-task` for the files or records you check; read [knowledge use]",
+            "Call `knowledge_read` on `agents-remember-task` for the records you check; read [knowledge use]",
             "Before interpreting a knowledge read, read [knowledge-read limits]",
         ),
     ),

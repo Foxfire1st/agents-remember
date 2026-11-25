@@ -27,6 +27,10 @@ from agents_remember.models.knowledge_files.canonical import (
     canonical_text,
     parse_json,
 )
+from agents_remember.models.knowledge_files.converted_reviews import (
+    CONVERTED_REVIEWS_PATH,
+    ConvertedReviews,
+)
 from agents_remember.models.knowledge_files.documents import (
     KNOWLEDGE_ROOT,
     LAYOUT_MARKER_PATH,
@@ -175,6 +179,8 @@ class _Parser:
     def parse(self, path: str, data: bytes) -> None:
         if path == LAYOUT_MARKER_PATH:
             self.layout(path, data)
+        elif path == CONVERTED_REVIEWS_PATH:
+            self.converted_reviews(path, data)
         elif path.startswith(HISTORY_DIRECTORY):
             self.history(path, data)
         elif path.startswith(CENSUS_DIRECTORY):
@@ -194,6 +200,14 @@ class _Parser:
             self.problem(
                 path, "the layout marker is an ar-memory-layout/v2 document", field="schema"
             )
+
+    def converted_reviews(self, path: str, data: bytes) -> None:
+        # The product's file beside the history files names no owner of its own, so the history
+        # file naming rule does not apply to it; only its shape is checked.
+        document = self.json_document(path, data)
+        model = None if document is None else self.model(path, document)
+        if model is not None and not isinstance(model, ConvertedReviews):
+            self.problem(path, f"{path} holds the converted review facts only", field="schema")
 
     def history(self, path: str, data: bytes) -> None:
         if "/" in path.removeprefix(HISTORY_DIRECTORY) or not path.endswith(".json"):

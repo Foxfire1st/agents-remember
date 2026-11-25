@@ -129,13 +129,25 @@ _AR_OTHER_SERVER_CHOICE = (
     "other name: it belongs to another installation, its tools carry the same tool names, and "
     "nothing found there serves this assignment. "
 )
+# Every hand-over says where the briefs lie, that a file's brief is opened before the file is
+# edited, and what a file without a brief means.
+BRIEFS_SENTENCES = (
+    "Before editing a source file, open its saved brief when available at briefs/<path in the "
+    "repository>.md under the memory root with your own file tool (source brief folders have "
+    "INDEX.md and briefs/_task/ has no index). When current memory finds neither a card nor a "
+    "qualifying brief for a file it can assess, no rule, weakness, decision or standing "
+    "document is recorded there."
+)
 _AR_TOOL_SERVER_USAGE_TAIL = (
     "After a start or a resume a tool server can "
     f"take some seconds to appear: look once more before reporting {TOOL_SERVER_NAME} missing, "
     "and report that instead of substituting another. For a leaf, pass the exact "
-    "arMcpContext.readerArguments; add the requested files to read_ar_files as a list of "
-    'path strings such as "<path in the repository>". A read names where each file is and '
-    "carries no file text: read the named files with your harness's own file tool. If either tool "
+    "arMcpContext.readerArguments. Add the requested files to read_ar_files as a list of path "
+    'strings such as "<path in the repository>". A compact row gives its path and, where '
+    "applicable, whether it exists, its card's status and the path of its brief with saved "
+    "freshness. Fuller replies can include rule text. A covering write renews a missing or "
+    "older brief when the writer can refresh it. Read source files with your own file tool. "
+    f"{BRIEFS_SENTENCES} If either tool "
     "schema lacks the declared task_context fields, stop and report the missing AR reader "
     "capability; do not drop task_context or substitute another root."
 )

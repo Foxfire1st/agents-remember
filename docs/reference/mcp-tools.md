@@ -87,7 +87,7 @@ that asks before a write can tell the reads apart.
 | --- | --- | --- |
 | `server_info` | Report the resolved configuration: the build, the roots, the allowed repositories, the build state of the running tool servers and dashboards, and, on a tool server that a role start launched, the tool server name and the agent binding. It does not list the tools. | none |
 | `context_packet` | Where the caller works and what needs action: the roots, the task, action lines only when needed, the serving build commit and the pair's two commits. | `repo_id`, `include_drift=false`, `include_freshness=false`, `task_context` for a task |
-| `read_ar_files` | Name which knowledge governs up to 20 paths: existence, governing card as a memory-worktree location, record counts by state, and action-asking records by ID, kind, state and card heading; overviews once per call, nearest first. `openWeaknesses` and `dependentDocuments` are one count each for a path and are absent at zero. No source, card or overview text: read the named files with your own tools. | `repo_id`, `files` (a list of paths), `task_context` for a task |
+| `read_ar_files` | Name which knowledge governs up to 20 paths. Compact replies keep each path, its existence and card status where applicable, and the `brief` pointer and saved freshness where available. When space permits, the reply can also give the governing card's memory-worktree location, record counts by state, action-asking records by ID, kind, state and card heading, and overviews once per call, nearest first. `openWeaknesses` and `dependentDocuments` count items per path when shown and are omitted at zero. For eligible files with recorded knowledge, a fuller short answer of the file's [brief](../concepts.md#brief) can include rule titles, state, proof, anchors and text, open weaknesses with their sentence, standing documents and families as space permits. The answer points to the brief for omitted content and reports whether a saved brief is missing, older or of unknown freshness. The next write covering the file or folder renews it. Read source, card and overview text with your own tools. | `repo_id`, `files` (a list of paths), `task_context` for a task |
 | `runtime_install` | Install or refresh the files that the package owns in the coordination root; safe to run again. The install mirrors the packaged documentation into `<coordination-root>/docs/` and the packaged files of the two [search providers](../concepts.md#search-provider) into `<coordination-root>/providers/`, creates the folders for tasks, memory repositories, worktrees, notes and logs, and creates `<workspace-root>/.agents-remember/role-executions/`. No part of the product starts, indexes or queries a search provider. The tool server serves the skills as resources from the package. The `host` part installs or updates the host that the `paseoRuntime` block of the settings file names and reports the outcome and an owed restart; the install never writes that block, names a missing block and never restarts a running host. With `dry_run=true` the install changes nothing. **Preserves** user data (`<coordination-root>/memory-repos/`, `<coordination-root>/providers/data/`, and `<coordination-root>/providers/runners/` when `install_provider_deps=false`) and **replaces** the managed documentation (`<coordination-root>/docs/`). `experiment` selects an experimental install for one call and is never a setting. | `dry_run=false`, `include_benchmarks=false`, `experiment` |
 
 When the [route index](../concepts.md#route-index), the generated file `overview.index.json` that
@@ -190,8 +190,8 @@ carryover.
 
 | Tool | Purpose | Main arguments |
 | --- | --- | --- |
-| `knowledge_read` | Name the records of one memory-tree view (`source_context`, `invariant`, `family`, `record`, `weakness`, `dependent`) at one snapshot, paged; each row holds the text ID, kind, state and memory-checkout location. No record text: open the named files with your own tools. | `memoryRoot`, `view`, `limit=32`, `continuation`, the seed of the view (`sourcePath`, `invariantRevisionId`, `familyRevisionId`, `recordId`), filters `weaknessKind`, `includeClosed`, `staleOnly`, `standsOn` |
-| `knowledge_write` | Plan or write the [hand-off list](../concepts.md#hand-off-list) that a Curator gives it, through the one writer of knowledge files, which `agents-remember knowledge-ingest` and `agents-remember knowledge-bootstrap` also use. Without `commit` it plans and validates; with it, writes knowledge files and makes no Git commit. The answer names the whole report and all refusals. | `contractPath`, `handoff` + `handoffName` or `handoffPath`, `authorizationRef`, `commit=false`; for a [foundation wave](../concepts.md#knowledge-foundation), a write that belongs to no task, `repoId` + `wave`; for a crossing, a master's crossing sync or structural merge that parked before its merge commit and opened a history file, the master's `contractPath` + `crossing` |
+| `knowledge_read` | Name one view of a memory snapshot (`source_context`, `invariant`, `family`, `record`, `weakness`, `dependent`, `writers`). Paged record rows hold the text ID, kind, state and memory-checkout location. Open the named files for record text. The short answer of `read_ar_files` carries a source file's rules. The `writers` view returns bounded aggregates by role, harness and model, with revision counts and the path to the complete report. | `memoryRoot`, `view`, `limit=32`, `continuation`, the seed of the view (`sourcePath`, `invariantRevisionId`, `familyRevisionId`, `recordId`), filters `weaknessKind`, `includeClosed`, `staleOnly`, `standsOn` |
+| `knowledge_write` | Plan or write the [hand-off list](../concepts.md#hand-off-list) that a Curator gives it, through the one writer of knowledge files, which `agents-remember knowledge-ingest` and `agents-remember knowledge-bootstrap` also use. Without `commit` it plans and validates; with it, writes knowledge files and makes no Git commit. The answer names the whole report and all refusals, and its `notes` say what the write took but the caller should know, for example a revised invariant that has no title. | `contractPath`, `handoff` + `handoffName` or `handoffPath`, `authorizationRef`, `commit=false`; for a [foundation wave](../concepts.md#knowledge-foundation), a write that belongs to no task, `repoId` + `wave`; for a crossing, a master's crossing sync or structural merge that parked before its merge commit and opened a history file, the master's `contractPath` + `crossing` |
 | `knowledge_diff` | Name the changed records of two memory trees beside a caller-readable report holding the whole comparison: the two trees, counts by kind, changed records, report location. | `memoryRoot`, `beforeRevision="HEAD"`, `afterRevision`, `recordId`, `path` |
 | `knowledge_integrity_check` | Validate a memory tree: `validation.ok`, refusal/report counts, rule counts and bounded violations. With `contractPath`, use the task's code and memory worktrees and return its latest persisted worklist; no semantic judgment is inferred. | `memoryRoot`, `codeRoot`, `baseCommits`, or a task's `contractPath` |
 
@@ -206,6 +206,25 @@ resumes the same selection at the same memory tree, until every row has been ret
 The views `invariant` and `family` accept the text ID of a record in `recordId`, beside the
 revision IDs. The view `record` answers one record of any kind: its state, its links with the
 state of each target, the records that link to it and its [judgment rows](../concepts.md#judgment-row).
+
+The view `writers` answers one table of how each writer did, counted from the selected memory
+tree. A row names a writer by the role, harness and model of its
+[stamp](knowledge-system.md#state-writer-and-review) and counts that writer's revisions: `written`;
+of them `reviewed` (reviewed or consolidated); `laterChangedByAnother`, where a later revision of
+the same record carries another seat's stamp; `laterChangedWriterUnknown`, where a later revision
+changed it but a seat on either side is unknown, so the change is not counted as another writer's;
+and `retired`, the revision that was live when its record was retired. A revision without a stamp,
+such as an earlier revision of a record written before stamps existed, counts under the writer
+`unknown`. The answer holds at most 20 rows, most revisions written first, with the totals of
+writers, revisions and records. Its `report` names a file that holds every row and, for each
+number, the revisions behind it as `<record>@<revision>` (`<record>@<first>..<last>` for a run of
+revisions that no file names). The columns of a Consolidator come with that role.
+
+`knowledge_write` takes `status` only as `retired`, to retire a record, and as a decision's own
+status words. It refuses an entry, or the fields of a record, whose `status` is `proposed`,
+`accepted`, `reviewed` or `consolidated`, and says that the product sets the state. It stamps each
+revision it writes with its caller from the caller's launch, never from its input
+([State, writer and review](knowledge-system.md#state-writer-and-review)).
 
 A task closes its own weakness with the task and a reason, and the reader supplies the code commit from the closing memory commit's `Code-Commit` trailer after closeout or says that the commit comes with the task's closeout beforehand; a closure by another task names a real commit of the code repository.
 
@@ -626,6 +645,16 @@ caller must know something, for example a missing requirement file. A start of a
 the addresses of the dashboard and of the chat (`dashboardAddress`, `chatAddress`, each with a
 detail field) and a `nextAction`.
 
+A start of a Reviewer or a Curator that answers running adds `productMessage`: what became of the
+product's start message to that role agent (see [Brief](../concepts.md#brief)). Its
+`moment` is `review-start` or `curator-start`. Its `state` is `delivered`, `held` (waiting for the
+recipient's turn; `heldMessageId` names the message), `refused`, or `not-sent` when the message
+could not be made; `problem` says why for the last two. When the product creates a moment file, `file` names that brief with every touched rule in words.
+For unconverted memory, the delivered notice has no `file`. `messageFile` names the filed
+message when supplied. A held Reviewer or Curator
+gets the message when it opens, as part of its first turn, and its start answer has no
+`productMessage`. A repeated start sends nothing again. A failed message never fails the start.
+
 In a short start answer, the warning puts missing requirement filenames before other notices
 so the names fit first. `warningCut` marks shortened warning text.
 
@@ -637,10 +666,10 @@ status `unknown`, the same call with the same `request_id` reconciles the same r
 The whole result, in the file that `log` names, also holds `preparation`, `parentAgentId`,
 `reportPath`, the `choices` of the launch, `taskDocumentFiles` and `secondCopyLoaded`.
 
-A role agent that the host runs receives the tools of Agents Remember once, from the tool server
-`agents-remember-task` that the start launches for it. `secondCopyLoaded` says whether the role
-agent's harness also loaded a second copy of the tools. The start changes no configuration file
-of the user or of the harness for this.
+A role agent that the host runs receives the tools of its role once, from the tool server
+`agents-remember-task` that the start launches for it. `secondCopyLoaded` says whether a second
+copy of the tools was also loaded. The start changes no configuration file of the user or of the
+host for this.
 
 ### Messages
 

@@ -175,6 +175,15 @@ function TruthHeader({ answer }: { answer: RecordViewAnswer }) {
         </span>
       ) : null}
       {record.revision ? <span className={muted}> · revision {record.revision}</span> : null}
+      {/* Retirement suppresses the derived state. Show the projected writer, including
+          unknown attribution, and omit the text when the writer is absent. */}
+      <StateBadge state={record.recordState} testid="record-revision-state" />
+      {record.writer ? (
+        <span className={muted} data-testid="record-writer">
+          {' '}
+          written by {record.writer.role} · {record.writer.model}
+        </span>
+      ) : null}
     </h2>
   );
 }

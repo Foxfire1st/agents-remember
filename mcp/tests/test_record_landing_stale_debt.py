@@ -280,7 +280,7 @@ def _locator_for_delivery(state: str, delivery: str) -> str:
 def _complete_with_locator(whole: dict[str, Any], locator: str) -> dict[str, Any]:
     # Control the locator at the log I/O boundary. The shaper and tokenizer run unchanged.
     directory = Path(locator).parent
-    recorded = tool_response._LoggedAnswer(locator, None, None, 0, directory)
+    recorded = tool_response._LoggedAnswer(locator, None, 0, directory)
     config = McpRuntimeConfig(
         config_path=directory / "settings.json",
         coordination_root=directory,

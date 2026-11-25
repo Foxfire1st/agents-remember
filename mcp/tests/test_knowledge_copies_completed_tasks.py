@@ -87,6 +87,7 @@ def _dataset(path: Path) -> bytes:
             "ix_route",
             "ix_link",
             "ix_history_row",
+            "ix_revision",
             "ix_uuid",
         ):
             connection.execute(f"DROP TABLE {table}")

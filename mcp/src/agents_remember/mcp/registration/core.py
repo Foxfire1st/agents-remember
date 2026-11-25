@@ -101,13 +101,13 @@ def _register_orientation_tools(
         task_context: TaskScopedReaderContext | None = None,
     ) -> dict[str, Any]:
         """
-        Name which knowledge governs up to 20 paths (MIK-R109).
-
-        Per path: existence, its governing card with `cardStatus`, record counts, and the
-        action-asking records by ID, kind, state and heading. `openWeaknesses` and
-        `dependentDocuments` are one count each, absent at zero. No text is returned: open the
-        files yourself. `refresh` is removed. Leaf calls pass `task_context`; `worktreeScope`,
-        `sourceRoot` and `memoryRoot` name both. Longer explanation: docs/reference/mcp-tools.md.
+        Name up to 20 paths. A compact row gives its path and, where applicable, whether
+        it exists, its card's status and the path of its brief with saved freshness. Fuller
+        rows may give rule text. Open saved briefs before edits. A missing or older brief is
+        renewed by the next writing call that covers the file when that writer can refresh
+        briefs; otherwise the writer's answer reports the problem (briefsProblem) and the brief
+        stays as it was. Records may lack briefs. Open source and cards. refresh removed. Leaf
+        calls use task_context. worktreeScope, sourceRoot, memoryRoot. docs/reference/mcp-tools.md.
         """
         return tools.read_ar_files_payload(
             config,

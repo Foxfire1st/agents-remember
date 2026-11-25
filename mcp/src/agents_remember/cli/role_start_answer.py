@@ -88,7 +88,7 @@ def started_answer(config: McpRuntimeConfig, request: RoleDispatchRequest) -> di
             if receipt.get("taskDocumentFiles")
             else {}
         ),
-        **({"warning": receipt["warning"]} if receipt.get("warning") else {}),
+        **({"warning": warning} if (warning := _start_warning(receipt)) else {}),
         **({"nextAction": next_action} if next_action else {}),
     }
     if request.role == "bootstrap":
@@ -127,6 +127,16 @@ def _projects_preparation_note(receipt: dict[str, Any]) -> str:
     if isinstance(preparation, dict) and preparation.get("workspace") == "opened":
         return " Projects workspace was opened; the host does not report whether it was created."
     return ""
+
+
+def _start_warning(receipt: dict[str, Any]) -> str:
+    preparation = receipt.get("preparation")
+    briefs_problem = preparation.get("briefsProblem") if isinstance(preparation, dict) else None
+    return " ".join(
+        warning
+        for warning in (receipt.get("warning"), briefs_problem)
+        if isinstance(warning, str) and warning
+    )
 
 
 def _started_agent_id(receipt: dict[str, Any]) -> str | None:

@@ -113,6 +113,23 @@ OneSentence = Annotated[
 Label = Annotated[
     str, Field(min_length=1, max_length=REFERENCE_MAX_LENGTH), AfterValidator(_exact_token)
 ]
+# A rule's title is a short name on one line. It is written exactly as authored,
+# like every other name here, so a longer or multi-line title is refused rather than cut.
+INVARIANT_TITLE_MAX_LENGTH: Final = 80
+
+
+def _one_line_name(value: str) -> str:
+    _exact_token(value)
+    if "\n" in value or "\r" in value:
+        raise ValueError("a title is one line")
+    return value
+
+
+InvariantTitle = Annotated[
+    str,
+    Field(min_length=1, max_length=INVARIANT_TITLE_MAX_LENGTH),
+    AfterValidator(_one_line_name),
+]
 RepositoryPath = Annotated[
     str, Field(min_length=1, max_length=PATH_MAX_LENGTH), AfterValidator(require_repository_path)
 ]

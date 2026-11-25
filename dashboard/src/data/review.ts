@@ -608,7 +608,13 @@ export interface ReviewOutlineMember {
   membership: 'both' | 'joined' | 'left';
   meaning?: ReviewOutlineMeaning;
 }
-export interface ReviewOutlineFamily {
+// A baseline-only row has no candidate standing. Retirement suppresses the derived state.
+// An unattributed candidate writer projects as unknown role and model.
+export interface ReviewOutlineStanding {
+  record_state?: 'proposed' | 'reviewed' | 'consolidated' | null;
+  writer?: { role: string; model: string } | null;
+}
+export interface ReviewOutlineFamily extends ReviewOutlineStanding {
   selector_id: string;
   id: string;
   title: string;
@@ -616,7 +622,7 @@ export interface ReviewOutlineFamily {
   members: ReviewOutlineMember[];
   meaning?: ReviewOutlineMeaning;
 }
-export interface ReviewOutlineInvariant {
+export interface ReviewOutlineInvariant extends ReviewOutlineStanding {
   selector_id: string;
   id: string;
   summary: string;

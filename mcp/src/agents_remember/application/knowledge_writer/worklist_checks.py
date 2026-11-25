@@ -15,9 +15,11 @@ from agents_remember.models.knowledge_files.documents import (
 from agents_remember.models.knowledge_files.history import (
     FamilyRow,
     InvariantRow,
+    membership_invariant,
+)
+from agents_remember.models.knowledge_files.history_governing_rows import (
     changed_family_row_violation,
     changed_record_row_violation,
-    membership_invariant,
 )
 from agents_remember.models.knowledge_files.unexplained import row_subject
 

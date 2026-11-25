@@ -29,7 +29,7 @@ from agents_remember.worktrees.closeout_input import (
     normalize_closeout_input,
 )
 from agents_remember.worktrees.integration import integration_ref_transaction
-from agents_remember.worktrees.modules.closeout import _validate_closeout_source_heads
+from agents_remember.worktrees.modules.closeout_source_heads import validate_closeout_source_heads
 from agents_remember.worktrees.modules.integrate import _integration_replay_requirements
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 from test_worktree_support import git, init_repo
@@ -219,7 +219,7 @@ def test_r3_closeout_ancestry_passes_when_the_source_is_still_at_the_recorded_ba
     _git, repo, base, candidate = _git_repo(tmp_path)
     contract = _git_contract(repo, code_base_commit=base, code_commit=candidate)
 
-    _validate_closeout_source_heads(contract)  # does not raise
+    validate_closeout_source_heads(contract)  # does not raise
 
 
 def test_r3_closeout_accepts_the_source_head_a_checkpoint_landed(tmp_path: Path) -> None:
@@ -242,7 +242,7 @@ def test_r3_closeout_accepts_the_source_head_a_checkpoint_landed(tmp_path: Path)
         integrated_code_commit=landed,
     )
 
-    _validate_closeout_source_heads(contract)  # does not raise
+    validate_closeout_source_heads(contract)  # does not raise
 
 
 def test_r3_closeout_refuses_when_the_source_branch_moved(tmp_path: Path) -> None:
@@ -255,7 +255,7 @@ def test_r3_closeout_refuses_when_the_source_branch_moved(tmp_path: Path) -> Non
     contract = _git_contract(repo, code_base_commit=base, code_commit=candidate)
 
     with pytest.raises(RuntimeError, match="code source branch moved"):
-        _validate_closeout_source_heads(contract)
+        validate_closeout_source_heads(contract)
 
 
 def test_r4_integration_replay_requirement_is_git_ancestry_not_a_record(tmp_path: Path) -> None:

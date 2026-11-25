@@ -12,7 +12,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from agents_remember.memory.knowledge_index.tree import directory_key
 from agents_remember.models.tokens import count_response_tokens
+from agents_remember.models.tools.tool_answer import bound_for
 from tool_entry_point_world import EntryPointWorld
 
 # L109's largest cases are operation-produced, not recorded: the producers
@@ -137,7 +139,26 @@ def _write_l109_largest_pair(code: Path, memory: Path, onb: Path, index: int, re
     return inv
 
 
-def _produce_l109_read_ar_files_largest() -> tuple[str, dict[str, bool]]:
+def _assert_l109_compact_reply(answer: dict[str, Any], files: list[str], memory: Path) -> None:
+    assert answer.get("ok") is True and answer.get("state") == "named", answer
+    assert "cut" not in answer and answer.get("overflow") is not True, answer
+    assert count_response_tokens(answer) <= bound_for("read_ar_files"), answer
+    assert answer.get("memoryRoot") == memory.as_posix(), answer
+    rows = answer.get("files")
+    assert isinstance(rows, list) and len(rows) == len(files) == 20, answer
+    for source, row in zip(files, rows, strict=True):
+        assert row == {
+            "path": source,
+            "exists": True,
+            "cardStatus": "found",
+            "brief": {"path": f"briefs/{source}.md", "freshness": "missing"},
+        }, row
+    notice = answer["briefsLeftOut"]
+    assert "under memoryRoot with your own file tool" in notice, answer
+    assert "next write covering the file or the whole folder" in notice, answer
+
+
+def _produce_l109_read_ar_files_largest() -> str:
     from agents_remember.models.knowledge_files import (  # noqa: PLC0415
         canonical_text,
         derived_record_id,
@@ -153,20 +174,19 @@ def _produce_l109_read_ar_files_largest() -> tuple[str, dict[str, bool]]:
     world = EntryPointWorld()
     world.build()
     try:
-        # The packet's canonical journey: a leaf Worker names twenty files
-        # in its own worktrees through task scope, so cards and overviews
-        # arrive worktree-relative and the answer holds its bound on any
-        # root length. The fixture repos stay empty; the leaf worktrees
-        # carry the governed files and their cards.
+        # Twenty governed paths at typical package depths exercise the compact
+        # answer before any brief has been saved.
         contract = load_contract(world.contract)
         code, memory = contract.code_worktree, contract.memory_worktree
         assert memory is not None, contract
-        group = code.parent
         for name in ("user.email", "user.name"):
             _l109_git(code, "config", name, "l109-fixture@example.invalid")
             _l109_git(memory, "config", name, "l109-fixture@example.invalid")
-        files = [f"pkg/mod{index}.py" for index in range(10)] + [
-            f"pkg/sub/deep{index}.py" for index in range(10)
+        package = (
+            "pkg/controlplane/lifecycle/series_worktree_reconciliation/requirement_attempt_evidence"
+        )
+        files = [f"{package}/mod{index}.py" for index in range(10)] + [
+            f"{package}/sub/deep{index}.py" for index in range(10)
         ]
         for index, rel in enumerate(files):
             path = code / rel
@@ -183,7 +203,7 @@ def _produce_l109_read_ar_files_largest() -> tuple[str, dict[str, bool]]:
         )
         _write_overview(onb, "", "# Repo overview\nroot text\n")
         _write_overview(onb, "pkg", "# pkg overview\npkg text\n")
-        _write_overview(onb, "pkg/sub", "# sub overview\nsub text\n")
+        _write_overview(onb, f"{package}/sub", "# sub overview\nsub text\n")
         members = []
         for index, rel in enumerate(files):
             members.append(_write_l109_largest_pair(code, memory, onb, index, rel))
@@ -217,25 +237,22 @@ def _produce_l109_read_ar_files_largest() -> tuple[str, dict[str, bool]]:
             "task_document_ref": {"repository": "repo-a", "path": "m/1_leaf.json"},
             "contract_path": world.contract.as_posix(),
         }
+        tree = directory_key(memory)
+        memory_files = world.census(memory)
+        assert _l109_git(memory, "status", "--porcelain") == ""
+        assert not (memory / "briefs").exists()
         outcome, out = world.call(
             "read_ar_files",
             {"repo_id": "repo-a", "files": list(files), "task_context": task_context},
         )
         assert outcome == "RETURNED", out
         assert isinstance(out, dict)
-        rows = out.get("files", [])
-        assert isinstance(rows, list) and len(rows) == 20, out
-        for row in rows:
-            assert isinstance(row, dict), out
-            card = row.get("card")
-            assert isinstance(card, str) and not Path(card).is_absolute(), row
-            assert (group / card).is_file(), row
-        for location in out.get("overviews", []):
-            assert not Path(str(location)).is_absolute(), out
-            assert (group / str(location)).is_file(), out
-        text = _sanitize_l109_answer(out, {world.coord.as_posix(): "/world"})
-        states = {str(row.get("cardState")): True for row in rows if isinstance(row, dict)}
-        return text, states
+        _assert_l109_compact_reply(out, files, memory)
+        assert directory_key(memory) == tree
+        assert world.census(memory) == memory_files
+        assert _l109_git(memory, "status", "--porcelain") == ""
+        assert not (memory / "briefs").exists()
+        return _sanitize_l109_answer(out, {world.coord.as_posix(): "/world"})
     finally:
         world.close()
 

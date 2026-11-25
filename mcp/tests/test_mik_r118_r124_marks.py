@@ -25,6 +25,12 @@ from typing import Any, cast
 
 import anyio
 import pytest
+from agents_remember.application.file_briefs.folder import WriteReport
+from agents_remember.application.file_briefs.triggers import (
+    after_memory_files_written,
+    index_before_write,
+    refresh_written_memory_folder,
+)
 from agents_remember.application.knowledge_currentness.observe import CodeTree, open_code_tree
 from agents_remember.application.knowledge_gate import landing as landing_module
 from agents_remember.application.knowledge_gate.adapter import KnowledgeGate
@@ -61,6 +67,7 @@ from agents_remember.application.knowledge_writer.writer import WriteRequest, wr
 from agents_remember.application.landing_answer_shapes import project_landing_answer
 from agents_remember.application.read_files import _add_mark_lines, _BatchScope
 from agents_remember.kernel.coordination_context.models import StorageSettings
+from agents_remember.kernel.memory_ignore import ignore_briefs
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.server import create_server
 from agents_remember.mcp.tools import knowledge as _knowledge
@@ -96,6 +103,7 @@ from agents_remember.models.tools.tool_answer import (
     short_form,
 )
 from agents_remember.worktrees.knowledge_gate import landing_document_answer, landing_gate_refusal
+from agents_remember.worktrees.knowledge_validation import PairedCode
 from agents_remember.worktrees.modules.onboarding import (
     OnboardingTraceInputs,
     onboarding_refresh_plan_for_context,
@@ -1231,6 +1239,71 @@ def test_a_deleted_document_takes_its_dependent_record_and_no_other_kind(tmp_pat
     assert any(
         "only a document that was deleted" in problem.message for problem in refused.problems
     )
+
+
+def _briefs_after(world, report, before, coordination):
+    """The leaf route's refresh of the briefs a committed write changed."""
+
+    assert report.state == "written", report.problems
+    return after_memory_files_written(
+        world.memory, world.code, coordination, (*report.written, *report.removed), before
+    )
+
+
+def _brief_text(world, source: str) -> str | None:
+    target = world.memory / "briefs" / f"{source}.md"
+    return target.read_text(encoding="utf-8") if target.is_file() else None
+
+
+def test_a_removed_dependent_leaves_no_brief_that_still_shows_it(tmp_path):
+    """The brief of the file a removed document stood on is written again without it."""
+
+    world = _writer_world(tmp_path)
+    coordination = tmp_path / "coordination"
+    coordination.mkdir()
+    assert _write(world, [_dependent_record()], commit=True).state == "written"
+    stored = _stored_document(world.memory, "dependent")
+    ignore_briefs(world.memory)
+    paired_code = PairedCode(world.code, git(world.code, "rev-parse", "HEAD"))
+    assert isinstance(
+        refresh_written_memory_folder(world.memory, paired_code, coordination), WriteReport
+    )
+    assert WRITER_DOCUMENT in (_brief_text(world, "pkg/landing.py") or "")
+
+    (world.code / WRITER_DOCUMENT).unlink()
+    commit_all(world.code, "the document is gone")
+    before = index_before_write(world.memory, coordination)
+    report = _write(world, [_dependent_record(record_id=stored["id"], remove=True)], commit=True)
+    _briefs_after(world, report, before, coordination)
+
+    assert WRITER_DOCUMENT not in (_brief_text(world, "pkg/landing.py") or "")
+
+
+def test_a_dependent_that_moves_renews_the_brief_it_left_and_the_one_it_joined(tmp_path):
+    world = _writer_world(tmp_path)
+    (world.code / "pkg/other.py").write_text("OTHER = 1\n", encoding="utf-8")
+    commit_all(world.code, "a second file")
+    coordination = tmp_path / "coordination"
+    coordination.mkdir()
+    assert _write(world, [_dependent_record()], commit=True).state == "written"
+    stored = _stored_document(world.memory, "dependent")
+    ignore_briefs(world.memory)
+    paired_code = PairedCode(world.code, git(world.code, "rev-parse", "HEAD"))
+    assert isinstance(
+        refresh_written_memory_folder(world.memory, paired_code, coordination), WriteReport
+    )
+    assert WRITER_DOCUMENT in (_brief_text(world, "pkg/landing.py") or "")
+    assert WRITER_DOCUMENT not in (_brief_text(world, "pkg/other.py") or "")
+
+    before = index_before_write(world.memory, coordination)
+    moved = _dependent_record(
+        record_id=stored["id"], stands_on=[{"kind": "file", "path": "pkg/other.py"}]
+    )
+    report = _write(world, [moved], commit=True)
+    _briefs_after(world, report, before, coordination)
+
+    assert WRITER_DOCUMENT not in (_brief_text(world, "pkg/landing.py") or "")
+    assert WRITER_DOCUMENT in (_brief_text(world, "pkg/other.py") or "")
 
 
 def test_a_second_task_confirming_an_unchanged_document_names_itself_and_its_judgment(tmp_path):

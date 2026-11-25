@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.atomic_write import atomic_write_bytes, atomic_write_text
 from agents_remember.kernel.git_command import run_git, run_git_with_index
 from agents_remember.kernel.memory_attribution import (
     MemoryAttributionError,
     attributed_commits,
     ledger_rows_from_attribution,
 )
+from agents_remember.kernel.memory_ignore import with_briefs_ignore
 from agents_remember.kernel.memory_ledger import (
     LEDGER_RELATIVE_PATH,
     LedgerError,
@@ -53,11 +54,38 @@ def ignore_memory_cache(repository: Path) -> bytes:
 
     ignore = repository / ".gitignore"
     text = ignore.read_text(encoding="utf-8") if ignore.exists() else ""
+    updated = _with_ledger_ignore(text)
+    if updated != text:
+        atomic_write_text(ignore, updated)
+    return updated.encode("utf-8")
+
+
+def _with_ledger_ignore(text: str) -> str:
     if f"/{LEDGER_RELATIVE_PATH}" not in text.splitlines():
         separator = "" if not text or text.endswith("\n") else "\n"
-        text = f"{text}{separator}/{LEDGER_RELATIVE_PATH}\n"
-        atomic_write_text(ignore, text)
-    return text.encode("utf-8")
+        return f"{text}{separator}/{LEDGER_RELATIVE_PATH}\n"
+    return text
+
+
+def memory_publication_ignore_bytes(previous: bytes | None) -> bytes:
+    """Compute the exact ignore bytes owned by a durable memory publication."""
+
+    text = previous.decode("utf-8") if previous is not None else ""
+    return with_briefs_ignore(_with_ledger_ignore(text)).encode("utf-8")
+
+
+def ignore_memory_publication(repository: Path) -> bytes:
+    """Prepare both derived surfaces in one write before a publication's gate."""
+
+    ignore = repository / ".gitignore"
+    try:
+        before = ignore.read_bytes()
+    except FileNotFoundError:
+        before = None
+    prepared = memory_publication_ignore_bytes(before)
+    if prepared != before:
+        atomic_write_bytes(ignore, prepared)
+    return prepared
 
 
 def prepare_memory_cache(repository: Path, *, index_path: Path | None = None) -> bytes:
@@ -74,6 +102,19 @@ def prepare_memory_cache(repository: Path, *, index_path: Path | None = None) ->
     """
 
     prepared = ignore_memory_cache(repository)
+    _exclude_memory_cache(repository, index_path)
+    return prepared
+
+
+def prepare_memory_publication(repository: Path, *, index_path: Path) -> bytes:
+    """Prepare a private index and both ignore rules for an admitted publication."""
+
+    prepared = ignore_memory_publication(repository)
+    _exclude_memory_cache(repository, index_path)
+    return prepared
+
+
+def _exclude_memory_cache(repository: Path, index_path: Path | None) -> None:
     args = ["rm", "--cached", "--force", "--ignore-unmatch", "--", LEDGER_RELATIVE_PATH]
     if index_path is not None:
         result = run_git_with_index(repository, args, index_path)
@@ -81,7 +122,6 @@ def prepare_memory_cache(repository: Path, *, index_path: Path | None = None) ->
         result = run_git(repository, args)
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or "could not exclude the memory cache")
-    return prepared
 
 
 def refresh_memory_cache(

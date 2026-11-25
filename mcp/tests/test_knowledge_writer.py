@@ -323,12 +323,17 @@ def test_the_command_line_round_trips_every_kind(
     assert _ingest(world, listed, "--commit") == 0
     capsys.readouterr()
     # MIK-R26 rule 3: the leaf's ingest, run twice, made no dataset. The writer works on the files
-    # of the memory tree, so no SQLite file lies anywhere in the world, and the retired per-leaf
-    # baseline and candidate directory does not exist.
+    # of the memory tree, and the retired per-leaf baseline and candidate directory does not
+    # exist. The one SQLite file is the coordination root's shared read index, which the briefs
+    # written after a committed write read; it is a cache keyed by memory tree,
+    # not a dataset of the leaf.
+    index_cache = world.root / "runtime" / "knowledge-index"
     datasets = [
         path.relative_to(tmp_path).as_posix()
         for path in sorted(tmp_path.rglob("*"))
-        if path.is_file() and path.read_bytes()[:16] == b"SQLite format 3\x00"
+        if path.is_file()
+        and path.read_bytes()[:16] == b"SQLite format 3\x00"
+        and index_cache not in path.parents
     ]
     assert datasets == []
     assert not list(tmp_path.rglob("provider-runtime"))

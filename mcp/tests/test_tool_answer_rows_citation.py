@@ -20,6 +20,7 @@ from agents_remember.application.memory_tools import (
     citation_fix_tool,
 )
 from agents_remember.application.tool_response import complete_tool_response
+from agents_remember.kernel.memory_ignore import briefs_ignored, ignore_briefs
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
@@ -259,6 +260,8 @@ class CitationProductionTests(unittest.TestCase):
             (memory / "knowledge" / "layout.json").write_text(LAYOUT_MARKER, encoding="utf-8")
             onboarding = memory / "onboarding"
             _write_card(onboarding, "good.md", "pkg/real.py:1-2")
+            ignore_briefs(memory)
+            self.assertTrue(briefs_ignored(memory))
             whole_clean = _run_fix(scoped, configured, contract, CitationOperationScope())
             for index in range(25):
                 name = f"lost-{index:02d}.md"
@@ -270,6 +273,7 @@ class CitationProductionTests(unittest.TestCase):
         with self.subTest("ordinary"):
             answer = _citation_fix_answer(whole_clean)
             self.assertTrue(answer["ok"])
+            self.assertNotIn("briefsProblem", answer)
             assert_production_answer(self, _TOOL, answer)
             assert_answer_survives_the_guard(_TOOL, whole_clean, answer)
         with self.subTest("largest"):

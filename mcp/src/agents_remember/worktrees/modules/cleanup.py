@@ -42,6 +42,7 @@ from agents_remember.worktrees.modules import terminal_cleanup
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import branch_commit
 from agents_remember.worktrees.modules.guidance import carryover_done, status_payload
+from agents_remember.worktrees.modules.kept_tool_calls import removal_after_keep
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.state_refusals import (
     RefusalNext,
@@ -368,11 +369,14 @@ def _removed_directories(
         lifecycle_path,
         dry_run=dry_run,
     )
-    # MIK-R108 rule 3: cleanup removes <enclosure>/logs/ with the enclosure.
+    # Cleanup removes <enclosure>/logs/ with the enclosure, and a leaf's own lines are kept in
+    # its master's notes first.
     logs_path = contract.worktree_group / ENCLOSURE_LOGS_DIRECTORY
-    logs = worktree_services().provider_lifecycle.remove_tree(
+    logs = removal_after_keep(
+        contract,
         logs_path,
         dry_run=dry_run,
+        remove_tree=worktree_services().provider_lifecycle.remove_tree,
     )
     if contract.kind == "series":
         return {

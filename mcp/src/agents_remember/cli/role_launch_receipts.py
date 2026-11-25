@@ -29,6 +29,10 @@ from agents_remember.cli.investigator_receipts import (
     investigator_receipts,
     matches_selection,
 )
+from agents_remember.cli.message_binding_files import (
+    message_binding_projection_bytes,
+    message_binding_projection_matches,
+)
 from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, LaunchOutcome, run_launch_call
 from agents_remember.cli.role_activity import publish_receipt_role_agent
 from agents_remember.cli.role_handover_restore import HandoverFileRefusal, restore_launch_files
@@ -40,7 +44,10 @@ from agents_remember.cli.role_launch_choices import (
 from agents_remember.cli.role_launch_outcome import publish_launch_outcome
 from agents_remember.cli.role_receipt_listing import taskless_execution_receipts
 from agents_remember.cli.role_step_up_decisions import record_step_up
-from agents_remember.controlplane.held_store_discovery import receipt_holder
+from agents_remember.controlplane.held_store_discovery import (
+    receipt_holder,
+    taskless_session_directory,
+)
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_identity import LEAF_ROLES, TASKLESS_ROLES, canonical_role
@@ -376,7 +383,7 @@ def _taskless_session_directory(config: McpRuntimeConfig, role: str) -> Path:
         raise ValueError(
             "Per-request role execution receipts are reserved for taskless project roles."
         )
-    return receipt_holder(config.coordination_root) / role / "sessions"
+    return taskless_session_directory(config.coordination_root, role)
 
 
 def _message_binding_projection_reference(
@@ -384,7 +391,7 @@ def _message_binding_projection_reference(
     request_id: uuid.UUID,
     binding: dict[str, Any],
 ) -> dict[str, str]:
-    body = _message_binding_projection_bytes(binding)
+    body = message_binding_projection_bytes(binding)
     path = message_binding_projection_path(config, request_id)
     return {
         "path": path.as_posix(),
@@ -406,9 +413,9 @@ def _place_message_binding_projection(
     if reference != expected_reference:
         raise ValueError("The message-binding projection reference does not match its content.")
     path = Path(reference["path"])
-    body = _message_binding_projection_bytes(binding)
+    body = message_binding_projection_bytes(binding)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if _existing_message_binding_projection_matches(path, body):
+    if message_binding_projection_matches(path, body):
         return False
 
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
@@ -420,7 +427,7 @@ def _place_message_binding_projection(
         try:
             os.link(temporary, path, follow_symlinks=False)
         except FileExistsError:
-            if not _existing_message_binding_projection_matches(path, body):
+            if not message_binding_projection_matches(path, body):
                 raise ValueError(
                     "This request ID already has a different immutable message-binding projection."
                 ) from None
@@ -439,8 +446,8 @@ def _verify_message_binding_projection(
     reference = _message_binding_projection_reference(config, request_id, binding)
     if reference != expected_reference:
         raise ValueError("This request ID is already bound to different message content.")
-    if not _existing_message_binding_projection_matches(
-        Path(reference["path"]), _message_binding_projection_bytes(binding)
+    if not message_binding_projection_matches(
+        Path(reference["path"]), message_binding_projection_bytes(binding)
     ):
         raise ValueError("The saved native message-binding projection is missing.")
 
@@ -449,26 +456,6 @@ def message_binding_projection_path(config: McpRuntimeConfig, request_id: uuid.U
     return (
         receipt_holder(config.coordination_root) / "message-bindings" / f"{request_id}.json"
     ).resolve(strict=False)
-
-
-def _message_binding_projection_bytes(binding: dict[str, Any]) -> bytes:
-    return (
-        json.dumps(binding, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n"
-    ).encode("utf-8")
-
-
-def _existing_message_binding_projection_matches(path: Path, expected: bytes) -> bool:
-    try:
-        mode = path.lstat().st_mode
-    except FileNotFoundError:
-        return False
-    if not stat.S_ISREG(mode):
-        raise ValueError("The message-binding projection path is not a regular file.")
-    if path.read_bytes() != expected:
-        raise ValueError(
-            "This request ID already has a different immutable message-binding projection."
-        )
-    return True
 
 
 def _migrate_taskless_legacy_receipt(config: McpRuntimeConfig, selection: RoleSelection) -> None:

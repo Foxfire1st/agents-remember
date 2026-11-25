@@ -12,9 +12,9 @@ request is one JSON object on standard input: the identity of the start (``repoI
 ``worktreeName``, ``leafId``, ``parentTask``) and the roots the backend holds
 (``coordinationRoot``, ``codeRoot``, ``memoryRoot``). The child resolves its roots from the
 settings file and starts nothing when they are not the backend's. The reply is one JSON object on
-standard output: ``{"ok": true}`` or ``{"ok": false, "error": {"code", "message"}}``; the exit
-status is 0 only for ``ok``. The command is internal: it is no sub-command of the public command
-line and appears in no help.
+standard output. A successful reply carries ``ok`` and any ``briefsProblem``; a refusal carries
+``error`` with its code and message. The exit status is 0 only for ``ok``. The command is internal:
+it is no sub-command of the public command line and appears in no help.
 """
 
 from __future__ import annotations
@@ -52,7 +52,8 @@ def start_leaf_enclosure_in_child(
 ) -> dict[str, Any]:
     """Run the worktree start in a child process and return its outcome as the start tool does.
 
-    ``{"ok": True}`` when the child created the enclosure; otherwise ``ok`` is false and
+    ``ok`` and any file-brief advisory when the child created the enclosure. On failure,
+    ``ok`` is false and
     ``summary`` names the reason: the child's own error code and message, or that it was cut off
     at the limit or answered unreadably.
     """
@@ -92,7 +93,7 @@ def start_leaf_enclosure_in_child(
     except json.JSONDecodeError:
         reply = None
     if isinstance(reply, dict) and reply.get("ok") is True and completed.returncode == 0:
-        return {"ok": True}
+        return _successful_reply(reply)
     error = reply.get("error") if isinstance(reply, dict) else None
     if isinstance(reply, dict) and isinstance(error, dict):
         refused = _refused(
@@ -109,6 +110,11 @@ def start_leaf_enclosure_in_child(
         f"the worktree start ended with status {completed.returncode} and no readable reply.",
         completed.stderr,
     )
+
+
+def _successful_reply(result: dict[str, Any]) -> dict[str, Any]:
+    problem = result.get("briefsProblem")
+    return {"ok": True, **({"briefsProblem": problem} if isinstance(problem, str) else {})}
 
 
 def _run_child(argv: list[str], request: dict[str, Any]) -> subprocess.CompletedProcess[bytes]:
@@ -213,7 +219,7 @@ def run(args: argparse.Namespace) -> int:
     except Exception as error:  # every failure is this command's one reply
         return _reply(str(getattr(error, "code", "") or type(error).__name__), str(error))
     if created.get("ok") is True:
-        print(json.dumps({"ok": True}))
+        print(json.dumps(_successful_reply(created)))
         return 0
     return _reply(
         str(created.get("state") or "worktree_start_refused"),

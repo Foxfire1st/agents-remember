@@ -407,8 +407,7 @@ def family_guarantee(
         revision_id=revision.revision_id,
         display_version=revision.display_version,
         joint_guarantee=revision.joint_guarantee,
-        state_at_origin=str(revision.state_at_origin),
-        acceptance_ref=revision.acceptance_ref,
+        state=revision.state,
         provenance=revision.provenance.model_dump(mode="json"),
         payload_digest=revision.payload_digest,
     )

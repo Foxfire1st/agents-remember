@@ -9,10 +9,12 @@ returns the plan as the worktree layer's :class:`CrossingPlanView`. A failing st
 from __future__ import annotations
 
 import tempfile
+from datetime import datetime
 from importlib import import_module
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
+from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.conversion.crossing_sync import (
     CrossingDestination,
@@ -68,7 +70,11 @@ class GitKnowledgeCrossing:
                             CodeObjects(request.memory_repository), request.sides
                         ),
                     ),
-                    owner=HistoryOwner(kind=request.owner_kind, id=request.owner_id),
+                    owner=HistoryOwner(
+                        kind=request.owner_kind,
+                        id=request.owner_id,
+                        at=merged_at(request.memory_repository, request.sides[1:]),
+                    ),
                 )
         except CrossingError as error:
             raise import_module("agents_remember.worktrees.services").CrossingStepFailed(
@@ -84,3 +90,19 @@ class GitKnowledgeCrossing:
             conflict_versions=plan.conflict_versions,
             report=plan.report,
         )
+
+
+def merged_at(repository: Path, commits: tuple[str, ...]) -> str:
+    """The later committer time of the merged lines' commits: the time of the merge's own stamp.
+
+    Read from the commits, not from a clock, so a merge repeated on the same commits stores the same
+    bytes.
+    """
+
+    times: list[str] = []
+    for commit in commits:
+        shown = run_git(repository, ["show", "-s", "--format=%cI", commit])
+        if shown.returncode != 0 or not shown.stdout.strip():
+            raise OSError(f"the commit time of {commit} cannot be read: {shown.stderr.strip()}")
+        times.append(shown.stdout.strip())
+    return max(times, key=datetime.fromisoformat)

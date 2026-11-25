@@ -138,6 +138,11 @@ def start_leaf_set(
             reviewer_opening=reviewer_opening,
             lock_wait_seconds=LOCK_WAIT_SECONDS,
         )
+        from agents_remember.cli.product_start_message import (  # noqa: PLC0415 - sends through the role tools, which import this module
+            set_start_messages,
+        )
+
+        set_start_messages(config, answer, selections)
         return _with_second_copies(config, answer, selections)
     except _Refused as refused:
         return {**refused.payload(), "requestId": str(call.request_id)}
@@ -321,7 +326,17 @@ def _start_role(
     unread = _host_not_read(response)
     if unread is not None:
         raise _host_unreachable(f"{unread} Nothing was recorded for this request.")
-    return _started(config, request)
+    answer = _started(config, request)
+    # A Reviewer or Curator started directly gets the product's start message
+    # when its start answers running; the answer says what became of it.
+    from agents_remember.cli.product_start_message import (  # noqa: PLC0415 - sends through the role tools, which import this module
+        direct_start_message,
+    )
+
+    report = direct_start_message(config, request, answer)
+    if report is not None:
+        answer["productMessage"] = report
+    return answer
 
 
 def _host_not_read(response: JSONResponse) -> str | None:

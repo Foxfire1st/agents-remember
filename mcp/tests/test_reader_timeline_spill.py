@@ -390,6 +390,7 @@ def test_truth_view_acquires_full_history_only_on_manifest_miss(
 
     selected.index.record = lambda _: SimpleNamespace(value=record)
     selected.index.incoming_links = lambda _: SimpleNamespace(value=())
+    selected.index.standing = lambda _: SimpleNamespace(value=None)
     selected.index.history_rows_about = history
     # Hold unrelated truth-view sections, not the defended caller/history acquisition,
     # producer, manifest/cache/digest, spill or continuation.

@@ -28,6 +28,7 @@ from agents_remember.application.tool_answer_log import (
     shorten_long_arguments,
     tool_call_context,
 )
+from agents_remember.application.tool_call_outcome import CallOutcome, call_outcome
 from agents_remember.application.tool_response import complete_tool_response
 from agents_remember.cli import tool_log_stats
 from agents_remember.kernel.primitives.runtime_config import (
@@ -154,6 +155,58 @@ class ToolAnswerLogTests(unittest.TestCase):
             self.assertIsNone(outcome.log_error)
             lines = self._read_lines(coord)
             self.assertEqual(lines[-1]["code"], "raised")
+
+    def test_refusal_answers_log_as_refusals_with_their_digest(self) -> None:
+        # A refusal reads as a refusal on its line, whatever
+        # the answer's own ok says, and every line carries the result digest.
+        refusals = {
+            "knowledge_read": {
+                "ok": True,
+                "state": "refused",
+                "view": "record",
+                "repositoryId": "agents-remember",
+                "refusalCode": "file-unknown",
+                "refusalDetail": "No such file.",
+            },
+            "role_start_set": {
+                "ok": False,
+                "operation": "role_start_set",
+                "status": "refused",
+                "refusal": "launch-refused",
+                "detail": "bad seat.",
+                "nextAction": "Fix the seat.",
+                "requestId": "r1",
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            coord = Path(tmp)
+            config = _stub_config(coord)
+            answers = {}
+            for tool, raw in refusals.items():
+                reset_log_budgets()
+                with tool_call_context(tool, {}, config=config):
+                    answers[tool] = complete_tool_response(tool, raw)
+            lines = self._read_lines(coord)
+        self.assertTrue(answers["knowledge_read"]["ok"], "the answer itself is not changed")
+        self.assertEqual(
+            [(line["tool"], line["ok"], line["code"]) for line in lines],
+            [
+                ("knowledge_read", False, "file-unknown"),
+                ("role_start_set", False, "launch-refused"),
+            ],
+        )
+        for line in lines:
+            self.assertTrue(line["detail"].endswith(".json"))
+            self.assertRegex(line["resultDigest"], r"^[0-9a-f]{64}$")
+
+    def test_refusal_without_ok_or_code_still_reads_as_refusal(self) -> None:
+        self.assertEqual(
+            call_outcome({"state": "refused", "refusal": "seat-unbound", "detail": "d"}),
+            CallOutcome(ok=False, code="seat-unbound"),
+        )
+        self.assertEqual(
+            call_outcome({"ok": True, "status": "refused"}), CallOutcome(ok=False, code="refused")
+        )
 
     def test_long_argument_replaced_by_length_and_digest(self) -> None:
         shortened = shorten_long_arguments({"small": "x", "big": "y" * 500})

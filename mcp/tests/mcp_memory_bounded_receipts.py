@@ -36,6 +36,7 @@ class WorkloadReceipt:
     calls: int
     pid: int
     serving_build: dict[str, Any]
+    previewed_paths: tuple[str, ...]
     written_paths: tuple[str, ...]
     quality_trees: tuple[str, ...]
     readings_kib: dict[str, int]
@@ -141,42 +142,61 @@ def _full_replies(
         if result["operation"] == "knowledge_write":
             assert result["reportPath"] == row["report_path"]
             report = logs.parent / Path(result["reportPath"]).relative_to(logical_root)
-            assert report.resolve().is_relative_to(logs.resolve()) and report.is_file()
+            assert report.resolve().is_relative_to(logs.resolve())
+            full = _json_file(report)
+            assert full["state"] == result["state"] and full["written"] == result["written"]
+            result = {**result, "records": full["records"]}
         details.append(result)
     return details
 
 
-def _completed_cycles(details: list[dict[str, Any]]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _weakness_path(reply: dict[str, Any], handoff: str, companion_paths: tuple[str, ...]) -> str:
+    [record] = reply["records"]
+    assert record["kind"] == "weakness" and record["action"] == "created"
+    assert record["revision"] == 1 and record["handoffEntry"] == handoff
+    path = record["path"]
+    assert path == f"knowledge/weaknesses/{record['id']}-{handoff}.json"
+    assert sorted(reply["written"]) == sorted((path, *companion_paths))
+    return path
+
+
+def _completed_cycles(
+    details: list[dict[str, Any]], history: str
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     assert len(details) == CYCLES * 3
+    previews: list[str] = []
     trees: list[str] = []
     paths: list[str] = []
-    for quality, preview, write in zip(details[::3], details[1::3], details[2::3], strict=True):
+    cycles = zip(details[::3], details[1::3], details[2::3], strict=True)
+    for cycle, (quality, preview, write) in enumerate(cycles, 1):
         assert quality["operation"] == "memory_quality_check"
         assert quality["scopeAuthority"] == "leaf-candidate"
         assert quality["knowledgeGate"]["worklistState"] == "complete"
         assert preview["operation"] == "knowledge_write" and preview["state"] == "planned"
         assert write["operation"] == "knowledge_write" and write["state"] == "written"
         assert preview["ok"] is True and write["ok"] is True
-        [path] = write["written"]
-        paths.append(path)
+        previews.append(_weakness_path(preview, "memory-sample-preview", (history,)))
+        companions = (history, ".gitignore") if cycle == 1 else (history,)
+        paths.append(_weakness_path(write, f"memory-sample-{cycle}", companions))
         trees.append(quality["finalFullCatalog"]["memoryTree"])
     assert len(set(paths)) == len(set(trees)) == CYCLES
-    return tuple(paths), tuple(trees)
+    return tuple(previews), tuple(paths), tuple(trees)
 
 
 def read_completed_workload(
-    capture: Path, logs: Path, logical_root: Path, cases: Sequence[CaseIdentity]
+    capture: Path, logs: Path, logical_root: Path, cases: Sequence[CaseIdentity], history: str
 ) -> WorkloadReceipt:
     replies = _reply_pairs(capture, cases)
     info = _json_file(capture / "server-info.json")
     assert info["ok"] is True and info["transport"] == "stdio"
-    paths, trees = _completed_cycles(_full_replies(replies, logs, logical_root))
+    previews, paths, trees = _completed_cycles(_full_replies(replies, logs, logical_root), history)
     readings = _readings(replies, len(cases))
     exceeded = tuple(name for name, limit in LIMITS_KIB.items() if readings[name] > limit)
     return WorkloadReceipt(
         calls=len(replies) - 1,
         pid=replies[0]["pid"],
         serving_build=info["servingBuild"],
+        previewed_paths=previews,
         written_paths=paths,
         quality_trees=trees,
         readings_kib=readings,

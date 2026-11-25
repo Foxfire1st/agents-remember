@@ -276,10 +276,11 @@ def test_a_path_selects_one_family_hop_in_the_declared_order(tmp_path: Path) -> 
     assert header["memberCount"] == 3
     assert "RLZ-R00001" not in json.dumps(page["rows"])
     member = rows[("member", "INV-DDDDDD")]
+    # The fixture's stored ``accepted`` is an old state word, no lifecycle status: it reads empty.
     assert {key: member[key] for key in ("statement", "applicability", "status", "admission")} == {
         "statement": "INV-DDDDDD holds.",
         "applicability": "Where INV-DDDDDD applies.",
-        "status": "accepted",
+        "status": "",
         "admission": "legacy-unassessed",
     }
     assert (member["conditions"], member["exclusions"]) == (

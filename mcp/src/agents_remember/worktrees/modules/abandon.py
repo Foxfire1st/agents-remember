@@ -56,6 +56,7 @@ from agents_remember.worktrees.modules.cleanup import (
 )
 from agents_remember.worktrees.modules.git import branch_exists, is_ancestor
 from agents_remember.worktrees.modules.guidance import status_payload
+from agents_remember.worktrees.modules.kept_tool_calls import removal_after_keep
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.state_refusals import (
     provider_setup_blocked,
@@ -893,11 +894,14 @@ def _abandon_directories(
             ),
             **outside,
         }
+    # A leaf's own tool-call lines are kept in its master's
+    # notes before either branch below removes <enclosure>/logs/.
+    remove_tree = worktree_services().provider_lifecycle.remove_tree
     role_folders = remove_group_role_folders(contract, dry_run=dry_run)
     if force:
         directories = {
-            "worktree_group": worktree_services().provider_lifecycle.remove_tree(
-                group, dry_run=dry_run
+            "worktree_group": removal_after_keep(
+                contract, group, dry_run=dry_run, remove_tree=remove_tree
             ),
             **outside,
         }
@@ -911,10 +915,7 @@ def _abandon_directories(
         # Abandon removes <enclosure>/logs/ with the enclosure, as cleanup does
         # (MIK-R108 rule 3): the tool-call log is the product's own trace.
         logs_path = group / ENCLOSURE_LOGS_DIRECTORY
-        logs = worktree_services().provider_lifecycle.remove_tree(
-            logs_path,
-            dry_run=dry_run,
-        )
+        logs = removal_after_keep(contract, logs_path, dry_run=dry_run, remove_tree=remove_tree)
         planned: set[Path] = {
             Path(str(row["path"]))
             for row in role_folders.values()

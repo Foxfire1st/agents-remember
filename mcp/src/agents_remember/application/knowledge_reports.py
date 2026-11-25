@@ -1,6 +1,6 @@
 """Caller-readable reports for the naming reads (MIK-R109 rules 2 and 3).
 
-A read names where a thing is; when the whole list behind an answer is what
+A naming read names where a thing is; when the whole list behind an answer is what
 the caller works through next — a diff's comparison, a queue's entries — the
 list is a file of its own and not a log (MIK-R108 rule 3): under
 ``<enclosure>/reports/`` for a caller whose log lies in an enclosure, in the

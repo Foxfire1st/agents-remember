@@ -293,6 +293,7 @@ _CITATION_STATUS_KEYS = (
     "staleCount",
     "unreadableCount",
     "refusedCount",
+    "briefsProblem",
 )
 _CITATION_CONVERTED_ENTRY_KEYS = ("stale", "unreadableSidecars", "refused")
 
@@ -317,8 +318,8 @@ def _carry_legacy_refusal(full: Mapping[str, Any], answer: dict[str, Any]) -> No
 def _citation_fix_answer(full: Mapping[str, Any]) -> dict[str, Any]:
     """MIK-R110 rules 1-2: one ``citation_fix`` whole result answered as a status.
 
-    Successes carry only the outcome and the document and repair counts --
-    never the root paths. Failures additionally carry the bounded
+    Successes carry the outcome, document and repair counts, and any brief refresh advisory.
+    The root paths stay in the whole result. Failures additionally carry the bounded
     actionable entries -- the stale, unreadable, refused, declined, or
     refused-document rows the curator must work, first entries up to the
     status entry cap -- beside the root context the recovery is read against. The

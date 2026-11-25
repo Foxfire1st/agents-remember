@@ -1,10 +1,12 @@
 // One shared async tree for File Viewer and Knowledge. Headless Tree owns loading,
-// selection and arrow keys; the caller owns what a row opens and what its suffix says.
+// selection and arrow keys; the caller owns what a row opens, what its suffix says and
+// what a row's own second line says. The suffix is cut to the row; the second line wraps.
 import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
 import {
   asyncDataLoaderFeature,
   hotkeysCoreFeature,
   selectionFeature,
+  type ItemInstance,
   type TreeInstance,
 } from '@headless-tree/core';
 import { useTree } from '@headless-tree/react';
@@ -37,6 +39,9 @@ const row = css({
 const name = css({ minWidth: '3ch', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
 const glyph = css({ width: '1ch', flexShrink: 0, color: 'muted' });
 const suffix = css({ marginLeft: 'auto', minWidth: '0', maxWidth: '55%', overflow: 'hidden', textOverflow: 'ellipsis', color: 'cyan', whiteSpace: 'nowrap' });
+const stacked = css({ flexDirection: 'column', alignItems: 'stretch', gap: '0' });
+const line = css({ display: 'flex', alignItems: 'center', gap: '0.3rem', minWidth: '0' });
+const detail = css({ paddingLeft: 'calc(1ch + 0.3rem)', color: 'cyan', fontSize: '0.7rem', whiteSpace: 'normal', overflowWrap: 'anywhere' });
 
 interface ExplorerProps<T extends ExplorerRow> {
   label: string;
@@ -48,6 +53,7 @@ interface ExplorerProps<T extends ExplorerRow> {
   ancestors?: string[];
   openFolders?: boolean;
   renderSuffix?: (entry: T) => ReactNode;
+  renderDetail?: (entry: T) => ReactNode;
   rowAttributes?: (entry: T) => Record<string, string | undefined>;
   revision?: string;
 }
@@ -119,7 +125,7 @@ function useExplorerTree<T extends ExplorerRow>({
 
 export function ExplorerTree<T extends ExplorerRow>(props: ExplorerProps<T>) {
   const { tree, failures } = useExplorerTree(props);
-  const { testid, label, rowAttributes, renderSuffix, onOpen, openFolders } = props;
+  const { testid, label, rowAttributes, renderSuffix, renderDetail, onOpen, openFolders } = props;
   const viewport = useRef<HTMLDivElement>(null);
   const revealed = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -143,12 +149,13 @@ export function ExplorerTree<T extends ExplorerRow>(props: ExplorerProps<T>) {
         {tree.getItems().map((item) => {
           const data = item.getItemData();
           const props = item.getProps();
+          const second = data && renderDetail ? renderDetail(data) : undefined;
           return (
             <button
               {...props}
               {...(data ? rowAttributes?.(data) : {})}
               key={item.getId()}
-              className={cx(row, props.className as string | undefined)}
+              className={cx(row, second ? stacked : undefined, props.className as string | undefined)}
               title={data?.name}
               style={{
                 ...(props.style as CSSProperties),
@@ -163,16 +170,47 @@ export function ExplorerTree<T extends ExplorerRow>(props: ExplorerProps<T>) {
                 if (data && (openFolders || !item.isFolder())) onOpen(data);
               }}
             >
-              <span className={glyph} aria-hidden>
-                {item.isFolder() ? (item.isExpanded() ? '▾' : '▸') : ''}
-              </span>
-              <span className={name}>{item.getItemName()}</span>
-              {data && renderSuffix ? <span className={suffix}>{renderSuffix(data)}</span> : null}
+              <RowContent
+                item={item}
+                suffixText={data && renderSuffix ? renderSuffix(data) : undefined}
+                second={second}
+              />
             </button>
           );
         })}
       </div>
     </div>
+  );
+}
+
+// A row's first line is its folder glyph, name and suffix; a row with a second line stacks it
+// below, wrapping, so nothing on it is cut.
+function RowContent<T>({
+  item,
+  suffixText,
+  second,
+}: {
+  item: ItemInstance<T>;
+  suffixText: ReactNode;
+  second: ReactNode;
+}) {
+  const first = (
+    <>
+      <span className={glyph} aria-hidden>
+        {item.isFolder() ? (item.isExpanded() ? '▾' : '▸') : ''}
+      </span>
+      <span className={name}>{item.getItemName()}</span>
+      {suffixText !== undefined ? <span className={suffix}>{suffixText}</span> : null}
+    </>
+  );
+  if (!second) return first;
+  return (
+    <>
+      <span className={line}>{first}</span>
+      <span className={detail} data-testid="tree-row-detail">
+        {second}
+      </span>
+    </>
   );
 }
 

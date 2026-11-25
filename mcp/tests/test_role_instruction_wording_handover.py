@@ -440,9 +440,17 @@ class HandoverTextWordingTests(unittest.TestCase):
             "serves this assignment.",
             f"look once more before reporting {TOOL_SERVER} missing, and report that instead of "
             "substituting another.",
-            "add the requested files to read_ar_files as a list of path strings such as "
-            '"<path in the repository>". A read names where each file is and carries no file '
-            "text: read the named files with your harness's own file tool.",
+            'Add the requested files to read_ar_files as a list of path strings such as "<path '
+            'in the repository>". A compact row gives its path and, where applicable, whether'
+            " it exists, its card's status and the path of its brief with saved freshness. Fuller"
+            " replies can include rule text. A covering write renews a missing or older brief"
+            " when the writer can refresh it. Read source files with your own file tool.",
+            # Every hand-over carries the two sentences on the briefs.
+            "Before editing a source file, open its saved brief when available at briefs/<path "
+            "in the repository>.md under the memory root with your own file tool (source brief "
+            "folders have INDEX.md and briefs/_task/ has no index). When current memory finds "
+            "neither a card nor a qualifying brief for a file it can assess, no rule, weakness,"
+            " decision or standing document is recorded there.",
         ):
             with self.subTest(said=said):
                 self.assertIn(said, host["arMcpUsage"])

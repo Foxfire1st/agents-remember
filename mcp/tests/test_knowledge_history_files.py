@@ -34,8 +34,6 @@ from agents_remember.models.knowledge_files.canonical import format_text
 from agents_remember.models.knowledge_files.history import (
     FAMILY_DISPOSITIONS,
     INVARIANT_DISPOSITIONS,
-    changed_family_row_violation,
-    changed_record_row_violation,
     empty_history,
     invariant_revision_violation,
     is_closed_history,
@@ -44,6 +42,10 @@ from agents_remember.models.knowledge_files.history import (
     sidecar_entry_anchors,
     stale_examined_members,
     unknown_subjects,
+)
+from agents_remember.models.knowledge_files.history_governing_rows import (
+    changed_family_row_violation,
+    changed_record_row_violation,
 )
 from agents_remember.models.knowledge_files.ids import mint_id
 from agents_remember.models.knowledge_files.sidecars import FileSidecar

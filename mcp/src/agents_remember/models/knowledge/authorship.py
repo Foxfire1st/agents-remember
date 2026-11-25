@@ -14,19 +14,11 @@ from uuid import UUID
 from pydantic import Field, field_validator
 
 from agents_remember.models.knowledge.base import (
-    ACCEPTED_STATE,
-    PROPOSED_STATE,
     REFERENCE_MAX_LENGTH,
     KnowledgeModel,
-    KnowledgeState,
 )
 
-__all__ = [
-    "ACCEPTED_STATE",
-    "PROPOSED_STATE",
-    "Authorship",
-    "KnowledgeState",
-]
+__all__ = ["Authorship"]
 
 
 class Authorship(KnowledgeModel):

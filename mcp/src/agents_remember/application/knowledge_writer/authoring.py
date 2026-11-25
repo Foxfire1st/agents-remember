@@ -8,8 +8,12 @@ Everything else is mechanical and filled here (MIK-R12 rule 2):
   produces the same files with the same IDs;
 * **anchors** are resolved at C and record ``blob`` and ``content`` (:mod:`.code_anchors`);
 * **revisions** increment once per leaf when a record's meaning changes against the base: every field
-  except ``id``, ``schema``, ``origin``, ``revision``, ``admission`` and ``status`` is meaning
-  (MIK-R07 rule 3: ``admission``, ``origin`` and the slug carry none);
+  except ``id``, ``schema``, ``origin``, ``revision``, ``admission``, ``status``, ``writer`` and an
+  invariant's ``title`` is meaning. The invariant's title is a name, so a title edit alone
+  raises no revision;
+* **the writer's stamp** of a revision this owner raised stands in the record and in the owner's
+  history file (:mod:`.revision_stamps`); no input names it, and no input names a
+  record's state: ``status`` is only a kind's own lifecycle word;
 * **origin** names the task, the leaf or wave, the hand-off list and entry, and the entry's evidence
   (MIK-R12 rule 3: evidence is never dropped);
 * **history rows** get their ID, the invariant's or family's own revision, each examined member's
@@ -29,7 +33,6 @@ from pathlib import Path
 from typing import Any, Final
 
 from agents_remember.application.knowledge_writer import case_proof
-from agents_remember.application.knowledge_writer.authoring_rows import meaning
 from agents_remember.application.knowledge_writer.code_anchors import (
     AnchorResolutionError,
     CodeSnapshot,
@@ -53,7 +56,6 @@ from agents_remember.application.knowledge_writer.handoff import (
 )
 from agents_remember.application.knowledge_writer.memory_state import (
     MemoryState,
-    MergeStageError,
     Owner,
     canonical_equal,
     deep_copy,
@@ -72,6 +74,13 @@ from agents_remember.application.knowledge_writer.report import (
     RecordOutcome,
     RowOutcome,
 )
+from agents_remember.application.knowledge_writer.revision_stamps import (
+    record_written_revision,
+    revision_step,
+    stamp_record,
+    unresolved_stamp,
+)
+from agents_remember.application.knowledge_writer.rule_titles import untitled_note
 from agents_remember.application.knowledge_writer.weakness_authoring import author_weakness
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
@@ -86,27 +95,11 @@ from agents_remember.models.knowledge_files.ids import (
     mint_id,
 )
 from agents_remember.models.knowledge_files.records import schema_name
+from agents_remember.models.knowledge_files.writer_stamp import WriterStamp
 
 DecisionResolver = Callable[[str], str | None]
 """The task owner's answer about one decision entry of the leaf's task document: ``None`` when it
 resolves, else why not (MIK-R11 rule 5, ``dropped``)."""
-
-# The record kinds that carry a ``status``; a weakness carries a state and a dependent neither, and
-# the writer never adds a field its model refuses (MIK-R118 rule 1, MIK-R124 rule 1).
-_STATUS_KINDS: Final = frozenset(
-    {
-        "invariant",
-        "family",
-        "decision",
-        "incident",
-        "assumption",
-        "limitation",
-        "failure_mode",
-        "scenario",
-        "diagnostic",
-        "term",
-    }
-)
 
 _SLUG_WORDS: Final = 6
 
@@ -190,10 +183,14 @@ class Authoring(RepointRowAuthoring):
     # The leaf's recorded memory base for a fresh card comparison.
     memory_base: str | None = None
     coordination_root: Path | None = None
+    # The stamp of this operation's caller, resolved once by the write's route.
+    stamp: WriterStamp | None = None
 
     # -- the operation ------------------------------------------------------------------------
 
     def run(self, document: HandoffDocument) -> None:
+        if self.stamp is None:
+            self.stamp = unresolved_stamp(self.owner)
         self._taken = self.state.known_ids()
         self._assign_ids(document)
         restore_refreshes(self)
@@ -312,8 +309,13 @@ class Authoring(RepointRowAuthoring):
         handoff_entry: str,
     ) -> None:
         record_id = str(document["id"])
-        revision = self._revision(record_id, document, before)
-        document["revision"] = revision
+        step = revision_step(self.state, record_id, document, before, self.problem)
+        revision = document["revision"] = step.revision
+        writer = self.stamp or unresolved_stamp(self.owner)
+        stamp_record(document, before, step, writer)
+        closed = record_written_revision(self.state, self.owner, record_id, step, document)
+        if closed is not None:
+            self.problem(*closed)
         path = self.state.put_record(kind, record_id, slug, document)
         action: Action = (
             "created"
@@ -323,33 +325,8 @@ class Authoring(RepointRowAuthoring):
             else "updated"
         )
         self.records.append(RecordOutcome(kind, record_id, path, action, revision, handoff_entry))
-
-    def _revision(
-        self, record_id: str, document: Mapping[str, Any], before: Mapping[str, Any] | None
-    ) -> int:
-        """The record's revision after this operation.
-
-        A record a merge left unmerged (both sides changed it, MIK-R24 rule 8 step 4) is resolved
-        at one more than the higher side's revision. Otherwise the base's revision, incremented once
-        when the meaning changed; 1 for a record new to the base.
-        """
-
-        try:
-            merged = self.state.merged_sides_revision(record_id)
-        except MergeStageError as error:
-            self.problem(f"record {record_id}", str(error))
-            merged = None
-        if merged is not None:
-            return merged + 1
-        reference = self.state.base_record(record_id)
-        if reference is None and self.state.base is None:
-            reference = before
-        if reference is None:
-            return 1
-        base_revision = reference.get("revision")
-        return (base_revision if isinstance(base_revision, int) else 1) + (
-            0 if canonical_equal(meaning(reference), meaning(document)) else 1
-        )
+        if kind == "invariant" and action == "updated" and (note := untitled_note(document)):
+            self.notes.append(note)
 
     def _write_entry(self, entry: EntryRequest) -> tuple[CitedTest, ...]:
         invariant_id = self.handles.get(entry.entry_id)
@@ -388,7 +365,7 @@ class Authoring(RepointRowAuthoring):
     ) -> bool:
         """MIK-R10: a change is never attached to a retired invariant; the refusal is named."""
 
-        if entry.invariant_id is None or not entry.targets or document["status"] != "retired":
+        if entry.invariant_id is None or not entry.targets or document.get("status") != "retired":
             return False
         self.problem(
             f"entry {entry.entry_id}",
@@ -414,13 +391,16 @@ class Authoring(RepointRowAuthoring):
             }
         )
         document["statement"] = entry.statement
+        if entry.title is not None:
+            document["title"] = entry.title
         if entry.scope is not None:
             document["applicability"] = entry.scope.applicability
             document["conditions"] = list(entry.scope.conditions)
             document["exclusions"] = list(entry.scope.exclusions)
         if entry.admission is not None:
             document["admission"] = entry.admission
-        document["status"] = entry.status or document.get("status") or "proposed"
+        if entry.status is not None:
+            document["status"] = entry.status
         if entry.supersedes:
             resolved = [self.resolve_id(one, f"entry {entry.entry_id}") for one in entry.supersedes]
             document["supersedes"] = list(dict.fromkeys(one for one in resolved if one))
@@ -452,8 +432,8 @@ class Authoring(RepointRowAuthoring):
             else {"schema": schema_name(request.kind), "id": record_id}
         )
         document.update(fields)
-        if request.kind in _STATUS_KINDS and "status" not in document:
-            document["status"] = "active" if request.kind == "decision" else "proposed"
+        if request.kind == "decision" and "status" not in document:
+            document["status"] = "active"
         if request.kind == "weakness":
             author_weakness(self, document, where, before)
         elif request.kind == "dependent":
