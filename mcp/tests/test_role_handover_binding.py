@@ -74,8 +74,18 @@ def _check_projection(
     assert projection[PROJECTION_FILE_FIELD]["path"] == (
         Path(prepared["taskReportPath"]).with_suffix(".handover.json").as_posix()
     )
-    for absent in ("capsule", "contextPacket", "ownerHandover", "taskDocumentDigest"):
+    for absent in (
+        "assignment",
+        "canonicalTaskReportPath",
+        "capsule",
+        "contextPacket",
+        "ownerHandover",
+        "taskDocumentDigest",
+    ):
         assert absent not in projection
+    assert "ownerRelation" not in projection["host"]
+    assert "developerQuestions" not in projection["host"]
+    assert "developerQuestionRoute" in projection["host"]
     for name in ("documents", "leafSeats"):
         assert (name in projection) is (name in kept)
 
@@ -357,15 +367,13 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
                     # The handover names the one server to use for AR tools, and no other.
                     self.assertEqual(handover["host"]["arToolServer"], "agents-remember-task")
                     for sentence in (
-                        "Call every Agents Remember tool on the tool server named "
-                        "agents-remember-task",
-                        "Do not connect to, list, describe or call a tool server named "
-                        "agents-remember or any of its tools, nor an AR tool server under any "
-                        "other name: it belongs to another installation, its tools carry the "
-                        "same tool names, and nothing found there serves this assignment.",
-                        "After a start or a resume a tool server can take some seconds to "
-                        "appear: look once more before reporting agents-remember-task missing, "
-                        "and report that instead of substituting another.",
+                        "Use agents-remember-task (agents_remember_task): "
+                        "direct mcp__agents_remember_task__server_info or "
+                        "mcp__agents_remember_task search/script; "
+                        "ignore proxies without it, other install.",
+                        "Never use agents-remember or any other AR tool server name: "
+                        "it belongs to another installation with the same tool names.",
+                        "Retry once after start/resume if agents-remember-task is missing.",
                     ):
                         self.assertIn(sentence, handover["host"]["arMcpUsage"])
                     self.assertNotIn("existing shared", prepared["prompt"])
@@ -374,6 +382,9 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
                     self.assertIsNone(handover["host"]["parent"])
                     self.assertIn("needs none", handover["host"]["ownerRelation"])
                     self.assertIn("in your own chat", handover["host"]["developerQuestions"])
+                    self.assertEqual(
+                        handover["host"]["developerQuestionRoute"], {"mode": "own-chat"}
+                    )
                     self.assertTrue(canonical_report.is_relative_to(task_reports.resolve()))
                     self.assertEqual(len(documents), 3)
                     documents_by_ref = {
@@ -528,10 +539,18 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
             handover["capsule"]["binding"]["taskPath"],
             "free-agent:architect",
         )
-        self.assertEqual(handover["capsule"]["binding"]["role"], "architect")
-        self.assertEqual(handover["capsule"]["binding"]["operation"], "planning")
+        self.assertEqual(
+            (handover["capsule"]["binding"]["role"], handover["capsule"]["binding"]["operation"]),
+            ("architect", "planning"),
+        )
         self.assertTrue(
-            prepared["prompt"].startswith("AR ROLE BRIEF: the dashboard launcher started this role")
+            prepared["prompt"].startswith(
+                "AR ROLE BRIEF: The following effective instructions and canonical handover"
+            )
+        )
+        self.assertIn(
+            "\n\n## Launch Context\n\nStarted by: the dashboard launcher.\n\n",
+            prepared["prompt"],
         )
         self.assertEqual(forbidden_in(prepared["prompt"]), [])
         source = handover["host"]["instructionSource"]

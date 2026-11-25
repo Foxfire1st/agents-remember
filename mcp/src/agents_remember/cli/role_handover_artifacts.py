@@ -3,7 +3,7 @@
 Every launch stores the compiled capsule and handover in one file beside the report the agent is
 told to write. The file is never changed: it is created read-only, the same request reuses it, and
 different content for the same request is refused. The message an agent actually receives is that
-content preceded by one line that names the file and its SHA-256, so an agent that no longer has
+content followed by one line that names the file and its SHA-256, so an agent that no longer has
 its assignment in context can read it again.
 """
 
@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agents_remember.cli.immutable_artifact import (
     MAX_ARTIFACT_BYTES,
@@ -26,7 +26,10 @@ from agents_remember.cli.immutable_artifact import (
 from agents_remember.cli.immutable_artifact import (
     write_once as _write_once,
 )
-from agents_remember.cli.role_handover_file import handover_file_line
+from agents_remember.cli.role_handover_file import (
+    handover_envelope_candidates,
+    handover_file_line,
+)
 from agents_remember.errors import AgentsRememberError
 from agents_remember.models.role_capsules.types import CapsuleDetailReference
 from agents_remember.worktrees.role_handover_locator import ensure_locator, is_locator
@@ -218,13 +221,29 @@ def _write_takeover(path: Path, body: bytes) -> None:
 
 
 def artifact_line(reference: dict[str, Any], handover_file: dict[str, Any] | None = None) -> str:
-    """The one line that precedes the compiled content in the message an agent receives.
+    """The trailing locator line appended to the compiled content in the message an agent receives.
 
-    A launch of this leaf names both files: the text that holds the message below the line, and
-    the JSON that holds the complete hand-over object (MIK-R193 rule 3). A receipt without that
-    reference — a seat started before this leaf — keeps today's one-file text, so that the
-    restore's comparison of an unchanged message still holds.
+    Launches with a complete hand-over file name both files; single-file launches name only the
+    handover text artifact.
     """
+
+    if handover_file is None:
+        return (
+            f"AR handover artifact: {reference['path']} (SHA-256 {reference['sha256']}). It holds "
+            "the launch handover above this line; read that file again whenever your assignment is "
+            "no longer in your context."
+        )
+    return (
+        f"AR handover artifacts: {reference['path']} (SHA-256 {reference['sha256']}) holds "
+        f"the launch handover above this line; {handover_file_line(handover_file)} holds the "
+        "complete hand-over. Read them again whenever your assignment is no longer in context."
+    )
+
+
+def legacy_prefix_artifact_line(
+    reference: dict[str, Any], handover_file: dict[str, Any] | None = None
+) -> str:
+    """The legacy leading locator line used by receipts written before suffix placement."""
 
     if handover_file is None:
         return (
@@ -244,9 +263,36 @@ def first_message(
     content: str,
     handover_file: dict[str, Any] | None = None,
 ) -> str:
-    """The message sent to the agent: the artifact line, then the content exactly as stored."""
+    """The message sent to the agent: the compiled content, followed by its artifact line."""
 
-    return f"{artifact_line(reference, handover_file)}\n{content}"
+    return f"{content}\n{artifact_line(reference, handover_file)}"
+
+
+def resolve_handover_envelope(
+    message: str,
+    artifact_ref: dict[str, Any],
+    handover_file_ref: dict[str, Any] | None = None,
+) -> tuple[Literal["suffix", "prefix"], str, str]:
+    """Resolve the single verified ``(position, locator_line, content)`` split of ``message``."""
+
+    candidates = handover_envelope_candidates(message)
+    suffix_line = artifact_line(artifact_ref, handover_file_ref)
+    prefix_line = legacy_prefix_artifact_line(artifact_ref, handover_file_ref)
+    matches: list[tuple[Literal["suffix", "prefix"], str, str]] = []
+    for position, line, content in candidates:
+        expected = suffix_line if position == "suffix" else prefix_line
+        if (
+            line == expected
+            and hashlib.sha256(content.encode("utf-8")).hexdigest() == artifact_ref["sha256"]
+        ):
+            matches.append((position, line, content))
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ValueError("The saved first message does not match its handover artifact reference.")
+    raise ValueError(
+        "The saved first message matches multiple handover artifact boundaries ambiguously."
+    )
 
 
 def restore_handover_artifact(
@@ -292,14 +338,8 @@ def checked_handover_artifact_target(
             f"{', '.join(missing)}, so the saved first message cannot be checked against its "
             "file and nothing was sent. Put the reference back as the launch wrote it and retry."
         )
-    line, separator, content = message.partition("\n")
+    _position, _line, content = resolve_handover_envelope(message, reference, handover_file)
     body = content.encode("utf-8")
-    if (
-        not separator
-        or line != artifact_line(reference, handover_file)
-        or hashlib.sha256(body).hexdigest() != reference["sha256"]
-    ):
-        raise ValueError("The saved first message does not match its handover artifact reference.")
     given = Path(reference["path"])
     canonical = _canonical(given)
     if canonical.as_posix() != reference["canonicalPath"] and is_locator(given.parent):

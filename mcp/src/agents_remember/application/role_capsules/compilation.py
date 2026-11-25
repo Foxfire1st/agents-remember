@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agents_remember.application.role_capsules.shared_block import filter_shared_block
 from agents_remember.application.role_capsules.sources import (
     CapsuleAdmissionRequest,
     admit_capsule_sources,
@@ -38,6 +39,7 @@ from agents_remember.models.role_capsules.types import (
     CapsuleCapsule,
     CapsuleCompilationResult,
     CapsuleDigest,
+    CapsuleRoleSeat,
     CapsuleTaskProjectionSource,
 )
 
@@ -129,6 +131,8 @@ def compile_admitted_capsule(
             manifest=_failure_manifest(parsed, binding, error),
             error=error,
         )
+    if shared_block is not None and isinstance(binding.admitted.seat, CapsuleRoleSeat):
+        shared_block = filter_shared_block(shared_block, binding.admitted.seat.role)
     return CapsuleCompilationOutcome(
         result=result, manifest=result.manifest, error=None, shared_block=shared_block
     )

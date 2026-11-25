@@ -88,6 +88,15 @@ class FirstMessageMatrixTests(FirstMessageMatrixBase):
                     self.release(receipt)
                     self.assertNotIn(f"## {SHARED_BLOCK_HEADING}\n\n", message)
                     self.assertIn(title, message)
+                    if kind == "task-bound":
+                        self.assertIn(
+                            "skills/l-01-agent-lifecycles/reference/refused-write.md",
+                            message,
+                        )
+                        self.assertIn(
+                            "never keep a blanket ban on writing it by hand",
+                            message,
+                        )
 
     @contextmanager
     def composition_corpus(self, block: str | None) -> Iterator[None]:

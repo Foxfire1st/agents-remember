@@ -7,6 +7,7 @@ from hashlib import sha256
 from pathlib import Path
 
 import pytest
+from agents_remember.application.role_capsules.shared_block import filter_shared_block
 from agents_remember.application.skill_resources.provider import shipped_composition_corpus
 from agents_remember.cli.role_brief_message import shared_block
 from agents_remember.cli.role_instruction_details import compose_launch_instructions
@@ -607,18 +608,19 @@ def test_moved_piece_pointers_reach_each_required_compile_and_reject_removal() -
             assert outcome.result is not None
             result = outcome.result
             assert outcome.shared_block is not None
-            assert outcome.shared_block == shared
-            assert shared_block(outcome.shared_block).count(shared) == 1
+            expected_shared = filter_shared_block(shared, role)
+            assert outcome.shared_block == expected_shared
+            assert shared_block(outcome.shared_block).count(expected_shared) == 1
             rendered = result.render_instructions()
             source = next(
                 record for record in result.manifest.sources if record.path == "core/every-role.md"
             )
             assert source.revision == "sha256:" + sha256(shared.encode()).hexdigest()
             # The shared body is delivered separately, not injected into render_instructions.
-            _assert_moved_action_pointer(shared, SETTINGS_AUTHORITY_POINTER)
+            _assert_moved_action_pointer(outcome.shared_block, SETTINGS_AUTHORITY_POINTER)
             with pytest.raises(AssertionError):
                 _assert_moved_action_pointer(
-                    shared.replace(SETTINGS_AUTHORITY_POINTER, "", 1),
+                    outcome.shared_block.replace(SETTINGS_AUTHORITY_POINTER, "", 1),
                     SETTINGS_AUTHORITY_POINTER,
                 )
             if role in MOVED_ACTION_POINTERS:
@@ -1017,8 +1019,9 @@ def test_retirement_shared_source_and_delivered_detail_preserve_stops(role, tmp_
     for operation in (operations[role],):
         outcome = _compiled_outcome(role, operation)
         assert outcome.result is not None
-        assert outcome.shared_block == shared
-        assert shared_block(outcome.shared_block).count(shared) == 1
+        expected_shared = filter_shared_block(shared, role)
+        assert outcome.shared_block == expected_shared
+        assert shared_block(outcome.shared_block).count(expected_shared) == 1
         result = outcome.result
         assert outcome.shared_block is not None
         _assert_shared_retirement_boundary(
@@ -1105,8 +1108,9 @@ def test_short_rules_use_shared_delivery_and_reject_removed_step_reads() -> None
             outcome = _compiled_outcome(role, operation)
             assert outcome.result is not None
             assert outcome.shared_block is not None
-            assert outcome.shared_block == shared
-            assert shared_block(outcome.shared_block).count(shared) == 1
+            expected_shared = filter_shared_block(shared, role)
+            assert outcome.shared_block == expected_shared
+            assert shared_block(outcome.shared_block).count(expected_shared) == 1
             source = next(
                 record
                 for record in outcome.result.manifest.sources
@@ -1124,13 +1128,16 @@ def test_short_rules_use_shared_delivery_and_reject_removed_step_reads() -> None
                 assert sha256(core.encode()).hexdigest() == unit["sha256"], f"Run {RENEW_COMMAND}"
                 for clause in clauses:
                     assert clause in core
-                _assert_short_shared_rule(outcome.shared_block, line)
-                for mutant in (
-                    outcome.shared_block.replace(line, "", 1),
-                    outcome.shared_block + "\n" + line,
-                ):
-                    with pytest.raises(AssertionError):
-                        _assert_short_shared_rule(mutant, line)
+                if role in roles:
+                    _assert_short_shared_rule(outcome.shared_block, line)
+                    for mutant in (
+                        outcome.shared_block.replace(line, "", 1),
+                        outcome.shared_block + "\n" + line,
+                    ):
+                        with pytest.raises(AssertionError):
+                            _assert_short_shared_rule(mutant, line)
+                else:
+                    assert line not in outcome.shared_block
             rendered = outcome.result.render_instructions()
             for actor, _source, action in REMOVED_SHORT_RULE_ACTIONS:
                 if actor == role:

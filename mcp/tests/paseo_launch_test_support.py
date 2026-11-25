@@ -282,11 +282,11 @@ class GivenToAgentExpectations(unittest.TestCase):
         return {"path": path, "canonicalPath": path, "sha256": sha, "bytes": len(content)}, content
 
     def first_message(self, request: RoleDispatchRequest) -> str:
-        """What the agent of ``request`` receives: the artifact line, then its content."""
+        """What the agent of ``request`` receives: its content, then the suffix artifact line."""
 
         artifact = self.artifact(request)
         handover_file, _content = self.planned_handover(request)
-        return f"{artifact_line(artifact, handover_file)}\n{self.prompt}"
+        return f"{self.prompt}\n{artifact_line(artifact, handover_file)}"
 
     def watch_launch(self, path: Path, observed: list[tuple[str, Any, Any, bool]]) -> None:
         """At every runtime call of a launch, record the receipt on disk and whether its artifact is."""

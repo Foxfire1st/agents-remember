@@ -27,7 +27,10 @@ from typing import Any
 
 import test_paseo_launch as launch
 from agents_remember.cli import role_launch_receipts
-from agents_remember.cli.role_handover_artifacts import checked_handover_artifact_target
+from agents_remember.cli.role_handover_artifacts import (
+    checked_handover_artifact_target,
+    resolve_handover_envelope,
+)
 from agents_remember.models.role_launcher import RoleDispatchRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.acp_providers import (
@@ -115,12 +118,18 @@ class AcpInstructionLaunchTests(launch.PaseoLaunchTestCase):
 
         self.assertEqual(stored, f"{self.prompt}\n\n{ACP_WAIT_INSTRUCTION}")
         # The reference's digest was taken after the sentence joined the message, and the message
-        # the agent is given is the artifact line followed by exactly those bytes.
+        # the agent is given is those exact bytes followed by the trailing artifact line.
         self.assertEqual(
             receipt["handoverArtifact"]["sha256"],
             hashlib.sha256(stored.encode("utf-8")).hexdigest(),
         )
-        self.assertEqual(saved["replayRequest"]["agent"]["prompt"].split("\n", 1)[1], stored)
+        position, _line, body = resolve_handover_envelope(
+            saved["replayRequest"]["agent"]["prompt"],
+            receipt["handoverArtifact"],
+            receipt["handoverFile"],
+        )
+        self.assertEqual(position, "suffix")
+        self.assertEqual(body, stored)
         self.assertEqual(
             saved["acpInstruction"],
             {"provider": "codex", "acp": True, "instruction": "added"},

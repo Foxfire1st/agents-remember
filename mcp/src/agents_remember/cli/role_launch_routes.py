@@ -105,6 +105,13 @@ from agents_remember.cli.role_launch_request_rules import (
     missing_copies_receipt_warning,
     with_caller_harness,
 )
+from agents_remember.cli.role_opening_offload import (
+    preflight_opening_message_artifact,
+    prepare_direct_opening_message,
+    resolve_role_message_limit,
+    selection_repo_id,
+    write_opening_message_artifact,
+)
 from agents_remember.cli.role_report import register_role_report_route
 from agents_remember.cli.role_start_execution import start_execution
 from agents_remember.cli.role_step_up_runtime import (
@@ -593,10 +600,17 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
     # A successor names the earlier agent's report paths, so that it takes over from what is
     # written (MIK-R100 rule 9).
     prompt = successor_prompt(start, prompt)
+    opening_artifact: dict[str, Any] | None = None
     if start.opening_message and not start.held:
         # First work carried with the start (MIK-R100 rule 3): the seat opens at once
         # with its handover and that message.
-        prompt = f"{prompt}\n{start.opening_message}"
+        limit = resolve_role_message_limit(start.config, repo_id=selection_repo_id(start.binding))
+        bounded_opening, opening_artifact = prepare_direct_opening_message(
+            prepared["taskReportPath"], start.opening_message, limit=limit
+        )
+        if opening_artifact is not None:
+            preflight_opening_message_artifact(opening_artifact)
+        prompt = f"{prompt}\n{bounded_opening}"
     # MIK-R216 rule 3: a seat on an ACP connection is told at launch how to wait for its own
     # helpers, and the sentence joins the message that is stored below, so the saved first
     # message already carries it. Nothing else about the launch changes: the capsule, the
@@ -613,6 +627,8 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         expected=prepared["handoverFile"],
         request_id=str(request.request_id),
     )
+    if opening_artifact is not None:
+        write_opening_message_artifact(opening_artifact)
     launch_call = build_launch_call(
         RoleLaunch(
             agent_id=agent_id,
@@ -699,6 +715,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         "handoverArtifact": artifact,
         "handoverFile": {**handover_file, "content": prepared["handoverFileContent"]},
         "stepUpArtifact": prepared.get("stepUpArtifact"),
+        **({"openingMessageArtifact": opening_artifact} if opening_artifact is not None else {}),
         # A held seat keeps its opening handover for its first message (MIK-R100 rules 2/4).
         **(
             {

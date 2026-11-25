@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agents_remember.application.role_capsules.compilation import compile_admitted_capsule
+from agents_remember.application.role_capsules.shared_block import filter_shared_block
 from agents_remember.application.skill_resources.capsule import (
     CapsuleSeatAddress,
     routed_admission_for,
@@ -28,7 +29,12 @@ from .artifacts import json_digest, sha256_file
 
 
 def _captured_origins(
-    result: CapsuleCompilationResult, shared: str, shared_block: str | None
+    result: CapsuleCompilationResult,
+    shared: str,
+    shared_block: str | None,
+    *,
+    corpus_root: Path,
+    role: str,
 ) -> list[dict]:
     """Retain the compiled source spans and the admitted shared digest's own source."""
     origins = []
@@ -36,10 +42,15 @@ def _captured_origins(
         sources = [
             source for source in result.manifest.sources if source.identity == "core:every-role"
         ]
+        if len(sources) != 1 or shared_block is None:
+            raise AuthorityError(
+                "captured shared instruction prefix has ambiguous source provenance"
+            )
+        source_bytes = (corpus_root / sources[0].path).read_bytes()
+        expected_shared = filter_shared_block(source_bytes.decode("utf-8"), role)
         if (
-            len(sources) != 1
-            or shared_block is None
-            or sources[0].revision != compute_content_digest(shared_block.encode())
+            sources[0].revision != compute_content_digest(source_bytes)
+            or shared_block != expected_shared
         ):
             raise AuthorityError(
                 "captured shared instruction prefix has ambiguous source provenance"
@@ -92,7 +103,9 @@ def capture_curator_text(code: Path) -> dict:
         )
         entries[operation] = {
             "instructions": shared + result.render_instructions(),
-            "instructionOrigins": _captured_origins(result, shared, outcome.shared_block),
+            "instructionOrigins": _captured_origins(
+                result, shared, outcome.shared_block, corpus_root=root, role="curator"
+            ),
             "semanticDigest": str(result.semantic_digest),
             "details": [
                 {

@@ -744,7 +744,7 @@ class InstructionFileWordingTests(unittest.TestCase):
             "Wait a few seconds and look once more before reporting it missing.", orientation
         )
         self.assertIn(
-            "take some seconds to appear: look once more before reporting agents-remember-task missing",
+            "Retry once after start/resume if agents-remember-task is missing.",
             _AR_TOOL_SERVER_USAGE_TAIL,
         )
 

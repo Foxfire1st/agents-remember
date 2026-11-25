@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from agents_remember.application.role_capsules.compilation import compile_admitted_capsule
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
+from agents_remember.application.role_capsules.shared_block import filter_shared_block
 from agents_remember.application.role_capsules.sources import (
     CapsuleAdmissionRequest,
     admit_capsule_sources,
@@ -638,13 +639,17 @@ def test_structured_shared_digest_is_delivered_once_and_seals_each_role() -> Non
             binding = _shipped_binding(role, operation)
             outcome = compile_admitted_capsule(binding, request)
             assert outcome.ok and outcome.result is not None, (role, operation)
-            assert outcome.shared_block == text
-            if role in {"worker", "reviewer", "curator"}:
-                assert outcome.shared_block is not None
-                assert outcome.shared_block.count(archive_rule) == 1, (role, operation)
-                assert outcome.shared_block.count(evidence_rule) == 1, (role, operation)
+            expected_shared = filter_shared_block(text, role)
+            assert outcome.shared_block == expected_shared
+            assert outcome.shared_block is not None
+            assert outcome.shared_block.count(archive_rule) == int(
+                role in {"worker", "reviewer", "curator"}
+            ), (role, operation)
+            assert outcome.shared_block.count(evidence_rule) == int(
+                role in {"worker", "reviewer"}
+            ), (role, operation)
             rendered = shared_block(outcome.shared_block) + outcome.result.render_instructions()
-            assert rendered.count(text) == 1
+            assert rendered.count(expected_shared) == 1
             assert not any(
                 block.identity == "core:every-role" for block in outcome.result.capsule.instructions
             )

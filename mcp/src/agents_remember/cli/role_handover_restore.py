@@ -22,6 +22,7 @@ from agents_remember.cli.role_handover_artifacts import (
     artifact_refusal,
     checked_handover_artifact_target,
     checked_step_up_target,
+    resolve_handover_envelope,
     restore_handover_artifact,
     restore_step_up_artifact,
     takeover_refusal,
@@ -32,6 +33,18 @@ from agents_remember.cli.role_handover_file import (
     restore_handover_file,
 )
 from agents_remember.cli.role_instruction_details import validate_instruction_detail_artifacts
+from agents_remember.cli.role_opening_offload import (
+    checked_opening_message_target,
+    opening_message_refusal,
+    restore_opening_message_artifact,
+)
+
+__all__ = [
+    "HandoverFileRefusal",
+    "resolve_handover_envelope",
+    "restore_launch_files",
+    "saved_handover_file",
+]
 
 
 class HandoverFileRefusal(ValueError):
@@ -61,6 +74,7 @@ def restore_launch_files(receipt_path: Path, receipt: dict[str, Any], message: s
             handover_file=handover_file,
         )
         step_up_target = checked_step_up_target(receipt, message, receipt=receipt_path)
+        opening_target = checked_opening_message_target(receipt, message, receipt=receipt_path)
     except HandoverFileRefusal:
         raise
     except ValueError as error:
@@ -71,6 +85,8 @@ def restore_launch_files(receipt_path: Path, receipt: dict[str, Any], message: s
         preflight(*step_up_target, takeover_refusal(step_up_target[0]))
     if file_target is not None:
         preflight(*file_target, handover_file_refusal(file_target[0]))
+    if opening_target is not None:
+        preflight(*opening_target, opening_message_refusal(opening_target[0]))
     validate_instruction_detail_artifacts(receipt)
     restore_handover_artifact(
         artifact if isinstance(artifact, dict) else {},
@@ -81,6 +97,7 @@ def restore_launch_files(receipt_path: Path, receipt: dict[str, Any], message: s
     restore_step_up_artifact(receipt, message, receipt=receipt_path)
     if handover_file is not None:
         restore_handover_file(handover_file, message, receipt=receipt_path)
+    restore_opening_message_artifact(receipt, message, receipt=receipt_path)
 
 
 def saved_handover_file(receipt: dict[str, Any], path: Path) -> dict[str, Any] | None:

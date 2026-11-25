@@ -26,6 +26,7 @@ import unittest
 from pathlib import Path
 from typing import Any, cast
 
+from agents_remember.application.role_capsules.shared_block import filter_shared_block
 from agents_remember.errors import CapsuleManifestError
 from agents_remember.models.role_capsules.types import CapsuleOperation, CapsuleRole
 from agents_remember_test_support.testing.capsule_wording import (
@@ -298,14 +299,20 @@ def assert_held_shared_delivery(root: Path) -> None:
     """Verify every messaging role's actual shared compiler stream without a detail read."""
     source = (root / "core/authority.md").read_text()
     assert " ".join(HELD_DELIVERY_CLAUSES) in source
+    raw_shared = (root / "core/every-role.md").read_text()
     seen = set()
     for delivery in compile_matrix(root):
         if delivery.role not in COMPILED_ROLES:
             assert delivery.role == "bootstrap"
+            assert delivery.shared_block is not None
+            assert delivery.shared_block == filter_shared_block(raw_shared, delivery.role)
+            assert (
+                HELD_DELIVERY_PREFIX + " ".join(HELD_DELIVERY_CLAUSES) not in delivery.shared_block
+            )
             continue
         shared = delivery.shared_block
         assert shared is not None
-        assert shared == (root / "core/every-role.md").read_text()
+        assert shared == filter_shared_block(raw_shared, delivery.role)
         _assert_held_shared_line(shared)
         assert "#handle-held-delivery" not in delivery.result.render_instructions()
         for clause in HELD_DELIVERY_CLAUSES:

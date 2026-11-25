@@ -27,9 +27,8 @@ from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
     selection_binding,
 )
-from agents_remember.application.task_scoped_mcp import (
-    task_scoped_mcp_config_for_reader,
-)
+from agents_remember.application.skill_resources.provider import durable_composition_corpus_root
+from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_reader
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import (
     launcher_options,
@@ -43,7 +42,11 @@ from agents_remember.cli.paseo_launch import (
     native_antigravity_role_start_refusal,
 )
 from agents_remember.cli.role_brief_message import BriefParts, brief_prompt
-from agents_remember.cli.role_instruction_details import compose_launch_instructions
+from agents_remember.cli.role_instruction_details import (
+    compose_launch_instructions,
+    nested_detail_root,
+)
+from agents_remember.cli.role_instruction_links import compact_skill_uri_links
 from agents_remember.cli.role_instructions import (
     instruction_metadata,
     launch_choice_metadata,
@@ -77,6 +80,7 @@ from agents_remember.models.role_launcher import (
     RoleSelection,
 )
 from agents_remember.models.task_document_ref import TaskScopedReaderContext
+from agents_remember.serving.capsule_delivery import CapsuleDelivery
 from agents_remember.serving.launch_capsule import LaunchCapsule, LaunchCapsuleRequest
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.worktrees.task_document_copies import prepare_task_document_copies
@@ -103,53 +107,26 @@ OTHER_INSTALLATION_TOOL_SERVER = "agents-remember"
 _UNDERSCORED_TOOL_SERVER = TOOL_SERVER_NAME.replace("-", "_")
 _PREFIXED_TOOL_SERVER = f"mcp__{_UNDERSCORED_TOOL_SERVER}"
 _PREFIXED_TOOL_EXAMPLE = f"{_PREFIXED_TOOL_SERVER}__server_info"
-# Where a launched agent finds its AR tools. The first message says it twice: in plain text
-# before the capsule, and as host.arMcpUsage of the handover. It names no harness and no
-# harness's tool: every harness shows a tool server's tools in its own way.
+# Where a launched agent finds AR tools (plain text before the capsule and host.arMcpUsage).
 _AR_TOOL_SERVER_USAGE_HEAD = (
-    f"Call every Agents Remember tool on the tool server named {TOOL_SERVER_NAME}: the AR build "
-    "that launched this agent started it for this agent, and its tools are in this session. A "
-    "harness shows them in its own way, so find them by the server's name in either spelling, "
-    f"{TOOL_SERVER_NAME} or {_UNDERSCORED_TOOL_SERVER}. Either a tool is declared to you under a "
-    "name that contains that spelling and ends in the tool's own name, for example "
-    f"{_PREFIXED_TOOL_EXAMPLE}: call it. Or your harness's own instructions to you list a server "
-    f"or namespace in that spelling, for example {_PREFIXED_TOOL_SERVER}, and say how its tools "
-    "are reached, for example through the harness's tool search or its script tool: reach them "
-    "that way, and learn a tool's arguments there too. A tool that lists, describes, connects "
-    "or proxies tool servers holds only the servers it was configured with. When it does not "
-    f"list {TOOL_SERVER_NAME} itself, do not use it for AR tools at all, not even to search for "
-    "or describe a tool by its name: what it answers then comes from another installation, and "
-    'its answer "server not found" speaks only for that tool. '
+    f"Use {TOOL_SERVER_NAME} ({_UNDERSCORED_TOOL_SERVER}): "
+    f"direct {_PREFIXED_TOOL_EXAMPLE} or {_PREFIXED_TOOL_SERVER} search/script; "
+    "ignore proxies without it, other install. "
 )
-# The server-choice sentence (MIK-R112 rule 6, last line; MIK-R132 rule 5). It stays in what
-# an agent reads unless its launch hands the host what keeps the other server out.
 _AR_OTHER_SERVER_CHOICE = (
-    "Do not connect to, list, describe or call a tool server named "
-    f"{OTHER_INSTALLATION_TOOL_SERVER} or any of its tools, nor an AR tool server under any "
-    "other name: it belongs to another installation, its tools carry the same tool names, and "
-    "nothing found there serves this assignment. "
+    f"Never use {OTHER_INSTALLATION_TOOL_SERVER} or any other AR tool server name: "
+    "it belongs to another installation with the same tool names. "
 )
-# Every hand-over says where the briefs lie, that a file's brief is opened before the file is
-# edited, and what a file without a brief means.
 BRIEFS_SENTENCES = (
-    "Before editing a source file, open its saved brief when available at briefs/<path in the "
-    "repository>.md under the memory root with your own file tool (source brief folders have "
-    "INDEX.md and briefs/_task/ has no index). When current memory finds neither a card nor a "
-    "qualifying brief for a file it can assess, no rule, weakness, decision or standing "
-    "document is recorded there."
+    "Before edits, open memory briefs/<path in the repository>.md; "
+    "folders INDEX.md, briefs/_task/ none; no card/brief: no recorded rule, "
+    "weakness, decision or standing document."
 )
 _AR_TOOL_SERVER_USAGE_TAIL = (
-    "After a start or a resume a tool server can "
-    f"take some seconds to appear: look once more before reporting {TOOL_SERVER_NAME} missing, "
-    "and report that instead of substituting another. For a leaf, pass the exact "
-    "arMcpContext.readerArguments. Add the requested files to read_ar_files as a list of path "
-    'strings such as "<path in the repository>". A compact row gives its path and, where '
-    "applicable, whether it exists, its card's status and the path of its brief with saved "
-    "freshness. Fuller replies can include rule text. A covering write renews a missing or "
-    "older brief when the writer can refresh it. Read source files with your own file tool. "
-    f"{BRIEFS_SENTENCES} If either tool "
-    "schema lacks the declared task_context fields, stop and report the missing AR reader "
-    "capability; do not drop task_context or substitute another root."
+    f"Retry once after start/resume if {TOOL_SERVER_NAME} is missing. "
+    "Exact arMcpContext.readerArguments; read_ar_files takes path strings "
+    "(compact=status/brief, fuller=rules). Read source via file tool. "
+    f"{BRIEFS_SENTENCES} Missing schema task_context: stop/report; never drop/substitute root."
 )
 # MIK-R193 rule 11: the one constant every role's first message carries. Another role's work is
 # a role_start, never a helper; a harness without sub-agents is one of the named exceptions.
@@ -342,6 +319,8 @@ def _task_document_read_metadata(
     context: RoleLaunchContext,
     workspace: dict[str, str],
     task_reads: list[dict[str, Any]],
+    *,
+    shared_block: str | None = None,
 ) -> tuple[dict[str, Any], str]:
     own_document = context.effective_task
     own_ref = own_document.ref.model_dump(mode="json") if own_document is not None else None
@@ -374,10 +353,21 @@ def _task_document_read_metadata(
         else "inside-working-folder",
         **_task_document_copy_lists(workspace),
     }
+    has_shared_recovery = (
+        shared_block is not None
+        and "refused-write.md" in shared_block
+        and "never keep a blanket ban on writing it by hand" in shared_block
+    )
+    suffix = (
+        ". Use task_doc first; the owner's next publication refreshes renders/projections "
+        "and rendered copies are never parsed back."
+        if has_shared_recovery
+        else ". Use task_doc first. A correct-input refusal of a covered write (task_doc edits (including an admitted task retirement or folder movement), knowledge_write, citation_fix, citation_note_revision and curator_coherence publication) follows the same-tool/input-class ladder in skills/l-01-agent-lifecycles/reference/refused-write.md before applying a stop. If no admitted route works, record the refusal, tell the owner, then make that write openly by hand and log it; never keep a blanket ban on writing it by hand. The owner's next publication refreshes renders/projections; rendered copies are never parsed back. Read/check/validation/sync refusals, starts, other product guards and commit gates retain stops."
+    )
     first_read = (
         "Read this rendered task document first with your harness's own file tools: "
         + ", ".join(primary_files)
-        + ". Use task_doc first. A correct-input refusal of a covered write (task_doc edits (including an admitted task retirement or folder movement), knowledge_write, citation_fix, citation_note_revision and curator_coherence publication) follows the same-tool/input-class ladder in skills/l-01-agent-lifecycles/reference/refused-write.md before applying a stop. If no admitted route works, record the refusal, tell the owner, then make that write openly by hand and log it; never keep a blanket ban on writing it by hand. The owner's next publication refreshes renders/projections; rendered copies are never parsed back. Read/check/validation/sync refusals, starts, other product guards and commit gates retain stops."
+        + suffix
         if primary_files
         else "This taskless role has no task document to read."
     )
@@ -569,26 +559,41 @@ def _prepare_role_folders(
     workspace["scratchRoot"] = scratch.as_posix()
 
 
+def _compose_compact_instructions(
+    request: RoleHandoverRequest,
+    delivery: CapsuleDelivery,
+    report_path: str,
+) -> tuple[str, dict[str, Any], str]:
+    durable_root = durable_composition_corpus_root(
+        cache_root=request.config.coordination_root / ".cache" / "skill-corpus"
+    )
+    notes = request.session_options.get("choices", {}).get("notes", {})
+    instructions, record = compose_launch_instructions(
+        delivery, report_path, notes, compact_links=True, corpus_root=durable_root
+    )
+    link_roots = f"Link roots: skill={json.dumps(durable_root.as_posix())}"
+    if record.get("detailReferences"):
+        link_roots += f", detail={json.dumps(nested_detail_root(Path(report_path)).as_posix())}"
+    return instructions, record, link_roots
+
+
 def _assembled_brief(
     request: RoleHandoverRequest,
     handover: dict[str, Any],
     *,
     report_path: str,
-    texts: tuple[str, str],
+    texts: tuple[str, str, str],
     capsule: LaunchCapsule,
 ) -> tuple[str, dict[str, Any], dict[str, Any], str]:
-    """The first message, its projection and the file it names, from what this module gathered.
-
-    The assembly itself lives in its own module (MIK-R193 rule 1 and rule 10); this call gives it
-    the role's own values: who started the seat, the one direction its brief carries, where this
-    session holds the AR tools, and the compiled capsule.
-    """
-
+    """Assemble the first message, its projection, and its handover file reference."""
     context = request.context
     bound_document = (
         context.effective_task.ref.model_dump(mode="json") if context.effective_task else None
     )
-    first_read, instructions = texts
+    first_read, instructions, link_roots = texts
+    compacted_shared = (
+        compact_skill_uri_links(capsule.shared_block) if capsule.shared_block is not None else None
+    )
     parts = BriefParts(
         started_from=_started_from(request.started_by),
         direction=SPLIT_WORK_DIRECTION,
@@ -597,25 +602,17 @@ def _assembled_brief(
         ),
         first_read=first_read,
         instructions=instructions,
-        shared_block=capsule.shared_block,
+        shared_block=compacted_shared,
+        link_roots=link_roots,
     )
     return brief_prompt(
-        handover,
-        report_path=report_path,
-        bound_document=bound_document,
-        parts=parts,
+        handover, report_path=report_path, bound_document=bound_document, parts=parts
     )
 
 
-def _compile_handover(
-    request: RoleHandoverRequest,
-) -> dict[str, Any]:
-    config = request.config
-    context = request.context
-    workspace = request.workspace
-    agent_id = request.agent_id
-    ar_mcp_context = request.ar_mcp_context
-    request_id = request.request_id
+def _compile_handover(request: RoleHandoverRequest) -> dict[str, Any]:
+    config, context, workspace = request.config, request.context, request.workspace
+    ar_mcp_context, request_id = request.ar_mcp_context, request.request_id
     operation = role_start_operation(context.role)
     task_ref = context.effective_task.ref if context.effective_task else None
     role_config = config
@@ -647,19 +644,17 @@ def _compile_handover(
     documents = [doc for doc in (context.sprint, context.master, context.task) if doc]
     task_reads = [_read_task_doc(config, document) for document in documents]
     document_files, first_read = _task_document_read_metadata(
-        config, context, workspace, task_reads
+        config, context, workspace, task_reads, shared_block=capsule.shared_block
     )
     primary = context.effective_task
     context_packet = None
     if context.role in LEAF_ROLES and context.task is not None:
         context_packet = build_context_packet(
-            role_config,
-            ContextPacketRequest(repo_id=context.task.ref.repository),
+            role_config, ContextPacketRequest(repo_id=context.task.ref.repository)
         )
     elif primary and primary.ref.repository in config.repositories:
         context_packet = build_context_packet(
-            config,
-            ContextPacketRequest(repo_id=primary.ref.repository),
+            config, ContextPacketRequest(repo_id=primary.ref.repository)
         )
     repository_context = None
     if context.effective_task is None:
@@ -676,10 +671,8 @@ def _compile_handover(
     if request_id is None:
         raise ValueError("A message binding requires its durable requestId.")
     task_document_digest = _digest(task_reads)
-    instructions, instruction_record = compose_launch_instructions(
-        capsule.delivery,
-        report_path,
-        request.session_options.get("choices", {}).get("notes", {}),
+    instructions, instruction_record, link_roots = _compose_compact_instructions(
+        request, capsule.delivery, report_path
     )
     effective_digest = instruction_record["semanticDigest"]
     canonical_report_path = (
@@ -698,8 +691,7 @@ def _compile_handover(
     message_binding_projection = _message_binding_projection_reference(
         config, request_id, ar_binding
     )
-    started_by = request.started_by
-    chat_started = request.chat_started
+    started_by, chat_started = request.started_by, request.chat_started
     entry_mode = _entry_mode(started_by, chat_started)
     handover = {
         "schema": "ar-role-handover/v1",
@@ -707,7 +699,7 @@ def _compile_handover(
         "role": context.role,
         "operation": operation,
         "assignment": _role_assignment(context, report_path, started_by=started_by),
-        "agent": agent_id,
+        "agent": request.agent_id,
         "selection": selection_binding(context),
         "documents": task_reads,
         "taskDocumentFiles": document_files,
@@ -783,6 +775,11 @@ def _compile_handover(
                     "in this session and end your turn. The developer reads this chat in the "
                     "dashboard and answers in it. Never send a developer question to another agent."
                 )
+            ),
+            "developerQuestionRoute": (
+                {"mode": "parent", "agentId": started_by.agent_id}
+                if started_by is not None
+                else {"mode": "own-chat"}
             ),
             "arToolServer": TOOL_SERVER_NAME,
             "arMcpUsage": _ar_tool_server_usage(
@@ -880,13 +877,11 @@ def _compile_handover(
                 if role != context.role
             },
         }
-    # The complete object is written beside the message before the start is sent; the message
-    # names it and carries only the projection (MIK-R193 rules 1 and 2).
     prompt, projection, handover_file, handover_file_content = _assembled_brief(
         request,
         handover,
         report_path=report_path,
-        texts=(first_read, instructions),
+        texts=(first_read, instructions, link_roots),
         capsule=capsule,
     )
     return {

@@ -8,6 +8,7 @@ from urllib.parse import quote
 
 import pytest
 import test_role_instruction_wording_handover as handover_wording
+from agents_remember.application.role_capsules.shared_block import filter_shared_block
 from agents_remember.application.skill_resources.provider import shipped_composition_corpus
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.models.role_capsules.types import CapsuleRole
@@ -130,7 +131,7 @@ def delivered_question_transport(role: str, detail: str) -> str:
     assert len(deliveries) == 1, role
     shared = deliveries[0].shared_block
     assert shared is not None, role
-    assert shared == (root / "core/every-role.md").read_text()
+    assert shared == filter_shared_block((root / "core/every-role.md").read_text(), role)
     assert SHARED_QUESTION_RULE in (root / "core/authority.md").read_text()
     paragraph = held_question_transport(shared, role)
     # Exercise actual shared delivery, not a fixture pretending the rule is in a detail.

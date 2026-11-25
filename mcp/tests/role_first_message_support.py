@@ -35,9 +35,16 @@ from agents_remember.cli import (
     role_launch_workspace,
 )
 from agents_remember.cli.paseo_launch import StartingAgent
-from agents_remember.cli.role_brief_message import HANDOVER_HEADING, SHARED_BLOCK_HEADING
+from agents_remember.cli.role_brief_message import (
+    HANDOVER_HEADING,
+    LAUNCH_CONTEXT_HEADING,
+    SHARED_BLOCK_HEADING,
+)
+from agents_remember.cli.role_handover_artifacts import resolve_handover_envelope
 from agents_remember.cli.role_handover_file import planned_handover_file
 from agents_remember.cli.role_handover_projection import (
+    FILE_ONLY_FIELDS,
+    FILE_ONLY_NESTED,
     PROJECTION_FIELDS,
     PROJECTION_FILE_FIELD,
     project_handover,
@@ -632,8 +639,23 @@ class FirstMessageMatrixBase(unittest.TestCase):
     ) -> None:
         operation = _operation_of(role)
         where = f"{role}/{operation}, {harness}, {kind}"
-        line, separator, body = message.partition("\n")
+        body, separator, line = message.rpartition("\n")
         self.assertTrue(separator, f"{where}: the message has no artifact line")
+        position, resolved_line, resolved_body = resolve_handover_envelope(
+            message, receipt["handoverArtifact"], receipt["handoverFile"]
+        )
+        self.assertEqual(position, "suffix", f"{where}: the artifact line is not trailing")
+        self.assertEqual(
+            line, resolved_line, f"{where}: the trailing line differs from the resolved envelope"
+        )
+        self.assertEqual(
+            body, resolved_body, f"{where}: the body differs from the resolved envelope"
+        )
+        self.assertIn(
+            "holds the launch handover above this line",
+            line,
+            f"{where}: the trailing artifact line omits its direction wording",
+        )
         self.assertIn(
             receipt["handoverArtifact"]["path"], line, f"{where}: the line omits the hand-over text"
         )
@@ -668,40 +690,14 @@ class FirstMessageMatrixBase(unittest.TestCase):
         self.assertEqual(
             Path(receipt["handoverArtifact"]["path"]).read_text(encoding="utf-8"),
             body,
-            f"{where}: the hand-over text differs from what follows the artifact line",
+            f"{where}: the hand-over text differs from what precedes the artifact line",
         )
-        # Rule 11: the one constant stands once, inside the opening, before the capsule.
-        self.assertEqual(
-            message.count(SPLIT_WORK_DIRECTION),
-            1,
-            f"{where}: the split-work direction does not stand exactly once",
-        )
-        at = message.index(SPLIT_WORK_DIRECTION)
-        tools = message.index("AR tools, before your first tool call:")
-        first_read = message.index(
-            "Each contentDigest records the document snapshot used for this launch."
-        )
-        self.assertLess(
-            message.index("AR ROLE BRIEF:"),
-            at,
-            f"{where}: the direction stands before the opening it belongs to",
-        )
-        self.assertLess(at, tools, f"{where}: the direction stands after the AR-tools paragraph")
-        self.assertLess(tools, first_read, f"{where}: the first-read paragraph moved")
-        # Rule 1: at most one block, and no second heading for it. Absence of the block when no
-        # source provides one is proven by the plain launch in the shared-block test below.
-        self.assertLessEqual(
-            message.count(f"## {SHARED_BLOCK_HEADING}"),
-            1,
-            f"{where}: the block's heading stands more than once",
-        )
-        head, heading, projection_text_part = body.rpartition(
-            "AR owner assignment and canonical task handover:\n"
-        )
+        head, heading, projection_text_part = body.rpartition(f"{HANDOVER_HEADING}\n")
         self.assertTrue(heading, f"{where}: the message has no hand-over heading")
         # The projection is one compact object exactly as the message carries it; a successor or
         # step-up line may follow it.
         projection, end = json.JSONDecoder().raw_decode(projection_text_part)
+        self.check_structure(body, projection, where)
         expected = project_handover(
             handover,
             handover_file={
@@ -733,6 +729,88 @@ class FirstMessageMatrixBase(unittest.TestCase):
         self.check_nothing_twice(message, projection, where)
         self.check_reachable(head, projection, handover, where)
         self.check_paths(message, projection, where, expect_snapshot=expect_snapshot)
+
+    def check_structure(self, body: str, projection: dict[str, Any], where: str) -> None:
+        """Verify static-prefix-first layout, Launch Context placement, and recovery dedup."""
+
+        self.assertTrue(
+            body.startswith("AR ROLE BRIEF:"),
+            f"{where}: the static role brief header does not start the message",
+        )
+        self.assertEqual(
+            body.count(SPLIT_WORK_DIRECTION),
+            1,
+            f"{where}: the split-work direction does not stand exactly once",
+        )
+        self.assertLessEqual(
+            body.count(f"## {SHARED_BLOCK_HEADING}"),
+            1,
+            f"{where}: the block's heading stands more than once",
+        )
+        self.assertEqual(
+            body.count(f"{LAUNCH_CONTEXT_HEADING}\n\n"),
+            1,
+            f"{where}: the Launch Context heading does not stand exactly once",
+        )
+        at = body.index(SPLIT_WORK_DIRECTION)
+        tools = body.index("AR tools, before your first tool call:")
+        launch_context_at = body.index(f"{LAUNCH_CONTEXT_HEADING}\n\n")
+        started_by_at = body.index("Started by: ", launch_context_at)
+        first_read_at = body.index(
+            "Each contentDigest records the document snapshot used for this launch.",
+            launch_context_at,
+        )
+        link_roots_at = body.index("Link roots: skill=", launch_context_at)
+        handover_at = body.rindex(f"{HANDOVER_HEADING}\n")
+        self.assertLess(at, tools, f"{where}: the direction stands after the AR-tools paragraph")
+        if f"## {SHARED_BLOCK_HEADING}" in body:
+            shared_at = body.index(f"## {SHARED_BLOCK_HEADING}")
+            self.assertLess(tools, shared_at, f"{where}: the shared block precedes AR tools")
+            self.assertLess(
+                shared_at,
+                launch_context_at,
+                f"{where}: the shared block stands after Launch Context",
+            )
+        self.assertLess(
+            tools, launch_context_at, f"{where}: Launch Context precedes the static prefix"
+        )
+        self.assertLess(started_by_at, first_read_at, f"{where}: Started by follows first_read")
+        self.assertLess(first_read_at, link_roots_at, f"{where}: Link roots precedes first_read")
+        self.assertLess(link_roots_at, handover_at, f"{where}: Link roots follows the handover")
+        static_prefix = body[:launch_context_at]
+        launch_context = body[launch_context_at:handover_at]
+        self.assertNotIn(
+            "](skill://agents-remember/skills/l-01-agent-lifecycles/",
+            static_prefix,
+            f"{where}: an uncompacted lifecycle skill URI link remains in the static prefix",
+        )
+        has_shared_recovery = (
+            "refused-write.md" in static_prefix
+            and "never keep a blanket ban on writing it by hand" in static_prefix
+        )
+        has_task_document = bool((projection.get("taskDocumentFiles") or {}).get("paths"))
+        if has_shared_recovery:
+            self.assertNotIn(
+                "refused-write.md",
+                launch_context,
+                f"{where}: Launch Context repeats the refused-write recovery ladder",
+            )
+            self.assertNotIn(
+                "never keep a blanket ban on writing it by hand",
+                launch_context,
+                f"{where}: Launch Context repeats the manual write recovery sentence",
+            )
+        elif has_task_document:
+            self.assertIn(
+                "skills/l-01-agent-lifecycles/reference/refused-write.md",
+                launch_context,
+                f"{where}: Launch Context dropped the refused-write fallback without shared block",
+            )
+            self.assertIn(
+                "never keep a blanket ban on writing it by hand",
+                launch_context,
+                f"{where}: Launch Context dropped the manual write fallback without shared block",
+            )
 
     def _bound_document(self, handover: dict[str, Any]) -> dict[str, Any] | None:
         selection = handover["selection"]
@@ -810,6 +888,18 @@ class FirstMessageMatrixBase(unittest.TestCase):
                     )
                 continue
             self.assertEqual(value, handover[key], f"{where}: {key} is not the object's value")
+        for omitted in FILE_ONLY_FIELDS:
+            self.assertNotIn(
+                omitted,
+                projection,
+                f"{where}: file-only field {omitted!r} leaked into the projection",
+            )
+        for omitted_nested in FILE_ONLY_NESTED:
+            found, _nested = _lookup(projection, omitted_nested)
+            self.assertFalse(
+                found,
+                f"{where}: file-only nested field {omitted_nested!r} leaked into the projection",
+            )
 
     def check_reachable(
         self,

@@ -597,8 +597,8 @@ class DeepLaunchFolderTests(PaseoLaunchTestCase):
                 self.assertIn(
                     f"Assignment file: {artifact['path']} (SHA-256 {artifact['sha256']}).", note
                 )
-                first_line = self.runtime.launch_calls()[-1][1]["prompt"].splitlines()[0]
-                self.assertIn(f"{artifact['path']} (SHA-256 {artifact['sha256']})", first_line)
+                last_line = self.runtime.launch_calls()[-1][1]["prompt"].rpartition("\n")[2]
+                self.assertIn(f"{artifact['path']} (SHA-256 {artifact['sha256']})", last_line)
                 self.assertIn(request.role, note)
                 # No part of the folder the report lives in is in the note at either depth.
                 self.assertNotIn(self.root.joinpath(*parts).as_posix(), note)

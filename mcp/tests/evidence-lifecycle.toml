@@ -746,6 +746,7 @@ consumers = [
   "mcp/tests/test_role_start_set.py",
   "mcp/tests/test_role_step_up.py",
   "mcp/tests/test_role_tool_scope.py",
+  "mcp/tests/test_role_wire_token_budgets.py",
   "mcp/tests/test_route_index_memory_scope.py",
   "mcp/tests/test_route_review_clean_sync_door.py",
   "mcp/tests/test_semantic_topology_refusals.py",
@@ -1305,6 +1306,7 @@ consumers = [
   "mcp/tests/test_role_first_message.py",
   "mcp/tests/test_role_first_message_guards.py",
   "mcp/tests/test_role_handover_binding.py",
+  "mcp/tests/test_role_wire_token_budgets.py",
   "mcp/tests/test_route_index_memory_scope.py",
   "mcp/tests/test_series_finalize_rules.py",
   "mcp/tests/test_series_refusal_texts.py",
@@ -3193,6 +3195,7 @@ consumers = [
   "mcp/tests/test_role_start_set.py",
   "mcp/tests/test_role_step_up.py",
   "mcp/tests/test_role_tool_scope.py",
+  "mcp/tests/test_role_wire_token_budgets.py",
   "mcp/tests/test_route_index_memory_scope.py",
   "mcp/tests/test_route_review_clean_sync_door.py",
   "mcp/tests/test_semantic_topology_refusals.py",
@@ -4242,6 +4245,7 @@ consumers = [
   "mcp/tests/test_role_revival_registration.py",
   "mcp/tests/test_role_start_set.py",
   "mcp/tests/test_role_step_up.py",
+  "mcp/tests/test_role_wire_token_budgets.py",
   "mcp/tests/test_step_up_choice_validation.py",
   "mcp/tests/test_step_up_recovery.py",
 ]
@@ -4360,6 +4364,7 @@ consumers = [
   "mcp/tests/test_role_revival_registration.py",
   "mcp/tests/test_role_start_set.py",
   "mcp/tests/test_role_step_up.py",
+  "mcp/tests/test_role_wire_token_budgets.py",
   "mcp/tests/test_step_up_choice_validation.py",
   "mcp/tests/test_step_up_recovery.py",
   "mcp/tests/test_user_settings_guard.py",
@@ -4649,6 +4654,7 @@ consumers = [
   "mcp/tests/test_l84_unique_detail_pointers.py",
   "mcp/tests/test_role_first_message.py",
   "mcp/tests/test_role_first_message_guards.py",
+  "mcp/tests/test_role_wire_token_budgets.py",
 ]
 
 [[artifact]]

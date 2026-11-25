@@ -17,6 +17,7 @@ from agents_remember.application.role_capsules.compilation import (
     CapsuleCompilationOutcome,
     compile_admitted_capsule,
 )
+from agents_remember.application.role_capsules.shared_block import filter_shared_block
 from agents_remember.application.role_launch_context import (
     RoleLaunchContext,
     resolve_role_launch_context,
@@ -28,6 +29,7 @@ from agents_remember.cli import role_launch_routes, role_launch_workspace
 from agents_remember.cli.paseo_role_tools import start_role
 from agents_remember.cli.role_brief_message import SHARED_BLOCK_HEADING
 from agents_remember.cli.role_instruction_details import compose_launch_instructions
+from agents_remember.cli.role_instruction_links import compact_skill_uri_links
 from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.mcp.registration.knowledge import register_knowledge_tools
@@ -233,9 +235,10 @@ class RealDigestFirstMessageTests(FirstMessageMatrixBase):
                 self.check_message(
                     message, receipt, role=role, harness=FIXTURE_HARNESSES[0], kind=kind
                 )
+                expected_digest = compact_skill_uri_links(filter_shared_block(digest, role))
                 self.assertEqual(message.count(heading), 1)
-                self.assertEqual(message.count(digest), 1, remedy)
-                self.assertIn(f"{heading}{digest}\n\n# {role.title()}", message, remedy)
+                self.assertEqual(message.count(expected_digest), 1, remedy)
+                self.assertIn(f"{heading}{expected_digest}\n\n# {role.title()}", message, remedy)
                 self.release(receipt)
 
 
@@ -305,8 +308,10 @@ async def test_knowledge_detail_views_and_keywords_match_the_registered_tool(
     views = set(re.findall(r'view="([a-z_]+)"', text))
     assert views == {"source_context", "invariant", "family"}
     description = tool.description or ""
-    advertised = description.split("Views:", 1)[1].split(".", 1)[0]
-    assert views <= set(re.findall(r"[a-z_]+", advertised))
+    advertised_match = re.search(r"\bviews:\s*([^.(]+)", description, flags=re.IGNORECASE)
+    assert advertised_match is not None, description
+    advertised = {token.strip() for token in advertised_match.group(1).split(",") if token.strip()}
+    assert views <= advertised
     for view in views:
         _content, answer = await server.call_tool(
             "knowledge_read", {"memoryRoot": str(tmp_path / "absent-memory"), "view": view}

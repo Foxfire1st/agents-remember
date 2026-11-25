@@ -5,13 +5,24 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
+from urllib.parse import quote
 
-from agents_remember.application.skill_resources.provider import shipped_composition_corpus
+from agents_remember.application.skill_resources.provider import (
+    durable_composition_corpus_root,
+    shipped_composition_corpus,
+)
+from agents_remember.cli import immutable_artifact
 from agents_remember.cli.role_handover_artifacts import write_detail_artifacts
-from agents_remember.cli.role_instruction_links import bind_markdown_links, require_no_unbound_links
+from agents_remember.cli.role_instruction_links import (
+    bind_markdown_links,
+    compact_skill_uri_links,
+    require_no_unbound_links,
+)
 from agents_remember.cli.role_instructions import compose_role_instructions
 from agents_remember.errors import CapsuleDeliveryError
 from agents_remember.models.role_capsules.types import (
@@ -21,15 +32,86 @@ from agents_remember.models.role_capsules.types import (
 from agents_remember.serving.capsule_delivery import CapsuleDelivery
 
 
+def nested_detail_root(report: Path) -> Path:
+    """Directory beside ``report`` that holds nested frozen detail snapshots."""
+    return report.with_name(f"{report.stem}.details")
+
+
+def _validated_detail_source_parts(source_path: str) -> tuple[str, ...]:
+    if not source_path or "\\" in source_path or "\x00" in source_path:
+        raise ValueError(
+            f"Detail source path must be a confined POSIX relative path: {source_path!r}"
+        )
+    candidate = PurePosixPath(source_path)
+    windows_candidate = PureWindowsPath(source_path)
+    raw_parts = tuple(source_path.split("/"))
+    if (
+        candidate.is_absolute()
+        or windows_candidate.is_absolute()
+        or windows_candidate.drive
+        or any(part in {"", ".", ".."} for part in raw_parts)
+    ):
+        raise ValueError(
+            f"Detail source path must be a confined POSIX relative path: {source_path!r}"
+        )
+    return raw_parts
+
+
+def nested_detail_path(report: Path, source_path: str) -> Path:
+    """Confined path for one frozen detail file under ``<report_stem>.details/``."""
+    _validated_detail_source_parts(source_path)
+    return nested_detail_root(report) / source_path
+
+
+@contextmanager
+def _corpus_root_context(*, compact_links: bool, corpus_root: Path | None) -> Iterator[Path]:
+    if corpus_root is not None:
+        yield corpus_root.resolve()
+        return
+    if compact_links:
+        yield durable_composition_corpus_root()
+        return
+    with shipped_composition_corpus() as (root, _manifest):
+        yield root
+
+
 def compose_launch_instructions(
-    delivery: CapsuleDelivery, report_path: str, choice: dict[str, Any]
+    delivery: CapsuleDelivery,
+    report_path: str,
+    choice: dict[str, Any],
+    *,
+    compact_links: bool = False,
+    corpus_root: Path | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Preserve user-note composition while binding the baseline's frozen details."""
-    references, targets = _bound_details(delivery, Path(report_path))
-    baseline = _bound_baseline(delivery, targets)
-    paths = write_detail_artifacts(report_path, references)
+    report = Path(report_path)
+    with _corpus_root_context(compact_links=compact_links, corpus_root=corpus_root) as root:
+        references, targets = _bound_details(
+            delivery, report, root=root, compact_links=compact_links
+        )
+        detail_targets = (
+            {
+                (root / ref.source_path).resolve(): ref.source_path
+                for ref in delivery.detail_references
+            }
+            if compact_links
+            else None
+        )
+        baseline = _bound_baseline(
+            delivery,
+            targets,
+            root=root,
+            compact_links=compact_links,
+            detail_targets=detail_targets,
+        )
+    paths = (
+        _write_nested_detail_artifacts(report, references)
+        if compact_links
+        else write_detail_artifacts(report_path, references)
+    )
     for source, path in paths.items():
-        baseline = baseline.replace("{{detail:" + source + "}}", path.as_posix())
+        replacement = "detail/" + quote(source, safe="/:@") if compact_links else path.as_posix()
+        baseline = baseline.replace("{{detail:" + source + "}}", replacement)
     instructions, record = compose_role_instructions(baseline, delivery.semantic_digest, choice)
     if paths:
         record["detailReferences"] = [
@@ -51,52 +133,145 @@ def _detail_path(report: Path, source_path: str) -> Path:
 
 
 def _bound_details(
-    delivery: CapsuleDelivery, report: Path
+    delivery: CapsuleDelivery,
+    report: Path,
+    *,
+    root: Path,
+    compact_links: bool,
 ) -> tuple[tuple[CapsuleDetailReference, ...], dict[Path, Path]]:
     """Freeze launch-relative destinations without changing the admitted compiler value."""
     if not delivery.detail_references:
         return (), {}
-    with shipped_composition_corpus() as (root, _manifest):
-        targets = {
-            (root / reference.source_path).resolve(): _detail_path(
-                report.absolute(), reference.source_path
-            )
-            for reference in delivery.detail_references
-        }
-        references = []
-        for reference in delivery.detail_references:
-            content = bind_markdown_links(
-                reference.content.decode("utf-8"), root / reference.source_path, targets
-            ).encode("utf-8")
-            references.append(
-                replace(reference, content=content, revision=compute_content_digest(content))
-            )
+    absolute_report = report.absolute()
+    targets = {
+        (root / reference.source_path).resolve(): (
+            nested_detail_path(absolute_report, reference.source_path)
+            if compact_links
+            else _detail_path(absolute_report, reference.source_path)
+        )
+        for reference in delivery.detail_references
+    }
+    references = []
+    for reference in delivery.detail_references:
+        # Links inside frozen detail files always bind to absolute durable targets so a detail
+        # file read standalone still resolves after the provider exits.
+        content = bind_markdown_links(
+            reference.content.decode("utf-8"),
+            root / reference.source_path,
+            targets,
+            compact_links=False,
+        ).encode("utf-8")
+        references.append(
+            replace(reference, content=content, revision=compute_content_digest(content))
+        )
     return tuple(references), targets
 
 
-def _bound_baseline(delivery: CapsuleDelivery, targets: dict[Path, Path]) -> str:
+def _bound_baseline(
+    delivery: CapsuleDelivery,
+    targets: dict[Path, Path],
+    *,
+    root: Path,
+    compact_links: bool,
+    detail_targets: dict[Path, str] | None,
+) -> str:
     """Bind inline links to frozen details or their original non-detail sources."""
     baseline = delivery.trusted_instructions
     if not delivery.instruction_origins:
         require_no_unbound_links(baseline)
-        return baseline
+        return compact_skill_uri_links(baseline) if compact_links else baseline
     offset = 0
     parts: list[str] = []
-    with shipped_composition_corpus() as (root, _manifest):
-        for origin in delivery.instruction_origins:
-            if origin.start != offset or not origin.start <= origin.end <= len(baseline):
-                raise CapsuleDeliveryError(
-                    "instruction source origins do not cover the trusted stream"
-                )
-            parts.append(
-                bind_markdown_links(
-                    baseline[origin.start : origin.end], root / origin.source_path, targets
-                )
+    for origin in delivery.instruction_origins:
+        if origin.start != offset or not origin.start <= origin.end <= len(baseline):
+            raise CapsuleDeliveryError("instruction source origins do not cover the trusted stream")
+        parts.append(
+            bind_markdown_links(
+                baseline[origin.start : origin.end],
+                root / origin.source_path,
+                targets,
+                compact_links=compact_links,
+                corpus_root=root if compact_links else None,
+                detail_targets=detail_targets,
             )
-            offset = origin.end
+        )
+        offset = origin.end
     if offset != len(baseline):
         raise CapsuleDeliveryError("instruction source origins do not cover the trusted stream")
     return "".join(parts)
+
+
+def _require_non_symlink_directory(directory: Path, *, allow_missing: bool) -> None:
+    try:
+        st = os.lstat(directory)
+    except FileNotFoundError:
+        if allow_missing:
+            return
+        raise
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        raise ValueError(
+            f"Detail artifact directory {directory} must be a real directory, not a symlink or file."
+        )
+
+
+def _ensure_real_directory(directory: Path) -> None:
+    try:
+        st = os.lstat(directory)
+    except FileNotFoundError:
+        try:
+            directory.mkdir(exist_ok=False)
+            return
+        except FileExistsError:
+            st = os.lstat(directory)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        raise ValueError(
+            f"Detail artifact directory {directory} must be a real directory, not a symlink or file."
+        )
+
+
+def _write_nested_detail_artifacts(
+    report: Path, references: tuple[CapsuleDetailReference, ...]
+) -> dict[str, Path]:
+    """Freeze each admitted detail under ``<report_stem>.details/<source_path>``, once."""
+    if not references:
+        return {}
+    # Resolve only the outer report parent so admitted outer report-access or locator symlinks
+    # stay intact while every interior directory beneath <stem>.details is confined to real dirs.
+    canonical_report_parent = report.parent.resolve(strict=False)
+    details_dirname = f"{report.stem}.details"
+    canonical_details_root = canonical_report_parent / details_dirname
+    paths: dict[str, Path] = {}
+    for reference in references:
+        parts = _validated_detail_source_parts(reference.source_path)
+        given_target = nested_detail_path(report, reference.source_path)
+        given_cursor = report.parent
+        for segment in (details_dirname, *parts[:-1]):
+            given_cursor = given_cursor / segment
+            _require_non_symlink_directory(given_cursor, allow_missing=True)
+        canonical_report_parent.mkdir(parents=True, exist_ok=True)
+        canonical_cursor = canonical_report_parent
+        for segment in (details_dirname, *parts[:-1]):
+            canonical_cursor = canonical_cursor / segment
+            _ensure_real_directory(canonical_cursor)
+        given_cursor = report.parent
+        for segment in (details_dirname, *parts[:-1]):
+            given_cursor = given_cursor / segment
+            _require_non_symlink_directory(given_cursor, allow_missing=False)
+        canonical_target = canonical_details_root / reference.source_path
+        if (
+            not canonical_target.is_relative_to(canonical_details_root)
+            or canonical_target == canonical_details_root
+        ):
+            raise ValueError(
+                f"Detail artifact target {canonical_target} escapes {canonical_details_root}."
+            )
+        refusal = (
+            f"This role request already has different detail content in {given_target}; "
+            "start under a new request id."
+        )
+        immutable_artifact.write_once(canonical_target, reference.content, refusal)
+        paths[reference.source_path] = given_target
+    return paths
 
 
 def validate_instruction_detail_artifacts(receipt: dict[str, Any]) -> None:
@@ -158,12 +333,52 @@ def _require_detail_target(receipt: dict[str, Any], reference: dict[str, Any], p
         or Path(artifact["canonicalPath"]).name != given_artifact.name
     ):
         raise _detail_refusal(reference, "the saved handover is not beside its report")
-    detail = _detail_path(given_report, reference["sourcePath"])
-    name = detail.name
-    expected = Path(artifact["canonicalPath"]).with_name(name)
-    if path != detail or path.parent.resolve() / path.name != expected:
+    source_path = reference["sourcePath"]
+    legacy_detail = _detail_path(given_report, source_path)
+    if path == legacy_detail:
+        expected = Path(artifact["canonicalPath"]).with_name(legacy_detail.name)
+        if path.parent.resolve() / path.name != expected:
+            raise _detail_refusal(
+                reference, f"the path no longer names its canonical target {expected}"
+            )
+        return
+    _require_nested_detail_target(given_report, artifact, reference, path)
+
+
+def _require_nested_detail_target(
+    given_report: Path,
+    artifact: dict[str, Any],
+    reference: dict[str, Any],
+    path: Path,
+) -> None:
+    source_path = reference["sourcePath"]
+    try:
+        parts = _validated_detail_source_parts(source_path)
+    except ValueError as error:
+        raise _detail_refusal(reference, str(error)) from error
+    expected_nested = nested_detail_path(given_report, source_path)
+    details_dirname = f"{given_report.stem}.details"
+    canonical_details_root = Path(artifact["canonicalPath"]).parent / details_dirname
+    expected_canonical = canonical_details_root / source_path
+    if (
+        path != expected_nested
+        or not expected_canonical.is_relative_to(canonical_details_root)
+        or expected_canonical == canonical_details_root
+    ):
         raise _detail_refusal(
-            reference, f"the path no longer names its canonical target {expected}"
+            reference, f"the path no longer names its canonical target {expected_canonical}"
+        )
+    cursor = given_report.parent
+    for segment in (details_dirname, *parts[:-1]):
+        cursor = cursor / segment
+        st = os.lstat(cursor)
+        if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+            raise _detail_refusal(
+                reference, f"interior detail directory {cursor} is not a real directory"
+            )
+    if path.parent.resolve() / path.name != expected_canonical:
+        raise _detail_refusal(
+            reference, f"the path no longer names its canonical target {expected_canonical}"
         )
 
 

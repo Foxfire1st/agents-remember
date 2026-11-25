@@ -50,12 +50,24 @@ class FirstMessageMatrixTests(FirstMessageMatrixBase):
         self.release(receipt)
         # A name that no field of the hand-over object starts: not a hand-over reference at all.
         self.assertEqual(_unreachable("`role_start` and `stop`", projection, handover), [])
-        # A field of the file the projection leaves out: reachable through the file.
-        self.assertEqual(_unreachable("`contextPacket`", projection, handover), [])
+        # Fields of the file the projection leaves out: reachable through the file.
+        for file_only in (
+            "contextPacket",
+            "assignment",
+            "canonicalTaskReportPath",
+            "host.ownerRelation",
+            "host.developerQuestions",
+        ):
+            self.assertEqual(_unreachable(f"`{file_only}`", projection, handover), [])
         # An indexed path through the projected documents list: reachable in the projection.
         self.assertEqual(_unreachable("`documents[0].taskDocReadArgs`", projection, handover), [])
         # A file-only root with a part the object does not have, and a projected root likewise.
-        for name in ("capsule.missing", "contextPacket.missing", "workspace.missing"):
+        for name in (
+            "capsule.missing",
+            "contextPacket.missing",
+            "workspace.missing",
+            "host.missing",
+        ):
             self.assertEqual(
                 _unreachable(f"see `{name}`", projection, handover),
                 [name],
@@ -157,7 +169,7 @@ class FirstMessageMatrixTests(FirstMessageMatrixBase):
                     ][-1]
                     opening = receipt["heldOpeningPrompt"]
                     self.assertTrue(
-                        opened.startswith(opening),
+                        opened.startswith(f"{opening}\n\n"),
                         f"{where}: the delivered turn does not begin with the saved opening",
                     )
                     self.assertEqual(

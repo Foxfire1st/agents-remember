@@ -249,12 +249,18 @@ def _report_candidates(root: Path, launch_report: Path | None) -> Iterator[Path]
 
 
 def _launch_carrier(path: Path, launch_report: Path | None) -> bool:
-    if launch_report is None or path.parent != launch_report.parent:
+    if launch_report is None:
+        return False
+    if path.is_relative_to(launch_report.with_name(f"{launch_report.stem}.details")):
+        return True
+    if path.parent != launch_report.parent:
         return False
     return (
         path == launch_report.with_suffix(".handover.txt")
         or path == launch_report.with_suffix(HANDOVER_FILE_SUFFIX)
+        or path == launch_report.with_suffix(".opening-message.md")
         or path.name.startswith(f"{launch_report.stem}.detail-")
+        or (path.name.startswith(f"{launch_report.stem}.held-batch-") and path.name.endswith(".md"))
     )
 
 

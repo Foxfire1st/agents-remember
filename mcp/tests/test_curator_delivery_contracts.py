@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 import pytest
+from agents_remember.application.role_capsules.shared_block import filter_shared_block
 from agents_remember.application.skill_resources.provider import shipped_composition_corpus
 from agents_remember.cli.__main__ import build_parser
 from agents_remember.cli.role_brief_message import shared_block as render_shared_block
@@ -158,7 +159,9 @@ def test_curator_role_itself_retains_complete_truth_continuation_stops_and_excep
             require_full_checks(role_block)
             require_handover_checks(role_block, (delivery.role, delivery.operation, ROLE))
             assert delivery.shared_block is not None
-            assert delivery.shared_block == source("core/every-role.md")
+            assert delivery.shared_block == filter_shared_block(
+                source("core/every-role.md"), delivery.role
+            )
             require_clauses(
                 delivery.shared_block,
                 SHARED_CONTINUATION,

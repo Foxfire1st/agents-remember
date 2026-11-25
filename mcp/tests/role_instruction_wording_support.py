@@ -18,6 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import get_args
 
+from agents_remember.application.role_capsules.shared_block import filter_shared_block
 from agents_remember.models.role_capsules.vocabulary import capsule_role_or_none
 from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.role_launcher import LauncherRole
@@ -140,7 +141,9 @@ def assert_message_handover_delivery(roles: tuple[str, ...]) -> None:
         assert pointer in role_text(role), role
         shared = shared_by_role[role]
         assert shared is not None
-        assert shared == (CANONICAL / LIFECYCLE / "core/every-role.md").read_text()
+        assert shared == filter_shared_block(
+            (CANONICAL / LIFECYCLE / "core/every-role.md").read_text(), role
+        )
         assert shared.count(shared_clause) == 1, role
         for mutant in (shared.replace(shared_clause, "", 1), shared + "\n" + shared_clause):
             with unittest.TestCase().assertRaises(AssertionError):

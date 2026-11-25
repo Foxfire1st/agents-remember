@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from agents_remember.application.role_capsules.compilation import compile_admitted_capsule
+from agents_remember.application.role_capsules.shared_block import filter_shared_block
 from agents_remember.application.skill_resources.capsule import (
     CapsuleSeatAddress,
     routed_admission_for,
@@ -70,6 +71,7 @@ def _assert_one_receipt_contract(held_text: str, refusal_text: str) -> None:
 def test_receipt_contract_has_one_home_even_when_repeated_in_other_words() -> None:
     root = HOME.parents[1]
     shared_source = (root / "core/every-role.md").read_text()
+    expected_shared = filter_shared_block(shared_source, "worker")
     binding = worker_binding(operation="orientation", granted=frozenset(PUBLIC_TOOLS))
     admission = routed_admission_for(
         root,
@@ -81,8 +83,8 @@ def test_receipt_contract_has_one_home_even_when_repeated_in_other_words() -> No
     assert outcome.ok, outcome.render_explanation()
     assert outcome.result is not None
     assert outcome.shared_block is not None
-    assert outcome.shared_block == shared_source
-    assert shared_block(outcome.shared_block).count(shared_source) == 1
+    assert outcome.shared_block == expected_shared
+    assert shared_block(outcome.shared_block).count(expected_shared) == 1
     source = next(
         record for record in outcome.result.manifest.sources if record.path == "core/every-role.md"
     )

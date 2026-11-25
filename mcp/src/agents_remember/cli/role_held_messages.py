@@ -56,6 +56,7 @@ from agents_remember.cli.role_launch_receipts import (
     _restore_launch_handover,
     _write_receipt,
 )
+from agents_remember.cli.role_opening_offload import prepare_held_opening_batch
 from agents_remember.controlplane.held_store_discovery import (
     EXECUTIONS_DIRECTORY,
     receipt_roots,
@@ -92,6 +93,7 @@ from agents_remember.controlplane.held_store_layout import (
     waiting_total,
     withdraw_message,
 )
+from agents_remember.kernel.agentic_settings import AgenticSettingsError
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving.projections.host_activity import agent_in_turn
@@ -497,13 +499,20 @@ def _open_held_seat(batch: _DrainBatch) -> dict[str, Any]:
     except ValueError as error:
         _release_claim(batch.folder, batch.agent_id, batch.claim)
         return {"outcome": "cannot-open", "detail": str(error)}
+    try:
+        bounded_batch = prepare_held_opening_batch(
+            batch.config, batch.receipt, combined_text(messages)
+        )
+    except (AgenticSettingsError, OSError, ValueError) as error:
+        _release_claim(batch.folder, batch.agent_id, batch.claim)
+        return {"outcome": "open-failed", "detail": f"The held seat stays held: {error}"}
     from agents_remember.cli.product_start_message import (  # noqa: PLC0415 - sends through the role tools, which import this module
         held_seat_opening,
     )
 
     # A held Reviewer or Curator gets the product's start message as it opens.
     product = held_seat_opening(batch.config, batch.path, batch.receipt)
-    opening_text = "\n\n".join(filter(None, (opening, product, combined_text(messages))))
+    opening_text = "\n\n".join(filter(None, (opening, product, bounded_batch)))
     call = {
         **launch_call,
         "agent": {**(launch_call.get("agent") or {}), "prompt": opening_text},

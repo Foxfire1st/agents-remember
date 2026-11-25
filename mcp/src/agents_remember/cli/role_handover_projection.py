@@ -28,10 +28,8 @@ PROJECTION_FIELDS: tuple[str, ...] = (
     "role",
     "operation",
     "agent",
-    "assignment",
     "selection",
     "taskReportPath",
-    "canonicalTaskReportPath",
     "documents",
     "taskDocumentFiles",
     "workspace",
@@ -63,13 +61,14 @@ AR_MCP_CONTEXT_FIELDS: tuple[str, ...] = (
 )
 HOST_FIELDS: tuple[str, ...] = (
     "parent",
-    "ownerRelation",
-    "developerQuestions",
+    "developerQuestionRoute",
 )
 
 # The object's parts the first message leaves to the hand-over file. Named here so a check can
 # say which of them a message must reach through the file rather than the projection.
 FILE_ONLY_FIELDS: tuple[str, ...] = (
+    "assignment",
+    "canonicalTaskReportPath",
     "contextPacket",
     "instructionComposition",
     "launchChoices",
@@ -78,6 +77,8 @@ FILE_ONLY_FIELDS: tuple[str, ...] = (
     "ownerHandover",
 )
 FILE_ONLY_NESTED: tuple[str, ...] = (
+    "host.ownerRelation",
+    "host.developerQuestions",
     "host.arMcpUsage",
     "host.roleTools",
     "host.messageBinding",
@@ -128,19 +129,20 @@ def projection_text(projection: dict[str, Any]) -> str:
 
 
 def first_read_paragraph(first_read: str) -> str:
-    """The brief's own paragraph before the capsule: the first read, and where the rest lives.
+    """The brief's Launch Context paragraph: the first read, and where the rest lives.
 
     It carries the three sentences of ``ownerHandover`` that are said nowhere else — the first
     read, the ``contentDigest`` note and the acceptance line — and names the file that holds the
-    hand-over fields the projection leaves out (MIK-R193 rule 1).
+    hand-over fields the projection leaves out.
     """
 
     return (
         f"{first_read} Each contentDigest records the document snapshot used for this launch. "
         "Never claim AR review, curation, lifecycle, or Git acceptance from a finished turn. "
-        "The fields of your hand-over that are not in the projection below are in the file "
-        f"named by `{PROJECTION_FILE_FIELD}`. It is large: read the one field a step needs with "
-        "a search or a one-line JSON read, not the whole file."
+        "The fields of your hand-over that are not in the projection below "
+        "(including `assignment`, `host.ownerRelation`, and `host.developerQuestions`) "
+        f"are in the file named by `{PROJECTION_FILE_FIELD}`. It is large: read the one field a "
+        "step needs with a search or a one-line JSON read, not the whole file."
     )
 
 
@@ -149,7 +151,7 @@ def projection_tokens(text: str) -> int:
 
     with vendored_vocabulary_cache(VENDORED_ENCODING_NAME):
         encoding = tiktoken.get_encoding(VENDORED_ENCODING_NAME)
-    return len(encoding.encode(text))
+    return len(encoding.encode(text, disallowed_special=()))
 
 
 def _bound_document_entry(
