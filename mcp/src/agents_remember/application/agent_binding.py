@@ -62,6 +62,14 @@ def launch_server_exclusion(
     and nothing else), for Pi, and for every other provider the settings name. A launch that
     carries no task server keeps the other one: without it the agent had none of the
     product's tools.
+
+    Pinned Paseo 0.16.2 has no per-launch switch for a server a harness reads from its own
+    configuration. It narrows tools only along these routes: ``codex/options.js`` and
+    ``codex-app-server-agent.js`` for a server the same create request names, and
+    ``acp-agent.js`` and ``pi/agent.js``, where a session receives the request's servers and
+    nothing else. Keeping the other server's tools out of Codex, ACP or Pi therefore needs an
+    upstream host capability; a config mutation here would deny it to concurrent sessions of
+    the user.
     """
     if provider == "claude" and servers:
         return {

@@ -427,7 +427,7 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
         agent["mcpServers"] = {
             TOOL_SERVER_NAME: tool_server_definition(launch.settings_file, agent_binding(launch))
         }
-        policy = preapproval_policy(launch.provider, TOOL_SERVER_NAME)
+        policy = preapproval_policy(launch.provider, TOOL_SERVER_NAME, role=launch.context.role)
         if policy is not None:
             agent["toolPolicy"] = policy
     if launch.parent_agent_id:

@@ -39,13 +39,17 @@ from agents_remember.canvas.explainer_binding import EXPLAINER_SURFACE
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.mcp.server import create_server
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
+from agents_remember.models.tools.role_tool_scope import tools_for_role
 from agents_remember.serving.build_info import process_serving_build, runtime_source_digest
 
 REPO = "agents-remember"
 TASK = "260928_import-guard"
 LEAF = "260928-MIK-L999"
 #: Every launch serves AR's general tools; an explainer binding adds its own four (MIK-R211 v5 rule 3).
-GENERAL_TOOLS = 44
+GENERAL_TOOLS = len(PUBLIC_TOOLS)
+#: A role-bound launch advertises only its role's allowlist; this one is a Worker.
+ROLE_BOUND_TOOLS = len(tools_for_role("worker"))
 EXPLAINER_TOOLS = GENERAL_TOOLS + len(EXPLAINER_SURFACE)
 
 INITIALIZE = {
@@ -332,7 +336,13 @@ def test_discovery_loads_no_implementation_module(tmp_path: Path, mode: str) -> 
 
     tools, modules, timings = report["tools"], report["modules"], report["timings"]
     assert isinstance(tools, list) and isinstance(modules, list) and isinstance(timings, dict)
-    expected = EXPLAINER_TOOLS if mode == "explainer" else GENERAL_TOOLS
+    expected = (
+        EXPLAINER_TOOLS
+        if mode == "explainer"
+        else ROLE_BOUND_TOOLS
+        if mode == "ordinary-role-bound"
+        else GENERAL_TOOLS
+    )
     assert len(tools) == expected, f"{mode}: {len(tools)} tools, expected {expected}"
     found = _forbidden_loaded(modules)
     # A machine-readable line on the passing path too: a run that prints nothing is a failed launch, and
@@ -401,7 +411,7 @@ def test_the_real_command_answers_initialize_and_tools_list(tmp_path: Path) -> N
 
     for mode, expected in (
         ("ordinary", GENERAL_TOOLS),
-        ("ordinary-role-bound", GENERAL_TOOLS),
+        ("ordinary-role-bound", ROLE_BOUND_TOOLS),
         ("explainer", EXPLAINER_TOOLS),
     ):
         _root, settings, env = _world(tmp_path / mode, mode=mode)
