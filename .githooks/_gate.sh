@@ -150,15 +150,10 @@ report_untracked_scope() {
     --project-root "$root" untracked
 }
 
-# The host frontend rail is intentionally non-test: codegen, lint, and typecheck.
-# Playwright remains outside this hook's deterministic non-test scope. Direct targeted Vitest is a
-# diagnostic-only developer loop, not part of this hook or closeout/integration evidence. A fresh
-# checkout without node_modules fails with the install instruction instead of skipping the gate.
-dashboard_checks() {
-  if [ ! -f "dashboard/package.json" ]; then
-    echo "[$label] dashboard/package.json missing; skipping the frontend rail." >&2
-    return 0
-  fi
+# Both tiers look for the dashboard prerequisites before running the longer checks.
+# A checkout with no dashboard package skips the frontend rail.
+dashboard_prerequisites() {
+  [ -f "dashboard/package.json" ] || return 0
   if [ ! -d "dashboard/node_modules" ]; then
     echo "[$label] dashboard/node_modules missing; run 'npm ci' in dashboard/ first." >&2
     return 1
@@ -166,6 +161,15 @@ dashboard_checks() {
   if ! command -v npm >/dev/null 2>&1; then
     echo "[$label] npm not found; cannot run the dashboard rail." >&2
     return 1
+  fi
+}
+
+# The host frontend rail runs codegen, lint, and typecheck. Playwright is outside
+# this hook's scope. Direct targeted Vitest is a developer diagnostic.
+dashboard_checks() {
+  if [ ! -f "dashboard/package.json" ]; then
+    echo "[$label] dashboard/package.json missing; skipping the frontend rail." >&2
+    return 0
   fi
   # Panda's generated styled-system tree is checkout-local and ignored. Linked
   # worktrees may share node_modules with the primary checkout while correctly
@@ -189,6 +193,7 @@ dashboard_checks() {
 }
 
 run_fast_checks() {
+  dashboard_prerequisites || return 1
   report_wrapper_tier || return 1
   if [ "${AR_QUALITY_INVOCATION:-}" = "pre-commit-sequencer" ]; then
     report_untracked_scope || return 1

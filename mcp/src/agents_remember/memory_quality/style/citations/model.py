@@ -2,7 +2,8 @@
 
 A citation contains one or more anchors and one or more ``path:start-end`` sources. Anchor
 kinds are: a backticked identifier (including supported TypeScript call/generic syntax),
-a backticked ``#`` heading, or a double-quoted literal. Identifiers match whole names;
+a backticked ``#`` heading, or a double-quoted literal. Rows that cite Lean also accept
+extended Lean names scoped to the cited Lean files. Identifiers match whole names;
 member calls and broken syntax are not reduced to plausible names. Quoted matching
 collapses whitespace and removes only leading TypeScript line-comment prefixes.
 
@@ -18,9 +19,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from enum import Enum
 
 from agents_remember.memory_quality.style.citations import grammars
+from agents_remember.memory_quality.style.citations.lean_names import is_lean_name
 from agents_remember.memory_quality.style.document_shape import inline_scan
+from agents_remember.models.knowledge_files.shapes import require_repository_path
 
 SEGMENT_SEPARATORS = ";·"
 # Measured over the memory root: 839 rows mark "nothing to cite" with an em dash, 246 with
@@ -39,12 +43,27 @@ HEADING = "heading"
 QUOTE = "quote"
 
 
+class CitationReader(Enum):
+    """Language readers for current cards and the byte-pinned legacy converter."""
+
+    LIVE = "live"
+    FORMAT_1 = "format-1"
+
+    def grammar_of(self, path: str) -> str | None:
+        grammar = grammars.grammar_of(path)
+        if self is CitationReader.FORMAT_1 and grammar == grammars.LEAN:
+            return None
+        return grammar
+
+
 @dataclass(frozen=True)
 class Anchor:
     """One thing a claim asserts the cited lines contain, and how it is matched."""
 
     kind: str
     text: str
+    grammar: str | None = None
+    """When set, only files read by this grammar can satisfy the anchor."""
 
 
 @dataclass(frozen=True)
@@ -66,6 +85,8 @@ class Claim:
     citations: tuple[Citation, ...]
     malformed: tuple[str, ...]
     unchecked_spans: int
+    source_paths: tuple[str, ...]
+    """Local paths in citation order, including whole-file sources."""
 
 
 def masked(text: str) -> str:
@@ -87,7 +108,9 @@ def code_span_texts(text: str) -> list[str]:
     return found
 
 
-def anchors_in(text: str) -> tuple[tuple[Anchor, ...], int]:
+def anchors_in(
+    text: str, *, cited_grammars: frozenset[str | None] = frozenset()
+) -> tuple[tuple[Anchor, ...], int]:
     """``(anchors, count of backticked spans that are not anchors)``."""
     found: list[Anchor] = []
     skipped = 0
@@ -96,6 +119,8 @@ def anchors_in(text: str) -> tuple[tuple[Anchor, ...], int]:
             found.append(Anchor(kind=SYMBOL, text=span))
         elif span.startswith(HEADING_MARK):
             found.append(Anchor(kind=HEADING, text=span))
+        elif grammars.LEAN in cited_grammars and is_lean_name(span):
+            found.append(Anchor(kind=SYMBOL, text=span, grammar=grammars.LEAN))
         else:
             identifier = grammars.typescript_anchor_identifier(span)
             if identifier is None:
@@ -150,21 +175,28 @@ def repo_relative(path: str) -> bool:
     return not path.startswith("/") and ".." not in path.split("/") and "://" not in path
 
 
-def citations_in(text: str) -> tuple[tuple[Citation, ...], tuple[str, ...]]:
-    """``(citations, segments that are not a repo-relative ``path:start-end``)``."""
-    found: list[Citation] = []
-    malformed: list[str] = []
+def local_path(value: str) -> str | None:
+    """A valid repository path, as written, or no path."""
+    try:
+        return require_repository_path(value)
+    except ValueError:
+        return None
+
+
+def citations_in(text: str) -> tuple[Citation | str, ...]:
+    """Ranged citations and other source segments in the order the author wrote them."""
+    found: list[Citation | str] = []
     for piece in split_segments(text):
         written = unwrapped(piece)
         if written.lower() in NO_CITATION_MARKERS:
             continue
         match = SOURCE_PATTERN.fullmatch(written)
         if match is None or not repo_relative(match.group("path")):
-            malformed.append(written)
+            found.append(written)
             continue
         start = int(match.group("start"))
         end = int(match.group("end") or match.group("start"))
         found.append(
             Citation(text=written, path=match.group("path"), start=start, end=max(start, end))
         )
-    return tuple(found), tuple(malformed)
+    return tuple(found)

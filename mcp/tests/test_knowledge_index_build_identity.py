@@ -29,6 +29,7 @@ from agents_remember.models.knowledge.read import (
     PathSeed,
 )
 from agents_remember.serving.build_info import process_serving_build, runtime_source_digest
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from knowledge_index_test_support import (
     REVIEW_INVARIANT,
     REVIEW_PATH,
@@ -105,7 +106,7 @@ def _memory_fixture(tmp_path: Path) -> Path:
 
 
 def _align_cold_readers(monkeypatch: pytest.MonkeyPatch) -> None:
-    first_miss = Barrier(8, timeout=10)
+    first_miss = Barrier(8, timeout=HANG_GUARD_SECONDS)
     seen = local()
     reuse = KnowledgeIndexCache._reuse
 
@@ -126,6 +127,14 @@ def _read_index(directory: Path, memory: Path) -> Path:
         return index.database_path
 
 
+def _assert_build_quiescent(directory: Path) -> None:
+    directory = directory.resolve()
+    with module._builds_guard:
+        assert not any(path.parent == directory for path in module._builds)
+    with module._active_temps_guard:
+        assert not any(path.parent == directory for path in module._active_temps)
+
+
 @pytest.mark.parametrize(
     "lock_failure",
     [
@@ -138,6 +147,7 @@ def test_eight_cold_callers_share_one_build(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lock_failure: type[LockCapabilityError] | None
 ) -> None:
     memory = _memory_fixture(tmp_path)
+    directory = tmp_path / "cache"
     build_started = Event()
     release_build = Event()
     builds: list[Path] = []
@@ -151,7 +161,7 @@ def test_eight_cold_callers_share_one_build(
     def slow_build(snapshot: MemoryTreeSnapshot, path: Path) -> BuildReport:
         builds.append(path)
         build_started.set()
-        assert release_build.wait(10)
+        assert release_build.wait(HANG_GUARD_SECONDS)
         return build_index(snapshot, path)
 
     if lock_failure is not None:
@@ -159,12 +169,13 @@ def test_eight_cold_callers_share_one_build(
     _align_cold_readers(monkeypatch)
     monkeypatch.setattr(module, "build_index", slow_build)
     with ThreadPoolExecutor(max_workers=8) as pool:
-        reads = [pool.submit(_read_index, tmp_path / "cache", memory) for _ in range(8)]
+        reads = [pool.submit(_read_index, directory, memory) for _ in range(8)]
         try:
-            assert build_started.wait(10)
+            assert build_started.wait(HANG_GUARD_SECONDS)
         finally:
             release_build.set()
-        assert len({read.result(timeout=10) for read in reads}) == 1
+        assert len({read.result(timeout=HANG_GUARD_SECONDS) for read in reads}) == 1
+    _assert_build_quiescent(directory)
     assert len(builds) == 1
     if lock_failure is not None:
         assert len(lock_attempts) == 1
@@ -180,13 +191,13 @@ def test_failed_build_reaches_all_waiters_and_a_later_lookup_rebuilds(
     builds: list[Path] = []
 
     class ObservedFuture[T](Future[T]):
-        def result(self, timeout: float | None = None) -> T:
+        def result(self, timeout: float | None = HANG_GUARD_SECONDS) -> T:
             followers.release()
             return super().result(timeout)
 
     def fail_build(_snapshot: MemoryTreeSnapshot, path: Path) -> BuildReport:
         builds.append(path)
-        assert release_build.wait(10)
+        assert release_build.wait(HANG_GUARD_SECONDS)
         raise LockCapabilityError("failure inside the index build")
 
     with monkeypatch.context() as patch:
@@ -196,12 +207,13 @@ def test_failed_build_reaches_all_waiters_and_a_later_lookup_rebuilds(
         with ThreadPoolExecutor(max_workers=8) as pool:
             reads = [pool.submit(_read_index, directory, memory) for _ in range(8)]
             try:
-                assert all(followers.acquire(timeout=10) for _ in range(7))
+                assert all(followers.acquire(timeout=HANG_GUARD_SECONDS) for _ in range(7))
             finally:
                 release_build.set()
             for read in reads:
                 with pytest.raises(LockCapabilityError, match="failure inside the index build"):
-                    read.result(timeout=10)
+                    read.result(timeout=HANG_GUARD_SECONDS)
+    _assert_build_quiescent(directory)
     assert len(builds) == 1
     assert not list(directory.glob("*.sqlite"))
     assert _read_index(directory, memory).is_file()
@@ -295,12 +307,12 @@ def _index_process(mode: str, directory: Path, memory: Path) -> Iterator[subproc
     finally:
         if process.poll() is None:
             process.kill()
-        process.communicate(timeout=10)
+        process.communicate(timeout=HANG_GUARD_SECONDS)
 
 
 def _process_signal(process: subprocess.Popen[str]) -> str:
     assert process.stdout is not None
-    ready, _, _ = select.select([process.stdout], [], [], 10)
+    ready, _, _ = select.select([process.stdout], [], [], HANG_GUARD_SECONDS)
     assert ready, f"index process {process.pid} did not reach its synchronization point"
     return process.stdout.readline().strip()
 
@@ -315,8 +327,8 @@ def test_two_processes_share_one_cold_index(tmp_path: Path) -> None:
             assert _process_signal(second) == "waiter blocked"
             KnowledgeIndexCache(directory).evict()
             assert Path(temporary).is_file()
-            built, _ = first.communicate(input="\n", timeout=10)
-            opened, _ = second.communicate(timeout=10)
+            built, _ = first.communicate(input="\n", timeout=HANG_GUARD_SECONDS)
+            opened, _ = second.communicate(timeout=HANG_GUARD_SECONDS)
             assert first.returncode == second.returncode == 0
     built_path, built_reused, built_complete = json.loads(built)
     opened_path, opened_reused, opened_complete = json.loads(opened)
@@ -338,7 +350,7 @@ def test_eviction_removes_dead_builder_temp_and_keeps_live_builder_temp(tmp_path
     with subprocess.Popen(command, stdin=subprocess.PIPE) as dead:
         abandoned = _temp_path(cache.directory, dead.pid)
         abandoned.touch()
-        dead.communicate(timeout=10)
+        dead.communicate(timeout=HANG_GUARD_SECONDS)
         assert dead.returncode == 0
     with subprocess.Popen(command, stdin=subprocess.PIPE) as live:
         active = _temp_path(cache.directory, live.pid)
@@ -349,7 +361,7 @@ def test_eviction_removes_dead_builder_temp_and_keeps_live_builder_temp(tmp_path
             assert not abandoned.exists()
             assert active.is_file()
         finally:
-            live.communicate(timeout=10)
+            live.communicate(timeout=HANG_GUARD_SECONDS)
 
 
 def test_eviction_keeps_registered_and_ambiguous_current_pid_temps(

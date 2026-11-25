@@ -91,6 +91,13 @@ file sidecar's own source omit the redundant path; route-sidecar anchors name a
 path. Route-index fields belong in generated `overview.index.json` caches, not in
 `overview.json`.
 
+Symbol anchors support Python, JavaScript, TypeScript, TSX and Lean. In a `.lean` file,
+a named declaration can be anchored by its name as written or by its full
+namespace-qualified name. A full-name match takes precedence. When a written
+name matches several verified declarations, use the full name. Cite a line range
+when the declaration has no name or uncertain scope makes both name forms
+unverifiable.
+
 A file sidecar that holds numbered references needs its Markdown card: the validator refuses a
 new sidecar with references and without the card (`R22.3-sidecar-without-markdown`). A new file <!-- docs-check: identifier: the product prints this code -->
 sidecar that holds only `realizes` or `proves` entries is valid without a card.

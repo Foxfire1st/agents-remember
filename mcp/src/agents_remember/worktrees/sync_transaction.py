@@ -721,15 +721,19 @@ def _run_side(
             record = _persist_fresh_validator_stop(store, record)
         raise
     if outcome.state == "resolution-required":
+        history_owner, report = outcome.crossing_history_owner, outcome.crossing_report
         if resumed_merge:
-            retained = recapture_resumed_merge(side, paired_code=paired, owner=owner)
+            retained, history_owner, report = recapture_resumed_merge(
+                side, paired_code=paired, owner=owner
+            )
         else:
             retained = capture_retained_digests(side, include_untracked=False)
         updated_side = side.model_copy(
             update={
                 "state": "resolution-required",
                 "conflictFiles": outcome.conflicts,
-                "crossingReport": outcome.crossing_report,
+                "crossingReport": report,
+                "crossingHistoryOwner": history_owner,
                 "retainedTreeDigests": retained,
             }
         )

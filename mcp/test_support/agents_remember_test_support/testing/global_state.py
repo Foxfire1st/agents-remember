@@ -16,6 +16,8 @@ from agents_remember.kernel.primitives import checkout_coordination
 
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, wait_until
 
+type _ProcessStateTreatment = Literal["restored", "reset", "constant for tests", "quiescent"]
+
 
 @dataclass(frozen=True)
 class OwnedMutableState:
@@ -28,7 +30,7 @@ class OwnedMutableState:
 class ProcessMutableState:
     module: str
     attribute: str
-    treatment: Literal["restored", "reset", "constant for tests"]
+    treatment: _ProcessStateTreatment
     reason: str
     reset: Callable[[ModuleType, str], None] | None = None
 
@@ -138,13 +140,14 @@ def _row(
     reason: str,
     reset: Callable[[ModuleType, str], None] | None = _clear,
     *,
-    treatment: Literal["restored", "reset", "constant for tests"] = "reset",
+    treatment: _ProcessStateTreatment = "reset",
 ) -> ProcessMutableState:
     return ProcessMutableState(f"agents_remember.{module}", attribute, treatment, reason, reset)
 
 
 # A reset never imports its product module. Tables whose tests deliberately register a
 # temporary row are restored per test; import-only tables must survive deferred imports.
+# Quiescent owners release their entries when their test-owned operations finish.
 # Every discovered state has exactly one row; test_suite_load_independence checks both ways.
 PROCESS_MUTABLE_STATES = (
     _row(
@@ -305,6 +308,20 @@ PROCESS_MUTABLE_STATES = (
         "memory.conversion.base",
         "_cache",
         "Forget comparison bases so every module establishes its own conversion inputs.",
+    ),
+    _row(
+        "memory.knowledge_index.cache",
+        "_builds",
+        "The builder releases its destination and settles its future on success or failure.",
+        None,
+        treatment="quiescent",
+    ),
+    _row(
+        "memory.knowledge_index.cache",
+        "_active_temps",
+        "The builder releases its temporary path in its cleanup before returning or raising.",
+        None,
+        treatment="quiescent",
     ),
     _row(
         "memory_quality.knowledge_validator.registry",

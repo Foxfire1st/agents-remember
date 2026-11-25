@@ -191,7 +191,7 @@ carryover.
 | Tool | Purpose | Main arguments |
 | --- | --- | --- |
 | `knowledge_read` | Name the records of one memory-tree view (`source_context`, `invariant`, `family`, `record`, `weakness`, `dependent`) at one snapshot, paged; each row holds the text ID, kind, state and memory-checkout location. No record text: open the named files with your own tools. | `memoryRoot`, `view`, `limit=32`, `continuation`, the seed of the view (`sourcePath`, `invariantRevisionId`, `familyRevisionId`, `recordId`), filters `weaknessKind`, `includeClosed`, `staleOnly`, `standsOn` |
-| `knowledge_write` | Plan or write the [hand-off list](../concepts.md#hand-off-list) that a Curator gives it, through the one writer of knowledge files, which `agents-remember knowledge-ingest` and `agents-remember knowledge-bootstrap` also use. Without `commit` it plans and validates; with it, writes knowledge files and makes no Git commit. The answer names the whole report and all refusals. | `contractPath`, `handoff` + `handoffName` or `handoffPath`, `authorizationRef`, `commit=false`; for a [foundation wave](../concepts.md#knowledge-foundation), a write that belongs to no task, `repoId` + `wave`; for a crossing, the sync of a master's branch that opened a history file for conflicting records, the master's `contractPath` + `crossing` |
+| `knowledge_write` | Plan or write the [hand-off list](../concepts.md#hand-off-list) that a Curator gives it, through the one writer of knowledge files, which `agents-remember knowledge-ingest` and `agents-remember knowledge-bootstrap` also use. Without `commit` it plans and validates; with it, writes knowledge files and makes no Git commit. The answer names the whole report and all refusals. | `contractPath`, `handoff` + `handoffName` or `handoffPath`, `authorizationRef`, `commit=false`; for a [foundation wave](../concepts.md#knowledge-foundation), a write that belongs to no task, `repoId` + `wave`; for a crossing, a master's crossing sync or structural merge that parked before its merge commit and opened a history file, the master's `contractPath` + `crossing` |
 | `knowledge_diff` | Name the changed records of two memory trees beside a caller-readable report holding the whole comparison: the two trees, counts by kind, changed records, report location. | `memoryRoot`, `beforeRevision="HEAD"`, `afterRevision`, `recordId`, `path` |
 | `knowledge_integrity_check` | Validate a memory tree: `validation.ok`, refusal/report counts, rule counts and bounded violations. With `contractPath`, use the task's code and memory worktrees and return its latest persisted worklist; no semantic judgment is inferred. | `memoryRoot`, `codeRoot`, `baseCommits`, or a task's `contractPath` |
 
@@ -267,6 +267,10 @@ A sync judges the memory that it adopts before any ref moves, on a fast-forward 
 names the source line and its violations, and it stays in the journal of the sync:
 `worktree_status` and a repeated `worktree_sync` show it.
 
+If the client stops waiting for a sync, look for the `worktree_sync` row in the
+[tool log](../concepts.md#tool-log) once the call has ended. The row and its detail record the
+outcome. Use `worktree_status` to see the sync's current state.
+
 The `reports/` directory of an enclosure holds evidence that may be deleted; the operation journal
 in the enclosure's folder `.lifecycle/` records each direct landing. A lifecycle read takes one of two
 ways. While the enclosure locator is live, it reads the enclosure's
@@ -313,6 +317,10 @@ certification.
 landing that has not landed can retire it, and `recover` finishes an interrupted direct landing.
 A `supersede` of a direct landing is refused as `lifecycle-direct-supersede-unavailable`; the
 refusal names a new `direct_landing` call.
+
+If the client stops waiting for a closeout, look for the `worktree_closeout_apply` row in the
+[tool log](../concepts.md#tool-log) once the call has ended. The row and its detail record the
+outcome.
 
 Closeout and landing record the actual code/memory Git pair. A memory-content commit that they
 create carries `Code-Commit` attribution; `memory.md` is an ignored computed cache, never an additional commit

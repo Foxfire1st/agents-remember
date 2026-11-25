@@ -216,6 +216,13 @@ the folder that the key `transcriptRoot` of the settings file names, by default
 `<coordination-root>/logs/mcp/`.
 The help of `agents-remember tool-log-stats` calls such a folder a tool-call log folder.
 
+If a tool raises after its request is cancelled, the log row has code `raised`. Its detail keeps
+the original error and sets `requestCancelled` to `true`. If cancellation occurs while the server
+is checking the build's currentness, waiting for the write lock, or waiting for a detached worker
+thread to become available, the row has code `cancelled`.
+Its detail names the wait in `waitingFor` and says that the tool never ran. A tool that finishes
+with a result after its request is cancelled records that result as usual.
+
 ### Scratch folder and report folder
 
 Each role agent gets two folders with its start: the scratch folder for its working files, and the

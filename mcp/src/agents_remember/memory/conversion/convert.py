@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any, Final, Literal
 
@@ -26,6 +26,7 @@ from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.conversion.legacy_db import ExportResult, export_database
 from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTree
 from agents_remember.memory_quality.knowledge_validator.validator import validate_tree
+from agents_remember.memory_quality.style.citations.model import CitationReader
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.knowledge_files.documents import (
     LAYOUT_MARKER_PATH,
@@ -241,7 +242,7 @@ def _convert_cards(
     overviews = frozenset(path for path in cards if PurePosixPath(path).name == OVERVIEW)
     split_cards: dict[str, tuple[SplitCard, str]] = {}
     for card in cards:
-        split = split_card(memory.files[card].decode("utf-8"))
+        split = split_card(memory.files[card].decode("utf-8"), reader=objects.reader)
         commit, fallback = _anchor_commit(card, split, objects, paired_commit, tally)
         if fallback and split.rows:
             tally.fallback_cards.append(card)
@@ -405,6 +406,7 @@ def convert_memory(
             changed={},
             report={"state": "already-converted", "memory": memory.label},
         )
+    objects = replace(objects, reader=CitationReader.FORMAT_1)
     paired = objects.commit(paired_commit)
     if paired is None:
         raise ConversionRefused(
