@@ -145,6 +145,13 @@ first authored in this leaf needs no row unless an item names it. A `raise` need
 a wave or crossing owner has no leaf worklist. A refused run lists no records, entries, rows
 or carried work as done: its count is planned and nothing was written.
 
+When both sides of a master's merge changed a dependent, the Curator resolves it through
+`knowledge_write`. Plan with the master's series contract as `contractPath`, the open
+`<task-id>-crossing-<n>` as `crossing`, `authorizationRef`, `handoffName`, `handoff` and
+`commit: false`. Give `handoff.records` an item with `key`, `kind: dependent`, the existing
+record's `id`, and `fields` holding the resolved `stands_on` links and `confirmed` with
+`task`, `role` and `statement`. Apply the reviewed plan with `commit: true`.
+
 **A `raise` the command cannot publish.** `knowledge-ingest` writes a raise's question to the
 leaf's task document through Model Context Protocol (MCP) authority settings it trusts. When it has none — no trusted
 tool-server settings in the user config folder, the checkout guard refusing an undeclared run from the
@@ -260,7 +267,7 @@ A record item is:
 ```
 
 - `kind` is one of `invariant`, `family`, `decision`, `incident`, `assumption`, `limitation`,
-  `failure_mode`, `scenario`, `diagnostic` or `term`.
+  `failure_mode`, `scenario`, `diagnostic`, `term`, `dependent` or `weakness`.
 
 - `fields` never holds `id`, `schema`, `origin`, `revision` or `writer`.
 

@@ -13,10 +13,13 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import pytest
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 
+from agents_remember.kernel.git_command import GitRunnerOptions
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
 from agents_remember.worktrees import sync_transaction_git
@@ -527,6 +530,297 @@ class WorktreeSyncTests(unittest.TestCase):
             self.assertTrue(archived_entry.is_symlink())
             self.assertEqual(Path(os.readlink(archived_entry)), target)
             self.assertEqual(target.read_text(encoding="utf-8"), "do not read or replace\n")
+
+
+def _retained_code_merge(tmp_path: Path, incoming_file: str) -> SyncFixture:
+    fixture = SyncFixture(tmp_path)
+    worktree = fixture.contract.code_worktree
+    source = fixture.code_repo
+    if incoming_file == "shared.txt":
+        # A common file with edits far enough apart for Git to merge without a conflict.
+        commit_file(source, incoming_file, "\n".join(f"line {n}" for n in range(15)))
+        git(worktree, "merge", "--ff-only", git(source, "rev-parse", "HEAD"))
+        shared = (worktree / incoming_file).read_text(encoding="utf-8")
+        commit_file(worktree, incoming_file, shared.replace("line 0\n", "task edit\n").rstrip())
+        incoming = shared.replace("line 14\n", "incoming edit \n").removesuffix("\n")
+        commit_file(source, incoming_file, incoming)
+    else:
+        commit_file(source, incoming_file, "incoming edit ")
+    _stage_code_conflict_resolution(fixture)
+    return fixture
+
+
+def _stage_code_conflict_resolution(fixture: SyncFixture) -> None:
+    worktree = fixture.contract.code_worktree
+    source = fixture.code_repo
+    commit_file(worktree, "README.md", "task version")
+    commit_file(source, "README.md", "incoming version")
+    fixture.map_official_memory(git(source, "rev-parse", "HEAD"))
+
+    retained = fixture.sync()
+    assert retained.payload["state"] == "sync-resolution-required", retained.payload
+    assert section(retained.payload, "resolution")["files"] == ["README.md"]
+    (worktree / "README.md").write_text("resolved version\n", encoding="utf-8")
+    git(worktree, "add", "--", "README.md")
+
+
+@pytest.mark.parametrize("incoming_file", ["incoming.txt", "shared.txt"])
+def test_sync_resolution_accepts_incoming_whitespace(tmp_path: Path, incoming_file: str) -> None:
+    fixture = _retained_code_merge(tmp_path, incoming_file)
+    worktree = fixture.contract.code_worktree
+    task_head = git(worktree, "rev-parse", "HEAD")
+    source_head = git(worktree, "rev-parse", "MERGE_HEAD")
+
+    preview = fixture.sync(resolution_action="continue", dry_run=True)
+    continued = fixture.sync(resolution_action="continue")
+
+    assert preview.payload["state"] == "would-continue-sync-resolution", preview.payload
+    assert continued.payload["state"] == "synced", continued.payload
+    parents = git(worktree, "rev-list", "--parents", "-n", "1", "HEAD").split()[1:]
+    assert parents == [task_head, source_head]
+    carried = (worktree / incoming_file).read_text(encoding="utf-8")
+    assert "incoming edit \n" in carried
+    if incoming_file == "shared.txt":
+        assert carried.startswith("task edit\n")
+
+
+@pytest.mark.parametrize(
+    ("path", "text", "diagnosis"),
+    [
+        ("README.md", "<<<<<<< resolution\n", "leftover conflict marker"),
+        ("beside.txt", "resolution edit \n", "trailing whitespace."),
+    ],
+)
+def test_sync_resolution_refuses_new_findings(
+    tmp_path: Path, path: str, text: str, diagnosis: str
+) -> None:
+    fixture = _retained_code_merge(tmp_path, "incoming.txt")
+    worktree = fixture.contract.code_worktree
+    task_head = git(worktree, "rev-parse", "HEAD")
+    (worktree / path).write_text(text, encoding="utf-8")
+    git(worktree, "add", "--", path)
+
+    preview = fixture.sync(resolution_action="continue", dry_run=True)
+    continued = fixture.sync(resolution_action="continue")
+
+    for result in (preview, continued):
+        assert result.payload["state"] == "sync-resolution-incomplete", result.payload
+        summary = str(result.payload["summary"])
+        assert f"{path}:1: {diagnosis}" in summary
+        assert "incoming.txt:" not in summary
+    assert git(worktree, "rev-parse", "HEAD") == task_head
+
+
+def test_sync_resolution_reports_commit_check_with_incoming_whitespace(tmp_path: Path) -> None:
+    fixture = _retained_code_merge(tmp_path, "incoming.txt")
+    hook = fixture.code_repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text(
+        "#!/bin/sh\necho 'fixture commit check refused' >&2\nexit 1\n", encoding="utf-8"
+    )
+    hook.chmod(0o755)
+
+    stopped = fixture.sync(resolution_action="continue")
+
+    assert stopped.payload["state"] == "sync-commit-check-failed", stopped.payload
+    summary = str(stopped.payload["summary"])
+    assert "fixture commit check refused" in summary
+    assert "incoming.txt: from the carried line" in summary
+
+
+@pytest.mark.parametrize("command", ["--check", "--name-only"], ids=["diagnostic", "paths"])
+def test_sync_resolution_reports_failed_whitespace_comparison(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    fixture = _retained_code_merge(tmp_path, "incoming.txt")
+    worktree = fixture.contract.code_worktree
+    (worktree / "beside.txt").write_text("authored whitespace \n", encoding="utf-8")
+    git(worktree, "add", "--", "beside.txt")
+    task_head = git(worktree, "rev-parse", "HEAD")
+    source_head = git(worktree, "rev-parse", "MERGE_HEAD")
+    compare = sync_git_merge.run_git_bytes
+
+    def fail_incoming_comparison(
+        repo: Path, args: list[str], options: GitRunnerOptions | None = None
+    ) -> subprocess.CompletedProcess[bytes]:
+        if repo == worktree and args[:3] == ["diff", "--cached", command] and source_head in args:
+            return subprocess.CompletedProcess(args, 128, b"", b"fatal: unreadable incoming tree\n")
+        return compare(repo, args, options)
+
+    monkeypatch.setattr(sync_git_merge, "run_git_bytes", fail_incoming_comparison)
+    preview = fixture.sync(resolution_action="continue", dry_run=True)
+    continued = fixture.sync(resolution_action="continue")
+
+    for result in (preview, continued):
+        assert result.payload["state"] == "sync-resolution-incomplete", result.payload
+        assert "fatal: unreadable incoming tree" in str(result.payload["summary"])
+    assert "resolution_action='cancel'" in str(continued.payload["summary"])
+    assert git(worktree, "rev-parse", "HEAD") == task_head
+    assert git(worktree, "rev-parse", "MERGE_HEAD") == source_head
+
+
+def test_sync_resolution_reports_a_transient_comparison_failure_before_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _retained_code_merge(tmp_path, "incoming.txt")
+    worktree = fixture.contract.code_worktree
+    task_head = git(worktree, "rev-parse", "HEAD")
+    source_head = git(worktree, "rev-parse", "MERGE_HEAD")
+    hook = fixture.code_repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nprintf called > hook-called\n", encoding="utf-8")
+    hook.chmod(0o755)
+    compare = sync_git_merge.run_git_bytes
+    attempts = 0
+
+    def fail_once(
+        repo: Path, args: list[str], options: GitRunnerOptions | None = None
+    ) -> subprocess.CompletedProcess[bytes]:
+        nonlocal attempts
+        if repo == worktree and args[:3] == ["diff", "--cached", "--check"] and source_head in args:
+            attempts += 1
+            if attempts == 1:
+                return subprocess.CompletedProcess(
+                    args, 128, b"", b"fatal: incoming comparison temporarily unavailable\n"
+                )
+        return compare(repo, args, options)
+
+    monkeypatch.setattr(sync_git_merge, "run_git_bytes", fail_once)
+    stopped = fixture.sync(resolution_action="continue")
+
+    assert stopped.payload["state"] == "sync-resolution-incomplete", stopped.payload
+    assert "fatal: incoming comparison temporarily unavailable" in str(stopped.payload["summary"])
+    assert attempts == 1
+    assert not (worktree / "hook-called").exists()
+    assert git(worktree, "rev-parse", "HEAD") == task_head
+    assert git(worktree, "rev-parse", "MERGE_HEAD") == source_head
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Git on Windows rejects LF in paths")
+def test_sync_resolution_keeps_identical_multiline_diagnostics_with_their_paths(
+    tmp_path: Path,
+) -> None:
+    fixture = SyncFixture(tmp_path)
+    worktree = fixture.contract.code_worktree
+    multiline = "alias:1: leftover conflict marker\nsecond"
+    commit_file(fixture.code_repo, multiline, "bad ")
+    commit_file(worktree, "alias", "<<<<<<< inherited marker")
+    commit_file(worktree, "second", "bad ")
+    _stage_code_conflict_resolution(fixture)
+
+    task_head = git(worktree, "rev-parse", "HEAD")
+    source_head = git(worktree, "rev-parse", "MERGE_HEAD")
+    for parent, names in ((task_head, ("alias", "second")), (source_head, (multiline,))):
+        for path in names:
+            assert git(worktree, "rev-parse", f"{parent}:{path}") == git(
+                worktree, "rev-parse", f":{path}"
+            )
+        check = subprocess.run(
+            ["git", "diff", "--cached", "--check", "--no-color", parent, "--"],
+            cwd=worktree,
+            capture_output=True,
+            check=False,
+        )
+        assert check.returncode == 2
+        assert (
+            check.stdout
+            == b"alias:1: leftover conflict marker\nsecond:1: trailing whitespace.\n+bad \n"
+        )
+
+    preview = fixture.sync(resolution_action="continue", dry_run=True)
+    continued = fixture.sync(resolution_action="continue")
+
+    assert preview.payload["state"] == "would-continue-sync-resolution", preview.payload
+    assert continued.payload["state"] == "synced", continued.payload
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Git on Windows rejects LF in paths")
+def test_sync_resolution_names_ambiguous_incoming_diagnostic(tmp_path: Path) -> None:
+    fixture = SyncFixture(tmp_path)
+    source = fixture.code_repo
+    commit_file(source, "alias", "<<<<<<< inherited marker")
+    commit_file(source, "second", "bad ")
+    commit_file(source, "alias:1: leftover conflict marker\nsecond", "bad ")
+    _stage_code_conflict_resolution(fixture)
+
+    worktree = fixture.contract.code_worktree
+    task_head = git(worktree, "rev-parse", "HEAD")
+    source_head = git(worktree, "rev-parse", "MERGE_HEAD")
+    assert git(worktree, "diff", "--cached", "--check", source_head, "--") == ""
+    preview = fixture.sync(resolution_action="continue", dry_run=True)
+
+    assert preview.payload["state"] == "sync-resolution-incomplete", preview.payload
+    summary = str(preview.payload["summary"])
+    assert f"Cannot attribute a staged Git diagnostic against {task_head}" in summary
+    assert "to exactly one changed path" in summary
+    assert "alias:1: leftover conflict marker" in summary
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Git on Windows rejects LF in paths")
+def test_sync_resolution_refuses_authored_whitespace_in_multiline_path(tmp_path: Path) -> None:
+    fixture = _retained_code_merge(tmp_path, "incoming.txt")
+    worktree = fixture.contract.code_worktree
+    path = "authored\nresolution.txt"
+    (worktree / path).write_text("resolution edit \n", encoding="utf-8")
+    git(worktree, "add", "--", path)
+
+    continued = fixture.sync(resolution_action="continue")
+
+    assert continued.payload["state"] == "sync-resolution-incomplete", continued.payload
+    summary = str(continued.payload["summary"])
+    assert f"{path}:1: trailing whitespace." in summary
+    assert "incoming.txt:" not in summary
+
+
+def test_sync_resolution_preserves_rename_and_whitespace_attribute_checks(tmp_path: Path) -> None:
+    fixture = SyncFixture(tmp_path)
+    worktree = fixture.contract.code_worktree
+    source = fixture.code_repo
+    original = "carried whitespace \n" + "".join(f"unchanged line {n}\n" for n in range(12))
+    commit_file(source, "before.txt", original.removesuffix("\n"))
+    commit_file(source, ".gitattributes", "ignored.txt -whitespace")
+    git(worktree, "merge", "--ff-only", git(source, "rev-parse", "HEAD"))
+    _stage_code_conflict_resolution(fixture)
+
+    git(worktree, "mv", "--", "before.txt", "after.txt")
+    (worktree / "ignored.txt").write_text("exempt authored whitespace \n", encoding="utf-8")
+    git(worktree, "add", "--", "ignored.txt")
+    preview = fixture.sync(resolution_action="continue", dry_run=True)
+    assert preview.payload["state"] == "would-continue-sync-resolution", preview.payload
+
+    (worktree / "after.txt").write_text(
+        original + "checked authored whitespace \n", encoding="utf-8"
+    )
+    git(worktree, "add", "--", "after.txt")
+    assert git(
+        worktree, "diff", "--cached", "--name-status", "--", "before.txt", "after.txt"
+    ).startswith("R")
+    continued = fixture.sync(resolution_action="continue")
+
+    assert continued.payload["state"] == "sync-resolution-incomplete", continued.payload
+    summary = str(continued.payload["summary"])
+    assert "after.txt:14: trailing whitespace." in summary
+    assert "after.txt:1:" not in summary
+    assert "ignored.txt:" not in summary
+
+
+def test_automatic_memory_merge_accepts_incoming_whitespace(tmp_path: Path) -> None:
+    fixture = SyncFixture(tmp_path)
+    worktree = fixture.contract.memory_worktree
+    assert worktree is not None
+    commit_file(worktree, "task.txt", "task memory")
+    source = fixture.memory_repo
+    code_tip = fixture.move_official_code()
+    (source / "incoming.txt").write_text("incoming memory \n", encoding="utf-8")
+    git(source, "add", "--", "incoming.txt")
+    git(source, "commit", "-m", render_memory_content_message("Incoming memory", code_tip))
+    task_head = git(worktree, "rev-parse", "HEAD")
+    source_head = git(source, "rev-parse", "HEAD")
+
+    result = fixture.sync(memory_sync_choice="merge-memory")
+
+    assert result.payload["state"] == "synced", result.payload
+    parents = git(worktree, "rev-list", "--parents", "-n", "1", "HEAD").split()[1:]
+    assert parents == [task_head, source_head]
+    assert (worktree / "incoming.txt").read_text(encoding="utf-8") == "incoming memory \n"
 
 
 def section(payload: dict[str, object], key: str) -> dict[str, Any]:
