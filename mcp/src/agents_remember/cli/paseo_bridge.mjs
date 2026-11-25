@@ -38,14 +38,12 @@
 //            with an open session, handing them to the plugin (MIK-R190 rule 3). A closed or
 //            archived agent is never asked: asking loads its session from storage.
 //
-//   usage-reports {agentIds: [string], leafAgentIds?: [string]} -> {serverId, reports}
-//            One usage read per agent, for the limit only (MIK-R190 rule 7). The client answers
-//            the pinned `{requestId, reports}` envelope. A leaf seat's entry older than 60 s is
-//            refreshed once with that entry's reportIds and no agent (the pinned host refuses a
-//            call that names both); a shared report is refreshed at most once per batch, and an
-//            entry that already reads error is never forced. One agent's failure is its own
-//            `error` and stops no other. Ids and labels only: an account's own fields never
-//            leave the host.
+//   usage-reports {agentIds, leafAgentIds, periodicCandidates} -> {serverId, reports, periodic}
+//            One usage batch for stamped ends and due limited reports. The client answers
+//            `{requestId, reports}`. Stamped leaf seats and selected periodic seats refresh
+//            entries older than 60 s by report ID alone. A shared report is refreshed once per
+//            batch, and an entry that already reads error is never forced. Each due report
+//            has an outcome in `periodic`. The reports include account IDs and labels only.
 //
 //   role-profiles {} -> {profiles, readAt}: reads getDaemonConfig only, never writes profiles.
 //
@@ -264,6 +262,7 @@ import { failure, nonEmpty, optionalText, requiredText, serverIdOf } from './pas
 import { openWorkspace } from './paseo_workspaces.mjs'
 import { listLiveAgents, readRoleRegistry } from './paseo_live_agents.mjs'
 import { sendExtras } from './paseo_send_attachments.mjs'
+import { readUsageReports } from './paseo_usage_reports.mjs'
 import { readFileSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
@@ -273,7 +272,7 @@ const COMMANDS = {
   catalog: readCatalog,
   'runtime-info': readRuntimeInfo,
   'host-activity-snapshot': readHostActivitySnapshot,
-  'usage-reports': readUsageReports,
+  'usage-reports': (context, input) => readUsageReports(context, input, text),
   'workspace-open': openWorkspace,
   'agent-create': createAgent,
   'role-profiles': readRoleProfiles,
@@ -336,11 +335,6 @@ const TURN_ENDS = { turn_completed: 'finished', turn_failed: 'failed', turn_canc
 // 3.2 s with three agents created at once and 5.3 s with six (261001-PNT master pass, 2026-10-02).
 const TOOL_SERVER_START_MS = 6000
 const FIRST_MESSAGE_SUFFIX = ':first-message'
-// MIK-R190 rule 7: how stale a leaf seat's cached usage entry may be before the bridge refreshes
-// it. Declared with the other constants because `main()` runs inside this module's own top-level
-// await (below): a `const` declared after that point is still in its temporal dead zone while a
-// command executes, so the refresh would throw instead of running.
-const USAGE_REFRESH_AGE_MS = 60000
 // Standard output carries the reply and nothing else: the client's log lines, and anything a
 // command or a package prints through the console, go to standard error.
 const STDERR_LOGGER = { debug() {}, info: logToStderr, warn: logToStderr, error: logToStderr }
@@ -645,77 +639,6 @@ async function listRoleAgentSubagents(api, daemon) {
     }
   }
   return lists
-}
-
-// MIK-R190 rule 7: the reports the product judges a limit by. The bridge is the only place that
-// can ask, because only a DaemonClient maps an agent to its usage accounts and can refresh one.
-async function readUsageReports({ daemon }, input) {
-  const agentIds = Array.isArray(input.agentIds) ? input.agentIds.filter((id) => nonEmpty(id)) : []
-  const leaf = new Set(Array.isArray(input.leafAgentIds) ? input.leafAgentIds : [])
-  const reports = []
-  // Rule 7: one forced read per report, however many seats named it in this batch. An account's
-  // report is one report, so two leaf seats on it must not refresh it twice.
-  const refreshed = new Map()
-  for (const agentId of agentIds) {
-    try {
-      const entries = await usageEntriesFor(daemon, agentId, leaf.has(agentId), refreshed)
-      reports.push({ agentId, entries })
-    } catch (error) {
-      // Rule 7: one agent's failure changes nothing for it and does not stop the others.
-      reports.push({ agentId, error: text(error?.message ?? error) || 'usage read failed' })
-    }
-  }
-  return { serverId: serverIdOf(daemon), reports }
-}
-
-async function usageEntriesFor(daemon, agentId, leaf, refreshed) {
-  const cached = await daemon.listUsageReports({ agentId })
-  let entries = usageReportsOf(cached)
-  if (!leaf) return entries.map(projectUsageEntry)
-  for (const entry of entries) {
-    // A forced fetch after a 429 is refused until Retry-After and turns the shared entry into an
-    // error, so an entry that already reads `error` is never forced.
-    if (entry?.report?.status === 'error') continue
-    if (typeof entry?.id !== 'string') continue
-    const shared = refreshed.get(entry.id)
-    if (shared !== undefined) {
-      // Rule 7 bounds a shared report to one refresh: a later seat in this batch reads the row
-      // the earlier seat's refresh already returned, instead of asking the host again.
-      entries = entries.map((row) => (row === entry ? shared : row))
-      continue
-    }
-    const fetchedAt = Date.parse(entry?.fetchedAt ?? '')
-    if (!Number.isFinite(fetchedAt) || Date.now() - fetchedAt <= USAGE_REFRESH_AGE_MS) continue
-    refreshed.set(entry.id, entry)
-    try {
-      // The pinned host refuses a call that names both selectors ("agentId and reportIds cannot
-      // be combined"): a forced read selects the report it refreshes, and no agent.
-      const forced = await daemon.listUsageReports({ forceRefresh: true, reportIds: [entry.id] })
-      const fresh = usageReportsOf(forced).find((row) => row?.id === entry.id)
-      if (fresh !== undefined) {
-        refreshed.set(entry.id, fresh)
-        entries = entries.map((row) => (row === entry ? fresh : row))
-      }
-    } catch {
-      // The cache's own entry stands: a failed refresh changes no fact, and this batch does not
-      // ask the host for the same report again.
-    }
-  }
-  return entries.map(projectUsageEntry)
-}
-
-// The pinned client answers `{requestId, reports}`; anything else names no report at all.
-function usageReportsOf(answer) {
-  const reports = answer?.reports
-  return Array.isArray(reports) ? reports : []
-}
-
-// Ids and labels only: an account's own fields never leave the host.
-function projectUsageEntry(entry) {
-  if (entry === null || typeof entry !== 'object') return {}
-  const { account, ...rest } = entry
-  const label = account?.label
-  return { ...rest, ...(typeof label === 'string' ? { account: { label } } : {}) }
 }
 
 async function createAgent({ api, daemon, deadline }, input) {

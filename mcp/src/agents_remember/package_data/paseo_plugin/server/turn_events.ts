@@ -186,9 +186,9 @@ export function registerParentWakeEvents(
   const log = options.log === undefined ? createTurnEndLog(home) : { append: options.log };
   const subagents = options.subagents;
   // MIK-R190: the two host signals the send-back reads — the seat's own running
-  // subagents, and the one file that says a seat is limited and until when. The
-  // file is read only where a decision needs it: at the wait's end, at the parent
-  // gate and when a resume fires (rule 15 keeps every timer out of it).
+  // subagents, and the one file that says when a seat is limited or cleared.
+  // Pending resumes and flushes share a check of the file for early clears.
+  const readLimits = () => readProviderLimits(home);
   const signals: TurnEndedSignals = {
     ...(subagents === undefined
       ? {}
@@ -198,7 +198,8 @@ export function registerParentWakeEvents(
           unwatchSubagents: (agentId: string, listener: () => void) =>
             subagents.unwatch(agentId, listener),
         }),
-    limitedUntil: (agentId: string, now: Date) => limitedUntil(readProviderLimits(home), agentId, now),
+    limitedUntil: (agentId: string, now: Date) => limitedUntil(readLimits(), agentId, now),
+    readProviderLimits: readLimits,
     // L184-R1-F13: the role record, read where a deferred action decides, so a
     // seat that has left it is reclaimed with its timer instead of being sent to.
     roleRecord: () => readRoleAgents(home),

@@ -443,6 +443,7 @@ unit-regression = [
   "mcp/tests/test_provider_degradation.py",
   "mcp/tests/test_provider_limit_hold.py",
   "mcp/tests/test_provider_limit_layering.py",
+  "mcp/tests/test_provider_limit_storage.py",
   "mcp/tests/test_provider_limits.py",
   "mcp/tests/test_provider_setup_retired.py",
   "mcp/tests/test_providers_remove.py",

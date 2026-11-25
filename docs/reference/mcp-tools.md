@@ -723,7 +723,9 @@ message with `withdraw_held_message_id`, and its answer reports the withdrawal i
   most once when the host answers.
 - `provider-limit`: the usage limit of the recipient's
   [model provider](../concepts.md#model-provider) holds it. The answer carries `limitedUntil`
-  when the end of the limit is known.
+  with the recorded reset time. While a limit is active, the dashboard rechecks the usage report
+  every five minutes. If the host reports an early reset, the next eligible drain sends the
+  held messages in order.
 
 Code `recipient-busy` is refused outright only when the recipient already holds twenty messages;
 that refusal names two ways on: wait for a delivery, or withdraw a waiting message. Every other

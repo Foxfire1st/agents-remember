@@ -17,9 +17,16 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from agents_remember.cli import provider_limit_hold as hold
 from agents_remember.cli import role_held_messages as held
+from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
+from agents_remember.cli.paseo_status import AgentReading
+from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA
+from agents_remember.controlplane.held_store_discovery import receipt_holder
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.observer.provider_limits import read_provider_limits
 from agents_remember.serving import _app_lifespan as life
+from agents_remember.serving.paseo import provider_limits as writer
 from agents_remember.serving.projections import host_activity as activity
 
 NOW = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
@@ -31,7 +38,7 @@ def _config(tmp_path: Path) -> SimpleNamespace:
 
     home = tmp_path / "home"
     (home / "agents-remember").mkdir(parents=True)
-    return SimpleNamespace(paseo_runtime=SimpleNamespace(home=home))
+    return SimpleNamespace(paseo_runtime=SimpleNamespace(home=home), coordination_root=tmp_path)
 
 
 def _path(config: SimpleNamespace, name: str) -> Path:
@@ -112,8 +119,8 @@ class _Ticker:
         self.reads: list[list[str]] = []
 
     def __call__(self) -> None:
-        def record_usage(_config: Any, agent_ids: list[str]) -> None:
-            self.reads.append(list(agent_ids))
+        def record_usage(_config: McpRuntimeConfig, batch: activity.UsageReadBatch) -> None:
+            self.reads.append(batch.stamped_agents)
 
         life._held_delivery_tick(
             cast(McpRuntimeConfig, self.config),
@@ -144,7 +151,14 @@ def test_unchanged_quiet_ticks_parse_both_inputs_once(
     tick = _Ticker(config)
 
     with _Reads(config) as counted:
-        for _ in range(3):
+        for minutes in (0, 5, 10):
+            monkeypatch.setattr(
+                activity,
+                "claim_due_reports",
+                lambda config, elapsed=minutes: writer.claim_due_reports(
+                    config, now=NOW + timedelta(minutes=elapsed)
+                ),
+            )
             tick()
         first = counted.reads
 
@@ -255,3 +269,220 @@ def test_a_new_registration_is_read_again(tmp_path: Path, monkeypatch) -> None:
     tick()
 
     assert tick.reads == [[AGENT], ["22222222-2222-5222-8222-222222222222"]]
+
+
+def _store_report_facts(
+    config: SimpleNamespace, now: datetime, agents: dict[str, list[str]]
+) -> Path:
+    path = _path(config, "provider-limits.json")
+    reports = {
+        report: {
+            "until": (now + timedelta(days=3)).isoformat(),
+            "observedAt": (now - timedelta(minutes=5)).isoformat(),
+        }
+        for report in dict.fromkeys(report for ids in agents.values() for report in ids)
+    }
+    path.write_text(json.dumps({"reports": reports, "agents": agents}), encoding="utf-8")
+    return path
+
+
+def _queue_held_work(config: SimpleNamespace, workspace: Path) -> None:
+    workspace.mkdir()
+    path = receipt_holder(config.coordination_root) / "receipt.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema": RECEIPT_SCHEMA,
+                "status": "running",
+                "execution": {"agentId": AGENT},
+                "workspace": {"path": str(workspace)},
+            }
+        ),
+        encoding="utf-8",
+    )
+    held.hold_message(
+        workspace,
+        AGENT,
+        held.HeldMessage(
+            sender_line="From manager",
+            sender_agent_id="manager",
+            text="Work held through the provider reset",
+            reason="provider-limit",
+        ),
+    )
+
+
+def test_a_due_provider_clear_releases_held_work_without_a_turn_end(tmp_path, monkeypatch) -> None:
+    config = _config(tmp_path)
+    now = datetime.now(UTC)
+    _publish(config, {})
+    _register(config, [AGENT])
+    limits_path = _store_report_facts(config, now, {AGENT: ["weekly"]})
+    workspace = tmp_path / "workspace"
+    _queue_held_work(config, workspace)
+    sent: list[str] = []
+
+    def usage(_config, _command, _payload):
+        return {
+            "reports": [
+                {"agentId": AGENT, "entries": [{"id": "weekly", "report": {"status": "available"}}]}
+            ],
+            "periodic": [{"reportId": "weekly", "agentId": AGENT}],
+        }
+
+    def send(_config, _command, payload):
+        sent.append(payload["text"])
+        return {"delivery": {"delivered": True, "taken": "started"}}
+
+    monkeypatch.setattr(hold, "bridge_call", usage)
+    monkeypatch.setattr(held, "bridge_call", send)
+    monkeypatch.setattr(
+        held, "read_agent", lambda *_: AgentReading(reachable=True, found=True, archived=False)
+    )
+    life._held_delivery_tick(
+        cast(McpRuntimeConfig, config),
+        {},
+        {},
+        sweep=True,
+        collaborators=life._DeliveryCollaborators(usage_read=hold.read_usage_for_agents),
+    )
+
+    assert read_provider_limits(limits_path).reports == {}
+    assert len(sent) == 1 and "Work held through the provider reset" in sent[0]
+    assert held.waiting_total(workspace, AGENT) == 0
+
+
+def test_two_due_reports_and_a_stamped_end_share_one_usage_batch(tmp_path, monkeypatch) -> None:
+    config = _config(tmp_path)
+    other = "22222222-2222-5222-8222-222222222222"
+    _publish(config, {other: {"state": "idle", "eventAt": NOW.isoformat()}})
+    _register(config, [AGENT, other])
+    limits_path = _store_report_facts(config, NOW, {AGENT: ["weekly", "daily"]})
+    monkeypatch.setattr(
+        activity, "claim_due_reports", lambda config: writer.claim_due_reports(config, now=NOW)
+    )
+    monkeypatch.setattr(held, "deliver_ended_turns", lambda *_: None)
+    calls: list[dict[str, Any]] = []
+
+    def usage(_config, _command, payload):
+        calls.append(payload)
+        return {
+            "reports": [
+                {
+                    "agentId": AGENT,
+                    "entries": [_exhausted_entry("weekly"), _exhausted_entry("daily")],
+                },
+                {"agentId": other, "entries": [_exhausted_entry("stamped")]},
+            ],
+            "periodic": [{"reportId": report, "agentId": AGENT} for report in ("weekly", "daily")],
+        }
+
+    monkeypatch.setattr(hold, "bridge_call", usage)
+    monkeypatch.setattr(
+        hold,
+        "record_usage_reads",
+        lambda config, reads, **_: writer.record_usage_reads(config, reads, now=NOW),
+    )
+    seen: dict[str, str] = {}
+    for _ in range(3):
+        life._held_delivery_tick(
+            cast(McpRuntimeConfig, config),
+            {},
+            seen,
+            sweep=False,
+            collaborators=life._DeliveryCollaborators(usage_read=hold.read_usage_for_agents),
+        )
+
+    assert calls == [
+        {
+            "agentIds": [other],
+            "leafAgentIds": [other],
+            "periodicCandidates": {"weekly": (AGENT,), "daily": (AGENT,)},
+        }
+    ]
+    assert set(read_provider_limits(limits_path).reports) == {"weekly", "daily", "stamped"}
+
+
+def _exhausted_entry(report: str) -> dict[str, Any]:
+    return {
+        "id": report,
+        "fetchedAt": NOW.isoformat(),
+        "report": {
+            "status": "available",
+            "windows": [
+                {
+                    "summary": True,
+                    "usedPct": 100,
+                    "resetsAt": (NOW + timedelta(days=3)).isoformat(),
+                }
+            ],
+        },
+    }
+
+
+def test_due_report_without_a_registered_seat_logs_once_per_period(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    config = _config(tmp_path)
+    _publish(config, {})
+    _register(config, [])
+    path = _store_report_facts(config, NOW, {AGENT: ["weekly"]})
+    clock = [NOW]
+    monkeypatch.setattr(
+        activity, "claim_due_reports", lambda config: writer.claim_due_reports(config, now=clock[0])
+    )
+
+    def unexpected_bridge(*_):
+        pytest.fail("a due report without a mapped seat started a bridge")
+
+    monkeypatch.setattr(hold, "bridge_call", unexpected_bridge)
+    for minutes in (0, 1, 4, 5, 6):
+        clock[0] = NOW + timedelta(minutes=minutes)
+        life._held_delivery_tick(
+            cast(McpRuntimeConfig, config),
+            {},
+            {},
+            sweep=False,
+            collaborators=life._DeliveryCollaborators(usage_read=hold.read_usage_for_agents),
+        )
+
+    assert sum("weekly: no mapped seat" in record.message for record in caplog.records) == 2
+    assert set(read_provider_limits(path).reports) == {"weekly"}
+
+
+@pytest.mark.parametrize("failure", ["unavailable", "error", "timeout"])
+def test_a_failed_periodic_read_retains_the_fact_and_mapping(
+    tmp_path, monkeypatch, caplog, failure: str
+) -> None:
+    config = _config(tmp_path)
+    _publish(config, {})
+    _register(config, [AGENT])
+    path = _store_report_facts(config, datetime.now(UTC), {AGENT: ["weekly"]})
+    original = read_provider_limits(path)
+
+    def usage(*_):
+        if failure == "timeout":
+            raise PaseoBridgeFailure("paseo_bridge_timeout", "the bridge did not answer")
+        return {
+            "reports": [
+                {"agentId": AGENT, "entries": [{"id": "weekly", "report": {"status": failure}}]}
+            ],
+            "periodic": [{"reportId": "weekly", "agentId": AGENT, "error": failure}],
+        }
+
+    monkeypatch.setattr(hold, "bridge_call", usage)
+    life._held_delivery_tick(
+        cast(McpRuntimeConfig, config),
+        {},
+        {},
+        sweep=False,
+        collaborators=life._DeliveryCollaborators(usage_read=hold.read_usage_for_agents),
+    )
+
+    current = read_provider_limits(path)
+    assert current.agents == original.agents
+    fact = current.reports["weekly"]
+    assert fact.until == original.reports["weekly"].until
+    assert fact.observedAt == original.reports["weekly"].observedAt
+    assert sum("provider usage read failed" in record.message for record in caplog.records) == 1
