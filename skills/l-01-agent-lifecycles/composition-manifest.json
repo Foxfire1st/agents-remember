@@ -997,7 +997,7 @@
           "investigator",
           "bootstrap"
         ],
-        "step": "before relying on storage or path eligibility, cross-repository allowances, or serving-build metadata; before diagnosing; before interpreting their resolution; before checking code and memory; before interpreting a knowledge read; before investigating repository code; when inspecting changes; before editing source; before diagnosing a failing test; before gathering that evidence"
+        "step": "before relying on storage or path eligibility, cross-repository allowances, or serving-build metadata; before diagnosing; before interpreting their resolution; before interpreting a knowledge read; for a record you need whole; before diagnosing a failing test; before gathering that evidence"
       },
       "curator/repository-foundation": {
         "roles": [

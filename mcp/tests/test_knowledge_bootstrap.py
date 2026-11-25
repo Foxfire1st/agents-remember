@@ -183,6 +183,7 @@ def entry(entry_id: str) -> dict[str, Any]:
         "record_action": None,
         "supersedes": None,
         "scope": {"applicability": "Every attempt.", "conditions": [], "exclusions": []},
+        "title": "Budget read at one place",
         "admission": {
             "criteria": ["prevents_costly_mistake"],
             "justification": "A budget read anywhere else lets an attempt run without one.",

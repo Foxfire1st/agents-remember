@@ -36,6 +36,7 @@ from agents_remember.kernel.git_command import (
     read_git_blobs_bytes,
     run_git,
 )
+from agents_remember.kernel.memory_ignore import with_briefs_ignore
 from agents_remember.memory_quality.knowledge_validator.trees import (
     KnowledgeTree,
     knowledge_tree_from_directory,
@@ -43,6 +44,7 @@ from agents_remember.memory_quality.knowledge_validator.trees import (
 from agents_remember.models.knowledge_files.canonical import CanonicalFormatError, parse_json
 from agents_remember.models.knowledge_files.documents import (
     KNOWLEDGE_ROOT,
+    ONBOARDING_ROOT,
     RECORD_DIRECTORIES,
     file_sidecar_path,
     history_path,
@@ -484,10 +486,34 @@ class MemoryState:
         files.update(rendered)
         return files
 
-    def write(self, files: Mapping[str, bytes]) -> tuple[list[str], list[str]]:
+    def write(self, files: Mapping[str, bytes], owner: Owner) -> tuple[list[str], list[str]]:
         """Write ``files`` where they differ from disk and delete what the operation removed."""
 
+        if owner.kind == "leaf" and self._changed_records(files):
+            ignore = self.root / ".gitignore"
+            try:
+                old = ignore.read_bytes()
+            except FileNotFoundError:
+                old = None
+            original = (old or b"").decode("utf-8", errors="surrogateescape")
+            prepared = with_briefs_ignore(original)
+            if prepared != original:
+                previous = dict(self.files)
+                if old is not None:
+                    previous[".gitignore"] = old
+                candidate = {
+                    **files,
+                    ".gitignore": prepared.encode("utf-8", errors="surrogateescape"),
+                }
+                return publish_files(self.root, previous, candidate)
         return publish_files(self.root, self.files, files)
+
+    def _changed_records(self, files: Mapping[str, bytes]) -> bool:
+        return any(
+            self.files.get(path) != files.get(path)
+            and (path.startswith(f"{ONBOARDING_ROOT}/") or _record_id_and_kind(path) is not None)
+            for path in self.files.keys() | files.keys()
+        )
 
 
 def deep_copy(document: Mapping[str, Any]) -> dict[str, Any]:

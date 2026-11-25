@@ -10,10 +10,12 @@ keeps the base's, and a caller that cannot be resolved reads ``unknown`` with th
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
+from agents_remember.application.file_briefs.folder import brief_location, tree_named
 from agents_remember.application.knowledge_write_route import (
     WaveTarget,
     WriteSubmission,
@@ -26,6 +28,7 @@ from agents_remember.application.knowledge_writer import Owner, WriteRequest
 from agents_remember.application.role_launch_context import selection_binding
 from agents_remember.cli.role_launch_receipts import _taskless_session_directory
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.memory.knowledge_index.tree import directory_key
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.knowledge_files.history_product import record_content_digest
 from agents_remember.models.knowledge_files.writer_stamp import WriterStamp
@@ -34,6 +37,7 @@ from agents_remember.worktrees.worktree_contract import load_contract
 from knowledge_writer_test_support import (
     ADMISSION,
     BASE_INVARIANT,
+    CODE_FILE,
     LEAF_ID,
     SCOPE,
     TASK_ID,
@@ -42,6 +46,7 @@ from knowledge_writer_test_support import (
     build_world,
     commit_all,
     entry,
+    git,
     read_json,
     target,
     tree_bytes,
@@ -141,6 +146,34 @@ def test_a_leaf_write_stamps_its_new_record_from_binding_and_receipt_not_from_in
     history = read_json(world.memory, f"knowledge/history/{LEAF_ID}.json")
     assert history["written"] == [_written_row(invariant)]
     assert "forged" not in (world.memory / path).read_text()
+
+
+def test_a_leaf_write_prepares_ignore_and_refreshes_only_after_a_real_write(tmp_path: Path) -> None:
+    world = build_world(tmp_path)
+    (world.task_root / "knowledge-worklist.json").write_text('{"items": []}', encoding="utf-8")
+    contract = load_contract(world.contract)
+    ignore = world.memory / ".gitignore"
+    ignore.write_text("/memory.md\n", encoding="utf-8")
+    brief = brief_location(world.memory, CODE_FILE)
+    original = git(world.memory, "status", "--porcelain")
+    submission = WriteSubmission(
+        document={"entries": [_authored()]},
+        handoff_path="handoff.json",
+        authorization_ref="authorized-by-test",
+        commit=False,
+    )
+    preview = leaf_write_report(contract, submission)
+    assert not isinstance(preview, str) and preview.state == "planned", preview
+    assert ignore.read_bytes() == b"/memory.md\n" and not brief.exists()
+    assert git(world.memory, "status", "--porcelain") == original
+
+    report = leaf_write_report(contract, replace(submission, commit=True))
+    assert not isinstance(report, str) and report.state == "written", report
+    assert ".gitignore" in report.written
+    assert ignore.read_text().splitlines().count("/briefs/") == 1
+    assert tree_named(brief) == directory_key(world.memory)
+    assert "Rule B-1" in brief.read_text()
+    assert "briefs/" not in git(world.memory, "status", "--porcelain")
 
 
 def test_a_wave_write_names_its_revisions_and_refuses_a_typed_written_part(

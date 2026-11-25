@@ -8,8 +8,9 @@ Everything else is mechanical and filled here (MIK-R12 rule 2):
   produces the same files with the same IDs;
 * **anchors** are resolved at C and record ``blob`` and ``content`` (:mod:`.code_anchors`);
 * **revisions** increment once per leaf when a record's meaning changes against the base: every field
-  except ``id``, ``schema``, ``origin``, ``revision``, ``admission``, ``status`` and ``writer`` is
-  meaning (``admission``, ``origin`` and the slug carry none);
+  except ``id``, ``schema``, ``origin``, ``revision``, ``admission``, ``status``, ``writer`` and an
+  invariant's ``title`` is meaning. The invariant's title is a name, so a title edit alone
+  raises no revision;
 * **the writer's stamp** of a revision this owner raised stands in the record and in the owner's
   history file (:mod:`.revision_stamps`); no input names it, and no input names a
   record's state: ``status`` is only a kind's own lifecycle word;
@@ -79,6 +80,7 @@ from agents_remember.application.knowledge_writer.revision_stamps import (
     stamp_record,
     unresolved_stamp,
 )
+from agents_remember.application.knowledge_writer.rule_titles import untitled_note
 from agents_remember.application.knowledge_writer.weakness_authoring import author_weakness
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
@@ -323,6 +325,8 @@ class Authoring(RepointRowAuthoring):
             else "updated"
         )
         self.records.append(RecordOutcome(kind, record_id, path, action, revision, handoff_entry))
+        if kind == "invariant" and action == "updated" and (note := untitled_note(document)):
+            self.notes.append(note)
 
     def _write_entry(self, entry: EntryRequest) -> tuple[CitedTest, ...]:
         invariant_id = self.handles.get(entry.entry_id)
@@ -387,6 +391,8 @@ class Authoring(RepointRowAuthoring):
             }
         )
         document["statement"] = entry.statement
+        if entry.title is not None:
+            document["title"] = entry.title
         if entry.scope is not None:
             document["applicability"] = entry.scope.applicability
             document["conditions"] = list(entry.scope.conditions)

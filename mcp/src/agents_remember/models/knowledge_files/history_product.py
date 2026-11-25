@@ -33,10 +33,17 @@ _NON_MEANING_FIELDS: Final = frozenset(
 )
 
 
+def _invariant_title_field(document: Mapping[str, Any]) -> frozenset[str]:
+    """An invariant's title is its display name, independent of its written revision."""
+
+    return frozenset({"title"}) if document.get("schema") == "ar-invariant/v1" else frozenset()
+
+
 def record_meaning(document: Mapping[str, Any]) -> dict[str, Any]:
     """The fields that the writer compares when deciding whether a revision changed."""
 
-    return {key: value for key, value in document.items() if key not in _NON_MEANING_FIELDS}
+    excluded = _NON_MEANING_FIELDS | _invariant_title_field(document)
+    return {key: value for key, value in document.items() if key not in excluded}
 
 
 def record_content_digest(document: Mapping[str, Any]) -> str:
@@ -81,11 +88,16 @@ class CrossingSelection(RevisionRef):
 
 
 def crossing_selection_digest(document: Mapping[str, Any]) -> str:
-    """Identify the selected record across a metadata-only retirement."""
+    """Identify the selected record across a retirement or invariant title edit."""
 
+    excluded = {"status"} | _invariant_title_field(document)
     return prefixed_sha256_digest(
         canonical_value(
-            {key: value for key, value in document.items() if key != "status" and value is not None}
+            {
+                key: value
+                for key, value in document.items()
+                if key not in excluded and value is not None
+            }
         )
     )
 

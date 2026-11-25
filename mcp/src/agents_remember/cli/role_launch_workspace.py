@@ -333,6 +333,9 @@ def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> 
     reference_warning = status.get("referenceWarning") or reference_result.get("warning")
     if isinstance(reference_warning, str) and reference_warning:
         workspace["referenceWarning"] = reference_warning
+    briefs_problem = status.get("briefsProblem")
+    if isinstance(briefs_problem, str):
+        workspace["briefsProblem"] = briefs_problem
     task_reports = context.task.path.parent / "notes" / "reports"
     task_reports.mkdir(parents=True, exist_ok=True)
     report_access = group / "role-reports"
@@ -442,6 +445,8 @@ def _ensure_leaf_enclosure(
             config,
             TaskRef(repo_id=leaf.ref.repository, contract_path=contract_path.as_posix()),
         )
+        if "briefsProblem" in created:
+            status = {**status, "briefsProblem": created["briefsProblem"]}
     if status.get("ok") is not True:
         raise _preparation_refusal(status, contract_path, leaf.ref.repository)
     status = {**status, "enclosurePreparation": preparation}

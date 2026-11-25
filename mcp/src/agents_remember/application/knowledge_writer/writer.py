@@ -229,7 +229,7 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         )
     if refused:
         return replace(report, state="refused", problems=refused)
-    return _finish(report, state, files, request.commit)
+    return _finish(report, state, files, request)
 
 
 CROSSING_ROWS_ONLY = (
@@ -450,11 +450,11 @@ def _writer_report_note() -> str:
 
 
 def _finish(
-    report: WriteReport, state: MemoryState, files: Mapping[str, bytes], commit: bool
+    report: WriteReport, state: MemoryState, files: Mapping[str, bytes], request: WriteRequest
 ) -> WriteReport:
     """A validated operation: written in a committing run, planned (nothing written) otherwise."""
 
-    if not commit:
+    if not request.commit:
         return replace(
             report,
             state="planned",
@@ -462,7 +462,7 @@ def _finish(
             removed=tuple(path for path in state.files if path not in files),
         )
     try:
-        written, removed = state.write(files)
+        written, removed = state.write(files, request.owner)
     except OSError as error:
         recovery = (
             (

@@ -52,6 +52,7 @@ A call on a repository without memory creates this tree:
 ```text
 <coordination-root>/memory-repos/ar-<repo-id>/
   .git/
+  .gitignore
   docs/
   knowledge/
     layout.json
@@ -64,6 +65,7 @@ A call on a repository without memory creates this tree:
 
 | Path | What it holds |
 | --- | --- |
+| `<memory-root>/.gitignore` | The tracked ignore rules, including `/briefs/` for generated briefs. |
 | `<memory-root>/onboarding/` | The cards. The call creates the folder empty. |
 | `<memory-root>/knowledge/layout.json` | The layout marker. It names the format of the memory files, and the memory tools need it. |
 | `<memory-root>/docs/` | Documents about the repository that you or a role agent add. The call creates the folder empty. |
@@ -73,7 +75,11 @@ A call on a repository without memory creates this tree:
 
 Each of the three files in `<memory-root>/system/` starts as one heading line. You fill them in.
 
-The call creates what is missing and overwrites no file that exists. Its answer names the result:
+The call creates the missing scaffold files and preserves the existing system files. When it
+creates a new layout, it adds the `/briefs/` rule to the root `.gitignore` if needed and keeps
+the previous ignore text. A successful refresh on a converted root writes the Git-ignored
+`briefs/TREE` stamp and any eligible source briefs when Git effectively ignores the folder.
+A dry run only reports what the call would do. Its answer names the result:
 
 | Field | Meaning |
 | --- | --- |
@@ -179,8 +185,11 @@ Each task adds memory for the files it touches:
 1. The role agent resolves the repository with `context_packet(repo_id="<repo-id>")`: the
    answer names the folders of the code and of the memory that the agent works in; see
    [Context resolution](../concepts.md#context-resolution).
-2. It asks `read_ar_files` for the cards and records of the files it will read. The tool names
-   where each one lies, and the agent reads those files beside the source.
+2. It asks `read_ar_files` about the files it will read. The answer reports card information
+   and names a brief for an eligible file with recorded knowledge. It carries rule text within
+   the reply's bound and reports when the saved brief is missing, older or of unknown freshness.
+   A writing call that covers the file or folder renews it. Before editing a file, the agent
+   opens the saved `briefs/<path>.md` when available for the rules' conditions and exclusions.
 3. The Worker builds the approved change.
 4. The Curator of the task writes or updates the cards and knowledge records of the touched
    files.

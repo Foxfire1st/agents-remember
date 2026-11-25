@@ -263,6 +263,42 @@ current truth; shared invariants, families and decisions live in records under
 `knowledge/`, rather than being copied into each card. See the [knowledge-system
 reference](reference/knowledge-system.md).
 
+### Brief
+
+A brief is a Markdown file that says in one place what the memory records about one source file:
+the file's purpose from its card, then each rule recorded at the file with its title, state,
+proof, anchors and text, the decisions that formed it and the weaknesses that burden it, then the
+weaknesses and decisions at the file that belong to no rule, the documents that stand on the file,
+and the families of its rules with their other rules. The product writes it; nobody edits it.
+
+The brief of a source file lies under `briefs/` at the file's path, like its card under
+`onboarding/`:
+
+```text
+<memory-root>/briefs/src/foo/bar.ts.md
+```
+
+Each source-file brief folder has an `INDEX.md` with one line per file that has a brief.
+A full write replaces the source-file briefs and preserves the task-moment folder
+`briefs/_task/`, which has no index. `briefs/TREE` names the memory tree of the last full
+write, and the first line of each brief names the tree it was made from.
+
+[Whole-folder memory writes](reference/knowledge-system.md#derived-index-and-reads) refresh all
+briefs. Task-local `knowledge_write` and `citation_fix` refresh briefs for the source files of
+changed records. Memory writers add the Git ignore line for `briefs/` during tracked preparation.
+
+`read_ar_files` carries the short answer of each file's brief: the rules with their text, the open
+weaknesses, the documents and the families. The read computes from current memory without writing
+memory files. Its answer reports when the brief on disk is missing, older or of unknown freshness.
+The next brief-writing call that covers the file or the whole folder renews it. If the memory
+records no rule, weakness, decision or standing document for the file, the answer says so.
+
+When a Reviewer or Curator starts, the product sends a message with the counts of the change and
+the rules whose anchors moved. If the converted memory already ignores `briefs/`, the message
+names `briefs/_task/review-start.md` or `briefs/_task/curator-start.md` with the whole list.
+If the converted memory lacks the ignore line, the message names the file in the task's scratch
+folder. For unconverted memory, the message says why there is no file.
+
 ### Route
 
 A route is a folder of a code repository that has a card of its own, the route overview: the
@@ -387,8 +423,13 @@ search, ranking or index stands between the file and its card.
 
 Two tools name the memory that belongs to source files. `read_ar_files` names, for up to 20 paths,
 the governing card and the knowledge records of each path. `knowledge_read` names the invariants
-and families attributed to one source file. Both tools return names and locations, never text; the
-agent opens the named files itself. An agent that knows a concept but no file searches the code and
+and families attributed to one source file. `read_ar_files` also carries, per file, the short answer of its [brief](#brief): the rules recorded at
+the file with their text. As the answer nears its size bound, the further paths get their counts
+and the path of their brief. If those rows would pass the bound too, every path gets a compact
+row instead: its path and, where applicable, whether it exists, its card's status and the path
+of its brief, marked when that brief is missing or older. The brief holds the full story.
+`knowledge_read` returns names and locations only; the agent opens the named files itself. An agent
+that knows a concept but no file searches the code and
 the cards as text first. The skill holds the
 [knowledge-use guidance](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/reference/knowledge/use.md).
 

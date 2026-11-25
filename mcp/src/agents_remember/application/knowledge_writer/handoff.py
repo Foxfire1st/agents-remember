@@ -7,12 +7,14 @@ The document is JSON, one of two spellings:
 * an **object** with up to three sections, ``entries``, ``records`` and ``history``.
 
 **Entries** keep the producer's thirteen fields unchanged. The curator's keys beside them say what the
-entry becomes: ``scope`` and ``admission`` author an invariant record from the verbatim
-``statement`` (``status`` only retires it: no input names a record's state, :mod:`.typed_state`);
-``invariant_id`` names a stored invariant the entry updates instead of creating one; ``supersedes`` names what the new invariant supersedes; ``proofs`` lists the tests that
-prove it, each with the curator's ``facet``. Every ``target`` becomes a realization entry. An entry
-that authors no invariant (no target, no ``invariant_id``, no ``admission``) is a ruling and writes
-nothing.
+entry becomes: ``scope``, ``admission`` and ``title`` author an invariant
+record from the verbatim ``statement``, and a new invariant is refused without its ``title``, a name
+of at most 80 characters. A ``status`` can retire the invariant; its state is derived
+(:mod:`.typed_state`); ``invariant_id`` names a stored invariant the entry
+updates instead of creating one, with or without a ``title``; ``supersedes`` names what the new
+invariant supersedes; ``proofs`` lists the tests that prove it, each with the curator's ``facet``.
+Every ``target`` becomes a realization entry. An entry that authors no invariant (no target, no
+``invariant_id``, no ``admission``) is a ruling and writes nothing.
 
 **Records** are curator-authored records of any kind: ``{key, kind, entry?, id?, slug?, fields}``.
 ``fields`` holds the kind's own fields (``status``, ``admission``, ``links`` …); the writer owns
@@ -47,6 +49,10 @@ from agents_remember.application.curator_realization_authoring import (
 )
 from agents_remember.application.curator_scope import CuratorScope, read_curator_scope
 from agents_remember.application.knowledge_writer.row_items import read_row_items
+from agents_remember.application.knowledge_writer.rule_titles import (
+    read_title,
+    record_title_problems,
+)
 from agents_remember.application.knowledge_writer.typed_state import typed_state_refusal
 from agents_remember.models.knowledge_files.ids import RECORD_PREFIXES, RecordKind
 from agents_remember.models.knowledge_files.shapes import require_repository_path
@@ -237,6 +243,7 @@ class EntryRequest:
     scope: CuratorScope | None = None
     admission: Any = None
     status: str | None = None
+    title: str | None = None
     invariant_id: str | None = None
     supersedes: tuple[str, ...] = ()
     replace_evidence: bool = False
@@ -701,7 +708,10 @@ def _entry(position: int, raw: Any, problems: list[Problem]) -> EntryRequest | N
         problems.append(
             Problem(where, "an invariant's 'statement' is the producer's verbatim text")
         )
-    return entry
+    title, title_problem = read_title(raw, new_rule=invariant_id is None)
+    if title_problem is not None:
+        problems.append(Problem(where, title_problem))
+    return replace(entry, title=title)
 
 
 def _record_kind(value: Any) -> RecordKind | None:
@@ -736,6 +746,9 @@ def _record(position: int, raw: Any, problems: list[Problem]) -> RecordRequest |
         problems.append(Problem(where, "a new record names its display 'slug'"))
     if key is None or kind is None or owned:
         return None
+    problems += [
+        Problem(f"{where}.fields", one) for one in record_title_problems(kind, record_id, fields)
+    ]
     return RecordRequest(
         key=key,
         kind=kind,

@@ -28,9 +28,14 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
+from agents_remember.application.file_briefs.triggers import (
+    IndexBefore,
+    after_memory_files_written,
+    index_before_write,
+)
 from agents_remember.application.knowledge_worklist.leaf import (
     WORKLIST_FILE_NAME,
     read_leaf_worklist,
@@ -339,7 +344,8 @@ def leaf_write_report(
     if shape := worklist_shape_problem(worklist):
         return f"{contract.contract_path.parent / WORKLIST_FILE_NAME}: {shape.message}"
     owner = leaf_owner(contract)
-    return write_knowledge(
+    before = index_before_write(contract.memory_worktree, contract.coordination_root)
+    report = write_knowledge(
         WriteRequest(
             memory_root=contract.memory_worktree,
             code_root=contract.code_worktree,
@@ -357,6 +363,35 @@ def leaf_write_report(
             stamp=write_stamp(owner, contract.coordination_root),
         )
     )
+    return _with_briefs(contract, report, before)
+
+
+def _with_briefs(
+    contract: WorktreeContract, report: WriteReport, before: IndexBefore | None
+) -> WriteReport:
+    """Write the briefs of the files a committed leaf write changed, and say so in its notes.
+
+    The briefs are derived: a writing that fails is a note of the report and never
+    changes what the write did.
+    """
+
+    if report.state != "written" or contract.memory_worktree is None:
+        return report
+    writing = after_memory_files_written(
+        contract.memory_worktree,
+        contract.code_worktree,
+        contract.coordination_root,
+        (*report.written, *report.removed),
+        before,
+    )
+    if writing is None:
+        return report
+    note = (
+        writing
+        if isinstance(writing, str)
+        else f"briefs written again for the changed files: {writing.briefs}"
+    )
+    return replace(report, notes=(*report.notes, note))
 
 
 def _crossing_contract_refusal(contract: WorktreeContract | str, crossing: str) -> str | None:

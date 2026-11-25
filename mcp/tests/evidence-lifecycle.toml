@@ -185,6 +185,7 @@ consumers = [
   "mcp/tests/test_checkout_coordination_isolation.py",
   "mcp/tests/test_checkpoint_landing.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
+  "mcp/tests/test_checkpoint_memory_ignore.py",
   "mcp/tests/test_citation_census_artifact.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_citation_fix_documents.py",
@@ -305,6 +306,7 @@ consumers = [
   "mcp/tests/test_f08_registered_handler_river.py",
   "mcp/tests/test_family_history_judgments.py",
   "mcp/tests/test_family_route_conditions.py",
+  "mcp/tests/test_file_briefs.py",
   "mcp/tests/test_file_identity_stat_first.py",
   "mcp/tests/test_file_size_detector.py",
   "mcp/tests/test_final_codex_certificate.py",
@@ -521,6 +523,7 @@ consumers = [
   "mcp/tests/test_mik_r53_report_only_rules.py",
   "mcp/tests/test_missing_master_tool_answers.py",
   "mcp/tests/test_models.py",
+  "mcp/tests/test_moment_composer.py",
   "mcp/tests/test_native_refresh_wiring.py",
   "mcp/tests/test_native_retire.py",
   "mcp/tests/test_next_step_address_binding.py",
@@ -588,6 +591,7 @@ consumers = [
   "mcp/tests/test_pnt_sandbox_settings.py",
   "mcp/tests/test_post_integration_cleanup_guidance.py",
   "mcp/tests/test_previous_host_removed.py",
+  "mcp/tests/test_product_start_messages.py",
   "mcp/tests/test_projection_failure_retry.py",
   "mcp/tests/test_projection_incremental.py",
   "mcp/tests/test_projection_path_directed.py",
@@ -873,6 +877,7 @@ consumers = [
   "mcp/tests/test_worktree_candidate_capture.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_closeout_route_review_transport.py",
+  "mcp/tests/test_worktree_file_briefs.py",
   "mcp/tests/test_worktree_own_environment.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_start_preview.py",
@@ -894,6 +899,7 @@ consumers = [
   "mcp/tests/test_writer_merge_bases.py",
   "mcp/tests/test_writer_question_publication.py",
   "mcp/tests/test_writer_refresh_restoration.py",
+  "mcp/tests/test_writer_rule_titles.py",
 ]
 
 [[artifact]]
@@ -916,6 +922,7 @@ consumers = [
   "mcp/tests/test_comparison_changeset.py",
   "mcp/tests/test_explainer_authored_claims.py",
   "mcp/tests/test_explainer_server.py",
+  "mcp/tests/test_file_briefs.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_copies_completed_tasks.py",
@@ -962,6 +969,8 @@ consumers = [
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_mik_r118_r124_marks.py",
   "mcp/tests/test_mik_r178_closeout_memory_fault_preflight.py",
+  "mcp/tests/test_moment_composer.py",
+  "mcp/tests/test_product_start_messages.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_request_logical_digests.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
@@ -989,6 +998,7 @@ consumers = [
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_weakness_closure.py",
   "mcp/tests/test_worktree_candidate_capture.py",
+  "mcp/tests/test_worktree_file_briefs.py",
 ]
 
 [[artifact]]
@@ -1075,6 +1085,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_abandoned_series_closeout.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
+  "mcp/tests/test_checkpoint_memory_ignore.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
@@ -1195,6 +1206,7 @@ consumers = [
   "mcp/tests/test_cardless_knowledge_writer.py",
   "mcp/tests/test_carryover_apply_transaction.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
+  "mcp/tests/test_checkpoint_memory_ignore.py",
   "mcp/tests/test_cleanup_completed_contract_remains.py",
   "mcp/tests/test_cleanup_kept_line_branch_deletion.py",
   "mcp/tests/test_cleanup_kept_line_carryover.py",
@@ -1327,6 +1339,7 @@ consumers = [
   "mcp/tests/test_weakness_closure_closeout.py",
   "mcp/tests/test_workspace_wake_zero_census.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
+  "mcp/tests/test_worktree_file_briefs.py",
   "mcp/tests/test_worktree_own_environment.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_start_preview.py",
@@ -2617,6 +2630,7 @@ consumers = [
   "mcp/tests/test_checkout_coordination_isolation.py",
   "mcp/tests/test_checkpoint_landing.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
+  "mcp/tests/test_checkpoint_memory_ignore.py",
   "mcp/tests/test_citation_census_artifact.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_citation_fix_documents.py",
@@ -2737,6 +2751,7 @@ consumers = [
   "mcp/tests/test_f08_registered_handler_river.py",
   "mcp/tests/test_family_history_judgments.py",
   "mcp/tests/test_family_route_conditions.py",
+  "mcp/tests/test_file_briefs.py",
   "mcp/tests/test_file_identity_stat_first.py",
   "mcp/tests/test_file_size_detector.py",
   "mcp/tests/test_final_codex_certificate.py",
@@ -2953,6 +2968,7 @@ consumers = [
   "mcp/tests/test_mik_r53_report_only_rules.py",
   "mcp/tests/test_missing_master_tool_answers.py",
   "mcp/tests/test_models.py",
+  "mcp/tests/test_moment_composer.py",
   "mcp/tests/test_native_refresh_wiring.py",
   "mcp/tests/test_native_retire.py",
   "mcp/tests/test_next_step_address_binding.py",
@@ -3020,6 +3036,7 @@ consumers = [
   "mcp/tests/test_pnt_sandbox_settings.py",
   "mcp/tests/test_post_integration_cleanup_guidance.py",
   "mcp/tests/test_previous_host_removed.py",
+  "mcp/tests/test_product_start_messages.py",
   "mcp/tests/test_projection_failure_retry.py",
   "mcp/tests/test_projection_incremental.py",
   "mcp/tests/test_projection_path_directed.py",
@@ -3305,6 +3322,7 @@ consumers = [
   "mcp/tests/test_worktree_candidate_capture.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_closeout_route_review_transport.py",
+  "mcp/tests/test_worktree_file_briefs.py",
   "mcp/tests/test_worktree_own_environment.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_start_preview.py",
@@ -3326,6 +3344,7 @@ consumers = [
   "mcp/tests/test_writer_merge_bases.py",
   "mcp/tests/test_writer_question_publication.py",
   "mcp/tests/test_writer_refresh_restoration.py",
+  "mcp/tests/test_writer_rule_titles.py",
 ]
 
 [[artifact]]
@@ -3580,6 +3599,7 @@ consumers = [
   "mcp/tests/test_converted_onboarding_drift_leaf_route.py",
   "mcp/tests/test_curator_card_layouts.py",
   "mcp/tests/test_curator_instruction_wording.py",
+  "mcp/tests/test_file_briefs.py",
   "mcp/tests/test_knowledge_conversion.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_crossing.py",
@@ -3597,6 +3617,7 @@ consumers = [
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_sync_parked_candidate.py",
   "mcp/tests/test_sync_parked_omissions.py",
+  "mcp/tests/test_worktree_file_briefs.py",
   "mcp/tests/test_worktree_sync_crossing_writer.py",
   "mcp/tests/test_worktree_sync_knowledge_merge.py",
   "mcp/tests/test_writer_merge_bases.py",
@@ -3640,6 +3661,7 @@ consumers = [
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_explainer_authored_claims.py",
   "mcp/tests/test_explainer_server.py",
+  "mcp/tests/test_file_briefs.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_diff_report.py",
   "mcp/tests/test_knowledge_index.py",
@@ -3663,6 +3685,8 @@ consumers = [
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_mik_r118_r124_marks.py",
   "mcp/tests/test_mik_r178_closeout_memory_fault_preflight.py",
+  "mcp/tests/test_moment_composer.py",
+  "mcp/tests/test_product_start_messages.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_change_kinds.py",
@@ -3683,6 +3707,7 @@ consumers = [
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_weakness_closure.py",
   "mcp/tests/test_worktree_candidate_capture.py",
+  "mcp/tests/test_worktree_file_briefs.py",
 ]
 
 [[artifact]]
@@ -3702,6 +3727,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_closeout_review_fact.py",
   "mcp/tests/test_comparison_changeset.py",
+  "mcp/tests/test_file_briefs.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_diff_attribution.py",
@@ -3799,6 +3825,7 @@ consumers = [
   "mcp/tests/test_comparison_changeset.py",
   "mcp/tests/test_explainer_authored_claims.py",
   "mcp/tests/test_explainer_server.py",
+  "mcp/tests/test_file_briefs.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_copies_completed_tasks.py",
@@ -3845,6 +3872,8 @@ consumers = [
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_mik_r118_r124_marks.py",
   "mcp/tests/test_mik_r178_closeout_memory_fault_preflight.py",
+  "mcp/tests/test_moment_composer.py",
+  "mcp/tests/test_product_start_messages.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_request_logical_digests.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
@@ -3872,6 +3901,7 @@ consumers = [
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_weakness_closure.py",
   "mcp/tests/test_worktree_candidate_capture.py",
+  "mcp/tests/test_worktree_file_briefs.py",
 ]
 
 [[artifact]]
@@ -3971,6 +4001,7 @@ consumers = [
   "mcp/tests/test_writer_integrations.py",
   "mcp/tests/test_writer_question_publication.py",
   "mcp/tests/test_writer_refresh_restoration.py",
+  "mcp/tests/test_writer_rule_titles.py",
 ]
 
 [[artifact]]
@@ -4198,6 +4229,7 @@ consumers = [
   "mcp/tests/test_paseo_role_tools_start.py",
   "mcp/tests/test_paseo_status.py",
   "mcp/tests/test_previous_host_removed.py",
+  "mcp/tests/test_product_start_messages.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_first_message.py",
   "mcp/tests/test_role_first_message_guards.py",
@@ -4239,6 +4271,7 @@ consumers = [
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
   "mcp/tests/test_paseo_role_tools_start.py",
+  "mcp/tests/test_product_start_messages.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_message_files.py",
   "mcp/tests/test_role_start_set.py",
@@ -4313,6 +4346,7 @@ consumers = [
   "mcp/tests/test_paseo_status_bridge.py",
   "mcp/tests/test_paseo_usage_reports.py",
   "mcp/tests/test_previous_host_removed.py",
+  "mcp/tests/test_product_start_messages.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_first_message.py",
   "mcp/tests/test_role_first_message_guards.py",
@@ -4362,6 +4396,7 @@ replacement_contract = "node:mcp/tests/test_worktree_start_preview.py::test_regi
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_master_retirement_readiness.py",
+  "mcp/tests/test_worktree_file_briefs.py",
   "mcp/tests/test_worktree_start_preview.py",
 ]
 
@@ -4996,6 +5031,7 @@ consumers = [
   "mcp/tests/test_writer_correction_publication.py",
   "mcp/tests/test_writer_corrections.py",
   "mcp/tests/test_writer_refresh_restoration.py",
+  "mcp/tests/test_writer_rule_titles.py",
 ]
 
 [[artifact]]
@@ -5021,6 +5057,7 @@ consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_carryover_apply_transaction.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
+  "mcp/tests/test_checkpoint_memory_ignore.py",
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_live_gate.py",
@@ -5071,6 +5108,7 @@ consumers = [
   "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
   "mcp/tests/test_weakness_closure_closeout.py",
   "mcp/tests/test_workspace_wake_zero_census.py",
+  "mcp/tests/test_worktree_file_briefs.py",
   "mcp/tests/test_worktree_sync_crossing_history.py",
   "mcp/tests/test_worktree_sync_crossing_writer.py",
   "mcp/tests/test_worktree_sync_knowledge_merge.py",
@@ -5081,6 +5119,7 @@ consumers = [
   "mcp/tests/test_writer_corrections.py",
   "mcp/tests/test_writer_merge_bases.py",
   "mcp/tests/test_writer_refresh_restoration.py",
+  "mcp/tests/test_writer_rule_titles.py",
 ]
 
 [[artifact]]

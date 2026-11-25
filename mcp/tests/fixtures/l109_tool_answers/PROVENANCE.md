@@ -7,10 +7,10 @@ counter against the row bounds in `test_tool_answer_table.py`.
   path, named with its card, in the leaf's own code/memory worktrees.
 - `read_ar_files_largest`: OPERATION-PRODUCED by
   `_produce_l109_read_ar_files_largest` — twenty converted governed files
-  in one leaf-scoped call (the packet's Worker journey: cards and overviews
-  arrive worktree-relative, so the answer holds its bound on any root
-  length). File size does not move this answer (no text is carried);
-  twenty paths is the tool's limit.
+  in one leaf-scoped call. Each compact row names its source, existence,
+  card status, and the brief path with missing freshness. The producer
+  checks the raw delivered bound and confirms that memory files, the
+  indexed tree and Git status stay the same and no brief is created.
 - `knowledge_read_ordinary`: recorded wire answer — one invariant view,
   five rows.
 - `knowledge_read_largest`: OPERATION-PRODUCED by

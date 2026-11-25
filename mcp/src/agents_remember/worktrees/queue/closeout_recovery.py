@@ -105,6 +105,7 @@ class MemoryCloseoutOutcome:
     ledger_repair: dict[str, object] = field(default_factory=dict)
     review_note: str = ""
     """The sentence a closeout adds when it closed the leaf's history without a review fact."""
+    created_memory_commit: bool = False
 
 
 def prove_closeout_recovery_commits(

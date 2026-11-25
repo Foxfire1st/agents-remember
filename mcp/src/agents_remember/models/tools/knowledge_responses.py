@@ -217,9 +217,11 @@ class KnowledgeWriteResponse(ToolResponse):
 
     ``state`` is the writer's own outcome: ``planned`` (the default, which writes nothing),
     ``written`` or ``refused``. ``counts`` counts what this run produced by kind, and
-    ``problems``/``violations`` name what the caller must act on, cut to the answer's list bound
-    with ``problemsTruncated``/``violationsTruncated`` saying so -- the whole report is the file
-    at ``reportPath`` (MIK-R108 rule 3), which is the one place the full listing lives.
+    ``problems``/``violations`` name what the caller must act on and ``notes`` what the write took
+    but the caller should know (a revised rule that has no title), each cut to the
+    answer's list bound with ``problemsTruncated``/``violationsTruncated``/``notesTruncated``
+    saying so -- the whole report is the file at ``reportPath``, which is the one
+    place the full listing lives.
 
     ``provisionalIds`` says the IDs in the report of a planning run are not the ones a committing
     run will mint, and ``plannedBeforeRefusal`` says how many outcomes a refused run had planned
@@ -243,6 +245,9 @@ class KnowledgeWriteResponse(ToolResponse):
     problemsTruncated: bool | None = None
     violations: list[dict[str, Any]] | None = None
     violationsTruncated: bool | None = None
+    # What the write took but the caller should know, such as a revised rule with no title.
+    notes: list[str] | None = None
+    notesTruncated: bool | None = None
     provisionalIds: bool | None = None
     plannedBeforeRefusal: int | None = None
     written: list[str] | None = None

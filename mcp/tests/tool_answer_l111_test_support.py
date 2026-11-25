@@ -359,6 +359,7 @@ _L111_USES: dict[str, str] = {
     "memory_worktree_dirty": "whether the memory worktree has uncommitted changes",
     "providers": "the providers the step ran",
     "memory": "the memory side the step planned",
+    "briefsProblem": "why the briefs could not be refreshed after writing the memory folder",
     "admission": "the admission the step observed, with what it expected",
     "retryPrecondition": "what is not sufficient to continue, when the sync refuses",
     "atomicSeriesActivation": "the activation the status observed",

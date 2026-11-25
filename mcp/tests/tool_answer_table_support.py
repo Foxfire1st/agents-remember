@@ -357,6 +357,8 @@ L109_SHAPED_ROWS: dict[tuple[str, str | None], ToolAnswerRow] = {
                 "statesProblem",
                 "routeIndexStale",
                 "routeIndexRefresh",
+                "briefsProblem",
+                "briefsLeftOut",
                 "refusalCode",
                 "refusalDetail",
             }
@@ -375,6 +377,8 @@ L109_SHAPED_ROWS: dict[tuple[str, str | None], ToolAnswerRow] = {
             "statesProblem": "the caller learns why no state could be measured",
             "routeIndexStale": "the caller learns the route index missed a card the answer served",
             "routeIndexRefresh": "the operation the caller runs to bring the route index back",
+            "briefsProblem": "the caller learns why the read could not assemble a file's brief",
+            "briefsLeftOut": "the caller learns how to open current briefs for details that did not fit",
             "refusalCode": "the refusal identity the caller branches on",
             "refusalDetail": "what the caller can do instead of this call",
         },

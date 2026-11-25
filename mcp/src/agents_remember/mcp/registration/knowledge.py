@@ -104,15 +104,16 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         standsOn: str | None = None,
     ) -> dict[str, Any]:
         """
-        Read one memory view.
+        Read memory.
 
         Views: source_context, invariant, family, record, weakness (open by file, kind or sentence),
-        dependent (document links), writers (per-writer aggregates with revision counts and the
-        complete report path). Record rows name ID, kind, state and location, never text.
-        `recordId`: text ID (`INV-…`, `WKN-…`, `DPD-…`). Filters: `sourcePath`, `weaknessKind`,
-        `includeClosed`, `staleOnly`, `standsOn`. `repositoryRoot` and `codeTreeId` select the measured
-        code tree. Writes: `agents-remember knowledge-ingest` or `agents-remember knowledge-bootstrap`.
-        Docs: docs/reference/mcp-tools.md.
+        dependent (document links), writers (per-writer revision counts and full report path).
+        Record rows name ID, kind, state and location, never text.
+        The `read_ar_files` short answer carries a file's rule text.
+        Use a text `recordId` (INV-…, WKN-…, DPD-…). Filters: sourcePath, weaknessKind,
+        includeClosed, staleOnly, standsOn. repositoryRoot and codeTreeId select the code tree.
+        Writes: `agents-remember knowledge-ingest` or `agents-remember knowledge-bootstrap`.
+        See docs/reference/mcp-tools.md.
         """
 
         return tools.knowledge_read_payload(

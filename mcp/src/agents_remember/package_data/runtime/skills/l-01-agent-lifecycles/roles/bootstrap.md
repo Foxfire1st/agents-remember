@@ -39,7 +39,7 @@ Use these setup surfaces on `agents-remember-task`: `runtime_install`, `memory_i
 
 Before initializing user settings or handling an existing settings file, follow [Write the initial user settings](../operations/bootstrap.md#4-write-the-initial-user-settings) for the one-write limit of `user_settings_init` on `agents-remember-task`, preview, readback and preservation of existing choices.
 
-For read-only resolution and retrieval, use `context_packet`, `server_info` and `read_ar_files` on `agents-remember-task`. `context_packet` answers where the caller works and what needs action. Ask `read_ar_files` which cards govern a path, then read the named files with your own tools.
+For read-only resolution and retrieval, use `context_packet`, `server_info` and `read_ar_files` on `agents-remember-task`. `context_packet` answers where the caller works and what needs action. Ask `read_ar_files` which cards govern a path and which rules are recorded at it, then read the named files with your own tools.
 
 Native reads and the procedure's state commands (`git status`, `git log`, `ls`) are allowed. Reading state does not authorize mutation.
 

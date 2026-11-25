@@ -1,6 +1,6 @@
 """Application entry point for the ``read_ar_files`` tool (MIK-R109 rule 1).
 
-A read names where a thing is and does not carry it. The tool takes
+The tool takes
 ``repo_id`` and ``files`` (repository-relative paths, as strings, up to
 :data:`READ_AR_FILES_MAX_PATHS`) and answers, per path, whether the file
 exists in the caller's code checkout, the card that governs it as a location
@@ -10,7 +10,10 @@ state asks the caller to act — the text ID, kind, state and card heading of
 each. The governing overviews are listed once per call, as locations,
 nearest first.
 
-It returns no source text, no card text and no overview text. The removed
+Beside these, each existing file's row carries ``brief``: the short answer of
+the file's brief, its recorded rules with their text, fitted inside the
+answer's bound (:mod:`.read_files_briefs`). It returns no source text, no
+card text and no overview text. The removed
 parameters (``refresh``, per-file ``source``/``onboarding``) and object-form
 file entries are refused with ``argument-removed``: the caller reads the
 file with its own tools. The server keeps no per-session state about what
@@ -46,6 +49,12 @@ from agents_remember.application.read_file_cards import (
     aggregate_state,
     card_records_for_path,
 )
+from agents_remember.application.read_files_briefs import (
+    BatchBriefs,
+    ReadFilesReply,
+    batch_briefs,
+    briefs_problem,
+)
 from agents_remember.application.read_files_format import TEXT_FORMAT, memory_format
 from agents_remember.application.worktree_code_state import observed_code_tree
 from agents_remember.errors import AuthorityError
@@ -62,6 +71,7 @@ from agents_remember.kernel.coordination_context_resolver import (
     resolve_storage_for_source,
 )
 from agents_remember.kernel.git_preparation import GitPreparationError
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.route_index import ROUTE_OVERVIEW_NAME
 from agents_remember.kernel.sidecar_pairing import (
     confine_rel as _confined_rel,
@@ -101,6 +111,27 @@ def read_ar_files_tool(
     worktree_scope: str = "official-line",
     _context: CoordinationContext | None = None,
 ) -> dict[str, Any]:
+    """Name the knowledge governing a batch of repository-relative paths."""
+
+    return read_ar_files_reply(
+        config,
+        repo_id=repo_id,
+        files=files,
+        working_folder=working_folder,
+        worktree_scope=worktree_scope,
+        _context=_context,
+    ).payload
+
+
+def read_ar_files_reply(
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    files: list[Any],
+    working_folder: Path | None = None,
+    worktree_scope: str = "official-line",
+    _context: CoordinationContext | None = None,
+) -> ReadFilesReply:
     """Name the knowledge governing a batch of repository-relative paths.
 
     ``working_folder`` is the caller's working folder when the server knows
@@ -117,14 +148,16 @@ def read_ar_files_tool(
     repo = require_repo(config, repo_id)
     refusal = _request_refusal(files)
     if refusal is not None:
-        return {
-            "ok": True,
-            "operation": "read_ar_files",
-            "repoId": repo.repo_id,
-            "state": "refused",
-            "refusalCode": refusal.code,
-            "refusalDetail": refusal.detail,
-        }
+        return ReadFilesReply(
+            {
+                "ok": True,
+                "operation": "read_ar_files",
+                "repoId": repo.repo_id,
+                "state": "refused",
+                "refusalCode": refusal.code,
+                "refusalDetail": refusal.detail,
+            }
+        )
 
     context = _context or resolve_coordination_context(
         code_repository_name=repo.repo_id,
@@ -137,9 +170,9 @@ def read_ar_files_tool(
         ),
     )
 
+    code_root = Path(repo.path)
     memory_state, dataset = _memory_selection(context, config)
     weaknesses, documents, counts_problem = _mark_counts(context, memory_state, dataset)
-    code_root = Path(repo.path)
     # The states are measured at the code the caller sees: the commit when the checkout is clean,
     # else its working tree, captured and held for exactly this read (MIK-R73 rule 7).
     with observed_code_tree(code_root) as observation:
@@ -149,27 +182,38 @@ def read_ar_files_tool(
             code_state = observation.code_state
             code_tree = observation.tree_id
             object_directory = observation.object_directory
-        return _named_files(
-            _NamedRead(
-                context=context,
-                repo_id=repo.repo_id,
-                code_root=code_root,
-                files=files,
-                scope=_BatchScope(
-                    memory_state=memory_state,
-                    dataset=dataset,
+        with batch_briefs(
+            memory_root=context.onboarding_root.parent,
+            index_path=dataset.index_path,
+            tree_key=dataset.memory_tree_id,
+            code_tree=(
+                None if code_tree is None else CodeTree(code_root, code_tree, object_directory)
+            ),
+            code_state=code_state,
+            locate=lambda absolute: _locate(absolute, working_folder),
+        ) as briefs:
+            return _named_files(
+                _NamedRead(
+                    context=context,
+                    repo_id=repo.repo_id,
+                    code_root=code_root,
+                    files=files,
+                    scope=_BatchScope(
+                        memory_state=memory_state,
+                        dataset=dataset,
+                        code_tree=code_tree,
+                        object_directory=object_directory,
+                        working_folder=working_folder,
+                        open_weaknesses=weaknesses,
+                        dependent_documents=documents,
+                        counts_problem=counts_problem,
+                    ),
+                    worktree_scope=worktree_scope,
+                    code_state=code_state,
                     code_tree=code_tree,
-                    object_directory=object_directory,
-                    working_folder=working_folder,
-                    open_weaknesses=weaknesses,
-                    dependent_documents=documents,
-                    counts_problem=counts_problem,
-                ),
-                worktree_scope=worktree_scope,
-                code_state=code_state,
-                code_tree=code_tree,
+                    briefs=briefs,
+                )
             )
-        )
 
 
 @dataclass(frozen=True)
@@ -184,9 +228,10 @@ class _NamedRead:
     worktree_scope: str
     code_state: str
     code_tree: str | None
+    briefs: BatchBriefs | None = None
 
 
-def _named_files(read: _NamedRead) -> dict[str, Any]:
+def _named_files(read: _NamedRead) -> ReadFilesReply:
     """Name each path against the memory and the code tree the caller's read observed."""
 
     context = read.context
@@ -212,6 +257,8 @@ def _named_files(read: _NamedRead) -> dict[str, Any]:
                 "refusalCode": "outside-repository",
                 "refusalDetail": str(error),
             }
+        if read.briefs is not None and result.get("exists") and "refusalCode" not in result:
+            read.briefs.answer_row(result, _confined_rel(code_root, rel))
         file_results.append(result)
 
     payload: dict[str, Any] = {
@@ -237,8 +284,12 @@ def _named_files(read: _NamedRead) -> dict[str, Any]:
             "the code checkout's HEAD tree could not be read, so no record state "
             "was measured; the cards are still named"
         )
-
-    return payload
+    problem = briefs_problem(read.briefs)
+    if problem is not None:
+        payload["briefsProblem"] = problem
+    if read.briefs is not None:
+        return read.briefs.prepare_reply(payload)
+    return ReadFilesReply(payload)
 
 
 # --- request validation ----------------------------------------------------

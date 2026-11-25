@@ -35,6 +35,8 @@ none of them:
 
 - `scope` is required before an entry becomes a new invariant, in the shape stated in [Curator-authored semantic scope](#curator-authored-semantic-scope).
 
+- `title` is required before an entry becomes a new invariant: the rule's name, at most 80 characters on one line. See [Invariant entries](#invariant-entries).
+
 - `admission`, `status`, `invariant_id`, `supersedes` and `proofs` are described in [the writer's input sections](#the-writers-input-sections) below.
 
 The Curator authors a joint obligation as a `family` item in `records`, never as an entry key. Give it `title`, its own `guarantee` text, `members`, `routes` and `admission` with criterion `joint_guarantee` and its justification.
@@ -68,7 +70,8 @@ Before interpreting a stored record’s format, read [knowledge use](../referenc
 - **Records** are one JSON file each, flat per kind, named `knowledge/<kind-dir>/<ID>-<slug>.json`
   with an optional `.md` beside it. The schema is `ar-<kind>/v1`. An invariant carries `statement`,
   `applicability`, `conditions[]`, `exclusions[]`, `supersedes[]`, `revision`, `admission`, `origin`
-  and `writer`, and `status` only once it is `retired`. It never lists its code locations, tests, families or decisions: each relationship
+  and `writer`. It carries `title` when named and `status` when retired. Realizations, proofs,
+  families and decisions stand in their own records. Each relationship
   is written once, on its owner's side.
 
 - **IDs** are minted by the writer, never by a producer. The form is `<KIND>-<6 Crockford base32>`,
@@ -195,6 +198,14 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
 
 - `scope` (as above) gives `applicability`, `conditions` and `exclusions`. It is required for a new
   invariant.
+
+- `title` is the rule's name: at most 80 characters on one line, with no spaces before or after.
+  It is required for a new invariant; without it the writer refuses the entry and says that the
+  `title` is missing. An invariant without a title is shown by the first six words of its statement.
+  A new revision of such an invariant through `invariant_id` is taken without a title, and the
+  write's answer has a note in `notes` that the invariant has none; give it a `title` in that or a
+  later write. A title is a name and not meaning: a write that changes only the title keeps the
+  revision.
 
 - `admission` is `{criteria, justification}` and is required for a new invariant.
 

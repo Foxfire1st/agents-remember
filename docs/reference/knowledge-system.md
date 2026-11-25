@@ -21,10 +21,17 @@ Paths below are relative to the selected memory root.
 
 Record directories are `invariants`, `families`, `decisions`, `incidents`,
 `assumptions`, `limitations`, `failure-modes`, `scenarios`, `diagnostics`, `terms`,
-`weaknesses` and `dependents`. An invariant owns its statement and admission;
+`weaknesses` and `dependents`. An invariant owns its title, statement and admission;
 realization and proof relationships belong to file sidecars. A family owns its
 members and routes. Other record kinds own their outgoing links. Stable IDs
 survive filename-slug changes; revisions change when meaning changes.
+
+Every invariant has a title, a name of at most 80 characters on one line in its field `title`. The
+writer refuses a new invariant without a title and says that the `title` is missing. An invariant
+without a title is shown by the first six words of its statement. A new revision of such an
+invariant is written without a title, and the answer of the write has a note that the invariant has
+none. A title is a name and no part of the meaning: a write that changes only the title does not
+change the revision.
 
 The members of a [family](../concepts.md#family) are invariants (its field `members`). A file
 realizes an invariant when its sidecar holds a `realizes` entry for it, a
@@ -375,7 +382,31 @@ files named by build and tree.
 MCP `knowledge_read` names attributed records and memory-file locations for a
 selected view. Open those named files with the harness's file tools; the response
 is not record text. `read_ar_files` names the cards and recorded knowledge for
-bounded source paths, including action-asking records. `knowledge_diff` reports
+bounded source paths, including action-asking records, and carries for each path the short
+answer of its brief: the file's own rules by title and standing, with their text.
+
+A brief is one Markdown file per source file at `briefs/<path>.md` under the memory root.
+Each source-file brief folder has an `INDEX.md`. A full write preserves the task-moment
+folder `briefs/_task/`, which has no index. `briefs/TREE` records the memory tree of the
+last full write.
+
+The brief holds what the file is for, the file's rules with their text, standing, proofs,
+decisions and weaknesses, the weaknesses and decisions that belong to no rule, the documents
+that stand on it, and its families, in that order. An empty part says “None.”
+
+Memory initialization, worktree start and sync, closeout, direct landing and memory baseline
+adoption refresh all briefs after a durable write to the memory folder. Task-local
+`knowledge_write` and `citation_fix` refresh briefs for the source files of changed records.
+Writers add the Git ignore line for `briefs/` only during their existing tracked preparation.
+A writer reports a skipped refresh when the ignore line is missing.
+
+`read_ar_files` computes its short answer from current memory without writing memory files.
+If the brief on disk is missing or older, the answer reports that and says the next write
+covering the file or the whole folder will renew it. If the header is unreadable, the answer
+reports unknown freshness. See [Brief](../concepts.md#brief) for where Reviewer and Curator
+start messages put the full list of touched rules.
+
+`knowledge_diff` reports
 the files' Git differences; it infers no semantic effect.
 
 The dashboard's knowledge reader selects a memory tree and presents records,

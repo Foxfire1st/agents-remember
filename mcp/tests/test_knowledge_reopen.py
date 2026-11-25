@@ -24,6 +24,7 @@ from agents_remember.application.knowledge_gate import landing as landing_gate
 from agents_remember.application.knowledge_worklist.leaf import recompute_leaf_worklist
 from agents_remember.application.knowledge_writer import Owner, WriteRequest, write_knowledge
 from agents_remember.kernel.coordination_context.models import StorageSettings
+from agents_remember.kernel.memory_ignore import briefs_ignored
 from agents_remember.memory.conversion.base import GitBaseConverter
 from agents_remember.memory.knowledge_index import (
     KnowledgeIndex,
@@ -735,6 +736,10 @@ def test_a_file_rewritten_while_the_gate_runs_is_never_committed_unjudged(
         return refusal
 
     head = git(world.memory, "rev-parse", "HEAD")
+    ignore = world.memory / ".gitignore"
+    ignore_before = ignore.read_bytes()
+    assert briefs_ignored(world.memory)
+    assert git(world.memory, "ls-tree", "HEAD", "--", ".gitignore") == ""
     with (
         mock.patch.object(closeout_external, "leaf_gate_refusal", rewriting),
         pytest.raises(RuntimeError, match="changed while the gate ran") as refused,
@@ -742,7 +747,9 @@ def test_a_file_rewritten_while_the_gate_runs_is_never_committed_unjudged(
         _closeout(world, code, refused=True)
     assert judged[0] in str(refused.value) and git(world.memory, "rev-parse", "HEAD") == head
     assert json.loads((world.memory / FIRST).read_text())["closed"] is False  # restored
-    assert not (world.memory / ".gitignore").exists()  # and the cache's ignore rule taken back
+    assert ignore.read_bytes() == ignore_before
+    assert briefs_ignored(world.memory)
+    assert git(world.memory, "ls-tree", "HEAD", "--", ".gitignore") == ""
 
     # Both captures read the rewritten card: the exact tree rehashes every file, and the tree the
     # commit would stage is read through a copy of the index that keeps the index file's time.

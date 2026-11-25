@@ -291,8 +291,17 @@ def build_crossing_world(world: World) -> CrossingWorld:
 
 
 def entry(entry_id: str, **curator: Any) -> dict[str, Any]:
-    """A producer entry with its thirteen fields, plus the curator's keys given."""
+    """A producer entry with its thirteen fields, plus the curator's keys given.
 
+    An entry that authors a new rule (``admission`` without ``invariant_id``) carries a title unless
+    the caller gives one, because the writer refuses a new rule without it;
+    ``title=None`` leaves it out.
+    """
+
+    if "admission" in curator and "invariant_id" not in curator:
+        curator.setdefault("title", f"Rule {entry_id}")
+    if curator.get("title", "") is None:
+        del curator["title"]
     return {
         "id": entry_id,
         "statement": f"Statement of {entry_id}: a landing is one recorded pair.",

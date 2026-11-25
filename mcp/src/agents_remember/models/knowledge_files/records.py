@@ -48,6 +48,7 @@ from agents_remember.models.knowledge_files.shapes import (
     IncidentId,
     InvariantAdmission,
     InvariantId,
+    InvariantTitle,
     Label,
     LegacyUnassessed,
     Link,
@@ -143,6 +144,9 @@ class InvariantRecord(_Record):
     id: InvariantId
     revision: int = Field(ge=1)
     status: StoredStatus | None = None
+    # A name and no part of the rule's meaning. Optional: every rule written
+    # before titles existed has none and keeps none until a later write names it.
+    title: InvariantTitle | None = None
     statement: Text
     applicability: Text
     conditions: tuple[Text, ...]

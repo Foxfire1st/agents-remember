@@ -989,7 +989,7 @@
       {
         "source": "roles/curator.md",
         "fragment": "read-code-and-knowledge-together",
-        "wording": "before checking code and memory"
+        "wording": "call `knowledge_read` on `agents-remember-task` for the records you check; read"
       }
     ],
     "use-before-diagnosing-b338e1f9ff": [
@@ -1010,7 +1010,7 @@
       {
         "source": "roles/worker.md",
         "fragment": "worker-read-before-editing-and-after-a-test-fails",
-        "wording": "before editing source"
+        "wording": "for a record you need whole"
       }
     ],
     "use-before-interpreting-a-knowledge-read-75e1759f9d": [
@@ -1031,7 +1031,7 @@
       {
         "source": "roles/investigator.md",
         "fragment": "investigator-distinguish-claims-observations-and-hypotheses",
-        "wording": "before investigating repository code"
+        "wording": "call `knowledge_read` on `agents-remember-task` for the records you need whole; read"
       }
     ],
     "use-before-relying-on-storage-or-path-eligibility-cross-repository-allowanc-13fc42b13f": [
@@ -1045,7 +1045,7 @@
       {
         "source": "roles/reviewer.md",
         "fragment": "reviewer-inspect-every-changed-file",
-        "wording": "when inspecting changes"
+        "wording": "call `knowledge_read` on `agents-remember-task` for the changed files' records you need whole; read"
       }
     ],
     "message-handover-before-delivering-a-developer-question-to-a-recipient-or-p-3ee8adce5f": [
@@ -1303,7 +1303,7 @@
       {
         "source": "roles/reviewer.md",
         "fragment": "report-problems-without-expanding-review",
-        "wording": "in `fix-verification`, reuse the sealed evidence and verify only listed identifiers under"
+        "wording": "in `fix-verification`, reuse sealed evidence and verify only listed identifiers under"
       }
     ],
     "worker-before-handing-over-or-attempting-a-role-start-acceptance-or-publica-491deada88": [

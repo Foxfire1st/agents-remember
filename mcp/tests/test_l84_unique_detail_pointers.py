@@ -569,7 +569,7 @@ MOVED_ACTION_POINTERS = {
     "curator": (
         "reference/knowledge/use.md",
         (
-            "Before checking code and memory, call `knowledge_read` on `agents-remember-task` for the files or records you check; read",
+            "Call `knowledge_read` on `agents-remember-task` for the records you check; read",
             "Before interpreting a knowledge read, read",
         ),
     ),

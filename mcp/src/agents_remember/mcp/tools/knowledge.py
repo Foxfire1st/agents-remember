@@ -86,6 +86,7 @@ from agents_remember.application.knowledge_routes_report import (
     working_tree_files,
 )
 from agents_remember.application.knowledge_worklist.surface import leaf_worklist_fields
+from agents_remember.application.knowledge_write_answer import write_answer
 from agents_remember.application.knowledge_write_route import (
     BLANK_AUTHORIZATION,
     WaveTarget,
@@ -1771,8 +1772,8 @@ def _write_answer(request: WriteToolRequest, config: McpRuntimeConfig) -> dict[s
     contract guard, the same authorization reference, the same worklist checks and the same
     refusals. Without ``commit`` it plans and writes nothing; with it, it writes files and commits
     nothing to Git. The whole report is written as a caller-readable file (MIK-R108 rule 3) and the
-    answer holds the outcome, the counts, the problems and violations the caller must act on, and
-    the report's location.
+    answer (:mod:`agents_remember.application.knowledge_write_answer`) holds the outcome, the
+    counts, the problems, violations and notes the caller must act on, and the report's location.
 
     Every refusal is one of this function's own returns, so the module keeps one envelope site per
     handler: a refusal is a response document like any other, and the reason it refuses is the
@@ -1791,37 +1792,7 @@ def _write_answer(request: WriteToolRequest, config: McpRuntimeConfig) -> dict[s
     if isinstance(report, str):
         return _refused_write("invalid-input", report)
     document = report.to_document()
-    report_path, report_error = _write_report_path(document, config)
-    problems = [{"where": one["where"], "message": one["message"]} for one in document["problems"]]
-    violations = list(document["violations"])
-    answer = {
-        "ok": True,
-        "operation": "knowledge_write",
-        "state": document["state"],
-        "owner": document["owner"],
-        "memoryRoot": document["memoryRoot"],
-        "codeTree": document["codeTree"],
-        "authorization": document["authorization"],
-        "counts": {
-            "records": len(document["records"]),
-            "entries": len(document["entries"]),
-            "historyRows": len(document["historyRows"]),
-            "evidence": len(document["evidence"]),
-            "carried": len(document["carried"]),
-            "requirementEndpoints": len(document["requirementEndpoints"]),
-        },
-        "problems": problems[:TOOL_ANSWER_LIST_MAX],
-        "problemsTruncated": len(problems) > TOOL_ANSWER_LIST_MAX,
-        "violations": violations[:TOOL_ANSWER_LIST_MAX],
-        "violationsTruncated": len(violations) > TOOL_ANSWER_LIST_MAX,
-        "provisionalIds": document["provisionalIds"],
-        "plannedBeforeRefusal": document["plannedBeforeRefusal"],
-        "written": document["written"],
-        "removed": document["removed"],
-        "reportPath": report_path,
-        "reportError": report_error,
-    }
-    return answer
+    return write_answer(document, *_write_report_path(document, config))
 
 
 def _write_report_path(

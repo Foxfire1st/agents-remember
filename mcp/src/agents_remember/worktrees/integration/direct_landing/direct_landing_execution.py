@@ -33,6 +33,7 @@ from agents_remember.worktrees.integration.mutation_evidence import (
     snapshot_is_clean,
 )
 from agents_remember.worktrees.knowledge_gate import ClosingReceiptError
+from agents_remember.worktrees.knowledge_validation import PairedCode
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
     CommitPublicationRefusal,
@@ -45,6 +46,7 @@ from agents_remember.worktrees.modules.git import (
     stage_tree,
 )
 from agents_remember.worktrees.review_note import committed_review_note
+from agents_remember.worktrees.services import refresh_written_memory_briefs
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -67,7 +69,7 @@ def execute_direct_landing(
         operation_progress=runtime.progress,
         recovery_commits=record.recoveryCommits,
     )
-    memory_commit = _direct_memory_commit(
+    memory_commit, created = _direct_memory_commit(
         runtime,
         args,
         memory_repo,
@@ -81,6 +83,14 @@ def execute_direct_landing(
         repo_name=contract.repo_name,
     )
     runtime.finish(result)
+    if created:
+        problem = refresh_written_memory_briefs(
+            memory_repo,
+            PairedCode(contract.code_repo_path, operation_input.codeCommit),
+            contract.coordination_root,
+        )
+        if problem is not None:
+            result["briefsProblem"] = problem
     return result
 
 
@@ -313,7 +323,7 @@ def _direct_memory_commit(
     memory_repo: Path,
     *,
     code_commit: str,
-) -> str:
+) -> tuple[str, bool]:
     """Create the memory-content commit, attributed to the verified code commit.
 
     Direct landing is the branch-addressed closeout route, so its memory content is the
@@ -326,10 +336,10 @@ def _direct_memory_commit(
     evidence = runtime.record.mutationEvidence["memory"]
     if evidence.state == "commit-proven":
         assert evidence.commit is not None
-        return evidence.commit
+        return evidence.commit, False
     recovery = runtime.record.recoveryCommits
     if recovery is not None and recovery.memoryContentCommit:
-        return recovery.memoryContentCommit
+        return recovery.memoryContentCommit, False
     if evidence.state == "reconciled-unchanged":
         runtime.record = reset_reconciled_attempt(runtime.store, leg="memory")
         evidence = runtime.record.mutationEvidence["memory"]
@@ -351,7 +361,7 @@ def _direct_memory_commit(
                     ),
                 },
             )
-            return memory_commit
+            return memory_commit, False
         intent = begin_git_mutation(
             args,
             leg="memory",
@@ -373,7 +383,7 @@ def _direct_memory_commit(
     )
     committed = _publish_judged_tree(runtime, memory_repo, intent, message)
     prove_git_commit(args, intent, repository=memory_repo, commit=committed)
-    return _required_recovery_commit(runtime.store.read(), "memoryContentCommit")
+    return _required_recovery_commit(runtime.store.read(), "memoryContentCommit"), True
 
 
 def _publish_judged_tree(

@@ -23,7 +23,7 @@ from agents_remember.worktrees.modules.git import head_commit
 from agents_remember.worktrees.review_fact_source import NO_PASS_SENTENCE, owner_review_fact
 from agents_remember.worktrees.services import bind_worktree_services, reset_worktree_services
 from test_direct_landing import _converted_request, _converted_series_fixture, direct_landing_tool
-from test_knowledge_closeout_gate import LEAF
+from test_knowledge_closeout_gate import LEAF, A
 from test_worktree_support import git
 
 HISTORY = f"knowledge/history/{LEAF}.json"
@@ -98,8 +98,24 @@ def test_converted_direct_landing_without_a_pass_closes_and_says_so(
     fixture["world"].rows()
     landed = _land(fixture, "open leaf history")
     assert landed["ok"], landed.get("detail", landed)
-    assert _landed_history(fixture["world"])["closed"] is True
+    world = fixture["world"]
+    assert _landed_history(world)["closed"] is True
     assert str(landed["summary"]).endswith(NO_PASS_SENTENCE), landed["summary"]
+    assert "/briefs/" in git(world.memory, "show", "HEAD:.gitignore").splitlines()
+    memory_tree = git(world.memory, "rev-parse", "HEAD^{tree}")
+    manifest = world.memory / "briefs" / "TREE"
+    assert manifest.read_text().strip() == memory_tree
+    brief = (world.memory / "briefs" / f"{A}.md").read_text()
+    assert f"<!-- memory tree {memory_tree} -->" in brief
+    assert f"code commit `{str(landed['codeCommit'])[:12]}`" in brief
+
+    manifest.unlink()
+    replay = direct_landing_tool(
+        fixture["config"], _converted_request(fixture, str(landed["codeCommit"]))
+    )
+    assert not replay["ok"] and replay["status"] == "direct-landing-input-conflict", replay
+    assert head_commit(world.memory) == landed["memoryContentCommit"]
+    assert not manifest.exists()
 
 
 def test_converted_direct_landing_writes_the_review_fact_into_the_closed_history(
@@ -193,3 +209,4 @@ def test_the_gate_refuses_a_fact_written_into_a_frozen_history(
     assert not refused["ok"], refused
     assert "only its closing flag and review fact may change" in str(refused["detail"])
     assert (fixture["world"].memory / HISTORY).read_bytes() == frozen
+    assert not (fixture["world"].memory / "briefs").exists()

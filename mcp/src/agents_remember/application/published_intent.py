@@ -231,7 +231,7 @@ def converted_memory_tree(path: Path) -> Path | None:
 def select_knowledge_dataset(
     path: Path, *, coordination_root: Path | None
 ) -> SelectedKnowledgeDataset:
-    """Select the derived index of a converted memory root; no database path is accepted."""
+    """Select the derived index without changing the converted memory folder."""
     memory_root = converted_memory_tree(path)
     if memory_root is None:
         raise MemoryTreeError(

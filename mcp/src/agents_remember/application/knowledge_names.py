@@ -1,6 +1,7 @@
 """Name-not-carry projection for ``knowledge_read`` answers (MIK-R109 rule 2).
 
-A read names where a thing is and does not carry it. The application layer
+``knowledge_read`` names where a thing is and does not carry it (the rules' text of
+a source file comes with ``read_ar_files``' short answer instead). The application layer
 keeps computing the whole result — the dashboard reader and the command line
 call the same functions and keep getting everything (MIK-R108 rule 5) — and
 the projection runs where the answer leaves the server for an agent, in

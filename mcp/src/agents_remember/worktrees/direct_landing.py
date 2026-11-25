@@ -64,7 +64,11 @@ from agents_remember.kernel.direct_execution_grants import (
     require_grant,
 )
 from agents_remember.kernel.git_command import GitRunnerOptions, run_git
-from agents_remember.kernel.memory_cache import ignore_memory_cache
+from agents_remember.kernel.memory_cache import (
+    ignore_memory_cache,
+    ignore_memory_publication,
+    memory_publication_ignore_bytes,
+)
 from agents_remember.kernel.primitives.gate_policy import (
     DecisionRole,
     GatePolicyRule,
@@ -1623,7 +1627,10 @@ def _close_gated_leaf(
             return None
         assert selected.source is not None and selected.owner is not None
         close = reviewed_closing(contract, memory_repo, selected.owner)  # before any write
-        ignore_before = HistoryClosing(ignore, ignore_previous, ignore_memory_cache(memory_repo))
+        ignore_before = HistoryClosing(
+            ignore, ignore_previous, memory_publication_ignore_bytes(ignore_previous)
+        )
+        ignore_memory_publication(memory_repo)
         closing = close()
         if closing.path.relative_to(memory_repo).as_posix() != selected.source.history_path:
             raise DirectLandingError(

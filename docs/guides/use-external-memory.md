@@ -51,7 +51,11 @@ memory_init(repo_id="<repo-id>", initial_branch="<branch>")
 
 The call creates the folders, the files `settings.md`, `sources.md` and `tools.md` under `system/`
 and the layout marker `knowledge/layout.json`, and it makes the folder a Git repository.
-It writes no card and no knowledge record, and it overwrites no file that exists.
+It preserves the existing system files. When it creates a new layout, it adds the `/briefs/`
+rule to the root `.gitignore` if needed and keeps the previous ignore text. A successful refresh
+on a converted root writes the Git-ignored `briefs/TREE` stamp and any eligible source briefs
+when Git effectively ignores the folder. The call writes no card or knowledge record. A dry run
+only reports what the call would do.
 When the memory path already holds a Git repository without the marker, the call writes no marker;
 [Onboard An Existing Repository](onboard-existing-repo.md#2-create-the-memory-repository) tells the
 two ways that work.

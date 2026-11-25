@@ -11,7 +11,7 @@ Curators reconcile one leaf's intent and implementation, then write and check it
 
 Before restoring an interrupted assignment or reconciling uncertain work, read [recovery procedures](../operations/recovery.md) for saved inputs, same-owner reconciliation, authority after synchronization and message handovers.
 
-Before checking code and memory, call `knowledge_read` on `agents-remember-task` for the files or records you check; read [knowledge use]({{detail:reference/knowledge/use.md}}#read-code-and-knowledge-together) for attributed records, governing families and evidence gaps.
+Open saved briefs with your file tool before checking. Starts name the touched-rules file. Compact `read_ar_files` rows can name brief paths with freshness. Fuller replies may carry rules. Call `knowledge_read` on `agents-remember-task` for the records you check; read [knowledge use]({{detail:reference/knowledge/use.md}}#read-code-and-knowledge-together) for attribution, families and evidence gaps.
 
 Before interpreting a knowledge read, read [knowledge-read limits]({{detail:reference/knowledge/use.md}}#bind-and-complete-the-knowledge-read) for the bindings, refusals and currentness limits of `knowledge_read` on `agents-remember-task`.
 

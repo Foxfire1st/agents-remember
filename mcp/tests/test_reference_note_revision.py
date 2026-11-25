@@ -30,11 +30,14 @@ sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
 from agents_remember.application import memory_tools
+from agents_remember.application.file_briefs.folder import tree_named
 from agents_remember.application.memory_tools import CitationOperationScope
+from agents_remember.kernel.memory_ignore import briefs_ignored, ignore_briefs
 from agents_remember.memory.conversion import card_authoring
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.conversion.convert import convert_memory
 from agents_remember.memory.conversion.inputs import memory_from_directory, write_changed
+from agents_remember.memory.knowledge_index.tree import directory_key
 from agents_remember.models.knowledge_files.canonical import canonical_text, parse_json
 from knowledge_conversion_test_support import (
     APP,
@@ -449,24 +452,34 @@ class MechanicalNonRewriteTests(unittest.TestCase):
     def test_a_repoint_changes_the_anchor_and_not_the_note(self) -> None:
         with _frozen_git(), tempfile.TemporaryDirectory() as raw:
             code, memory = _converted(Path(raw))
+            ignore_briefs(memory)
+            self.assertTrue(briefs_ignored(memory))
             before = _references(memory)
-            note = before["3"]["note"]
+            note = before["3"]["note"].encode("utf-8")
             anchor = before["3"]["targets"][0]["anchor"]["blob"]
             # A pure move: the blob changes, the symbol's bytes do not.
             (code.root / APP).write_text("# moved\n" + APP_SOURCE, encoding="utf-8")
             with mock.patch.object(
                 memory_tools, "_leaf_memory_writer_scope", return_value=_leaf_scope(memory, code)
             ):
+                # The coordination root holds the read index the briefs are written from
+                # after the fix.
                 result = memory_tools.citation_fix_tool(
-                    cast(Any, None),
+                    cast(Any, SimpleNamespace(coordination_root=Path(raw) / "coordination")),
                     repo_id="demo",
                     contract_path="contract.md",
                     operation_scope=CitationOperationScope(document="src/pkg/app.py.md"),
                 )
-            self.assertTrue(result.get("ok", True), result)
+            self.assertTrue(result["ok"], result)
             after = _references(memory)
             self.assertNotEqual(after["3"]["targets"][0]["anchor"]["blob"], anchor)
-            self.assertEqual(after["3"]["note"], note)
+            self.assertEqual(after["3"]["note"].encode("utf-8"), note)
+            self.assertNotIn("briefsProblem", result)
+            brief = memory / "briefs" / f"{APP}.md"
+            self.assertTrue(brief.is_file(), sorted((memory / "briefs").rglob("*")))
+            self.assertTrue(briefs_ignored(memory))
+            self.assertEqual(tree_named(brief), directory_key(memory))
+            self.assertNotIn("**moved**", brief.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

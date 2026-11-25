@@ -42,6 +42,7 @@ from agents_remember.worktrees.modules.args import WorktreeArgs, report_operatio
 from agents_remember.worktrees.modules.closeout_external import (
     GATE_NOT_APPLICABLE,
     candidate_gate_verdict,
+    closeout_briefs_result,
     closeout_changed_paths,
     external_closeout_commits,
     refuse_ungated_candidate,
@@ -788,6 +789,7 @@ def _closed_result_payload(updated, facts: _CloseoutResultFacts) -> dict[str, An
         "route_index_refresh": memory.route_index_refresh,
         "integration_reopen": facts.integration_reopen,
         "closeout_gate": _closeout_gate_payload(facts.gate_guard),
+        **closeout_briefs_result(updated, facts.code_commit, memory),
     }
     repair = _memory_ledger_repair(updated, memory, operation="worktree_closeout_apply")
     if repair is not None:

@@ -7,16 +7,15 @@ from typing import Any
 
 from agents_remember.application.read_files import (
     ARGUMENT_REMOVED_SENTENCE,
-    read_ar_files_tool,
+    read_ar_files_reply,
 )
 from agents_remember.application.task_scoped_mcp import (
     task_scoped_mcp_config_for_reader,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.mcp.tools.base import _tool_payload
 from agents_remember.mcp.vocabulary import REMOVED_ARGUMENT as _REMOVED_ARGUMENT
 from agents_remember.models.task_document_ref import TaskScopedReaderContext
-
-from .base import _tool_payload
 
 # The sentinel lives in the light vocabulary owner (MIK-R204 rule 1); this module keeps the name it used.
 """Sentinel for the removed ``refresh`` argument: only an omitted argument
@@ -37,6 +36,7 @@ def read_ar_files_payload(
         repository_id=repo_id,
         task_context=task_context,
     )
+    fit_reply = None
     if refresh is not _REMOVED_ARGUMENT:
         # The parameter is removed (MIK-R109 rule 1): any supplied value --
         # true, an explicit false, or an explicit null, which omission alone
@@ -51,15 +51,15 @@ def read_ar_files_payload(
             "refusalDetail": ARGUMENT_REMOVED_SENTENCE,
         }
     else:
-        working_folder = _working_folder(scoped_config, task_context)
-        body = read_ar_files_tool(
+        reply = read_ar_files_reply(
             scoped_config,
             repo_id=repo_id,
             files=files,
-            working_folder=working_folder,
+            working_folder=_working_folder(scoped_config, task_context),
             worktree_scope="leaf" if task_context is not None else "official-line",
         )
-    return _tool_payload("read_ar_files", body)
+        body, fit_reply = reply.payload, reply.fit_reply
+    return _tool_payload("read_ar_files", body, fit_reply=fit_reply)
 
 
 def _working_folder(scoped_config: McpRuntimeConfig, task_context: Any) -> Path | None:

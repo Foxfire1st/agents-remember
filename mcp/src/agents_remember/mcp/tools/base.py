@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.application.tool_response import complete_tool_response
+from agents_remember.application.tool_response import ReplyFit, complete_tool_response
 
 # Not defined here: the roster is advertised wire vocabulary and its one definition lives
 # in the `models` package, so a response model can read it without this adapter package
@@ -20,7 +20,11 @@ __all__ = ["PUBLIC_TOOLS", "RESERVED_TOOLS", "TRANSPORT"]
 
 
 def _tool_payload(
-    tool_name: str, payload: dict[str, Any], *, answer: dict[str, Any] | None = None
+    tool_name: str,
+    payload: dict[str, Any],
+    *,
+    answer: dict[str, Any] | None = None,
+    fit_reply: ReplyFit | None = None,
 ) -> dict[str, Any]:
     """Convert one application result into its protocol-ready response.
 
@@ -28,4 +32,4 @@ def _tool_payload(
     records; ``answer``, when given, is the compact status projected from it
     that the caller receives.
     """
-    return complete_tool_response(tool_name, payload, answer=answer)
+    return complete_tool_response(tool_name, payload, answer=answer, fit_reply=fit_reply)

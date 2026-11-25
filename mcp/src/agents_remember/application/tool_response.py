@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -39,6 +39,7 @@ from agents_remember.application.tool_answer_log import (
     write_diff_report,
 )
 from agents_remember.application.tool_build_currentness import current_tool_build_currentness
+from agents_remember.application.tool_call_outcome import call_outcome
 from agents_remember.models.base import NextStep, ResponseEnvelope
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import (
@@ -53,6 +54,8 @@ from agents_remember.models.tools.tool_answer import (
 from agents_remember.models.tools.tool_answer_short_fields import declared_short_fields
 from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.observer.tool_events import record_tool_completed
+
+type ReplyFit = Callable[[dict[str, Any], int], dict[str, Any]]
 
 _RESPONSE_PATH_FIELDS = ("contractPath", "enclosurePath")
 _ARGUMENT_PATH_FIELDS = (
@@ -156,7 +159,6 @@ class _LoggedAnswer:
 
     log: str | None
     log_error: str | None
-    unwritten_digest: str | None
     budget_bytes: int
     log_dir: Path
 
@@ -168,8 +170,8 @@ def _record_answer_log(record: ToolCallRecord, log_dir: Path, budget_bytes: int)
         log_dir, record.keep_days, is_enclosure, day=record.day, now=record.now
     )
     if folder_error is not None:
-        return _LoggedAnswer(None, folder_error, None, budget_bytes, log_dir)
-    log, detail_error, unwritten_digest = prepare_call_detail(
+        return _LoggedAnswer(None, folder_error, budget_bytes, log_dir)
+    log, detail_error, _digest = prepare_call_detail(
         DetailRequest(
             log_dir=log_dir,
             budget_bytes=budget_bytes,
@@ -181,7 +183,7 @@ def _record_answer_log(record: ToolCallRecord, log_dir: Path, budget_bytes: int)
         day=record.day,
         now=record.now,
     )
-    return _LoggedAnswer(log, detail_error, unwritten_digest, budget_bytes, log_dir)
+    return _LoggedAnswer(log, detail_error, budget_bytes, log_dir)
 
 
 def _append_answer_line(
@@ -191,7 +193,6 @@ def _append_answer_line(
     line = _call_line_dict(
         record,
         detail_name=detail_name,
-        unwritten_digest=logged.unwritten_digest,
         dropped=0,
     )
     return append_call_line(
@@ -249,7 +250,8 @@ def _write_delivered_line(
     logged: _LoggedAnswer,
     answer: dict[str, Any],
     delivered_tokens: int,
-    log_error: str | None,
+    *,
+    fit_reply: ReplyFit | None = None,
 ) -> tuple[dict[str, Any], int, bool]:
     """Write the delivered line; on failure attach, re-guard, retry once.
 
@@ -272,7 +274,7 @@ def _write_delivered_line(
     line_error = _append_answer_line(lined, logged, detail_name=detail_name)
     if line_error is None:
         return answer, delivered_tokens, guard_cut
-    if log_error is None:
+    if logged.log_error is None:
         answer["logError"] = line_error
     if record.tool_name == "role_message" and isinstance(answer.get("text"), str):
         # Late failure must not lose the waited reply's beginning into the
@@ -285,6 +287,8 @@ def _write_delivered_line(
         )
     if "cut" in answer:
         answer["cut"] = answer.pop("cut")
+    if fit_reply is not None and not guard_cut:
+        answer = fit_reply(answer, bound)
     location = ShortFormLocation(
         log=logged.log,
         log_error=answer.get("logError") if isinstance(answer.get("logError"), str) else None,
@@ -305,6 +309,8 @@ def _write_delivered_line(
     if retry_error is not None:
         # No replacement: the first failure stays attached; the retry only
         # counts as dropped. Re-guard in case the retry changed the mapping.
+        if fit_reply is not None and not guard_cut:
+            answer = fit_reply(answer, bound)
         guarded, cut_now, delivered_tokens = _apply_answer_guard(
             answer,
             final_tokens=count_response_tokens(answer),
@@ -404,6 +410,7 @@ def complete_tool_response(
     *,
     config: Any | None = None,
     answer: dict[str, Any] | None = None,
+    fit_reply: ReplyFit | None = None,
 ) -> dict[str, Any]:
     """Validate, enrich, count, shape the answer, log, and observe one result.
 
@@ -428,6 +435,9 @@ def complete_tool_response(
     file still records the whole result it was projected from. The guard
     still binds the projection, and the log line still carries the whole
     result's digest and byte size.
+
+    A reply fitter can account for the actual delivery metadata before the
+    guard measures the answer, including a late log error.
     """
     finalized = finalize_tool_response(
         tool_name,
@@ -468,18 +478,17 @@ def complete_tool_response(
     caller = read_tool_caller()
     dest = resolve_log_roots(effective_config, tool_name)
     log_dir = dest.enclosure_dir if dest.enclosure_dir is not None else dest.coord_log_dir
-    ok = bool(finalized.get("ok", False))
     # Rule 3: the outcome is (ok, code). Only a refusal or a failure
     # carries a code (rule 1); a successful answer's state is not a code.
-    code = str(finalized["code"]) if isinstance(finalized.get("code"), str) else None
+    outcome = call_outcome(finalized)
     duration_ms = (time.perf_counter() - call.started_perf) * 1000.0 if call is not None else 0.0
     record = ToolCallRecord(
         tool_name=tool_name,
         operation=operation,
         arguments=arguments,
         caller=caller,
-        ok=ok,
-        code=code,
+        ok=outcome.ok,
+        code=outcome.code,
         duration_ms=duration_ms,
         answer_tokens=answer_tokens,
         whole_result=finalized,
@@ -511,6 +520,8 @@ def complete_tool_response(
     # every log/logError change: attaching the location can itself take an
     # exact-edge answer over its bound.
     answer = _attach_log_outcome(tool_name, answer, log, log_error, diff_report)
+    if fit_reply is not None:
+        answer = fit_reply(answer, bound)
     answer, guard_cut, delivered_tokens = _apply_answer_guard(
         answer,
         final_tokens=count_response_tokens(answer),
@@ -521,7 +532,7 @@ def complete_tool_response(
     if logged is not None:
         lined = replace(record, answer_tokens=delivered_tokens, guard_cut=guard_cut)
         answer, delivered_tokens, _line_guard_cut = _write_delivered_line(
-            lined, logged, answer, delivered_tokens, log_error
+            lined, logged, answer, delivered_tokens, fit_reply=fit_reply
         )
     record_tool_completed(tool_name, finalized, delivered_tokens=delivered_tokens)
     return answer
