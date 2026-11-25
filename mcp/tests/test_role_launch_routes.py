@@ -515,7 +515,7 @@ class TasklessExecutionIdentityTests(unittest.TestCase):
                     "agent": {"agentId": "owned-agent", "prompt": "saved"},
                 },
             }
-            role_launch_receipts._write_receipt(first_path, receipt)
+            self.assertTrue(role_launch_receipts._create_receipt(first_path, receipt))
             with patch.object(
                 role_launch_liveness,
                 "_execute_prepared_launch",
@@ -563,9 +563,11 @@ class TasklessExecutionIdentityTests(unittest.TestCase):
                     "createdAt": str(request_id),
                 }
 
-            role_launch_receipts._write_receipt(legacy, receipt(current_id))
-            role_launch_receipts._write_receipt(
-                history / f"{archived_id}.json", receipt(archived_id)
+            self.assertTrue(role_launch_receipts._create_receipt(legacy, receipt(current_id)))
+            self.assertTrue(
+                role_launch_receipts._create_receipt(
+                    history / f"{archived_id}.json", receipt(archived_id)
+                )
             )
             unrelated = receipt(
                 foreign_id,
@@ -576,11 +578,15 @@ class TasklessExecutionIdentityTests(unittest.TestCase):
                     "taskDocumentRef": None,
                 },
             )
-            role_launch_receipts._write_receipt(history / f"{foreign_id}.json", unrelated)
+            self.assertTrue(
+                role_launch_receipts._create_receipt(history / f"{foreign_id}.json", unrelated)
+            )
             system_id = uuid.uuid4()
-            role_launch_receipts._write_receipt(
-                history / f"{system_id}.json",
-                receipt(system_id, role="investigator"),
+            self.assertTrue(
+                role_launch_receipts._create_receipt(
+                    history / f"{system_id}.json",
+                    receipt(system_id, role="investigator"),
+                )
             )
 
             options = RoleLauncherOptionsRequest(role="architect")

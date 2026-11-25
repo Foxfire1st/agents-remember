@@ -15,10 +15,48 @@ from agents_remember.worktrees.modules import cleanup
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
-from agents_remember.worktrees.modules.terminal_agents import archive_terminal_agents
+from agents_remember.worktrees.modules.terminal_group import (
+    TerminalItems,
+    group_directory_blockers,
+    prepare_terminal_group,
+    preview_unpublished_provider_skip,
+)
 from agents_remember.worktrees.modules.terminal_validation import TerminalPreflight
 from agents_remember.worktrees.services import TerminalGuard
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
+
+
+def _unpublished_provider_skip_refusal(
+    args: WorktreeArgs,
+    contract: WorktreeContract,
+    kept_line: dict[str, object] | None,
+) -> WorktreeCommandResult | None:
+    if args.teardown_providers:
+        return None
+    directories = preview_unpublished_provider_skip(contract)
+    if not directories:
+        return None
+    blocked = _group_blocked_result(
+        contract, directories, group_directory_blockers(directories, dry_run=True)
+    )
+    if kept_line is None:
+        return blocked
+    return WorktreeCommandResult(blocked.returncode, {**blocked.payload, "landedTips": kept_line})
+
+
+def _group_blocked_result(
+    contract: WorktreeContract, directories: TerminalItems, blockers: list[dict[str, object]]
+) -> WorktreeCommandResult:
+    return WorktreeCommandResult(
+        2,
+        {
+            "state": "blocked",
+            **status_payload(contract),
+            "summary": "The task folder cannot be removed. Resolve the listed blockers and retry.",
+            "directories": directories,
+            "blockers": blockers,
+        },
+    )
 
 
 def _cleanup_with_guard(
@@ -35,6 +73,9 @@ def _cleanup_with_guard(
             operation="worktree_cleanup",
             arguments=TerminalWorktreeCleanupArguments(teardown_providers=args.teardown_providers),
             dry_run=args.dry_run,
+            check_unpublished=lambda current: _unpublished_provider_skip_refusal(
+                args, current, kept_line
+            ),
         )
         if terminal_archive.returncode != 0:
             return terminal_archive
@@ -56,14 +97,21 @@ def _cleanup_with_guard(
                 if terminal is None:
                     raise RuntimeError("cleanup lost terminal archive authority before mutation")
                 current = terminal.archived_contract
-            agents = archive_terminal_agents(current, dry_run=args.dry_run)
-            outputs = cleanup._cleanup_terminal_outputs(
-                args,
-                current,
-                preflight,
-                series_permit=series_permit,
+            prepared = prepare_terminal_group(
+                current, dry_run=args.dry_run, teardown_providers=args.teardown_providers
             )
-            result = cleanup._cleanup_outputs_result(args, current, preflight, guard, outputs)
+            if prepared.blockers:
+                result = _group_blocked_result(current, prepared.directories, prepared.blockers)
+            else:
+                outputs = cleanup._cleanup_terminal_outputs(
+                    args,
+                    current,
+                    preflight,
+                    prepared.directories,
+                    series_permit=series_permit,
+                )
+                result = cleanup._cleanup_outputs_result(args, current, preflight, guard, outputs)
+            agents = prepared.agent_archive
             result = cleanup._with_terminal_archive(result, terminal_archive)
             if kept_line is not None:
                 return WorktreeCommandResult(

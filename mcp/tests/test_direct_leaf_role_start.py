@@ -12,6 +12,7 @@ import json
 import shutil
 import tempfile
 import unittest
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,7 +26,7 @@ from agents_remember.application.worktree_tools import (
     _direct_leaf_start_refusal,
     worktree_start_tool,
 )
-from agents_remember.cli import role_launch_workspace
+from agents_remember.cli import role_launch_enclosure, role_launch_workspace
 from agents_remember.cli.product_start_message import start_request
 from agents_remember.cli.role_launch_preparation import _verify_leaf_revival_scope
 from agents_remember.cli.role_launch_workspace import _resolve_workspace
@@ -212,7 +213,7 @@ def _fixture(root: Path) -> SimpleNamespace:
     )
 
 
-def _identity(fixture: SimpleNamespace, leaf_id: str | None) -> TaskIdentity:
+def _identity(_fixture: SimpleNamespace, leaf_id: str | None) -> TaskIdentity:
     return TaskIdentity(
         repo_id=REPO,
         task_name=MASTER_NAME,
@@ -485,6 +486,7 @@ class DirectLeafRoleStartTests(unittest.TestCase):
                 "_ensure_leaf_enclosure",
                 return_value=(expected_contract, status),
             ) as ensure,
+            patch.object(role_launch_enclosure, "publication_scope", return_value=nullcontext()),
         ):
             workspace = _resolve_workspace(self.fixture.config, self.fixture.context)
         ensure.assert_called_once()

@@ -17,14 +17,17 @@ from fastapi.responses import JSONResponse
 from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND
 from agents_remember.cli.paseo_status import AgentReading, read_agent, status_row
 from agents_remember.cli.role_activity import resume_role_agent
-from agents_remember.cli.role_held_messages import (
-    end_waiting_as,
-    record_lines,
-    recount_waiting_for,
+from agents_remember.cli.role_held_store import (
+    HostClosure,
+    begin_held_generation,
+    held_seat_ref,
+    receipt_is_closed,
+    settle_held_store,
 )
 from agents_remember.cli.role_launch_receipts import (
     _archive_receipt,
     _execute_prepared_launch,
+    _leaf_is_closing,
     _now_iso,
     _public_execution,
     _read_receipt,
@@ -92,12 +95,16 @@ def _reconcile_prior_execution(
                 detail="This request id is already bound to different AR task or agent-selection content.",
             )
         record_step_up(config, current)
-        if current.get("status") in {"starting", "unknown"} or (
-            current.get("stepUp")
-            and current.get("status") == "rejected"
-            and current.get("replayRequest")
-        ):
+        status = current.get("status")
+        if status in {"starting", "unknown"}:
             return _execute_prepared_launch(config, path, current)
+        if (
+            (status == "stopped" or (status == "rejected" and current.get("stepUp")))
+            and isinstance(current.get("replayRequest"), dict)
+            and not isinstance(current.get("retiredBy"), dict)
+            and not _leaf_is_closing(current)
+        ):
+            return _restart_closed_execution(config, path, current)
         return JSONResponse(_refresh_execution(config, path, current))
     if str(current.get("role")) in LEAF_ROLES or str(request.role) in LEAF_ROLES:
         return _reconcile_leaf_occupancy(
@@ -128,6 +135,24 @@ def _reconcile_prior_execution(
         )
     _archive_receipt(path, current)
     return None
+
+
+def _restart_closed_execution(
+    config: McpRuntimeConfig, path: Path, receipt: dict[str, Any]
+) -> JSONResponse:
+    ref = held_seat_ref(path, receipt)
+    host_state = None
+    if not receipt_is_closed(receipt):
+        reading = read_agent(config, ref.agent_id)
+        host_state = _host_closure(reading)
+        if host_state is None:
+            return JSONResponse(_apply_reading(path, receipt, reading))
+    begin_held_generation(
+        ref, receipt_updates={"status": "starting", "updatedAt": _now_iso()}, host_state=host_state
+    )
+    restarted = _read_receipt(path)
+    assert restarted is not None, "the restarted launch receipt was written"
+    return _execute_prepared_launch(config, path, restarted)
 
 
 def _reconcile_leaf_occupancy(
@@ -169,8 +194,11 @@ def _reconcile_leaf_occupancy(
             f"(agent {holder}) cannot be read; nothing was started or archived. "
             f"{reading.unreachable_reason}"
         )
-    if not reading.found or reading.archived:
-        _archive_receipt(path, current)
+    host_state = _host_closure(reading)
+    if host_state is not None:
+        _archive_receipt(
+            path, current, host_state=host_state if holder == current.get("agentId") else None
+        )
         return None
     replaces_agent_id = replacement.replaces_agent_id
     started_by = replacement.started_by
@@ -201,11 +229,7 @@ def _reconcile_leaf_occupancy(
             )
         _require_step_up_idle(config, reading, holder, replacement)
         _require_holder_interruptible(config, reading, holder, replacement.interrupt_turn)
-        current["replaceAuthorizedBy"] = caller
-
-        current["replaceAuthorizedAt"] = _now_iso()
-        _record_holder_replacement(current, holder, caller, replacement.request_id)
-        _write_receipt(path, current)
+        _record_holder_replacement(path, current, caller, replacement.request_id)
         _archive_receipt(path, current)
         return None
     owner = current.get("parentAgentId")
@@ -315,8 +339,8 @@ def _require_step_up_idle(
 
 
 def _record_holder_replacement(
+    path: Path,
     current: dict[str, Any],
-    holder: str,
     caller: str,
     request_id: str | None,
 ) -> None:
@@ -332,28 +356,21 @@ def _record_holder_replacement(
         else f"replaced by a new start authorized by {caller}"
     )
     now = _now_iso()
-    current.update(
-        status="stopped",
-        detail=f"Replaced by {caller}: {reason}.",
-        retiredBy={
+    updates = {
+        "status": "stopped",
+        "detail": f"Replaced by {caller}: {reason}.",
+        "retiredBy": {
             "caller": caller,
             "callerAgentId": None,
             "reason": reason,
             "at": now,
         },
-        retireReason=reason,
-        updatedAt=now,
-    )
-    workspace = current.get("workspace")
-    folder = workspace.get("path") if isinstance(workspace, dict) else None
-    if isinstance(folder, str) and folder:
-        try:
-            ended = end_waiting_as(folder, holder)
-        except ValueError:
-            ended = []
-        if ended:
-            record_lines(current, ended, "not-delivered-archived-or-gone")
-    recount_waiting_for(current)
+        "retireReason": reason,
+        "updatedAt": now,
+        "replaceAuthorizedBy": caller,
+        "replaceAuthorizedAt": now,
+    }
+    settle_held_store(held_seat_ref(path, current), receipt_updates=updates)
 
 
 def _refresh_execution(
@@ -394,6 +411,15 @@ def _recorded_agent_id(receipt: dict[str, Any]) -> str | None:
     return None
 
 
+def _host_closure(reading: AgentReading) -> HostClosure | None:
+    if reading.reachable:
+        if reading.archived:
+            return "archived"
+        if not reading.found:
+            return "gone"
+    return None
+
+
 def _apply_reading(path: Path, receipt: dict[str, Any], reading: AgentReading) -> dict[str, Any]:
     """Write what the matching row says into the receipt and return the public execution."""
 
@@ -424,7 +450,8 @@ def _apply_reading(path: Path, receipt: dict[str, Any], reading: AgentReading) -
     if reading.found and not reading.session_closed:
         # The session is open again, so an earlier refusal to resume it no longer describes it.
         receipt.pop("resumeRefused", None)
-    if before != {field: receipt.get(field) for field in _ROW_FIELDS}:
+    changed = before != {field: receipt.get(field) for field in _ROW_FIELDS}
+    if changed:
         now = _now_iso()
         receipt["updatedAt"] = now
         closed_now = before["status"] != receipt["status"] or before["result"] != receipt.get(
@@ -432,8 +459,22 @@ def _apply_reading(path: Path, receipt: dict[str, Any], reading: AgentReading) -
         )
         if closed_now and receipt["status"] in _CLOSED_STATUSES:
             receipt["terminalObservedAt"] = now
-        _write_receipt(path, receipt)
+    _publish_reading(path, receipt, reading, changed=changed)
     return _public_execution(receipt)
+
+
+def _publish_reading(
+    path: Path, receipt: dict[str, Any], reading: AgentReading, *, changed: bool
+) -> None:
+    host_state = _host_closure(reading)
+    if host_state is not None and _recorded_agent_id(receipt) == receipt.get("agentId"):
+        settle_held_store(
+            held_seat_ref(path, receipt),
+            host_state=host_state,
+            receipt_updates=receipt if changed else None,
+        )
+    elif changed:
+        _write_receipt(path, receipt)
 
 
 def _apply_held_reading(
@@ -451,14 +492,17 @@ def _apply_held_reading(
             "hostUnreachable": True,
             "hostUnreachableReason": reading.unreachable_reason,
         }
-    if not reading.found or reading.archived:
+    host_state = _host_closure(reading)
+    if host_state is not None and _recorded_agent_id(receipt) == receipt.get("agentId"):
         now = _now_iso()
         receipt.update(
             status="stopped",
             detail="The holder is archived or gone; the seat is free.",
             updatedAt=now,
         )
-        _write_receipt(path, receipt)
+        settle_held_store(
+            held_seat_ref(path, receipt), host_state=host_state, receipt_updates=receipt
+        )
     return _public_execution(receipt)
 
 

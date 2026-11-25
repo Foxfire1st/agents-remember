@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 from agents_remember.install.runtime import (
     RuntimeInstallRequest,
@@ -12,16 +12,29 @@ from agents_remember.install.runtime import (
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
+from agents_remember.models.core import RunningServerPayload
 from agents_remember.serving.daemon import ensure_running_dashboard, plan_running_dashboard
 from agents_remember.serving.paseo.paseo_install import install_host
-from agents_remember.serving.server_registry import server_inventory
+from agents_remember.serving.server_registry import preview_server_inventory, server_inventory
 
 __all__ = ["RuntimeInstallRequest", "open_user_settings_notice", "run_runtime_install"]
+
+
+class SharedHeldStoreReconciler(Protocol):
+    def __call__(
+        self,
+        config: McpRuntimeConfig,
+        *,
+        dry_run: bool,
+        servers: list[RunningServerPayload],
+    ) -> dict[str, Any]: ...
 
 
 def run_runtime_install(
     config: McpRuntimeConfig,
     request: RuntimeInstallRequest,
+    *,
+    reconcile_shared_stores: SharedHeldStoreReconciler | None = None,
 ) -> dict[str, Any]:
     result = install_runtime_from_config(config, request)
     host = install_host(config, request.dry_run)
@@ -41,7 +54,24 @@ def run_runtime_install(
             ),
         }
         result["ok"] = result["ok"] and dashboard.action not in {"failed", "lock-held"}
+    servers = preview_server_inventory(config) if request.dry_run else server_inventory(config)
     result["runningServers"] = [
-        server.model_dump(mode="json", exclude_none=True) for server in server_inventory(config)
+        server.model_dump(mode="json", exclude_none=True) for server in servers
     ]
+    if request.reconcile_shared_held_stores:
+        if reconcile_shared_stores is None or not result["ok"]:
+            shared_stores = {
+                "state": "blocked",
+                "reason": (
+                    "Resolve the failed runtime installation before reconciling held stores."
+                    if reconcile_shared_stores is not None
+                    else "This runtime installation has no held-store reconciliation service."
+                ),
+            }
+        else:
+            shared_stores = reconcile_shared_stores(
+                config, dry_run=request.dry_run, servers=servers
+            )
+        result["sharedHeldStores"] = shared_stores
+        result["ok"] = result["ok"] and shared_stores["state"] != "blocked"
     return result

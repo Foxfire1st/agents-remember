@@ -28,6 +28,7 @@ from agents_remember.cli.investigator_receipts import (
     open_investigator_receipts,
 )
 from agents_remember.cli.paseo_status import read_agent
+from agents_remember.cli.role_held_store import HeldSeatRef, open_held_store
 from agents_remember.cli.role_launch_preparation import (
     ROLE_START_TOOL,
 )
@@ -386,6 +387,69 @@ def _workspace_path(receipt: Mapping[str, Any] | None) -> Path | None:
         return None
     candidate = Path(path)
     return candidate if candidate.is_dir() else None
+
+
+def _file_message(
+    config: McpRuntimeConfig,
+    call: RoleMessageCall,
+    parties: _MessageParties,
+    limit: int,
+    seats: tuple[HeldSeatRef | None, HeldSeatRef | None],
+) -> dict[str, Any]:
+    """File one message before it reaches the host (MIK-R117 rules 2 to 4).
+
+    The filing is the all-or-nothing transaction of role_message_delivery: the scope,
+    the attachments, the workspace links and the staged write either all happen or a
+    preparation failure refuses the send as message-file-failed before anything is
+    delivered. The record carries the filed path, its SHA-256, the message id, the
+    folder, the recipient's role and task, and the text limit.
+    """
+
+    from agents_remember.cli.paseo_role_caller import sender_line  # noqa: PLC0415
+
+    scope = _message_scope(config, parties)
+    sender = parties.sender
+    recipient = parties.recipient
+    when = datetime.now(UTC)
+    message_id = str(uuid.uuid4())
+    recipient_role = _recipient_role(recipient, call)
+    recipient_task = _recipient_subject(config, recipient)
+    stem = utc_stem(sender.role, sender.agent_id, recipient_role, recipient.agent_id, when=when)
+    sender_ref, recipient_ref = seats
+    with open_held_store(sender_ref) if sender_ref else contextlib.nullcontext():
+        sender_warning = _ensure_sender_link(config, parties)
+    with open_held_store(recipient_ref) if recipient_ref else contextlib.nullcontext():
+        attachments = _prepare_attachments(call, parties, scope, stem)
+        recipient_warning = _ensure_recipient_link(config, parties)
+        path, digest, _payload = _store_message(
+            call,
+            parties,
+            _MessageDraft(
+                scope.folder,
+                sender_line(sender),
+                stem,
+                when,
+                message_id,
+                recipient_role,
+                recipient_task,
+            ),
+            attachments,
+        )
+    link_warning = recipient_warning
+    if sender_warning:
+        link_warning = (
+            f"{sender_warning} {recipient_warning}".strip() if recipient_warning else sender_warning
+        )
+    return {
+        "path": path.as_posix(),
+        "sha256": digest,
+        "messageId": message_id,
+        "folder": scope.folder.as_posix(),
+        "recipientRole": recipient_role,
+        "recipientTask": recipient_task,
+        "limit": limit,
+        "linkWarning": link_warning or "",
+    }
 
 
 def _prepare_attachments(

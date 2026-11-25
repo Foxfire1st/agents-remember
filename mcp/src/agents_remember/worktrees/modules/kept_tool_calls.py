@@ -23,6 +23,7 @@ the enclosure log budget it is copied from.
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -110,26 +111,87 @@ def removal_after_keep(
     return {**remove_tree(folder, dry_run=dry_run), **kept}
 
 
-def keep_tool_calls(contract: WorktreeContract) -> KeptToolCalls:
+def keep_tool_calls_for_group(
+    contract: WorktreeContract, *, dry_run: bool
+) -> tuple[dict[str, object], dict[str, dict[str, object]]]:
+    """Run or preview a leaf's tool-call move-out before whole-folder removal.
+
+    Returns ``(kept_field, blocker_directories)``. Series enclosures keep nothing.
+    A failure in either dry-run or execution blocks before any deletion occurs.
+    """
+
+    if contract.kind != "leaf":
+        return {}, {}
+    try:
+        kept = keep_tool_calls(contract, dry_run=dry_run)
+    except (OSError, ValueError) as error:
+        report = KeptToolCalls(path=None, kept=0, skipped=0, error=str(error)).entry()
+        return {}, {
+            "logs": {
+                "path": (contract.worktree_group / "logs").as_posix(),
+                "removed": False,
+                "reason": KEEP_FAILED_REASON,
+                "keptToolCalls": report,
+            }
+        }
+    return ({}, {}) if dry_run else ({"keptToolCalls": kept.entry()}, {})
+
+
+def keep_tool_calls(contract: WorktreeContract, *, dry_run: bool = False) -> KeptToolCalls:
     """Copy this leaf's lines from the enclosure log into its master's notes."""
 
     log_dir = contract.worktree_group / "logs"
-    if not log_dir.is_dir():
+    if log_dir.is_symlink() or not log_dir.is_dir():
+        return KeptToolCalls(path=None, kept=0, skipped=0)
+    day_files = _day_files(log_dir)
+    if not day_files:
         return KeptToolCalls(path=None, kept=0, skipped=0)
     leaf = normalize_contract_leaf_id(contract, keep_unresolved=True)
     task = _leaf_task_path(leaf)
-    lines, skipped = _leaf_lines(log_dir, task)
+    lines, skipped = _leaf_lines(day_files, task)
     removed = _removed_paths(contract)
     lines = [_without_removed_paths(line, removed, leaf.leaf_id) for line in lines]
     target = contract.task_root / "notes" / "reports" / f"{leaf.leaf_id}{KEPT_TOOL_CALLS_SUFFIX}"
+    if lines or target.is_symlink() or target.exists():
+        _check_keep_target(contract.task_root, target)
     previous, malformed = _read_lines(target) if target.is_file() else ([], 0)
     skipped += malformed
     merged = _union(previous, lines)
     if not merged:
         return KeptToolCalls(path=None, kept=0, skipped=skipped)
+    if dry_run:
+        return KeptToolCalls(path=target, kept=len(merged), skipped=skipped)
     target.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(target, "".join(f"{_canonical(line)}\n" for line in merged))
     return KeptToolCalls(path=target, kept=len(merged), skipped=skipped)
+
+
+def _day_files(log_dir: Path) -> list[Path]:
+    with os.scandir(log_dir) as entries:
+        return sorted(
+            Path(entry.path)
+            for entry in entries
+            if entry.name.startswith(TOOL_LOG_BASENAME_PREFIX)
+            and entry.name.endswith(".jsonl")
+            and not entry.is_symlink()
+        )
+
+
+def _check_keep_target(task_root: Path, target: Path) -> None:
+    notes = task_root / "notes"
+    reports = notes / "reports"
+    for folder in (notes, reports):
+        if folder.is_symlink():
+            raise ValueError(f"Canonical report folder {folder} is a symlink")
+        if folder.exists() and not folder.is_dir():
+            raise ValueError(f"Canonical report path {folder} is not a directory")
+    if target.is_symlink():
+        raise ValueError(f"Canonical tool-calls file {target} is a symlink")
+    if target.exists() and not target.is_file():
+        raise ValueError(f"Canonical tool-calls path {target} is not a regular file")
+    existing = reports if reports.exists() else (notes if notes.exists() else task_root)
+    if not os.access(existing, os.W_OK | os.X_OK):
+        raise PermissionError(f"Canonical report directory {existing} cannot be written")
 
 
 def _leaf_task_path(contract: WorktreeContract) -> str:
@@ -141,12 +203,12 @@ def _leaf_task_path(contract: WorktreeContract) -> str:
     return ref.path
 
 
-def _leaf_lines(log_dir: Path, task: str) -> tuple[list[dict[str, Any]], int]:
+def _leaf_lines(day_files: list[Path], task: str) -> tuple[list[dict[str, Any]], int]:
     """Every line of ``task`` in the day files, oldest day first, without ``detail``."""
 
     kept: list[dict[str, Any]] = []
     skipped = 0
-    for day_file in sorted(log_dir.glob(f"{TOOL_LOG_BASENAME_PREFIX}*.jsonl")):
+    for day_file in day_files:
         lines, malformed = _read_lines(day_file)
         skipped += malformed
         for line in lines:

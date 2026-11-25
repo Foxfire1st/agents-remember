@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
@@ -12,7 +11,6 @@ from agents_remember.memory_quality.style.citations.source_index_cache import (
     TERMINAL_CLEANUP_STATES,
 )
 from agents_remember.models.lifecycles.enclosure import TerminalWorktreeCleanupArguments
-from agents_remember.worktrees import outside_scratch
 from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
     with_terminal_atomic_series_release,
 )
@@ -42,7 +40,6 @@ from agents_remember.worktrees.modules import terminal_cleanup
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import branch_commit
 from agents_remember.worktrees.modules.guidance import carryover_done, status_payload
-from agents_remember.worktrees.modules.kept_tool_calls import removal_after_keep
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.state_refusals import (
     RefusalNext,
@@ -51,7 +48,6 @@ from agents_remember.worktrees.modules.state_refusals import (
     state_refusal_result,
     terminal_state_refusal,
 )
-from agents_remember.worktrees.modules.terminal_agents import archive_terminal_agents
 from agents_remember.worktrees.modules.terminal_branch_retirement import (
     _TERMINAL_MUTATION_CAPABILITY,
     RetiringBranch,
@@ -64,6 +60,11 @@ from agents_remember.worktrees.modules.terminal_branch_retirement import (
     _TerminalMutationAuthority,
     delete_branch_if_merged_into,
 )
+from agents_remember.worktrees.modules.terminal_group import (
+    preview_group_removal,
+    remove_terminal_group,
+    teardown_terminal_providers,
+)
 from agents_remember.worktrees.modules.terminal_inventory import (
     _absent_branch_entries,
     _absent_worktree_entries,
@@ -71,17 +72,12 @@ from agents_remember.worktrees.modules.terminal_inventory import (
     _require_terminal_note_readback,
     terminal_without_remains_reason,
 )
+from agents_remember.worktrees.modules.terminal_retry import retry_terminal_group
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalPreflight,
     TerminalResult,
-    legacy_series_reports_is_child_enclosure,
     terminal_preflight,
     terminal_result_blockers,
-)
-from agents_remember.worktrees.role_reports import (
-    RoleReportCollectionError,
-    collect_group_reports,
-    remove_group_role_folders,
 )
 from agents_remember.worktrees.services import TerminalGuard, worktree_services
 from agents_remember.worktrees.worktree_contract import (
@@ -93,10 +89,8 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 type TerminalItems = dict[str, dict[str, object]]
-ENCLOSURE_REPORTS_DIRECTORY = "reports"
 # MIK-R108 rule 3: the tool-call log lives here, outside both worktrees and
 # outside Git. A closeout preview never lists it; cleanup removes it.
-ENCLOSURE_LOGS_DIRECTORY = "logs"
 type CleanupOutputs = tuple[
     dict[str, object],
     TerminalItems,
@@ -335,83 +329,6 @@ def _deleted_branches(
     return branches
 
 
-def _scheduled_removal_paths(
-    providers: Mapping[str, object], removed_worktrees: dict[str, dict[str, object]]
-) -> set[Path]:
-    planned: set[Path] = set()
-    for item in removed_worktrees.values():
-        if item.get("removed") or item.get("would_remove"):
-            planned.add(Path(str(item["path"])).resolve())
-    provider_runtime = providers.get("providerRuntime")
-    if isinstance(provider_runtime, dict) and (
-        provider_runtime.get("removed") or provider_runtime.get("would_remove")
-    ):
-        planned.add(Path(str(provider_runtime["path"])).resolve())
-    return planned
-
-
-def _removed_directories(
-    contract, dry_run: bool, planned_removed: set[Path] | None = None
-) -> dict[str, dict[str, object]]:
-    reports_path = contract.worktree_group / ENCLOSURE_REPORTS_DIRECTORY
-    lifecycle_path = contract.worktree_group / ".lifecycle"
-    reports = (
-        {
-            "path": reports_path.as_posix(),
-            "removed": False,
-            "preserved": True,
-            "reason": "child-enclosure",
-        }
-        if contract.kind == "series" and legacy_series_reports_is_child_enclosure(contract)
-        else worktree_services().provider_lifecycle.remove_tree(reports_path, dry_run=dry_run)
-    )
-    lifecycle = worktree_services().provider_lifecycle.remove_tree(
-        lifecycle_path,
-        dry_run=dry_run,
-    )
-    # Cleanup removes <enclosure>/logs/ with the enclosure, and a leaf's own lines are kept in
-    # its master's notes first.
-    logs_path = contract.worktree_group / ENCLOSURE_LOGS_DIRECTORY
-    logs = removal_after_keep(
-        contract,
-        logs_path,
-        dry_run=dry_run,
-        remove_tree=worktree_services().provider_lifecycle.remove_tree,
-    )
-    if contract.kind == "series":
-        return {
-            "reports": reports,
-            "lifecycle": lifecycle,
-            **outside_scratch.removal_entry_for(contract, dry_run=dry_run),
-        }
-    role_folders = remove_group_role_folders(contract, dry_run=dry_run)
-    planned = set(planned_removed or ())
-    planned.update(
-        Path(str(row["path"]))
-        for row in role_folders.values()
-        if row.get("would_remove") or row.get("removed")
-    )
-    if reports.get("removed") or reports.get("would_remove"):
-        planned.add(reports_path.resolve())
-    if lifecycle.get("removed") or lifecycle.get("would_remove"):
-        planned.add(lifecycle_path.resolve())
-    if logs.get("removed") or logs.get("would_remove"):
-        planned.add(logs_path.resolve())
-    directories = {
-        **role_folders,
-        "reports": reports,
-        "lifecycle": lifecycle,
-        "logs": logs,
-        "worktree_group": remove_empty_dir(contract.worktree_group, dry_run, planned),
-        **outside_scratch.removal_entry_for(contract, dry_run=dry_run),
-    }
-    if contract.worktree_group.parent.exists():
-        directories["repo_worktree_group"] = remove_empty_dir(
-            contract.worktree_group.parent, dry_run, planned
-        )
-    return directories
-
-
 def _cleanup_state(
     dry_run: bool,
     cleanup_completed: bool,
@@ -492,7 +409,7 @@ def _finish_cleanup_without_remains(
         )
     try:
         providers: dict[str, object] = (
-            worktree_services().provider_lifecycle.teardown(contract, dry_run=args.dry_run)
+            teardown_terminal_providers(contract, dry_run=args.dry_run)
             if args.teardown_providers
             else {"state": "skipped", "reason": "teardown_providers disabled"}
         )
@@ -506,7 +423,11 @@ def _finish_cleanup_without_remains(
                 dry_run=args.dry_run,
             )
         }
-        directories = _removed_directories(contract, args.dry_run, None)
+        directories = (
+            preview_group_removal(contract, teardown_providers=args.teardown_providers)
+            if args.dry_run
+            else remove_terminal_group(contract)
+        )
         preflight = TerminalPreflight(
             worktrees=dict(removed_worktrees),
             branches=dict(branches),
@@ -692,6 +613,27 @@ def _cleanup_terminal_branch(
     args: WorktreeArgs,
 ) -> tuple[WorktreeContract, WorktreeCommandResult | None, dict[str, object] | None]:
     """Follow the terminal archive branch, answering or handing back the contract."""
+    if terminal.state == "reopen-reset":
+        return (
+            contract,
+            state_refusal_result(
+                contract,
+                state="blocked",
+                code=terminal.state,
+                error=(
+                    "This task was reopened after the accepted cleanup. "
+                    "Read worktree_status for the reopened task's next step."
+                ),
+                next=RefusalNext(
+                    tool="worktree_status",
+                    args={
+                        "repo_id": contract.repo_name,
+                        "contract_path": str(contract.contract_path),
+                    },
+                ),
+            ),
+            None,
+        )
     accepted_arguments = TerminalWorktreeCleanupArguments(
         teardown_providers=args.teardown_providers
     )
@@ -711,21 +653,13 @@ def _cleanup_terminal_branch(
         result = with_terminal_atomic_series_release(
             contract,
             _already_completed_cleanup(
-                contract,
+                terminal,
                 teardown_providers=args.teardown_providers,
                 dry_run=args.dry_run,
             ),
             dry_run=args.dry_run,
         )
-        agents = archive_terminal_agents(contract, dry_run=args.dry_run)
-        return (
-            contract,
-            WorktreeCommandResult(
-                result.returncode,
-                {**result.payload, **({"agentArchive": agents} if agents else {})},
-            ),
-            None,
-        )
+        return contract, result, None
     # MIK-R129 rule 1 per L129-THE-GATE-IS-NOT-JUDGED-AGAIN-RULING: on the archive
     # branch the gate is not judged again. TerminalEnclosureArchive declares no
     # kept-line record of that judgement (and forbids extra fields), so the repeat
@@ -990,31 +924,30 @@ def _terminal_archive_observation(
 
 
 def _already_completed_cleanup(
-    contract: WorktreeContract,
+    terminal: TerminalCleanupContractAuthority,
     *,
     teardown_providers: bool,
     dry_run: bool,
 ) -> WorktreeCommandResult:
+    contract = terminal.current_contract
     terminal_archive = _terminal_archive_observation(
         contract,
         teardown_providers=teardown_providers,
     )
     if terminal_archive.returncode != 0:
         return terminal_archive
-    # MIK-R207 rule 4: a completed retry removes a registered root that is still there, and
-    # never answers a success while it remains.
-    outside, blockers = outside_scratch.terminal_blocker(contract, dry_run=dry_run)
-    if blockers:
+    residue = retry_terminal_group(terminal, dry_run=dry_run)
+    outside = residue.directories.get("outside_scratch")
+    if residue.blockers:
         return WorktreeCommandResult(
             2,
             {
                 "state": "blocked",
                 **status_payload(contract),
-                "summary": (
-                    "Cleanup is already recorded as completed but its outside scratch root "
-                    "could not be removed."
-                ),
-                "blockers": blockers,
+                "summary": "Cleanup is already recorded but its task resources could not be removed.",
+                "directories": residue.directories,
+                "blockers": residue.blockers,
+                **({"agentArchive": residue.agent_archive} if residue.agent_archive else {}),
                 **({"outsideScratch": outside} if outside is not None else {}),
             },
         )
@@ -1029,10 +962,11 @@ def _already_completed_cleanup(
                 "removed_worktrees": {},
                 "branches": {},
                 "drift_snapshots": {},
-                "directories": {},
+                "directories": residue.directories,
                 "blockers": [],
                 "kept_branches": {},
                 "alreadyTerminal": True,
+                **({"agentArchive": residue.agent_archive} if residue.agent_archive else {}),
                 **({"outsideScratch": outside} if outside is not None else {}),
             },
         ),
@@ -1070,13 +1004,17 @@ def _cleanup_outputs_result(  # noqa: PLR0913 -- terminal_note rides the no-rema
             preview=args.dry_run,
         )
     )
-    if blockers and not args.dry_run:
+    if blockers:
         return WorktreeCommandResult(
             2,
             {
                 "state": "blocked",
                 **status_payload(contract),
-                "summary": "Cleanup terminal mutation failed; cache and contract stayed live.",
+                "summary": (
+                    "Cleanup preview found a blocker before deletion."
+                    if args.dry_run
+                    else "Cleanup terminal mutation failed; cache and contract stayed live."
+                ),
                 "providers": providers,
                 "citation_source_index": _preserved_cache(
                     guard.preview(), "terminal-operation-failed"
@@ -1181,6 +1119,7 @@ def _cleanup_terminal_outputs(
     args: WorktreeArgs,
     contract: WorktreeContract,
     preflight: TerminalPreflight,
+    directory_preview: TerminalItems,
     *,
     series_permit: AtomicSeriesTerminalPermit | None = None,
 ) -> CleanupOutputs:
@@ -1189,12 +1128,8 @@ def _cleanup_terminal_outputs(
         operation="worktree_cleanup",
         series_permit=series_permit,
     )
-    try:
-        collect_group_reports(contract, dry_run=args.dry_run)
-    except RoleReportCollectionError as error:
-        return {}, {}, {}, {}, {"role_reports": {"removed": False, "reason": str(error)}}
     providers: dict[str, object] = (
-        worktree_services().provider_lifecycle.teardown(contract, dry_run=args.dry_run)
+        teardown_terminal_providers(contract, dry_run=args.dry_run)
         if args.teardown_providers
         else {"state": "skipped", "reason": "teardown_providers disabled"}
     )
@@ -1242,10 +1177,7 @@ def _cleanup_terminal_outputs(
         )
     ):
         return providers, removed_worktrees, branches, drift_snapshots, {}
-    planned_removed = (
-        _scheduled_removal_paths(providers, removed_worktrees) if args.dry_run else None
-    )
-    directories = _removed_directories(contract, args.dry_run, planned_removed)
+    directories = directory_preview if args.dry_run else remove_terminal_group(contract)
     return providers, removed_worktrees, branches, drift_snapshots, directories
 
 

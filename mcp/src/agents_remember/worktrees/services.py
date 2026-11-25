@@ -403,9 +403,15 @@ def refresh_written_memory_briefs(
 
 
 class LeafAgentArchivePort(Protocol):
-    """Archive recorded leaf agents after terminal admission, before removal."""
+    """Census or archive recorded seats in the terminal contract's workspace."""
 
-    def archive(self, contract: WorktreeContract) -> dict[str, object]: ...
+    def archive(
+        self,
+        contract: WorktreeContract,
+        *,
+        dry_run: bool = False,
+        check_census: Callable[[], None] | None = None,
+    ) -> dict[str, object]: ...
 
 
 @dataclass(frozen=True)
