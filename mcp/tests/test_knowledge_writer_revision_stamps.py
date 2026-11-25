@@ -12,10 +12,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest import mock
 
 import pytest
-from agents_remember.application import knowledge_write_route as route
 from agents_remember.application.knowledge_write_route import (
     WaveTarget,
     WriteSubmission,
@@ -32,12 +30,7 @@ from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.knowledge_files.history_product import record_content_digest
 from agents_remember.models.knowledge_files.writer_stamp import WriterStamp
 from agents_remember.models.role_launcher import RoleSelection
-from agents_remember.worktrees.worktree_contract import (
-    ContractTask,
-    RepoBranchPlan,
-    default_series_contract,
-    load_contract,
-)
+from agents_remember.worktrees.worktree_contract import load_contract
 from knowledge_writer_test_support import (
     ADMISSION,
     BASE_INVARIANT,
@@ -45,14 +38,13 @@ from knowledge_writer_test_support import (
     SCOPE,
     TASK_ID,
     World,
+    build_crossing_world,
     build_world,
     commit_all,
     entry,
-    git,
     read_json,
     target,
     tree_bytes,
-    write,
 )
 from test_reconsideration_repoint import GONE, REPOINT
 from test_reconsideration_surfacing import D18_PATH, EDITED_THIRD, RERUN_ROW, REVIEW, S18B
@@ -185,42 +177,28 @@ def test_a_crossing_write_stamps_the_record_it_resolves_and_refuses_a_typed_writ
 ) -> None:
     world = build_world(tmp_path)
     _bind(monkeypatch, world, agent={"id": "codex", "model": "gpt-x", "effort": "high"})
-    series = default_series_contract(
-        ContractTask(
-            name="landing",
-            repo_name="agents-remember",
-            coordination_root=world.root,
-            workflow_kind="light-task",
-            memory_mode="external",
-        ),
-        code=RepoBranchPlan(world.code, "main", "main", git(world.code, "rev-parse", "HEAD")),
-        memory=RepoBranchPlan(world.memory, "main", "main", git(world.memory, "rev-parse", "HEAD")),
-        task_root=world.task_root,
-    )
-    crossing = f"{series.task_id}-crossing-1"
-    opened = {"schema": "ar-history/v1", "crossing": crossing, "closed": False, "rows": []}
-    write(world.memory, {f"knowledge/history/{crossing}.json": json.dumps(opened)})
+    parked = build_crossing_world(world)
+    parked.store.write(parked.record)
+    crossing = parked.owner
     resolved = {"key": "R", "kind": "invariant", "id": BASE_INVARIANT, "fields": {}}
     resolved["fields"] = {"statement": "Code and memory land as one recorded pair."}
 
     def run(fields: dict[str, Any]) -> Any:
         document = {"records": [{**resolved, "fields": {**resolved["fields"], **fields}}]}
-        locations = (world.memory, world.memory, "main", "main")
-        with mock.patch.object(route, "side_locations", return_value=locations):
-            return crossing_write_report(
-                series, crossing, WriteSubmission(document, "rows.json", "by-test", True)
-            )
+        return crossing_write_report(
+            parked.contract, crossing, WriteSubmission(document, "rows.json", "by-test", True)
+        )
 
     refused = run({"writer": FORGED})
     assert not isinstance(refused, str) and refused.refused
     assert "the writer owns ['writer']" in refused.render()
     written = run({})
     assert not isinstance(written, str) and written.state == "written", written
-    invariant = read_json(world.memory, f"knowledge/invariants/{BASE_INVARIANT}-landing-pair.json")
+    invariant = read_json(parked.memory, f"knowledge/invariants/{BASE_INVARIANT}-landing-pair.json")
     stamp = invariant["writer"]
     assert invariant["revision"] == 2 and "status" not in invariant  # the old word left with it
     assert _without_time(stamp) == _caller({"task": TASK_ID, "crossing": crossing})
-    history = read_json(world.memory, f"knowledge/history/{crossing}.json")
+    history = read_json(parked.memory, f"knowledge/history/{crossing}.json")
     assert history["written"] == [_written_row(invariant)]
 
 

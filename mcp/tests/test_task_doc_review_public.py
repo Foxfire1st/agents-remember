@@ -5,10 +5,13 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
+import anyio
 import pytest
 from _user_settings_guard import user_settings_path_for_write
 from agents_remember.application.task_docs import task_doc_route_review as tools
+from agents_remember.application.task_docs import task_review_step_up
 from agents_remember.application.task_docs.task_doc_response import review_state_payload
 from agents_remember.application.task_docs.task_doc_route_review import (
     _with_route_review_state,
@@ -20,9 +23,15 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.mcp.registration.tasks import register_task_tools
+from agents_remember.mcp.server import _complete_fastmcp_settings
+from agents_remember.models.task_doc import TaskDocResponse
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees.candidate_identity import resolve_candidate_identity
+from mcp.server.fastmcp import FastMCP
+from mcp.types import CallToolRequest, CallToolRequestParams, CallToolResult
 from test_task_document import _config
 
 
@@ -99,6 +108,63 @@ def _effective_limit(config: McpRuntimeConfig, stored_additional_rounds: int) ->
     (``begin_task_review``); the removed get answered this number read-only.
     """
     return review_settings_limit(config.coordination_root) + stored_additional_rounds
+
+
+@pytest.mark.parametrize(
+    ("description", "overflow"),
+    [
+        pytest.param("Review finding", False, id="ordinary"),
+        pytest.param(
+            "one two three four five six seven eight nine ten. " * 155, True, id="overflow"
+        ),
+    ],
+)
+def test_recorded_review_answer_keeps_settings_warning(
+    tmp_path: Path, description: str, overflow: bool
+) -> None:
+    config = _config(tmp_path)
+    _create(config)
+    _call(config, "begin_review", review={})
+    _complete_fastmcp_settings()
+    server = FastMCP("Recorded review")
+    register_task_tools(server, config)
+    target = _target()
+    arguments = {
+        "repo_id": target.repo_id,
+        "task_name": target.task_name,
+        "slug": target.slug,
+        "operation": "record_review",
+        "review": {
+            "verdict": "block",
+            "findings": [{"findingId": "A", "description": description}],
+        },
+    }
+    request = CallToolRequest(
+        method="tools/call", params=CallToolRequestParams(name="task_doc", arguments=arguments)
+    )
+    with (
+        patch.object(
+            task_review_step_up, "load_agentic_settings", side_effect=OSError("unreadable")
+        ),
+        tool_call_context("task_doc", arguments, config=config),
+    ):
+        response = anyio.run(server._mcp_server.request_handlers[CallToolRequest], request)
+
+    result = response.root
+    assert isinstance(result, CallToolResult)
+    assert not result.isError and result.structuredContent is not None, result.content
+    answer = result.structuredContent
+    assert answer["ok"] is True and answer["updated"] == "review recorded"
+    assert (answer.get("overflow") is True) is overflow
+    whole = TaskDocResponse.model_validate_json(Path(answer["log"]).read_text(encoding="utf-8"))
+    assert whole.ok and whole.updated == "review recorded"
+    assert whole.warning == (
+        "The review was recorded, but step-up advice could not read the settings: unreadable"
+    )
+    assert answer["warning"] == whole.warning
+    state = _leaf_doc(config).reviewState
+    assert state is not None and state.pending is False
+    assert state.remainingFindingIds == ["A"]
 
 
 def test_public_review_operations_seal_then_shrink_findings(tmp_path: Path) -> None:

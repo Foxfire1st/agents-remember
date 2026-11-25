@@ -52,9 +52,11 @@ Fitting outcome and next-action fields appear before the locator. Counts and oth
 fields follow it. If a declared value cannot fit whole, the guard omits it and, when there is
 room, adds its name and measured size to `cut.omittedFields` as `field` and `sizeTokens`.
 A fitting omission keeps its place before the guard considers the next declared field.
-`droppedFields` still counts omissions when their names and sizes cannot fit. The guard also
-fits `error`, shortened when needed (`errorCut`), and other numbers, booleans and short texts
-as space permits.
+`droppedFields` still counts omissions when their names and sizes cannot fit. The guard fits
+`error` first, then `warning`, then other numbers, booleans and short texts as space permits.
+Error and warning texts are limited to 600 characters and shortened further to fit the token
+budget. `errorCut` and `warningCut` mark shortened text. When no warning text fits,
+`warningCut` still marks its presence in the whole result.
 
 Every cut answer ends with one last field, `cut`: it says that the answer was cut and names the file
 that holds the whole result (`log`), with `readIt` telling the reader to read the rest there. Where
@@ -189,7 +191,7 @@ carryover.
 | Tool | Purpose | Main arguments |
 | --- | --- | --- |
 | `knowledge_read` | Name one view of a memory snapshot (`source_context`, `invariant`, `family`, `record`, `weakness`, `dependent`, `writers`). Paged record rows hold the text ID, kind, state and memory-checkout location. Open the named files for record text. The `writers` view returns bounded aggregates by role, harness and model, with revision counts and the path to the complete report. | `memoryRoot`, `view`, `limit=32`, `continuation`, the seed of the view (`sourcePath`, `invariantRevisionId`, `familyRevisionId`, `recordId`), filters `weaknessKind`, `includeClosed`, `staleOnly`, `standsOn` |
-| `knowledge_write` | Plan or write the [hand-off list](../concepts.md#hand-off-list) that a Curator gives it, through the one writer of knowledge files, which `agents-remember knowledge-ingest` and `agents-remember knowledge-bootstrap` also use. Without `commit` it plans and validates; with it, writes knowledge files and makes no Git commit. The answer names the whole report and all refusals. | `contractPath`, `handoff` + `handoffName` or `handoffPath`, `authorizationRef`, `commit=false`; for a [foundation wave](../concepts.md#knowledge-foundation), a write that belongs to no task, `repoId` + `wave`; for a crossing, the sync of a master's branch that opened a history file for conflicting records, the master's `contractPath` + `crossing` |
+| `knowledge_write` | Plan or write the [hand-off list](../concepts.md#hand-off-list) that a Curator gives it, through the one writer of knowledge files, which `agents-remember knowledge-ingest` and `agents-remember knowledge-bootstrap` also use. Without `commit` it plans and validates; with it, writes knowledge files and makes no Git commit. The answer names the whole report and all refusals. | `contractPath`, `handoff` + `handoffName` or `handoffPath`, `authorizationRef`, `commit=false`; for a [foundation wave](../concepts.md#knowledge-foundation), a write that belongs to no task, `repoId` + `wave`; for a crossing, a master's crossing sync or structural merge that parked before its merge commit and opened a history file, the master's `contractPath` + `crossing` |
 | `knowledge_diff` | Name the changed records of two memory trees beside a caller-readable report holding the whole comparison: the two trees, counts by kind, changed records, report location. | `memoryRoot`, `beforeRevision="HEAD"`, `afterRevision`, `recordId`, `path` |
 | `knowledge_integrity_check` | Validate a memory tree: `validation.ok`, refusal/report counts, rule counts and bounded violations. With `contractPath`, use the task's code and memory worktrees and return its latest persisted worklist; no semantic judgment is inferred. | `memoryRoot`, `codeRoot`, `baseCommits`, or a task's `contractPath` |
 
@@ -628,6 +630,9 @@ caller must know something, for example a missing requirement file. A start of a
 the addresses of the dashboard and of the chat (`dashboardAddress`, `chatAddress`, each with a
 detail field) and a `nextAction`.
 
+In a short start answer, the warning puts missing requirement filenames before other notices
+so the names fit first. `warningCut` marks shortened warning text.
+
 Every other outcome answers with its `status`, its `detail` and a `nextAction`. The status `held`
 means that the role agent takes its first turn with the first message addressed to it. The status
 `rejected` means that the launch is closed and `agentId` names no usable role agent. After the
@@ -669,7 +674,7 @@ A recipient that is in a turn takes the message into its running turn only where
 steer the recipient's harness; the answer then says `taken: "steered"`. For every other harness
 the message is held with the reason `recipient-in-turn`, and the turn goes on. Where the host
 replaced the running turn all the same, the answer says `taken: "replaced"` and carries a
-`warning`.
+`warning`. In a short message answer, `warningCut` marks shortened warning text.
 
 ### Holds and refusals
 

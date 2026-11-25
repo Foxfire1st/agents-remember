@@ -14,12 +14,11 @@ into a promotion:
 * no content. The observation carries identities, an entry kind and a status; the bytes stay where
   they are, which is what keeps a read page a facts-only packet rather than a document dump.
 
-The Git and parser answers behind an observation are remembered for the life of the process, keyed
-by complete object ids (:mod:`.read_anchor_memo`): which entry a tree holds at a path, which lines a
-blob holds and which names those lines define are functions of the ids alone, so every owner that
-observes the same anchor -- and every subject of the same comparison -- reuses one answer instead of
-spawning Git and re-parsing the blob again. Only answers are remembered; a lookup that failed is
-asked again, so an object that becomes readable later is observed then.
+The Git and parser answers behind an observation are remembered for the life of the process
+(:mod:`.read_anchor_memo`). The keys include the complete object id and the path or reader when
+it affects the answer. Subsequent owners reuse the result of reading an object or extracting its
+definitions. Failed reads leave no memo entry, so an object that becomes readable later is
+observed then.
 
 What is never remembered is whether the repository still *holds* the tree: that is a fact about the
 repository, not the id, and it changes when history is released and pruned or an alternate is
@@ -50,7 +49,7 @@ from agents_remember.memory.knowledge.read_anchor_memo import (
     Definitions,
     is_complete_object_id,
 )
-from agents_remember.memory_quality.style.citations import extents, grammars
+from agents_remember.memory_quality.style.citations import extents, grammars, test_cases
 from agents_remember.models.knowledge.read import AnchorResolution, KnowledgeReadContext
 from agents_remember.models.knowledge.source import LineRangeLocator
 
@@ -254,38 +253,24 @@ def _observed_symbol(
     object_id: str,
     repository_root: Path,
 ) -> AnchorResolution:
-    """Observe a symbol locator against the recorded blob through the shipped extractor.
-
-    The recorded blob is present at the recorded path -- the caller has already proved that -- so
-    the only question left is the one the locator actually asks: does those exact bytes **define**
-    the symbol they name? The answer comes from the same tree-sitter machinery the citation
-    fixer, repair and migration paths use, through :mod:`...style.citations.extents`, so the
-    ingest's notion of "this is a definition" and the reading rail's notion cannot drift apart:
-    there is one definition implementation in the tree and both call it.
-
-    A suffix with no grammar is the one genuine ``unsupported_locator`` left here, and the reason
-    is true of this revision: without a grammar a definition cannot be told from a mention, so the
-    locator is reported unresolved rather than guessed at. A grammar that will not LOAD is
-    reported the same way for the same reason -- the bytes were obtained, the parser was not -- and
-    never silently degrades into occurrence matching, which would resolve a mention as a
-    definition.
-    """
+    """Observe the symbol on the exact recorded blob through the shared definition extractor."""
 
     name = _locator_text(locator, "qualified_name")
     path = str(common["path"])
-    if not grammars.parsed(path):
+    grammar = grammars.grammar_of(path)
+    if grammar is None:
         return AnchorResolution(
             **common,
             observed_source_identity=object_id,
             resolution="unsupported_locator",
             detail=(
                 f"the recorded path {path!r} is written in a language the shipped extractor has no "
-                "grammar for, so a definition of the recorded symbol cannot be told apart from a "
+                "grammar or scanner for, so a definition of the recorded symbol cannot be told apart from a "
                 "mention of it; the recorded claim and its blob identity are unchanged"
             ),
         )
     try:
-        defined = _defining_extents(name, _blob_definitions(repository_root, object_id, path))
+        definitions = _blob_definitions(repository_root, object_id, path, grammar=grammar)
     except (GrammarUnavailableError, _BlobUnreadable) as failure:
         return AnchorResolution(
             **common,
@@ -296,6 +281,17 @@ def _observed_symbol(
                 f"{path!r} ({failure}); the recorded claim and its blob identity are unchanged"
             ),
         )
+    if grammar == grammars.LEAN and extents.uncertain_lean_scope(name, definitions):
+        return AnchorResolution(
+            **common,
+            observed_source_identity=object_id,
+            resolution="unsupported_locator",
+            detail=(
+                f"the recorded symbol {name!r} at {path!r} is unverifiable due to an uncertain Lean scope. "
+                f"{extents.LEAN_SCOPE_EXPLANATION}"
+            ),
+        )
+    defined = _defining_extents(name, definitions, grammar=grammar)
     if not defined:
         return AnchorResolution(
             **common,
@@ -407,43 +403,45 @@ def _recorded_lines(repository_root: Path, object_id: str) -> tuple[str, ...]:
     return lines
 
 
-def _blob_definitions(repository_root: Path, object_id: str, path: str) -> Definitions:
-    """Every name the recorded blob defines under ``path``'s grammar, parsed once per blob.
+def _blob_definitions(
+    repository_root: Path, object_id: str, path: str, *, grammar: str
+) -> Definitions:
+    """Cache the recorded blob's distinct defining ranges by grammar and test-file class.
 
-    The extractor's answer depends on the bytes and on which grammar reads them -- ``path``
-    contributes only its suffix -- so one parse serves every symbol anchored in the same blob, in
-    every read. The distinct ``(start, end)`` extents are kept in the extractor's document order.
+    JavaScript and TypeScript test files can bind names that their ordinary files do not.
+    Each reader class can share a parse across paths containing the same bytes.
     """
 
-    key = (str(repository_root), object_id, grammars.grammar_of(path) or "")
+    recognizes_cases = grammar in {grammars.JAVASCRIPT, grammars.TYPESCRIPT, grammars.TSX}
+    reader = f"{grammar}:test" if recognizes_cases and test_cases.is_test_file(path) else grammar
+    key = (str(repository_root), object_id, reader)
     remembered = BLOB_DEFINITIONS.get(key)
     if remembered is not None:
         return remembered[0]
     bound = extents.definitions(path, list(_recorded_lines(repository_root, object_id)))
     definitions: Definitions = MappingProxyType(
-        {
-            name: tuple(dict.fromkeys((extent.start, extent.end) for extent in found))
-            for name, found in bound.items()
-        }
+        {name: tuple(found) for name, found in bound.items()}
     )
     if is_complete_object_id(object_id):
         BLOB_DEFINITIONS.put(key, definitions)
     return definitions
 
 
-def _defining_extents(name: str, definitions: Definitions) -> tuple[tuple[int, int], ...]:
-    """Where the blob defines ``name``, as distinct ``(start, end)`` lines, or nothing.
+def _defining_extents(
+    name: str, definitions: Definitions, *, grammar: str
+) -> tuple[tuple[int, int], ...]:
+    """Distinct ranges for a whole name, or for the bound parts of a non-Lean name."""
 
-    A qualified name is resolved by its real halves, exactly as the extractor's own callers do:
-    the last segment has to be a definition and every namespace segment before it has to be one
-    too, so ``Holder.method`` resolves when both are bound and an invented prefix does not borrow
-    a real method's identity.
-    """
-
-    parts = [part for part in name.split(".") if part]
-    if not parts or any(part not in definitions for part in parts):
-        return ()
-    return definitions[parts[-1]]
+    if name in definitions or grammar == grammars.LEAN:
+        found = definitions.get(name, ())
+    else:
+        parts = [part for part in name.split(".") if part]
+        if not parts or any(part not in definitions for part in parts):
+            return ()
+        found = definitions[parts[-1]]
+    return tuple(
+        dict.fromkeys((extent.start, extent.end) for extent in found if not extent.scope_uncertain)
+    )
 
 
 def _locator_text(locator: Any, field: str) -> str:

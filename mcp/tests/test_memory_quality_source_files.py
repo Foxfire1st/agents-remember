@@ -61,8 +61,6 @@ class _World:
         )
 
     def cite(self, relative: str, data: bytes) -> None:
-        # The containing card stays visible even when the referenced path starts with a dot.
-        # Knowledge readers intentionally exclude hidden memory directories.
         sidecar = {
             "schema": "ar-onboarding-file/v1",
             "path": "baseline.py",

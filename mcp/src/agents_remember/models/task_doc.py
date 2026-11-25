@@ -170,6 +170,7 @@ class TaskDocResponse(ToolResponse):
     # Writes (MIK-R111 rule 2): the unit the write changed and its new value
     # in a phrase. Present only on successful writes.
     updated: str | None = None
+    warning: str | None = None
     # By-file text input (MIK-R111 rule 2): the absolute path read once and
     # its SHA-256. Present only on writes that took their text from a file.
     inputFile: str | None = None

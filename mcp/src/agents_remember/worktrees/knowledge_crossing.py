@@ -12,10 +12,10 @@ retired machinery; this prose does not promise the managed path it no longer tak
 
 Before Git merges anything, :func:`crossing_plan` asks the bound ``KnowledgeCrossingPort`` for the
 structural merge of the three trees; a failing step is refused with its name and the line is left
-unchanged. After ``git merge --no-commit``, :func:`apply_crossing` makes every ``knowledge/`` and
-``onboarding/`` path of the merge the plan's: clean paths are staged, and each conflicted path is
-left unmerged with its base, own and incoming versions as index stages 1-3, so the ordinary
-resolution route (``continue``) is how the curator finishes it. The merge commit itself is validated
+unchanged. After ``git merge --no-commit``, :func:`apply_crossing` overlays the modeled paths.
+Clean paths are staged, and each modeled conflict holds its base, own and incoming versions as
+index stages 1-3. Unmodeled paths keep the native merge result. The curator finishes conflicts
+through the ordinary resolution route (``continue``). The merge commit itself is validated
 (MIK-R22), against converted bases (rule 7), when it is committed. A crossing sync's own commit
 converts the line; there is no separate conversion commit.
 
@@ -33,16 +33,25 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Final, Literal
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
     GitRunnerOptions,
     run_git,
+    run_git_bytes,
 )
 from agents_remember.models.knowledge_files.canonical import canonical_text, parse_json
-from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH, history_path
+from agents_remember.models.knowledge_files.history import empty_history
+from agents_remember.models.knowledge_files.shapes import GitBlobId, RepositoryPath
 from agents_remember.worktrees.cutover_lock import cutover_lock_refusal, legacy_format_refusal
 from agents_remember.worktrees.knowledge_validation import (
     LayoutProbeError,
@@ -57,7 +66,6 @@ from agents_remember.worktrees.services import (
 )
 
 KNOWLEDGE_ROOTS: Final = ("knowledge", "onboarding")
-_ZERO_OBJECT: Final = "0" * 40
 
 
 class CrossingSyncError(RuntimeError):
@@ -136,11 +144,6 @@ def crossing_plan(
         raise CrossingSyncError(str(error)) from error
 
 
-def _tracked(worktree: Path) -> set[str]:
-    output = _git(worktree, ["ls-files", "-z", "--", *KNOWLEDGE_ROOTS])
-    return {path for path in output.split("\0") if path}
-
-
 def _holds(target: Path, data: bytes) -> bool:
     """Whether ``target`` is a regular file that already holds exactly ``data``."""
 
@@ -154,16 +157,13 @@ def _holds(target: Path, data: bytes) -> bool:
         return False
 
 
-def _write_plan_files(worktree: Path, plan: CrossingPlanView, tracked: set[str]) -> None:
-    """Delete the tracked paths the plan drops, and write every path whose bytes it changes.
+def _write_plan_files(worktree: Path, plan: CrossingPlanView) -> None:
+    """Apply explicit writes and deletions while leaving other paths alone.
 
     A path that already holds the plan's bytes is left alone, so an ordinary sync of converted
     memory rewrites only what the merge changed and every other file keeps its file time.
     """
 
-    kept = {path for path, data in plan.files.items() if data is not None}
-    for path in sorted(tracked - kept):
-        (worktree / path).unlink(missing_ok=True)
     for path, data in sorted(plan.files.items()):
         target = worktree / path
         if data is None:
@@ -175,38 +175,63 @@ def _write_plan_files(worktree: Path, plan: CrossingPlanView, tracked: set[str])
         target.write_bytes(data)
 
 
+def _stage_plan_files(worktree: Path, plan: CrossingPlanView) -> None:
+    """Update only the modeled entries without restaging any of Git's other results."""
+
+    removed = "".join(f"{path}\0" for path, data in plan.files.items() if data is None)
+    if removed:
+        _git(worktree, ["update-index", "--force-remove", "-z", "--stdin"], input_text=removed)
+    kept = "".join(f"{path}\0" for path, data in plan.files.items() if data is not None)
+    if kept:
+        _git(
+            worktree,
+            ["--literal-pathspecs", "add", "--pathspec-from-file=-", "--pathspec-file-nul"],
+            input_text=kept,
+        )
+
+
+def _staged_files(worktree: Path) -> dict[str, tuple[str, str]]:
+    """Return the stage-zero mode and object ID of each staged file under the knowledge roots."""
+
+    result = run_git_bytes(worktree, ["ls-files", "--stage", "-z", "--", *KNOWLEDGE_ROOTS])
+    if result.returncode:
+        detail = (result.stderr or result.stdout).decode("utf-8", errors="replace").strip()
+        raise CrossingSyncError(f"git ls-files failed during the crossing sync: {detail}")
+    entries = {}
+    for row in result.stdout.split(b"\0"):
+        if not row:
+            continue
+        fields, path = row.split(b"\t", 1)
+        mode, object_id, stage = fields.decode("ascii").split()
+        if stage == "0":
+            entries[os.fsdecode(path)] = (mode, object_id)
+    return entries
+
+
 def _unmerge(worktree: Path, plan: CrossingPlanView, conflicted: tuple[str, ...]) -> None:
     """Leave each conflicted path unmerged: its converted base, own and incoming as stages 1-3."""
 
     rows: list[str] = []
+    entries = _staged_files(worktree)
     for path in conflicted:
-        rows.append(f"0 {_ZERO_OBJECT}\t{path}")
+        mode, object_id = entries[path]
+        rows.append(f"0 {'0' * len(object_id)}\t{path}")
         for stage, data in enumerate(plan.conflict_versions[path], start=1):
             if data is not None:
                 blob = _git(
-                    worktree, ["hash-object", "-w", "--stdin"], input_text=data.decode("utf-8")
+                    worktree,
+                    ["hash-object", "-w", "--stdin"],
+                    input_text=data.decode("utf-8", errors="surrogateescape"),
                 ).strip()
-                rows.append(f"100644 {blob} {stage}\t{path}")
+                rows.append(f"{mode} {blob} {stage}\t{path}")
     _git(worktree, ["update-index", "-z", "--index-info"], input_text="\0".join(rows) + "\0")
 
 
 def apply_crossing(worktree: Path, plan: CrossingPlanView) -> tuple[str, ...]:
-    """Make the merge's knowledge and onboarding paths the plan; return the conflicted paths."""
+    """Overlay the structural plan and return the conflicts it introduced."""
 
-    tracked = _tracked(worktree)
-    _git(worktree, ["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", *KNOWLEDGE_ROOTS])
-    _write_plan_files(worktree, plan, tracked)
-    # A converted tree with no cards has no onboarding tree at all; an explicit pathspec that
-    # matches nothing in the worktree and the index fails the add, so only stage the roots
-    # that exist or the index still holds (MIK-R46: shared fixtures build such cardless trees).
-    present = [
-        root
-        for root in KNOWLEDGE_ROOTS
-        if (worktree / root).exists()
-        or any(path == root or path.startswith(f"{root}/") for path in tracked)
-    ]
-    if present:
-        _git(worktree, ["add", "-A", "--", *present])
+    _write_plan_files(worktree, plan)
+    _stage_plan_files(worktree, plan)
     conflicted = tuple(sorted(plan.conflict_versions))
     if conflicted:
         _unmerge(worktree, plan, conflicted)
@@ -275,31 +300,178 @@ def _official_line_converted(repository: Path, official_branch: str) -> bool | s
         return str(error)
 
 
-_CROSSING_HISTORY: Final = re.compile(r"^knowledge/history/[^/]+-crossing-[1-9][0-9]*\.json$")
+_CROSSING_HISTORY_PATTERN: Final = r"^knowledge/history/[^/]+-crossing-[1-9][0-9]*\.json$"
+_CROSSING_HISTORY: Final = re.compile(_CROSSING_HISTORY_PATTERN)
 
 
-def close_crossing_history(worktree: Path, parents: tuple[str, str]) -> tuple[str, ...]:
-    """Close each master-line crossing history file this merge adds (MIK-R24 rule 8 step 4).
+def open_crossing_history(worktree: Path, plan: CrossingPlanView) -> str:
+    """Stage the master history named by a structural merge that needs resolution."""
 
-    A crossing sync on a master line opens ``<task-id>-crossing-<n>.json`` for the row of a record
-    conflict the curator resolved; the file is ``closed`` in the merge commit that performs the
-    sync, so it is frozen from then on (MIK-R07 rule 7). A file either parent already holds is left
-    alone. Returns the paths closed and staged.
-    """
+    owner = str(plan.report["recordConflictHistoryOwner"])
+    path = history_path(owner)
+    if path not in plan.files:
+        target = worktree / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(canonical_text(empty_history("crossing", owner).to_document()), "utf-8")
+        _git(worktree, ["add", "--", path])
+    return owner
 
-    staged = _git(worktree, ["diff", "--cached", "--name-only", "--diff-filter=A", *parents[:1]])
-    closed: list[str] = []
-    for path in sorted(line for line in staged.splitlines() if _CROSSING_HISTORY.match(line)):
+
+class _OpenCrossingHistory(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    path: RepositoryPath = Field(pattern=_CROSSING_HISTORY_PATTERN)
+    original: str
+    mode: Literal["100644", "100755"]
+    blob: GitBlobId
+    closed: str
+    closed_blob: GitBlobId
+
+
+class _CrossingHistoryClose(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    parents: tuple[GitBlobId, GitBlobId]
+    entries: tuple[_OpenCrossingHistory, ...]
+
+
+def _stage_zero_entry(worktree: Path, path: str) -> tuple[Literal["100644", "100755"], str] | None:
+    index = _git(worktree, ["--literal-pathspecs", "ls-files", "--stage", "-z", "--", path])
+    rows = [row for row in index.split("\0") if row]
+    if len(rows) != 1:
+        return None
+    fields = rows[0].partition("\t")[0].split()
+    if len(fields) != 3:
+        return None
+    mode, blob, stage = fields
+    if stage != "0" or mode not in ("100644", "100755"):
+        return None
+    return mode, blob
+
+
+def _regular_disk_state(target: Path) -> tuple[Literal["100644", "100755"], bytes] | None:
+    try:
+        info = target.lstat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(info.st_mode):
+        return None
+    mode: Literal["100644", "100755"] = "100755" if info.st_mode & 0o111 else "100644"
+    return mode, target.read_bytes()
+
+
+def _open_history_entries(
+    worktree: Path, parents: tuple[str, str]
+) -> Iterator[_OpenCrossingHistory]:
+    staged = _git(
+        worktree, ["diff", "--cached", "--name-only", "-z", "--diff-filter=A", parents[0]]
+    )
+    for path in sorted(line for line in staged.split("\0") if _CROSSING_HISTORY.fullmatch(line)):
         if run_git(worktree, ["cat-file", "-e", f"{parents[1]}:{path}"]).returncode == 0:
             continue
-        target = worktree / path
-        document = parse_json(target.read_text(encoding="utf-8"))
+        staged_entry = _stage_zero_entry(worktree, path)
+        if staged_entry is None:
+            continue
+        mode, blob = staged_entry
+        original = (worktree / path).read_bytes().decode("utf-8")
+        document = parse_json(original)
         if isinstance(document, dict) and document.get("closed") is False:
             document["closed"] = True
-            target.write_text(canonical_text(document), encoding="utf-8")
-            _git(worktree, ["add", "--", path])
-            closed.append(path)
-    return tuple(closed)
+            closed = canonical_text(document)
+            closed_blob = _git(
+                worktree, ["hash-object", "--stdin", f"--path={path}"], input_text=closed
+            ).strip()
+            yield _OpenCrossingHistory(
+                path=path,
+                original=original,
+                mode=mode,
+                blob=blob,
+                closed=closed,
+                closed_blob=closed_blob,
+            )
+
+
+def _history_close_checkpoint(worktree: Path) -> Path:
+    git_dir = _git(worktree, ["rev-parse", "--absolute-git-dir"]).strip("\n")
+    return Path(git_dir) / "agents-remember-crossing-history-close.json"
+
+
+def _read_history_close_checkpoint(checkpoint: Path) -> _CrossingHistoryClose | None:
+    try:
+        saved = checkpoint.read_bytes()
+    except FileNotFoundError:
+        return None
+    try:
+        return _CrossingHistoryClose.model_validate_json(saved)
+    except ValidationError as error:
+        raise CrossingSyncError(
+            f"cannot read the pending crossing history close: {error}"
+        ) from error
+
+
+def clear_crossing_history_close(worktree: Path, parents: tuple[str, str]) -> None:
+    """Retire a matching close checkpoint after a verified commit or rollback."""
+
+    checkpoint = _history_close_checkpoint(worktree)
+    pending = _read_history_close_checkpoint(checkpoint)
+    if pending is not None and pending.parents == parents:
+        checkpoint.unlink(missing_ok=True)
+
+
+def restore_crossing_history(worktree: Path, parents: tuple[str, str]) -> None:
+    """Reopen only checkpoint-owned entries for this still-active merge."""
+
+    checkpoint = _history_close_checkpoint(worktree)
+    pending = _read_history_close_checkpoint(checkpoint)
+    if pending is None or pending.parents != parents:
+        return
+    active = run_git(worktree, ["rev-parse", "HEAD", "MERGE_HEAD"])
+    if active.returncode != 0 or tuple(active.stdout.splitlines()) != parents:
+        return
+    index_rows: list[str] = []
+    for entry in pending.entries:
+        original_bytes = entry.original.encode("utf-8")
+        closed_bytes = entry.closed.encode("utf-8")
+        disk = _regular_disk_state(worktree / entry.path)
+        staged = _stage_zero_entry(worktree, entry.path)
+        disk_owned = (
+            disk is not None and disk[0] == entry.mode and disk[1] in (original_bytes, closed_bytes)
+        )
+        index_owned = staged in ((entry.mode, entry.blob), (entry.mode, entry.closed_blob))
+        if not (disk_owned and index_owned):
+            continue
+        if disk is not None and disk[1] == closed_bytes:
+            (worktree / entry.path).write_bytes(original_bytes)
+        if staged == (entry.mode, entry.closed_blob):
+            index_rows.append(f"{entry.mode} {entry.blob} 0\t{entry.path}\0")
+    if index_rows:
+        _git(worktree, ["update-index", "-z", "--index-info"], input_text="".join(index_rows))
+    checkpoint.unlink(missing_ok=True)
+
+
+@contextmanager
+def close_crossing_history(worktree: Path, parents: tuple[str, str]) -> Iterator[tuple[str, ...]]:
+    """Stage closed history for a merge commit, restoring open entries on refusal."""
+
+    captured = tuple(_open_history_entries(worktree, parents))
+    if not captured:
+        yield ()
+        return
+    checkpoint = _history_close_checkpoint(worktree)
+    pending = _CrossingHistoryClose(parents=parents, entries=captured)
+    # The Git admin directory holds one image for the in-progress close. Publish it
+    # before changing either the file or the index so a dying process can be replayed.
+    atomic_write_text(checkpoint, pending.model_dump_json())
+    try:
+        for entry in captured:
+            (worktree / entry.path).write_text(entry.closed, encoding="utf-8")
+            _git(worktree, ["--literal-pathspecs", "add", "--", entry.path])
+        yield tuple(entry.path for entry in pending.entries)
+    except BaseException:
+        restore_crossing_history(worktree, parents)
+        raise
+    else:
+        checkpoint.unlink(missing_ok=True)
 
 
 CROSSING_REPORT_PREFIX: Final = "crossing-sync-report"

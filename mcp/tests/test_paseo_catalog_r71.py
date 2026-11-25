@@ -48,6 +48,7 @@ from agents_remember.models.role_launcher import (
     RoleAgentOverride,
     RoleSelection,
 )
+from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.worktrees import role_reports
 from agents_remember.worktrees.modules import cleanup as worktree_cleanup
 from agents_remember.worktrees.modules.args import WorktreeArgs
@@ -680,6 +681,7 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
             "reviewer",
             "curator",
         )
+        granted_tools = {"claude": ("server_info",), "codex": PUBLIC_TOOLS, "pi": ()}
         for role in roles:
             references = ROLE_REFS[role]
             documents = {
@@ -694,7 +696,7 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
                 or documents.get("masterDocumentRef")
                 or documents.get("sprintDocumentRef"),
             )
-            for provider in ("claude", "codex", "pi"):
+            for provider, tools in granted_tools.items():
                 with self.subTest(role=role, provider=provider):
                     call = build_launch_call(
                         RoleLaunch(
@@ -716,11 +718,10 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
                     agent = call["agent"]
                     self.assertEqual(set(agent["mcpServers"]), {"agents-remember-task"})
                     grants = agent.get("toolPolicy", {}).get("preapproved", [])
-                    expected = (
-                        [{"kind": "mcp", "server": "agents-remember-task", "tool": "server_info"}]
-                        if provider == "claude"
-                        else []
-                    )
+                    expected = [
+                        {"kind": "mcp", "server": "agents-remember-task", "tool": name}
+                        for name in tools
+                    ]
                     self.assertEqual(grants, expected)
                     self.assertNotIn(foreign, json.dumps(grants))
                     self.assertNotIn("*", json.dumps(grants))

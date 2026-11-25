@@ -192,8 +192,9 @@ class KnowledgeValidationPort(Protocol):
 class CrossingPlanView:
     """A crossing sync's knowledge half as the sync applies it (MIK-R24 rule 8).
 
-    ``files`` maps every ``knowledge/`` and ``onboarding/`` path of the merged tree to its bytes
-    (``None`` = absent); ``conflicts`` are ``(path, item, reason)`` triples for the curator, and
+    ``files`` maps modeled ``knowledge/`` and ``onboarding/`` paths to bytes
+    (``None`` = delete). Git owns paths omitted from the plan.
+    ``conflicts`` are ``(path, item, reason)`` triples for the curator, and
     ``conflict_versions`` the converted (base, own, incoming) bytes of each conflicted path.
     """
 

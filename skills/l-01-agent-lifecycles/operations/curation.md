@@ -102,7 +102,7 @@ Never invent a future code commit hash, advance fingerprints to an uncommitted t
 <!-- ar:roles all -->
 The completed curation result is handover evidence, not a closeout or integration gate or a claim about the whole repository. Before handover, complete [the full curation checks](#run-the-complete-curation-checks); they remain a prerequisite and cannot be deferred as an optional closeout or integration extra.
 
-`curator_coherence` on `agents-remember-task` supplies the authority when the checklist requires it. Run `prepare`, then `publish`, then `validate`. Publish when healthy memory returns `checklistStatus=coherence-required`, preparation succeeds and `candidateCount` is zero.
+When healthy memory returns `checklistStatus=coherence-required`, run `prepare` with `curator_coherence` on `agents-remember-task`. After preparation succeeds, `publish` with one judgment per candidate or none for an empty set, then `validate`.
 
 If it refuses, report the typed blocker. Change no closeout or integration transaction state. Validate before closeout. The frozen record names that candidate: closeout's history and fingerprint writes do not turn it into evidence about the later live tree. Do not validate that later tree again as a prerequisite to integration.
 

@@ -39,7 +39,8 @@ from agents_remember.kernel.git_command import (
     run_git,
 )
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo, is_complete_object_id
-from agents_remember.memory_quality.style.citations import extents, grammars
+from agents_remember.memory_quality.style.citations import extents
+from agents_remember.memory_quality.style.citations.model import CitationReader
 from agents_remember.models.knowledge_files import anchor_content
 from agents_remember.models.knowledge_files.anchor_content import (
     RangeOutsideBlobError,
@@ -87,6 +88,7 @@ class CodeObjects:
     repository: Path
     object_inputs: Path | None = None
     """A second object store read beside the repository's, never written (MIK-R73 rule 7)."""
+    reader: CitationReader = field(default=CitationReader.LIVE, kw_only=True)
     _commits: dict[str, str | None] = field(default_factory=dict)
     _trees: dict[str, dict[str, str]] = field(default_factory=dict)
     _modes: dict[str, dict[str, str]] = field(default_factory=dict)
@@ -337,7 +339,7 @@ class CodeObjects:
                 f"{path!r} is a symlink (mode 120000): symbol anchors are never parsed "
                 "from link bytes; cite a line_range or the file instead"
             )
-        grammar = grammars.grammar_of(path)
+        grammar = self.reader.grammar_of(path)
         if grammar is None:
             return None
         try:
@@ -358,14 +360,16 @@ class CodeObjects:
         """
 
         data = self.blob(blob_id)
+        grammar = self.reader.grammar_of(path)
+        if grammar is None:
+            return ()
         key = (str(self.repository), blob_id, path, name)
         remembered = SYMBOL_SPANS.get(key) if is_complete_object_id(blob_id) else None
         if remembered is not None:
             return remembered[0]
-        grammar = grammars.grammar_of(path)
-        if grammar is None:
-            return ()
-        spans = extents.qualified_spans(name, self._bound(path, blob_id, grammar, data))
+        spans = extents.qualified_spans(
+            name, self._bound(path, blob_id, grammar, data), grammar=grammar
+        )
         if is_complete_object_id(blob_id):
             SYMBOL_SPANS.put(key, spans)
         return spans
@@ -373,6 +377,8 @@ class CodeObjects:
     def known_spans(self, path: str, blob_id: str, name: str) -> Spans | None:
         """The kept answer of :meth:`qualified_spans`, if one is kept; nothing is read or parsed."""
 
+        if self.reader.grammar_of(path) is None:
+            return None
         remembered = SYMBOL_SPANS.get((str(self.repository), blob_id, path, name))
         return None if remembered is None else remembered[0]
 

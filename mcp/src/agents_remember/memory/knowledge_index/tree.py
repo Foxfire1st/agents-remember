@@ -18,10 +18,11 @@ checked against the blob ids the captured tree records for the same paths; a fil
 between the two reads fails that check and the capture is taken again. The snapshot's bytes are
 therefore always the bytes its key names.
 
-Only the files the index reads are carried: JSON documents under ``knowledge/`` (census files
-excepted, MIK-R20 owns them) and under ``onboarding/``, with the validator's exclusions: generated
-``*.index.json`` caches and hidden directories. Everything else in the tree -- prose, legacy
-databases, notes -- contributes to the key only.
+The snapshot carries JSON documents under ``knowledge/`` and ``onboarding/``, including dot
+directories. The census reader handles ``knowledge/census/``, and the validator's shared
+predicate excludes generated ``*.index.json`` route caches. Onboarding Markdown and the Markdown
+siblings of indexed knowledge JSON documents are carried as comparison bytes. Other tracked
+paths contribute to the tree key.
 """
 
 from __future__ import annotations
@@ -66,11 +67,10 @@ class MemoryTreeSnapshot:
 
 
 def is_indexed_path(path: str) -> bool:
-    """Answer whether the index reads the file at this memory-repository-relative path.
+    """Answer whether this memory-repository-relative path names an indexed JSON file.
 
-    The index reads the JSON knowledge files the validator reads (MIK-R22's shared
-    :func:`is_excluded_from_knowledge`: no route-index cache, nothing in a hidden directory), less
-    the census files, whose schemas MIK-R20 owns and the index does not answer for.
+    The validator's shared :func:`is_excluded_from_knowledge` excludes route-index caches.
+    Census schemas under ``knowledge/census/`` belong to the census reader.
     """
 
     if not path.endswith(".json") or is_excluded_from_knowledge(path):

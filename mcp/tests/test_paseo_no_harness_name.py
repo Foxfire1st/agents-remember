@@ -32,17 +32,16 @@ NAMED_EXCEPTIONS: dict[str, str] = {}
 # names are admitted: the decision cannot name the agent kind it decides for without
 # naming it.
 RULE21_MODULES = {
-    "cli/paseo_launch.py": (
-        "the provider's own grant mechanism for rule 22 (the installed host grants by "
-        "exact tool name for Claude; Codex carries a side effect that prevents the same "
-        "grant); MIK-R71 rules 21 and 22"
+    "cli/paseo_seat_policy.py": (
+        "Codex receives the whole starting roster because Paseo uses the grant as its "
+        "enabled-tools list and keeps it across resumes. Claude receives server_info "
+        "and the explainer's tools. MIK-R71 rules 21 and 22."
     ),
 }
-# The exact harness words each R71 file may name: an unrelated new provider decision in
-# either file fails the guard. Unlike RULE6's whole-module allowance, the admission is
-# bound to these occurrences; a file that stops naming them, or names more, is refused.
+# The admission is bound to the exact harness words in the grant policy. Missing or
+# additional names fail the guard. The launch builder and explainer host name no harness.
 RULE21_ADMITTED_NAMES = {
-    "cli/paseo_launch.py": {"Claude", "Codex", "claude"},
+    "cli/paseo_seat_policy.py": {"Claude", "Codex", "claude", "codex"},
 }
 
 
@@ -180,7 +179,7 @@ class NoHarnessNameTests(unittest.TestCase):
         for _name, reason in RULE6_MODULES.items():
             self.assertGreater(len(reason), 40)
         # The exception is exactly one module: an entry that no longer applies has to go.
-        self.assertEqual(sorted(RULE21_MODULES), ["cli/paseo_launch.py"])
+        self.assertEqual(sorted(RULE21_MODULES), ["cli/paseo_seat_policy.py"])
         for _name, reason in RULE21_MODULES.items():
             self.assertGreater(len(reason), 40)
         self.assertEqual(sorted(PRESENTER_MODULES), ["cli/paseo_bridge.mjs"])
@@ -201,7 +200,7 @@ class NoHarnessNameTests(unittest.TestCase):
                 self.assertFalse(guard_passes(name, sorted(admitted | {"eve"})))
                 self.assertFalse(guard_passes(name, []))
         # A mutant probe on the real files: an unrelated provider decision added to
-        # either R71 file's actual text fails the guard, so the admission cannot
+        # an admitted file's actual text fails the guard, so the admission cannot
         # silently widen to new harness/provider branches.
         for name in ADMITTED_NAMES:
             with self.subTest(mutant=name):
