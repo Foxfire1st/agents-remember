@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from typing import Annotated, Any, Literal
 
@@ -22,7 +21,7 @@ from agents_remember.models.role_agents import (
 from agents_remember.models.role_launcher import LauncherRole
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
-from ..thread_workers import run_in_request_thread
+from ..thread_workers import run_in_detached_request_thread, run_in_request_thread
 from .lazy import tools
 
 _SEAT_OVERRIDE_KEYS = frozenset({"agent", "model", "effort", "featureValues", "feature_values"})
@@ -168,7 +167,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         dry_run: bool = False,
     ) -> dict[str, object]:
         """Preview or create role-settings with a harness per named role; model and effort stay unset. Name one harness or a harness per role. Existing choices are read and never overwritten. Call dry_run first. host-authority is refused: host preparation writes paseoRuntime in the active MCP settings file. The answer names state, path and changes. More: docs/reference/mcp-tools.md."""
-        return await asyncio.to_thread(
+        return await run_in_detached_request_thread(
             tools.user_settings_init_payload,
             config,
             harness=harness,
@@ -206,7 +205,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
             timeout_seconds=timeout_seconds,
             withdraw_held_message_id=withdraw_held_message_id,
         )
-        return await asyncio.to_thread(tools.role_message_payload, config, call)
+        return await run_in_detached_request_thread(tools.role_message_payload, config, call)
 
 
 __all__ = ["register_role_agent_tools"]

@@ -274,6 +274,10 @@ A sync judges the memory that it adopts before any ref moves, on a fast-forward 
 names the source line and its violations, and it stays in the journal of the sync:
 `worktree_status` and a repeated `worktree_sync` show it.
 
+If the client stops waiting for a sync, look for the `worktree_sync` row in the
+[tool log](../concepts.md#tool-log) once the call has ended. The row and its detail record the
+outcome. Use `worktree_status` to see the sync's current state.
+
 The `reports/` directory of an enclosure holds evidence that may be deleted; the operation journal
 in the enclosure's folder `.lifecycle/` records each direct landing. A lifecycle read takes one of two
 ways. While the enclosure locator is live, it reads the enclosure's
@@ -320,6 +324,10 @@ certification.
 landing that has not landed can retire it, and `recover` finishes an interrupted direct landing.
 A `supersede` of a direct landing is refused as `lifecycle-direct-supersede-unavailable`; the
 refusal names a new `direct_landing` call.
+
+If the client stops waiting for a closeout, look for the `worktree_closeout_apply` row in the
+[tool log](../concepts.md#tool-log) once the call has ended. The row and its detail record the
+outcome.
 
 Closeout and landing record the actual code/memory Git pair. A memory-content commit that they
 create carries `Code-Commit` attribution; `memory.md` is an ignored computed cache, never an additional commit
