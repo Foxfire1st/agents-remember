@@ -216,11 +216,9 @@ def _held_delivery_tick(
     the receipts no holder named. Both are bounded: one small publication and the
     receipts a holder published, then the sweep's own per-tick census budget.
 
-    MIK-R190 rule 7 adds one read before that delivery, and only for a new stamped end
-    (``new_stamped_ends``): the product's limit file is then current for the check every
-    send makes. With no new stamped end there is no read at all — no timer and no
-    periodic read, after a plugin reload too. ``usage_read`` is the composition root's
-    port for that read: ``serving`` may not import the bridge's caller (rule 19).
+    One usage batch runs before delivery when a new stamped end arrives or a stored
+    limit is due for its five-minute recheck. ``usage_read`` is the composition root's
+    port for that read and keeps the bridge caller out of the serving layer.
     """
 
     from agents_remember.cli.role_held_messages import (  # noqa: PLC0415
@@ -228,17 +226,17 @@ def _held_delivery_tick(
         sweep_held_messages,
     )
     from agents_remember.serving.projections.host_activity import (  # noqa: PLC0415
-        new_stamped_ends,
         turn_ended_agents,
+        usage_read_batch,
     )
 
     collaborators = collaborators or _DeliveryCollaborators()
     ended = turn_ended_agents(config, seen)
-    if usage_seen is not None:
-        fresh = new_stamped_ends(config, usage_seen)
-        if fresh and collaborators.usage_read is not None:
+    if usage_seen is not None and collaborators.usage_read is not None:
+        batch = usage_read_batch(config, usage_seen)
+        if batch.stamped_agents or batch.periodic_candidates:
             # The read comes before this tick's delivery to the same agents.
-            collaborators.usage_read(config, fresh)
+            collaborators.usage_read(config, batch)
     if ended:
         deliver_ended_turns(config, ended)
         if collaborators.explainer is not None:

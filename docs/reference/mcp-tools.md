@@ -637,7 +637,7 @@ status `unknown`, the same call with the same `request_id` reconciles the same r
 The whole result, in the file that `log` names, also holds `preparation`, `parentAgentId`,
 `reportPath`, the `choices` of the launch, `taskDocumentFiles` and `secondCopyLoaded`.
 
-A role agent that the host runs receives the tools of Agents Remember once, from the tool server
+A role agent that the host runs receives the tools of its role once, from the tool server
 `agents-remember-task` that the start launches for it. `secondCopyLoaded` says whether the role
 agent's harness also loaded a second copy of the tools. The start changes no configuration file
 of the user or of the harness for this.
@@ -694,7 +694,9 @@ message with `withdraw_held_message_id`, and its answer reports the withdrawal i
   most once when the host answers.
 - `provider-limit`: the usage limit of the recipient's
   [model provider](../concepts.md#model-provider) holds it. The answer carries `limitedUntil`
-  when the end of the limit is known.
+  with the recorded reset time. While a limit is active, the dashboard rechecks the usage report
+  every five minutes. If the host reports an early reset, the next eligible drain sends the
+  held messages in order.
 
 Code `recipient-busy` is refused outright only when the recipient already holds twenty messages;
 that refusal names two ways on: wait for a delivery, or withdraw a waiting message. Every other
