@@ -6,6 +6,7 @@ targets, in order:
 
 1. **Symbols.** Each backticked identifier anchor that the shipped extractor binds exactly once in
    one of the row's cited files (tried in citation order) becomes a ``symbol`` target in that file.
+   An extended Lean name is tried against only the row's cited Lean files, including bare paths.
 2. **Ranges.** Each ``path:start-end`` source becomes its own ``line_range`` target, unless a symbol
    target of the row in the same file lies inside the range or contains it: that range is covered
    and adds nothing. A path the tree does not hold, or a range past the file's end, becomes an
@@ -34,7 +35,6 @@ from typing import Any, Final
 from agents_remember.memory.conversion.cards import CitationRow
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory_quality.style.citations import model
-from agents_remember.models.knowledge_files.shapes import require_repository_path
 
 _REASON: Final = "_reason"
 _TEST_DIRECTORIES: Final = frozenset({"tests", "test", "__tests__", "e2e"})
@@ -73,13 +73,6 @@ class RowContext:
     """Tree paths whose entry is a symlink: symbol anchors there are refused."""
 
 
-def _plain_path(value: str) -> str | None:
-    try:
-        return require_repository_path(value)
-    except ValueError:
-        return None
-
-
 def _anchor(context: RowContext, path: str, locator: dict[str, Any]) -> dict[str, Any] | None:
     blob = context.tree[path]
     content = context.objects.content(blob, locator, path, symlinks=context.symlinks)
@@ -98,16 +91,18 @@ def _unresolved(text: str, reason: str) -> dict[str, Any]:
 def _symbol_targets(
     row: CitationRow, context: RowContext
 ) -> list[tuple[str, tuple[int, int], dict[str, Any]]]:
-    cited = list(
-        dict.fromkeys(
-            citation.path for citation in row.claim.citations if citation.path in context.tree
-        )
-    )
+    ranged_paths = tuple(dict.fromkeys(citation.path for citation in row.claim.citations))
     found: list[tuple[str, tuple[int, int], dict[str, Any]]] = []
     for anchor in row.claim.anchors:
         if anchor.kind != model.SYMBOL:
             continue
-        for path in cited:
+        paths = row.claim.source_paths if anchor.grammar is not None else ranged_paths
+        for path in paths:
+            if path not in context.tree or (
+                anchor.grammar is not None
+                and context.objects.reader.grammar_of(path) != anchor.grammar
+            ):
+                continue
             span = context.objects.symbol_span(
                 path, context.tree[path], anchor.text, symlinks=context.symlinks
             )
@@ -134,7 +129,7 @@ def _source_targets(
 ) -> list[dict[str, Any]]:
     targets: list[dict[str, Any]] = []
     for citation in row.claim.citations:
-        path = _plain_path(citation.path)
+        path = model.local_path(citation.path)
         if path is None or path not in context.tree:
             targets.append(_unresolved(citation.text, "path-absent"))
             continue
@@ -151,7 +146,7 @@ def _source_targets(
         else:
             targets.append(target)
     for segment in row.claim.malformed:
-        path = _plain_path(segment)
+        path = model.local_path(segment)
         if path is not None and path in context.tree:
             target = _anchor(context, path, {"kind": "file"})
             if target is not None:

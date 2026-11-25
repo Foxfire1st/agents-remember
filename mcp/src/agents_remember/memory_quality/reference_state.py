@@ -6,10 +6,12 @@ citation tables. Each code or test anchor target is observed in the code working
 * ``current`` -- the file's blob equals the anchor's ``blob``, or the located bytes still hash to
   the anchor's ``content`` (the MIK-R03 entry rule);
 * ``stale`` -- the content differs, a symbol no longer resolves uniquely, or the path is absent.
+* ``unverifiable`` -- the Lean scanner cannot determine the namespace of the symbol.
 
-A stale reference is **reported, never a gate finding**: the onboarding gate (MIK-R30) is the route by
-which a curator refreshes it. The fixer only rewrites *mechanical* fields: an anchor whose content is
-unchanged but whose ``blob`` (or, for a line range, whose line numbers) moved is re-recorded at the
+A stale or unverifiable reference is **reported, never a gate finding**. The onboarding gate
+(MIK-R30) is the route by which a curator refreshes it. The fixer only rewrites *mechanical*
+fields. An anchor whose content is unchanged but whose ``blob`` (or, for a line range, whose line
+numbers) moved is re-recorded at the
 working tree -- a line range is re-found only when its exact bytes occur exactly once. It never
 touches a stale anchor, a note or a target list.
 """
@@ -34,6 +36,7 @@ from agents_remember.models.knowledge_files.canonical import canonical_text, par
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 
 STALE_REFERENCE_CHECK: Final = "knowledge.references.stale"
+_UNVERIFIABLE: Final = "unverifiable"
 _ANCHOR_KINDS: Final = frozenset({"code", "test"})
 
 
@@ -61,43 +64,63 @@ class _WorkingFiles:
         return self._cache[path]
 
 
-def _span(path: str, data: bytes, name: str) -> tuple[int, int] | None:
-    if not grammars.parsed(path):
-        return None
-    lines = data.decode("utf-8", errors="surrogateescape").split("\n")
-    spans = extents.qualified_spans(name, extents.definitions(path, lines))
-    return spans[0] if len(spans) == 1 else None
+@dataclass(frozen=True)
+class _Located:
+    content: bytes | None
+    scope_uncertain: bool = False
+
+
+def _locate(path: str, data: bytes, locator: dict[str, Any]) -> _Located:
+    kind = locator.get("kind")
+    if kind == "file":
+        return _Located(data)
+    if kind == "symbol":
+        grammar = grammars.grammar_of(path)
+        if grammar is None:
+            return _Located(None)
+        name = str(locator.get("name", ""))
+        bound = extents.definitions(path, extents.source_lines(data))
+        if grammar == grammars.LEAN and extents.uncertain_lean_scope(name, bound):
+            return _Located(None, scope_uncertain=True)
+        spans = extents.qualified_spans(name, bound, grammar=grammar)
+        if len(spans) != 1:
+            return _Located(None)
+        start, end = spans[0]
+    else:
+        start, end = int(locator["start"]), int(locator["end"])
+    try:
+        return _Located(range_bytes(data, start, end))
+    except RangeOutsideBlobError:
+        return _Located(None)
 
 
 def located(path: str, data: bytes, locator: dict[str, Any]) -> bytes | None:
     """The bytes ``locator`` names in ``data``, or ``None`` when it does not resolve."""
 
-    kind = locator.get("kind")
-    if kind == "file":
-        return data
-    if kind == "symbol":
-        span = _span(path, data, str(locator.get("name", "")))
-        if span is None:
-            return None
-        start, end = span
-    else:
-        start, end = int(locator["start"]), int(locator["end"])
-    try:
-        return range_bytes(data, start, end)
-    except RangeOutsideBlobError:
-        return None
+    return _locate(path, data, locator).content
 
 
 def anchor_state(path: str, anchor: dict[str, Any], files: _WorkingFiles) -> str:
     data = files.read(path)
     if data is None:
         return "stale:path-absent"
-    if git_blob_id(data) == anchor.get("blob"):
+    same_blob = git_blob_id(data) == anchor.get("blob")
+    locator = anchor.get("locator")
+    lean_symbol = (
+        isinstance(locator, dict)
+        and locator.get("kind") == "symbol"
+        and grammars.grammar_of(path) == grammars.LEAN
+    )
+    if same_blob and not lean_symbol:
         return "current"
-    found = located(path, data, anchor["locator"])
-    if found is None:
+    result = _locate(path, data, anchor["locator"])
+    if result.scope_uncertain:
+        return _UNVERIFIABLE
+    if same_blob:
+        return "current"
+    if result.content is None:
         return "stale:unresolved"
-    return "current" if content_identity(found) == anchor.get("content") else "stale"
+    return "current" if content_identity(result.content) == anchor.get("content") else "stale"
 
 
 _MALFORMED: Final = (AttributeError, KeyError, TypeError, ValueError)
@@ -158,7 +181,7 @@ def check_references(
 
     files = _WorkingFiles(code_root)
     states: Counter[str] = Counter()
-    stale: list[dict[str, Any]] = []
+    reports: list[dict[str, Any]] = []
     unreadable: list[str] = []
     sidecars_read = 0
     for relative, document in _sidecars(memory_root, unreadable, only):
@@ -176,31 +199,40 @@ def check_references(
         for field_name, anchor, state in observed:
             states[state.split(":")[0]] += 1
             if state != "current":
-                stale.append(_stale_finding(relative, field_name, anchor["path"], state))
+                reports.append(_reference_report(relative, field_name, anchor, state))
     return {
         "ok": True,
         "check": STALE_REFERENCE_CHECK,
         "status": "converted",
         "findingCount": 0,
         "findings": [],
-        "reportOnlyFindings": stale,
+        "reportOnlyFindings": reports,
         "states": dict(sorted(states.items())),
         "sidecarCount": sidecars_read,
         "unreadableSidecars": unreadable,
     }
 
 
-def _stale_finding(relative: str, field_name: str, target: str, state: str) -> dict[str, Any]:
+def _reference_report(
+    relative: str, field_name: str, anchor: dict[str, Any], state: str
+) -> dict[str, Any]:
+    target = anchor["path"]
+    label = f"{relative}: {field_name}: reference target {target}"
+    if state == _UNVERIFIABLE:
+        name = anchor["locator"]["name"]
+        message = (
+            f"{label} is unverifiable because the scope of Lean symbol {name!r} is uncertain. "
+            f"{extents.LEAN_SCOPE_EXPLANATION}"
+        )
+    else:
+        message = f"{label} is {state}; refresh it through the onboarding gate (MIK-R30)"
     return {
         "check": STALE_REFERENCE_CHECK,
         "path": relative,
         "field": field_name,
         "target": target,
         "state": state,
-        "message": (
-            f"{relative}: {field_name}: reference target {target} is "
-            f"{state}; refresh it through the onboarding gate (MIK-R30)"
-        ),
+        "message": message,
     }
 
 
