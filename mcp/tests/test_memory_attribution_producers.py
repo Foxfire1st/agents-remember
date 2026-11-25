@@ -372,7 +372,7 @@ def test_the_one_renderer_keeps_the_callers_body_verbatim_and_its_trailer_final(
 
 
 def _carryover_world(
-    root: Path, *, converted: bool = False
+    root: Path, *, converted: bool = False, feature_path: str = "feature.py"
 ) -> tuple[QueueFixture, WorktreeContract, str, str, str]:
     """One open external leaf whose source branch memory describes landed official code.
 
@@ -387,16 +387,19 @@ def _carryover_world(
     memory_worktree = contract.memory_worktree
     assert memory_worktree is not None
     old_base = git(code, "rev-parse", "main")
-    feature = "FEATURE = 1\n"
+    feature_file = code / feature_path
+    feature = "name: Quality\n" if feature_file.suffix == ".yml" else "FEATURE = 1\n"
     # The same content lands twice: once on the branch that describes it, once on the official
     # line. That is the ``patch-id-match`` evidence carryover auto-carries without a review.
     git(code, "switch", "-q", "-c", "source", old_base)
-    (code / "feature.py").write_text(feature, encoding="utf-8")
-    git(code, "add", "feature.py")
+    feature_file.parent.mkdir(parents=True, exist_ok=True)
+    feature_file.write_text(feature, encoding="utf-8")
+    git(code, "add", feature_path)
     git(code, "commit", "-q", "-m", "Add feature on the source branch")
     git(code, "switch", "-q", "-c", "official", old_base)
-    (code / "feature.py").write_text(feature, encoding="utf-8")
-    git(code, "add", "feature.py")
+    feature_file.parent.mkdir(parents=True, exist_ok=True)
+    feature_file.write_text(feature, encoding="utf-8")
+    git(code, "add", feature_path)
     git(code, "commit", "-q", "-m", "Land the feature officially")
     official_head = git(code, "rev-parse", "official")
     git(code, "switch", "-q", "main")
@@ -416,7 +419,7 @@ def _carryover_world(
                 "onboarding": {
                     "storage": {"mode": "memory-repo"},
                     "pathRules": {
-                        "include": {"paths": ["*"], "fileTypes": [".md", ".py"]},
+                        "include": {"paths": ["*"], "fileTypes": [".md", feature_file.suffix]},
                         "exclude": {"paths": []},
                     },
                 },
@@ -432,8 +435,10 @@ def _carryover_world(
     # merge base against the target, so a plain directory would not be the same world.
     source_memory = fixture.coord / "source-memory"
     git(memory, "switch", "-q", "-c", "branch-memory", "main")
-    (memory / "onboarding").mkdir(parents=True, exist_ok=True)
-    (memory / "onboarding" / "feature.py.md").write_text(
+    card_path = f"onboarding/{feature_path}.md"
+    card = memory / card_path
+    card.parent.mkdir(parents=True, exist_ok=True)
+    card.write_text(
         "# Feature\n"
         "\n"
         "| Field | Value |\n"
@@ -442,7 +447,7 @@ def _carryover_world(
         "| lastVerifiedCommitDate | 2026-01-01T00:00:00+00:00 |\n",
         encoding="utf-8",
     )
-    git(memory, "add", "onboarding/feature.py.md")
+    git(memory, "add", card_path)
     git(memory, "commit", "-q", "-m", "Describe the feature on the branch memory")
     git(memory, "switch", "-q", "main")
     git(memory, "worktree", "add", "--detach", source_memory.as_posix(), "branch-memory")

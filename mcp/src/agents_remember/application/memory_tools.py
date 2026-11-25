@@ -42,6 +42,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.summary imp
     DriftSummaryOutput,
     run_drift_summary,
 )
+from agents_remember.memory_quality.knowledge_validator.trees import is_excluded_from_knowledge
 from agents_remember.models.knowledge_files.documents import ONBOARDING_ROOT
 from agents_remember.models.knowledge_files.records import RECORD_MODELS
 from agents_remember.models.lifecycles.curator_coherence import MAX_CURATOR_SOURCE_CANDIDATES
@@ -605,7 +606,8 @@ def _citation_fix_document_count(
     return sum(
         1
         for path in onboarding.rglob("*.md")
-        if path.is_file() and not any(part.startswith(".") for part in path.parts)
+        if path.is_file()
+        and not is_excluded_from_knowledge(path.relative_to(memory_root).as_posix())
     )
 
 

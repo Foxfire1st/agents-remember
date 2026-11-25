@@ -50,7 +50,7 @@ TOOL_ANSWER_REASON_MAX_CHARS = 200
 # Rule 4: steps 1 and 2 of the short form (the fixed part and the location)
 # are within this many tokens, whatever the log folder is.
 TOOL_ANSWER_OVERFLOW_FIXED_MAX_TOKENS = 250
-# Rule 4: a long error is cut to this many characters first, then further
+# Rule 4: a long error or warning is cut to this many characters first, then further
 # from its end until the measured form fits; the detail file holds it whole.
 TOOL_ANSWER_ERROR_MAX_CHARS = 600
 # Rule 4: a code is an identifier in ASCII of at most this many characters
@@ -178,7 +178,7 @@ SHAPED_TOOL_BOUNDS: dict[tuple[str, str | None], int] = {
     ("lifecycle_finalize_task", None): 600,
     ("closeout_queue", None): 500,
     ("task_reopen", None): 900,
-    ("role_start", None): 300,
+    ("role_start", None): 600,
     ("role_message", None): 150,
     # A waited reply rides the exception bound (MIK-R111 rule 5): over it the
     # reply goes to the detail file and the answer keeps its beginning. The
@@ -300,10 +300,11 @@ L111_SHAPED_TOOLS = frozenset(
 # Measured maxima (short roots): start 260, status 273, preview 653,
 # integrate 187, cleanup 142, checkpoint 277, abandon 232, pause 172,
 # attach 190, control 122, record 366, sync 81, apply 236, finalize 259,
-# reopen 534, adopt 529, direct 141, role_start 160, role_message non-wait
-# 131. Role answers carry relative paths and fixed ids, so they are
-# root-invariant: their margin is 100, giving role_start 300 and
-# role_message 150. ``task_doc`` keeps the rule-4 default: its genuine ceiling is the
+# reopen 534, adopt 529, direct 141. The role_start missing-file answer measured
+# 236 tokens at a short root and 398 at a deep root, including the log path.
+# The short-root measurement plus 300 rounds up to 600. Role_message has a
+# shaped row of 150 and takes the 4000-token exception above.
+# ``task_doc`` keeps the rule-4 default: its genuine ceiling is the
 # 1,000-token dry-diff cap plus answer overhead. ``closeout_queue`` answers
 # live: status measures 82 short-root (118 undeclared) and 167 under a
 # 200-character root with two declared masters, so 500 covers the genuine
@@ -490,43 +491,47 @@ def _cut_hint(log: str | None, log_error: str | None) -> dict[str, Any]:
     }
 
 
-def _fit_error(
+def _fit_short_text(
     short: dict[str, Any],
-    error: Any,
+    field: str,
+    value: Any,
     count: Callable[[Mapping[str, Any]], int],
 ) -> bool:
-    """Cut the error to 600 characters, then from its end until it fits.
+    """Cut an error or warning to 600 characters, then to a measured prefix."""
 
-    A count of characters does not bound a count of tokens, so after the
-    character cut the error shrinks from its end until the measured form is
-    within the bound. Returns whether it was cut; the detail file holds it
-    whole. After the fixed part and the location the bound leaves room for
-    an error of at least 100 tokens.
-    """
-    if not isinstance(error, str):
-        short["error"] = error
+    if not isinstance(value, str):
+        short[field] = value
         return False
-    cut = len(error) > TOOL_ANSWER_ERROR_MAX_CHARS
-    text = error[:TOOL_ANSWER_ERROR_MAX_CHARS] if cut else error
-    short["error"] = text
+    marker = f"{field}Cut"
+    cut = len(value) > TOOL_ANSWER_ERROR_MAX_CHARS
+    text = value[:TOOL_ANSWER_ERROR_MAX_CHARS]
+    short[field] = text
     if cut:
-        short["errorCut"] = True
+        short[marker] = True
     if count(short) <= TOOL_ANSWER_OVERFLOW_MAX_TOKENS:
         return cut
     # The cut marker rides before the search: it is part of the measured
     # form, and adding it after the search would push the form back over.
-    short["errorCut"] = True
+    short[marker] = True
     low, high = 0, len(text)
     while low < high:
         mid = (low + high + 1) // 2
-        short["error"] = text[:mid]
+        short[field] = text[:mid]
         if count(short) <= TOOL_ANSWER_OVERFLOW_MAX_TOKENS:
             low = mid
         else:
             high = mid - 1
-    short["error"] = text[:low]
-    short["errorCut"] = True
+    short[field] = text[:low]
     return True
+
+
+def _fit_warning(
+    short: dict[str, Any], warning: str, count: Callable[[Mapping[str, Any]], int]
+) -> None:
+    """Keep a warning prefix or just its marker when no text fits."""
+
+    if _fit_short_text(short, "warning", warning, count) and not short["warning"]:
+        del short["warning"]
 
 
 def _eligible_short_scalars(
@@ -541,6 +546,8 @@ def _eligible_short_scalars(
             "overflow",
             "answerTokens",
             "errorCut",
+            "warning",
+            "warningCut",
             "droppedFields",
         ):
             continue
@@ -605,16 +612,19 @@ def short_form(
        end, until the measured form is within the bound.
        ``errorCut: true`` says that it was cut, and the detail file holds it
        whole.
-    5. The other top-level fields that are numbers, booleans or strings of up to
+    5. ``warning`` where present, with the same character cap as ``error``.
+       Fit it after the error and with the locator and final cut hint counted.
+       ``warningCut: true`` marks a cut and stays even when no warning text fits.
+    6. The other top-level fields that are numbers, booleans or strings of up to
        200 characters, in the order of the answer, each only while the form
        stays within its bound.
 
     ``error`` is never dropped. ``droppedFields`` holds the count of eligible
     fields left out, plus any count the incoming mapping already carried,
     and is part of the measured form: when it does not fit, further fields
-    are left out until it does, and when no field is left to shed the error
-    shrinks further until the form fits. A supplied ``logError`` always rides
-    the form beside ``log``; a previous ``errorCut`` marker is preserved.
+    are left out until it does. If needed, the warning shrinks before the error.
+    A supplied ``logError`` stays beside ``log``. A previous ``warningCut``
+    marker remains on a refit.
     Returns the short form, the dropped count, and whether the error was cut.
     ``count`` measures tokens with the product's counter (``models/tokens.py``);
     the module stays pure by taking it as an argument.
@@ -637,14 +647,16 @@ def short_form(
     )
     error_cut = prior_error_cut
     if "error" in answer:
-        error_cut = _fit_error(short, answer["error"], count) or prior_error_cut
+        error_cut = _fit_short_text(short, "error", answer["error"], count) or prior_error_cut
+    dropped = prior_dropped_count + declared_dropped
+    if answer.get("warningCut") is True:
+        short["warningCut"] = True
+    if isinstance(warning := answer.get("warning"), str):
+        _fit_warning(short, warning, lambda form: count(_with_cut_hint(form, hint, dropped)))
     reserved = set(short).union(field.root for field in declared_fields)
-    dropped, kept = _fit_scalars(short, _eligible_short_scalars(answer, reserved), count)
-    # Measure the form with its complete final hint; scalars and then the error make room
-    # for it rather than displacing it.
-    dropped += prior_dropped_count + declared_dropped
+    scalar_dropped, kept = _fit_scalars(short, _eligible_short_scalars(answer, reserved), count)
     dropped, error_cut = _fit_the_cut_hint(
-        short, _CutFitting(kept, dropped, hint, count, error_cut)
+        short, _CutFitting(kept, dropped + scalar_dropped, hint, count, error_cut)
     )
     short["cut"] = hint
     # Token accounting uses key-sorted JSON. Put fitted outcome and action
@@ -676,12 +688,20 @@ class _CutFitting:
     error_cut: bool
 
 
+def _with_cut_hint(
+    form: Mapping[str, Any], hint: Mapping[str, Any], dropped: int
+) -> dict[str, Any]:
+    measured = {**form, "cut": hint}
+    if dropped:
+        measured["droppedFields"] = dropped
+    return measured
+
+
 def _fit_the_cut_hint(short: dict[str, Any], fitting: _CutFitting) -> tuple[int, bool]:
     """Measure the form with its hint (and its ``droppedFields``) and shed until it fits.
 
-    The full-result hint is never dropped. Scalars go first, then the error shrinks from its
-    end until the form including the hint fits ``TOOL_ANSWER_OVERFLOW_MAX_TOKENS``. If nothing
-    else can be shed, keep the hint even above the bound so the reader can find the result.
+    Shed scalars, warning text and error text in that order. Keep the hint
+    even above the bound so the reader can find the result.
     """
 
     kept, dropped, hint, count, error_cut = (
@@ -692,23 +712,16 @@ def _fit_the_cut_hint(short: dict[str, Any], fitting: _CutFitting) -> tuple[int,
         fitting.error_cut,
     )
 
-    def measured() -> int:
-        form = {**short, "cut": hint}
-        if dropped:
-            form["droppedFields"] = dropped
-        return count(form)
+    def measured(form: Mapping[str, Any] = short) -> int:
+        return count(_with_cut_hint(form, hint, dropped))
 
     while kept and measured() > TOOL_ANSWER_OVERFLOW_MAX_TOKENS:
         del short[kept.pop()]
         dropped += 1
-    if measured() > TOOL_ANSWER_OVERFLOW_MAX_TOKENS and "error" in short:
-        _fit_error(
-            short,
-            short["error"],
-            lambda form: count(
-                {**form, "cut": hint, **({"droppedFields": dropped} if dropped else {})}
-            ),
-        )
+    if "warning" in short and measured() > TOOL_ANSWER_OVERFLOW_MAX_TOKENS:
+        _fit_warning(short, short["warning"], measured)
+    if "error" in short and measured() > TOOL_ANSWER_OVERFLOW_MAX_TOKENS:
+        _fit_short_text(short, "error", short["error"], measured)
         error_cut = True
     if dropped:
         short["droppedFields"] = dropped
@@ -733,6 +746,7 @@ FRAMEWORK_ANSWER_KEYS = frozenset(
         "answerTokens",
         "droppedFields",
         "errorCut",
+        "warningCut",
         "buildCurrentness",
         "runningOperation",
         "cut",

@@ -86,7 +86,7 @@ def _file_card() -> str:
             "<relative path to the governing overview>": "overview.md",
             "<Explain this file's job and the boundary it owns.>": "Find old-format onboarding cards at the adoption boundary.",
             "<Explain the important logic, conventions, contracts, failure cases and limits that a "
-            "reader cannot safely infer from names alone.>": "The scan skips hidden paths and unreadable cards and returns sorted matches.",
+            "reader cannot safely infer from names alone.>": "The scan returns sorted matches from readable cards.",
             "<Explain the internal callers and dependencies, documentation contracts and "
             "cross-repository behavior that affect this file. Distinguish the file's work from "
             "its neighbours.>": "Adoption owns this scan; knowledge validation owns unreadable-file refusals.",

@@ -279,6 +279,34 @@ class ToolAnswerGuardTests(unittest.TestCase):
         )
         self.assertLessEqual(count_response_tokens(short), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
 
+    def test_warning_cut_marker_remains_when_error_uses_the_available_room(self) -> None:
+        location = ShortFormLocation(log="/logs/role-start-detail.json")
+        refusal = {
+            "ok": False,
+            "error": "汉" * TOOL_ANSWER_ERROR_MAX_CHARS,
+            "warning": "The launch settings have changed.",
+        }
+        short, _, error_cut = short_form(
+            refusal, answer_tokens=9999, location=location, count=count_response_tokens
+        )
+        self.assertTrue(error_cut)
+        self.assertTrue(short["error"])
+        self.assertTrue(short["warningCut"])
+        self.assertNotIn("warning", short)
+        self.assertEqual(short["cut"]["log"], location.log)
+        self.assertLessEqual(count_response_tokens(short), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
+
+        refit, _, _ = short_form(
+            short,
+            answer_tokens=count_response_tokens(short),
+            location=ShortFormLocation(log=location.log, log_error="The answer log failed."),
+            count=count_response_tokens,
+        )
+        self.assertTrue(refit["warningCut"])
+        self.assertNotIn("warning", refit)
+        self.assertTrue(refit["error"])
+        self.assertLessEqual(count_response_tokens(refit), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
+
     def test_invalid_code_is_not_passed_on(self) -> None:
         # Rule 4: a longer or non-ASCII code is a defect of the tool that
         # made it: the answer keeps its ok and carries invalid-code.

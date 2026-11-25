@@ -64,6 +64,7 @@ from agents_remember.memory.conversion.citations import RowContext, TargetTally,
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory_quality.converted_cards import card_sidecar_path, is_overview
 from agents_remember.memory_quality.knowledge_validator.markers import escape_markers, find_markers
+from agents_remember.memory_quality.knowledge_validator.trees import is_excluded_from_knowledge
 from agents_remember.memory_quality.style.citations import cells, model
 from agents_remember.memory_quality.style.document_shape import tables
 from agents_remember.models.knowledge_files.canonical import canonical_text, parse_json
@@ -378,7 +379,7 @@ def _cards(memory_root: Path, only: str | None) -> list[str]:
         path.relative_to(memory_root).as_posix()
         for path in sorted(onboarding.rglob("*.md"))
         if path.is_file()
-        and not any(part.startswith(".") for part in path.relative_to(memory_root).parts)
+        and not is_excluded_from_knowledge(path.relative_to(memory_root).as_posix())
     ]
 
 

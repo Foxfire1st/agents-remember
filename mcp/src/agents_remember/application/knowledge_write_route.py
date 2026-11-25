@@ -58,8 +58,14 @@ from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH,
 from agents_remember.tasks.leaf_decisions import leaf_decision_refusal
 from agents_remember.worktrees.cutover_lock import legacy_format_refusal
 from agents_remember.worktrees.knowledge_crossing import unconverted_line_refusal
-from agents_remember.worktrees.modules.git import local_branch_ref
-from agents_remember.worktrees.sync_transaction_authority import side_locations
+from agents_remember.worktrees.sync_transaction_authority import require_record_contract
+from agents_remember.worktrees.sync_transaction_git import SyncGitProofError, side_branch_head
+from agents_remember.worktrees.sync_transaction_state import (
+    SyncJournalReadError,
+    SyncOperationRecord,
+    SyncOperationStore,
+    SyncSideRecord,
+)
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 _LEAF_SUFFIX = re.compile(r"^(?P<task>.+)-L[0-9]+$")
@@ -330,9 +336,7 @@ def leaf_write_report(
     )
 
 
-def _crossing_memory_root(contract: WorktreeContract | str, crossing: str) -> Path | str:
-    """The sync worktree holding the open crossing history file, or why the run is refused."""
-
+def _crossing_contract_refusal(contract: WorktreeContract | str, crossing: str) -> str | None:
     if isinstance(contract, str):
         return f"--crossing needs the master's series contract: {contract}"
     if contract.kind != "series":
@@ -346,17 +350,60 @@ def _crossing_memory_root(contract: WorktreeContract | str, crossing: str) -> Pa
             f"--crossing names this master's crossing history file, {contract.task_id}-crossing-<n> "
             f"(MIK-R24 rule 8 step 4); {crossing!r} is not one"
         )
-    memory_root = side_locations(contract, "memory")[1]
+    return None
+
+
+def _crossing_operation(contract: WorktreeContract, crossing: str) -> SyncOperationRecord | str:
+    """Read the open sync that owns the requested crossing."""
+
+    try:
+        record = SyncOperationStore(contract.worktree_group).read()
+        if (
+            not isinstance(record, SyncOperationRecord)
+            or record.phase != "memory-resolution-required"
+        ):
+            return (
+                f"No memory sync is open for {contract.task_id}. Run worktree_sync on "
+                f"{contract.contract_path} before writing crossing history"
+            )
+        require_record_contract(contract, record)
+    except (OSError, SyncJournalReadError, SyncGitProofError) as error:
+        return f"the master's open sync operation cannot be read: {error}"
+    owner = record.memory.crossingHistoryOwner if record.memory is not None else ""
+    if owner != crossing:
+        return (
+            f"The open memory sync owns {owner or 'no crossing history'}. "
+            f"It cannot write history for {crossing!r}"
+        )
+    return record
+
+
+def _crossing_history_refusal(memory_root: Path, crossing: str) -> str | None:
     path = memory_root / history_path(crossing)
     document = read_handoff_document(path) if path.is_file() else None
     if not isinstance(document, dict) or document.get("crossing") != crossing:
         return (
-            f"{path} is not an open crossing history file: the crossing sync opens it when a record "
-            "conflicts, and its rows are recorded while that sync is being resolved"
+            f"{path} is not open. Worktree_sync opens crossing history when the memory merge "
+            "parks for resolution"
         )
     if document.get("closed") is not False:
         return f"{path} is closed: the crossing sync's commit froze it (MIK-R07 rule 7)"
-    return memory_root
+    return None
+
+
+def _crossing_code_snapshot(code: SyncSideRecord) -> CodeSnapshot | str:
+    if code.state != "completed" or not code.resultHead:
+        return "The sync's code side has not completed. Finish the code sync before writing history"
+    try:
+        head = side_branch_head(code)
+        if head != code.resultHead:
+            return (
+                f"The sync's code branch {code.workBranch!r} moved to {head}. "
+                f"It must point to its settled commit {code.resultHead} to write history"
+            )
+        return CodeSnapshot.at_commit(Path(code.repository), code.resultHead)
+    except (AnchorResolutionError, RuntimeError, OSError) as error:
+        return f"the crossing's paired code cannot be read: {error}"
 
 
 def crossing_write_report(
@@ -368,22 +415,25 @@ def crossing_write_report(
 
     The rows go into the ``<task-id>-crossing-<n>.json`` file the sync opened in its memory
     worktree, and a conflicted record named by its ``id`` is resolved at one more than the
-    higher side's revision; C is the series' code work branch, the sync's paired code.
+    higher side's revision; C is the settled code commit recorded by that sync.
     """
 
     authorization = str(submission.authorization_ref or "").strip()
     if not authorization:
         return BLANK_AUTHORIZATION
-    memory_root = _crossing_memory_root(contract, crossing)
-    if isinstance(memory_root, str):
-        return memory_root
+    if refusal := _crossing_contract_refusal(contract, crossing):
+        return refusal
     assert not isinstance(contract, str)  # a contract that cannot be loaded is refused above
-    try:
-        code = CodeSnapshot.at_commit(
-            contract.code_repo_path, local_branch_ref(contract.code_work_branch)
-        )
-    except (AnchorResolutionError, RuntimeError) as error:
-        return f"the crossing's paired code cannot be read: {error}"
+    record = _crossing_operation(contract, crossing)
+    if isinstance(record, str):
+        return record
+    assert record.memory is not None  # the crossing belongs to the memory side
+    memory_root = Path(record.memory.worktree)
+    if refusal := _crossing_history_refusal(memory_root, crossing):
+        return refusal
+    code = _crossing_code_snapshot(record.code)
+    if isinstance(code, str):
+        return code
     return write_knowledge(
         WriteRequest(
             memory_root=memory_root,
@@ -394,7 +444,7 @@ def crossing_write_report(
             commit=submission.commit,
             authorization=authorization,
             coordination_root=contract.coordination_root,
-            code_base=local_branch_ref(contract.code_work_branch),
+            code_base=record.code.resultHead,
         ),
         code=code,
     )

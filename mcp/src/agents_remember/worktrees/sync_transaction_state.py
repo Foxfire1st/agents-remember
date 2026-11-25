@@ -92,6 +92,8 @@ class SyncSideRecord(BaseModel):
     # A crossing sync's durable report (MIK-R24 rule 8): the item-level conflicts, with each side's
     # value, and the cards taken from each side. The resolution payload names it and summarises it.
     crossingReport: str = Field(default="", max_length=4096)
+    # The master history opened by this operation's retained memory merge.
+    crossingHistoryOwner: str = ""
 
     @model_validator(mode="before")
     @classmethod
@@ -113,7 +115,7 @@ class SyncSideRecord(BaseModel):
 
     @model_serializer(mode="wrap")
     def _omit_empty_optional_state(self, handler: SerializerFunctionWrapHandler) -> Any:
-        """Write ``crossingReport`` and the retired knowledge keys only when they hold bytes.
+        """Write optional crossing state and retired knowledge keys only when populated.
 
         An ordinary journal keeps the exact shape the installed (pre-MIK-R24) runtime reads;
         a pre-MIK-R26 journal whose retired keys are empty round-trips to the dropped shape.
@@ -123,6 +125,8 @@ class SyncSideRecord(BaseModel):
         if isinstance(data, dict):
             if not self.crossingReport:
                 data.pop("crossingReport", None)
+            if not self.crossingHistoryOwner:
+                data.pop("crossingHistoryOwner", None)
             if not self.omissionReport:
                 data.pop("omissionReport", None)
             if not self.omittedItems:

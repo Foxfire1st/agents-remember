@@ -561,12 +561,14 @@ def test_missing_memory_is_not_reported_as_legacy(tmp_path):
     assert "code legacy-format" not in str(caught.value)
 
 
-def _converted_world(tmp_path):
-    fixture, contract, old_base, official, source = _carryover_world(tmp_path, converted=True)
+def _converted_world(tmp_path, *, feature_path: str = "feature.py"):
+    fixture, contract, old_base, official, source = _carryover_world(
+        tmp_path, converted=True, feature_path=feature_path
+    )
     source = Path(source)
     document = {
         "schema": "ar-onboarding-file/v1",
-        "path": "feature.py",
+        "path": feature_path,
         "realizes": [],
         "references": {
             "1": {
@@ -575,18 +577,20 @@ def _converted_world(tmp_path):
                         "kind": "code",
                         "anchor": {
                             "locator": {"kind": "file"},
-                            "blob": git(fixture.code, "rev-parse", f"{official}:feature.py"),
-                            "content": content_identity(b"FEATURE = 1\n"),
+                            "blob": git(fixture.code, "rev-parse", f"{official}:{feature_path}"),
+                            "content": content_identity(
+                                (contract.code_worktree / feature_path).read_bytes()
+                            ),
                         },
                     }
                 ]
             }
         },
     }
-    (source / "onboarding/feature.py.md").write_text(
+    (source / f"onboarding/{feature_path}.md").write_text(
         "# Feature\n\n## Evidence\n\n- Landed feature. [1]\n"
     )
-    (source / "onboarding/feature.py.json").write_text(canonical_text(document))
+    (source / f"onboarding/{feature_path}.json").write_text(canonical_text(document))
     selection = CarryoverSelection(
         repo_id=contract.repo_name,
         contract_path=str(contract.contract_path),
@@ -598,27 +602,37 @@ def _converted_world(tmp_path):
     return fixture, contract, selection
 
 
-def test_public_converted_apply_carries_pair_without_commit_and_repeats(tmp_path):
-    fixture, contract, selection = _converted_world(tmp_path)
+@pytest.mark.parametrize(
+    "feature_path",
+    ["feature.py", ".github/workflows/quality.yml"],
+    ids=["ordinary", "dot-directory"],
+)
+def test_public_converted_apply_carries_pair_without_commit_and_repeats(
+    tmp_path: Path, feature_path: str
+) -> None:
+    fixture, contract, selection = _converted_world(tmp_path, feature_path=feature_path)
     memory = contract.memory_worktree
     assert memory is not None
     head = git(memory, "rev-parse", "HEAD")
     index_path = Path(git(memory, "rev-parse", "--path-format=absolute", "--git-path", "index"))
     index = index_path.read_bytes()
     plan = memory_carryover_plan_tool(fixture.cfg, selection)
-    candidate = next(item for item in plan["candidates"] if item["source_path"] == "feature.py")
+    candidate = next(item for item in plan["candidates"] if item["source_path"] == feature_path)
     assert candidate["kind"] == "file-sidecar" and candidate["decision"] == "auto-carry", candidate
     assert candidate["anchors"]["all_current"]
     first = memory_carryover_apply_tool(fixture.cfg, selection, intent_note="recover landed memory")
     assert first["ok"] and first["state"] == "carried-into-worktree", json.dumps(first, indent=2)
-    assert "onboarding/feature.py.md" in first["written_paths"]
-    assert "onboarding/feature.py.json" in first["written_paths"]
+    for suffix in (".md", ".json"):
+        path = f"onboarding/{feature_path}{suffix}"
+        assert path in first["written_paths"]
+        assert (memory / path).read_bytes() == (Path(selection.source_memory) / path).read_bytes()
     assert first["worklist"] is not None
     assert git(memory, "rev-parse", "HEAD") == head
     assert index_path.read_bytes() == index
     repeated = memory_carryover_apply_tool(fixture.cfg, selection, intent_note="retry recovery")
     assert repeated["ok"] and repeated["state"] == "nothing-to-carryover", repeated
     assert git(memory, "rev-parse", "HEAD") == head
+    assert index_path.read_bytes() == index
 
 
 @pytest.mark.parametrize("kind", ["route-overview", "memory-only-doc", "entity-catalog"])

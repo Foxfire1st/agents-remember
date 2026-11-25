@@ -16,10 +16,13 @@ from agents_remember.kernel.memory_cache import prepare_memory_cache
 from agents_remember.worktrees.knowledge_crossing import (
     CrossingSyncError,
     apply_crossing,
+    clear_crossing_history_close,
     close_crossing_history,
     crossing_plan,
     merge_base,
     merge_structure,
+    open_crossing_history,
+    restore_crossing_history,
     write_crossing_report,
 )
 from agents_remember.worktrees.knowledge_validation import (
@@ -201,6 +204,7 @@ def _continue_memory_merge(
     """
 
     _require_active_merge(side)
+    _restore_open_memory_history(side)
     _remove_memory_cache_from_index(side)
     conflicts = content_conflicts(side)
     if conflicts:
@@ -226,11 +230,11 @@ def _existing_side_merge(
             return _continue_memory_merge(side, paired_code)
         return SideMergeOutcome(state="resolution-required", conflicts=unmerged_paths(worktree))
     if side_merge_completed(side):
-        debt = (
-            staged_merge_repair_debt(side, paired_code)
-            if side.side == "memory" and side.plan == "merge"
-            else ()
-        )
+        if side.side == "memory" and side.plan == "merge":
+            _clear_memory_history_close(side)
+            debt = staged_merge_repair_debt(side, paired_code)
+        else:
+            debt = ()
         return SideMergeOutcome(state="completed", message=head_commit(worktree), repair_debt=debt)
     return None
 
@@ -266,7 +270,9 @@ def start_side_merge(
     no_commit = ["--no-commit"] if memory_merge else []
     result = run_git(worktree, ["merge", *no_commit, "--no-edit", side.sourceCommit])
     if knowledge is not None:
-        return _apply_knowledge_merge(side, knowledge, result, paired_code)
+        return _apply_knowledge_merge(
+            side, knowledge, result, paired_code, crossing_owner=crossing_owner
+        )
     if result.returncode == 0:
         if memory_merge:
             return _continue_memory_merge(side, paired_code)
@@ -312,6 +318,8 @@ def _apply_knowledge_merge(
     plan: CrossingPlanView,
     result: subprocess.CompletedProcess[str],
     paired_code: PairedCode | None,
+    *,
+    crossing_owner: tuple[Literal["leaf", "master"], str] | None = None,
 ) -> SideMergeOutcome:
     """Replace the started merge's knowledge and onboarding paths with the structural plan.
 
@@ -327,16 +335,19 @@ def _apply_knowledge_merge(
             (result.stderr or result.stdout).strip() or "memory knowledge merge failed"
         )
     report = ""
+    history_owner = ""
     try:
         apply_crossing(worktree, plan)
-        if _needs_crossing_report(plan):
+        if crossing_owner and crossing_owner[0] == "master" and content_conflicts(side):
+            history_owner = open_crossing_history(worktree, plan)
+        if history_owner or _needs_crossing_report(plan):
             report = write_crossing_report(
                 worktree, side.preSyncHead, side.sourceCommit, plan
             ).as_posix()
     except CrossingSyncError as error:
         raise SyncGitProofError(str(error)) from error
     outcome = _continue_memory_merge(side, paired_code)
-    return replace(outcome, crossing_report=report)
+    return replace(outcome, crossing_report=report, crossing_history_owner=history_owner)
 
 
 def _knowledge_merge(
@@ -375,6 +386,22 @@ def _knowledge_merge(
         raise SyncGitProofError(str(error)) from error
 
 
+def _restore_open_memory_history(side: SyncSideRecord) -> None:
+    try:
+        restore_crossing_history(Path(side.worktree), (side.preSyncHead, side.sourceCommit))
+    except (OSError, CrossingSyncError) as error:
+        raise SyncGitProofError(str(error)) from error
+
+
+def _clear_memory_history_close(side: SyncSideRecord) -> None:
+    if side.side != "memory":
+        return
+    try:
+        clear_crossing_history_close(Path(side.worktree), (side.preSyncHead, side.sourceCommit))
+    except (OSError, CrossingSyncError) as error:
+        raise SyncGitProofError(str(error)) from error
+
+
 def _finish_staged_memory_merge(side: SyncSideRecord, paired_code: PairedCode | None) -> str:
     """Publish one ordinary memory merge with exact parents and no cache in its tree.
 
@@ -387,9 +414,19 @@ def _finish_staged_memory_merge(side: SyncSideRecord, paired_code: PairedCode | 
     prepare_memory_cache(worktree)
     _require_sync_git(worktree, ["add", "--", ".gitignore"])
     try:
-        close_crossing_history(worktree, (side.preSyncHead, side.sourceCommit))
+        with close_crossing_history(worktree, (side.preSyncHead, side.sourceCommit)):
+            _validate_and_commit_memory_merge(side, paired_code)
     except CrossingSyncError as error:
         raise SyncGitProofError(str(error)) from error
+    result_head = head_commit(worktree)
+    if not exact_created_head(side, result_head):
+        raise SyncGitProofError("memory merge commit does not have the pinned parents")
+    _refresh_memory_cache(side)
+    return result_head
+
+
+def _validate_and_commit_memory_merge(side: SyncSideRecord, paired_code: PairedCode | None) -> None:
+    worktree = Path(side.worktree)
     refusal = memory_commit_refusal(
         memory_repository=worktree,
         candidate_tree=_require_sync_git(worktree, ["write-tree"]),
@@ -399,11 +436,6 @@ def _finish_staged_memory_merge(side: SyncSideRecord, paired_code: PairedCode | 
     if refusal is not None:
         raise SyncKnowledgeValidationError(refusal)
     _require_sync_git(worktree, ["commit", "--no-edit"])
-    result_head = head_commit(worktree)
-    if not exact_created_head(side, result_head):
-        raise SyncGitProofError("memory merge commit does not have the pinned parents")
-    _refresh_memory_cache(side)
-    return result_head
 
 
 def staged_merge_repair_debt(
@@ -428,9 +460,12 @@ def continue_side_merge(side: SyncSideRecord, *, paired_code: PairedCode | None 
             raise SyncGitProofError(
                 f"{side.side} merge state disappeared without an operation-owned commit"
             )
+        _clear_memory_history_close(side)
         _refresh_memory_cache(side)
         return head_commit(worktree)
     _require_active_merge(side)
+    if side.side == "memory":
+        _restore_open_memory_history(side)
     validate_staged_resolution(side)
     if side.side == "memory":
         _remove_memory_cache_from_index(side)
@@ -507,3 +542,4 @@ def rollback_side(side: SyncSideRecord) -> None:
         raise SyncGitProofError(
             f"{side.side} branch is restored but post-sync work remains for manual repair"
         )
+    _clear_memory_history_close(side)

@@ -33,6 +33,7 @@ from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.conversion.base import converted_base, own_paired_code_commit
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.knowledge_index import is_indexed_path
+from agents_remember.memory_quality.knowledge_validator.trees import is_excluded_from_knowledge
 from agents_remember.models.knowledge_files.documents import ONBOARDING_ROOT
 
 __all__ = [
@@ -45,7 +46,7 @@ __all__ = [
 ]
 
 CACHE_DIRECTORY_PARTS: Final = ("runtime", "knowledge-worklist-bases")
-FORMAT: Final = "knowledge-worklist-base/v2"
+FORMAT: Final = "knowledge-worklist-base/v3"
 MAX_FILES: Final = 32
 _SUFFIX: Final = ".json.gz"
 
@@ -137,7 +138,7 @@ def is_cached_path(path: str) -> bool:
     return is_indexed_path(path) or (
         path.startswith(f"{ONBOARDING_ROOT}/")
         and path.endswith(".md")
-        and not any(part.startswith(".") for part in path.split("/")[:-1])
+        and not is_excluded_from_knowledge(path)
     )
 
 

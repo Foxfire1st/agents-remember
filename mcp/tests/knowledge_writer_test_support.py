@@ -22,6 +22,19 @@ from typing import Any
 
 from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.models.knowledge_files import canonical_text, derived_record_id
+from agents_remember.models.knowledge_files.documents import history_path
+from agents_remember.worktrees.sync_transaction_authority import side_locations, side_record
+from agents_remember.worktrees.sync_transaction_state import (
+    SyncOperationRecord,
+    SyncOperationStore,
+    operation_stamp,
+)
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    RepoBranchPlan,
+    WorktreeContract,
+    default_series_contract,
+)
 
 TASK_ID = "260928-MIK"
 LEAF_ID = "260928-MIK-L99"
@@ -222,6 +235,59 @@ def build_world(tmp_path: Path) -> World:
     contract = task_root / "contract.md"
     contract.write_text(contract_text(tmp_path, code, memory, task_root), encoding="utf-8")
     return World(root=tmp_path, code=code, memory=memory, task_root=task_root, contract=contract)
+
+
+@dataclass(frozen=True)
+class CrossingWorld:
+    contract: WorktreeContract
+    memory: Path
+    owner: str
+    record: SyncOperationRecord
+    store: SyncOperationStore
+
+
+def build_crossing_world(world: World) -> CrossingWorld:
+    """Give the writer a series contract, a real memory checkout and a prepared sync record."""
+
+    head = git(world.code, "rev-parse", "HEAD")
+    memory_head = git(world.memory, "rev-parse", "HEAD")
+    contract = default_series_contract(
+        ContractTask(
+            name="landing",
+            repo_name="agents-remember",
+            coordination_root=world.root,
+            workflow_kind="light-task",
+            memory_mode="external",
+        ),
+        code=RepoBranchPlan(world.code, "main", "main", head),
+        memory=RepoBranchPlan(world.memory, "main", "crossing-memory", memory_head),
+        task_root=world.task_root,
+    )
+    memory = side_locations(contract, "memory")[1]
+    git(world.memory, "worktree", "add", "-q", "-b", contract.memory_work_branch, str(memory))
+    owner = f"{contract.task_id}-crossing-1"
+    history = {"schema": "ar-history/v1", "crossing": owner, "closed": False, "rows": []}
+    write(memory, {history_path(owner): canonical(history)})
+    stamped = operation_stamp()
+    record = SyncOperationRecord(
+        generation=2,
+        contractPath=str(contract.contract_path),
+        taskId=contract.task_id,
+        contractKind="series",
+        codeBaseFrom=head,
+        memoryBaseFrom=memory_head,
+        phase="memory-resolution-required",
+        code=side_record(contract, "code", head).model_copy(
+            update={"state": "completed", "resultHead": head}
+        ),
+        memory=side_record(contract, "memory", memory_head).model_copy(
+            update={"state": "resolution-required", "crossingHistoryOwner": owner}
+        ),
+        createdAt=stamped,
+        updatedAt=stamped,
+    )
+    store = SyncOperationStore(contract.worktree_group)
+    return CrossingWorld(contract, memory, owner, record, store)
 
 
 def entry(entry_id: str, **curator: Any) -> dict[str, Any]:

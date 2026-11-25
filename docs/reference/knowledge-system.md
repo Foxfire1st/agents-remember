@@ -267,6 +267,11 @@ working trees, with separate files for each memory tree and build. A read reuses
 only when both match, or rebuilds it; deleting the cache loses no authored knowledge.
 Do not stage or hand-edit it.
 
+On a cache miss, callers in one process wait for the build of the same index.
+One file lock per cache directory serializes cold builds, with process-local coordination
+if the file lock cannot exclude or the 60-second wait expires.
+After a build, eviction removes temporary files whose builders are known to be gone.
+
 The build's identity is the package's source digest held by the process from its start,
 including for an installed package, a clean checkout or a checkout with uncommitted changes.
 It stays the same after a restart of the same build. A change to package source changes the

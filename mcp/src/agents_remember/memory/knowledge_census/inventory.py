@@ -7,8 +7,8 @@ Git objects only (no checkout), and returns the census's ``baseline.json`` and `
   is empty), with the governing onboarding route of its onboarding location
   ``onboarding/<path>.md``;
 * one **artifact row** per file under ``onboarding/`` of the memory commit (the generated
-  ``*.index.json`` cache and hidden directories excluded, as everywhere else), with its governing
-  route.
+  ``*.index.json`` cache excluded), with its governing route. This includes artifacts under dot
+  directories.
 
 An onboarding route is a directory under ``onboarding/`` holding an ``overview.md``; the governing
 route of a location is the nearest such ancestor directory (MIK-R21 rule 1). A path no route governs
