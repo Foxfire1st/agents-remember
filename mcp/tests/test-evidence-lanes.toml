@@ -647,6 +647,7 @@ unit-regression = [
   "mcp/tests/test_tool_log_budgets.py",
   "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_tool_response_budgets.py",
+  "mcp/tests/test_tool_schema_compaction.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
   "mcp/tests/test_unexplained_change_disposition.py",

@@ -51,17 +51,7 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
         retry_provider_setup: bool = False,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """
-        Create or load a task contract with its code and memory worktrees.
-
-        Answers the state reached (started, would-start, blocked) and the next call with its
-        arguments; the whole result is in the log file. Poll worktree_status for progress. A
-        dry run changes no task document, no contract, no Git ref and no worktree, and the
-        call is recorded in the observer log like every tool call. It does not read the
-        dependencies a packet names: leaves start in parallel and are synchronised later, so
-        the order of landing is the manager's decision. Reference:
-        docs/reference/mcp-tools.md.
-        """
+        """Create or load a task contract and its code/memory worktrees (does not enforce packet dependencies; dry_run changes nothing). States: started, would-start, blocked. Reference: docs/reference/mcp-tools.md."""
         return tools.worktree_start_payload(
             config,
             TaskIdentity(
@@ -100,11 +90,7 @@ def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) 
         approved: bool = False,
         expected_publication_request_id: str | None = None,
     ) -> dict[str, Any]:
-        """Explicitly adopt one readable pre-locator enclosure. Dry-run by default. This is the
-        only old-layout address migration. It validates one exact contract/root, preserves
-        source digests and an audit receipt, and never runs from normal status, control,
-        contract writes, or schema-1 repair. Answers the state reached. Reference:
-        docs/reference/mcp-tools.md."""
+        """Explicitly adopt one pre-locator enclosure by validating its exact contract/root and writing its locator and audit receipt. Dry-run by default; never runs implicitly. Docs: docs/reference/mcp-tools.md."""
         return tools.worktree_enclosure_adopt_payload(
             config,
             tools.EnclosureAdoptionRequest(
@@ -125,9 +111,7 @@ def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) 
         leaf_id: str | None = None,
         parent_task: str | None = None,
     ) -> dict[str, Any]:
-        """Re-attach to an existing task contract without mutating Git. Answers the state reached
-        (attached, attached-existing-contract, blocked) and the next call; the whole result is
-        in the log file. Reference: docs/reference/mcp-tools.md."""
+        """Re-attach to an existing task contract without mutating Git. States: attached, attached-existing-contract, blocked. Docs: docs/reference/mcp-tools.md."""
         return tools.worktree_attach_payload(
             config,
             TaskRef(
@@ -153,11 +137,7 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         parent_task: str | None = None,
         caller: DeclaredCaller | None = None,
     ) -> dict[str, Any]:
-        """Report a task worktree's lifecycle status: the phase reached (worktree-started,
-        integration-pending, closeout-pending, integration-blocked, carryover-pending,
-        cleanup-pending, cleanup-completed, abandoned), what blocks, the one
-        following call, and whether task-document copies differ from their sources. Lineage and
-        refresh detail stays in the log file. Reference: docs/reference/mcp-tools.md."""
+        """Report a task worktree's lifecycle phase (worktree-started, integration-pending, closeout-pending, integration-blocked, carryover-pending, cleanup-pending, cleanup-completed, abandoned), blockers, next call, and task-doc copy drift. Docs: docs/reference/mcp-tools.md."""
         return tools.worktree_status_payload(
             config,
             TaskRef(
@@ -178,16 +158,7 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         dry_run: bool = False,
         sync_source: SyncSource | None = None,
     ) -> dict[str, Any]:
-        """Pull the official line into a live worktree. Returns synced,
-        already-current, would-sync, sync-active, sync-resolution-required,
-        memory-sync-choice-required or blocked, with next-call arguments and a log path.
-        Tree changes mark the prior review pre-sync and offer a new review; sync movement
-        never blocks. The product merges memory lines only here; raw git merge is a hand edit
-        it cannot prevent. Every memory landing judges its tree; a fast-forward judges what
-        it adopts before moving any ref. sync_source="repository-default": default branch,
-        base pair kept.
-
-        Reference: docs/reference/mcp-tools.md."""
+        """Pull the official line into a live worktree (or default branch with sync_source='repository-default', keeping base pair); validates adopted memory before moving refs and marks changed reviews pre-sync. States: synced, already-current, would-sync, sync-active, sync-resolution-required, memory-sync-choice-required, blocked. Docs: docs/reference/mcp-tools.md."""
         return tools.worktree_sync_payload(
             config,
             contract_path,
@@ -204,7 +175,7 @@ def _register_worktree_stop_tools(server: FastMCP, config: McpRuntimeConfig) -> 
     def worktree_pause(
         contract_path: str,
     ) -> dict[str, Any]:
-        """PAUSE an atomic master: it stops, hands control back, and releases the master's atomic-series activation selection. Publishes NOTHING: publication is a separate, explicitly requested PUBLICATION through worktree_checkpoint_landing. States: paused, blocked. Answers the state reached and the next call. Reference: docs/reference/mcp-tools.md."""
+        """PAUSE an atomic master: stops, hands control back, and releases the master's atomic-series activation selection. Publishes NOTHING (separate, explicitly requested PUBLICATION uses worktree_checkpoint_landing). States: paused, blocked. Docs: docs/reference/mcp-tools.md."""
         return tools.worktree_pause_payload(
             config,
             contract_path,

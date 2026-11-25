@@ -36,15 +36,7 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
     def memory_quality_check(
         request: MemoryQualityCheckRequest,
     ) -> dict[str, Any]:
-        """
-        Check memory before closeout: findings, counts and checklist location, not semantic
-        certification. Pass sync/start/poll; candidate runs use the leaf contract. Full leaf logs
-        add knowledgeWorklist (state, path, digest, counts, unreadable inputs) and
-        knowledgeGate (exact-tree verdict and finding counts). Ready memory also needs validated
-        curator_coherence. Conversion, index build, formatter and worklist have no separate MCP
-        tool: conversion runs at crossing or once per repository; reads build the index; the
-        writer formats; this check computes the worklist. Docs: docs/tool-details.md.
-        """
+        """Check memory before closeout: findings, counts, checklist location (not semantic certification). Pass mode sync/start/poll; candidate runs pass contract_path. Full leaf logs include knowledgeWorklist and knowledgeGate; ready memory also requires validated curator_coherence. Docs: docs/tool-details.md."""
         if isinstance(request, MemoryQualityPollRequest):
             return tools.memory_quality_check_poll_payload(config, request)
         if isinstance(request, MemoryQualityStartRequest):
@@ -62,7 +54,7 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         mode: Literal["sync", "start", "poll"] = "sync",
         run_id: str | None = None,
     ) -> dict[str, Any]:
-        """Repair moved citation anchors in a leaf memory worktree. Pass repo_id and contract_path, with documents for a batch or document for one card; preview with dry_run. For a background preview use mode=start and dry_run=true, then mode=poll with its run_id and the same scope. Renames, deletions and ambiguous anchors remain curator work. Old-format memory is refused: convert before repair. Converted repairs author sidecar references; full lists are in logged detail. Longer explanation: docs/tool-details.md."""
+        """Repair moved citation anchors and author sidecar references in a leaf memory worktree (documents batch or single document; preview with dry_run, or async preview via mode=start+dry_run=true then mode=poll). Renames, deletions, and ambiguous anchors remain curator work; refuses legacy-format memory. Docs: docs/tool-details.md."""
         return tools.citation_fix_payload(
             config,
             repo_id,
@@ -89,7 +81,7 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         base_digest: str,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Revise one reference's note in a leaf memory worktree, keeping every target, anchor and other reference byte-identical. Pass repo_id, contract_path, card (the converted card), reference (n), note and base_digest (the sidecar's sha256 as read); preview with dry_run. A missing key, a stale base_digest, an empty note, an absent card or sidecar are refused, nothing written. Moved anchors are citation_fix's work. More: docs/tool-details.md."""
+        """Revise one sidecar reference note in a leaf memory worktree while keeping all targets, anchors, and other references byte-identical. Pass sidecar sha256 in base_digest; preview with dry_run. Refuses stale digests, missing keys, or empty notes without writing; moved anchors use citation_fix. Docs: docs/tool-details.md."""
         return tools.citation_note_revision_payload(
             config,
             repo_id,
@@ -107,7 +99,7 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         dry_run: bool = False,
         contract_path: str | None = None,
     ) -> dict[str, Any]:
-        """Refresh route indexes for a leaf memory worktree using repo_id and contract_path. Preview with dry_run; unscoped writes require pre-baseline admission. More: docs/tool-details.md."""
+        """Refresh route indexes for a leaf memory worktree (contract_path). Preview with dry_run; unscoped writes require pre-baseline admission. Docs: docs/tool-details.md."""
         return tools.route_index_refresh_payload(
             config, repo_id, dry_run=dry_run, contract_path=contract_path
         )
@@ -123,15 +115,7 @@ def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -
         initialize_git: bool = True,
         initial_branch: str | None = None,
     ) -> dict[str, Any]:
-        """Initialize or repair a repository's memory root (scaffold `system/` files, the
-        `onboarding/` and `docs/` layout, optionally `git init`). `initial_branch` names the code
-        branch the memory is the foundation of: it becomes the memory repository's initial branch
-        and the recorded `agents-remember.defaultBranch` that baseline adoption and every worktree
-        entry point check against. Omitted, it defaults to the configured code repository's
-        currently checked-out branch, and the call refuses rather than inventing a name when
-        neither is available. Creates missing paths only and never overwrites existing onboarding
-        content. Preview with dry_run=true. Documented in docs/guides/onboard-existing-repo.md.
-        """
+        """Initialize or repair a repo's memory root (system/, onboarding/, docs/, optional git init) without overwriting existing files. initial_branch sets the initial branch and agents-remember.defaultBranch (defaults to code repo's current branch; refuses if neither resolves). Preview with dry_run=true. Docs: docs/guides/onboard-existing-repo.md."""
         return tools.memory_init_payload(
             config,
             repo_id,
@@ -142,8 +126,7 @@ def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -
 
     @server.tool()
     def memory_baseline_status(repo_id: str) -> dict[str, Any]:
-        """Report drift and Git attribution state to decide whether an external-memory baseline can be
-        adopted. Read-only."""
+        """Report drift and Git attribution state for external-memory baseline adoption. Read-only."""
         return tools.memory_baseline_status_payload(config, repo_id)
 
     @server.tool()
@@ -154,7 +137,7 @@ def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -
         work_branch: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Adopt the first attributed external-memory baseline and commit memory. Pass repo_id; preview with dry_run. accept_drift lifts the drift gate on stale anchors only: the baseline still refuses a stale code or test reference anchor as R198.1-reference-anchor. More: docs/tool-details.md."""
+        """Adopt the first attributed external-memory baseline and commit memory; preview with dry_run. accept_drift lifts only the drift gate and still refuses stale code/test anchors (R198.1-reference-anchor). Docs: docs/tool-details.md."""
         return tools.memory_baseline_adopt_payload(
             config,
             repo_id,
@@ -180,7 +163,7 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
         old_base: str,
         replace_existing: bool = False,
     ) -> dict[str, Any]:
-        """Plan converted pairs/records at equal versions; observe official-code anchors, review conflicts. Curator authors history; no commit/report. More: docs/tool-details.md."""
+        """Plan converted pairs/records at equal versions; observe official-code anchors, review conflicts. Curator authors history; no commit/report. Docs: docs/tool-details.md."""
         return tools.memory_carryover_plan_payload(
             config,
             import_module("agents_remember.application.memory_tools").CarryoverSelection(
@@ -207,7 +190,7 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
         replace_existing: bool = False,
         include_review_required: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Apply converted pairs/records; reanchor, index, validate. Refusal restores bytes; skip edited targets, retry safely. No commit/history carry; curator authors rows before closeout. Requires intent_note. More: docs/tool-details.md."""
+        """Apply converted pairs/records: reanchor, index, validate. Refusals restore bytes; skip edited targets to retry safely. No commit/history carry; curator authors rows before closeout. Docs: docs/tool-details.md."""
         return tools.memory_carryover_apply_payload(
             config,
             import_module("agents_remember.application.memory_tools").CarryoverSelection(
