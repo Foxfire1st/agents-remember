@@ -6,12 +6,13 @@ identity. Code-side files keep ordinary Git semantics, including a file named me
 
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import GitRunnerOptions, run_git, run_git_bytes
 from agents_remember.kernel.memory_cache import prepare_memory_cache
 from agents_remember.worktrees.knowledge_crossing import (
     CrossingSyncError,
@@ -38,6 +39,7 @@ from agents_remember.worktrees.sync_transaction_git._base import (
     SyncFastForwardValidationError,
     SyncGitProofError,
     SyncKnowledgeValidationError,
+    SyncMergeCommitError,
 )
 from agents_remember.worktrees.sync_transaction_git._read import (
     _content_pathspec,
@@ -60,6 +62,107 @@ from agents_remember.worktrees.sync_transaction_git._stash import (
 )
 from agents_remember.worktrees.sync_transaction_state import SyncSideRecord
 
+_WHITESPACE_REASON = (
+    r"(?:trailing whitespace|space before tab in indent|indent with spaces|tab in indent)"
+)
+_DIFF_CHECK_FINDING = re.compile(
+    r"(?P<header>:[0-9]+: (?:leftover conflict marker|new blank line at EOF\.))\n"
+    rf"|(?P<whitespace>:[0-9]+: {_WHITESPACE_REASON}(?:, {_WHITESPACE_REASON})*\.)\n\+[^\n]*\n",
+)
+
+
+def _staged_diff(
+    side: SyncSideRecord, parent: str, *options: str
+) -> subprocess.CompletedProcess[bytes]:
+    # The byte transport preserves CR and LF in pathnames.
+    return run_git_bytes(
+        Path(side.worktree),
+        ["diff", "--cached", *options, "--no-color", parent, *(_content_pathspec(side) or ["--"])],
+        GitRunnerOptions(identity={"LC_ALL": "C"}),
+    )
+
+
+def _git_diff_error(result: subprocess.CompletedProcess[bytes]) -> SyncGitProofError:
+    detail = result.stderr.strip() or result.stdout.strip()
+    return SyncGitProofError(
+        detail.decode("utf-8", errors="surrogateescape") or "staged resolution check failed"
+    )
+
+
+def _staged_check_output(side: SyncSideRecord, parent: str) -> str:
+    checked = _staged_diff(side, parent, "--check")
+    if checked.returncode == 0:
+        return ""
+    if checked.returncode == 2 and checked.stdout:
+        return checked.stdout.decode("utf-8", errors="surrogateescape")
+    raise _git_diff_error(checked)
+
+
+def _staged_changed_paths(side: SyncSideRecord, parent: str) -> set[str]:
+    """Read the exact destinations of the same diff, including renamed destinations."""
+    changed = _staged_diff(side, parent, "--name-only", "-z", "--diff-filter=d")
+    if changed.returncode != 0:
+        raise _git_diff_error(changed)
+    return set(changed.stdout.decode("utf-8", errors="surrogateescape").split("\0")) - {""}
+
+
+def _finding_owners(
+    output: str, offset: int, paths: set[str], longest_path: int
+) -> list[tuple[str, re.Match[str]]]:
+    """Match the header's path against Git's path list, including paths that contain a colon or LF."""
+    owners = []
+    limit = offset + longest_path + 1
+    separator = output.find(":", offset, limit)
+    while separator != -1:
+        path = output[offset:separator]
+        if path in paths and (match := _DIFF_CHECK_FINDING.match(output, separator)):
+            owners.append((path, match))
+        separator = output.find(":", separator + 1, limit)
+    return owners
+
+
+def _attributed_findings(
+    output: str, parent: str, paths: set[str], changed_on_both: set[str]
+) -> tuple[list[tuple[str, str]], str]:
+    """Read each finding frame using its owning path, skipping its possible added-line preview."""
+    findings: list[tuple[str, str]] = []
+    offset = 0
+    longest_path = max(map(len, paths), default=0)
+    while offset < len(output):
+        owners = _finding_owners(output, offset, paths, longest_path)
+        if len(owners) != 1:
+            return findings, (
+                f"Cannot attribute a staged Git diagnostic against {parent} "
+                f"to exactly one changed path:\n{output[offset:].rstrip()}"
+            )
+        path, match = owners[0]
+        if path in changed_on_both:
+            findings.append((path, match["header"] or match["whitespace"]))
+        offset = match.end()
+    return findings, ""
+
+
+def _staged_merge_findings(side: SyncSideRecord) -> tuple[str, ...]:
+    """Keep staged findings absent from both verified merge parents."""
+    task_output = _staged_check_output(side, side.preSyncHead)
+    incoming_output = _staged_check_output(side, side.sourceCommit)
+    if not task_output and not incoming_output:
+        return ()
+    task_paths = _staged_changed_paths(side, side.preSyncHead)
+    incoming_paths = _staged_changed_paths(side, side.sourceCommit)
+    changed_on_both = task_paths & incoming_paths
+    if not changed_on_both:
+        return ()
+    task_findings, task_issue = _attributed_findings(
+        task_output, side.preSyncHead, task_paths, changed_on_both
+    )
+    incoming_findings, incoming_issue = _attributed_findings(
+        incoming_output, side.sourceCommit, incoming_paths, changed_on_both
+    )
+    incoming_set = set(incoming_findings)
+    common = [path + header for path, header in task_findings if (path, header) in incoming_set]
+    return (*common, *(issue for issue in (task_issue, incoming_issue) if issue))
+
 
 def commit_check_staged_files(side: SyncSideRecord) -> tuple[str, ...] | None:
     """Staged files of a merge stopped at the repository's commit check, else ``None``.
@@ -75,12 +178,11 @@ def commit_check_staged_files(side: SyncSideRecord) -> tuple[str, ...] | None:
     if content_conflicts(side):
         return None
     # Anything else that stops the commit before the hook is not the commit check: unstaged
-    # changes, or whitespace errors git's own --check refuses. Those keep their own answers.
+    # changes, or staged findings Git reports against both merge parents.
     unstaged = run_git(worktree, ["diff", "--quiet", *_content_pathspec(side)])
     if unstaged.returncode != 0:
         return None
-    checked = run_git(worktree, ["diff", "--cached", "--check", *_content_pathspec(side)])
-    if checked.returncode != 0:
+    if _staged_merge_findings(side):
         return None
     staged = run_git(worktree, ["diff", "--cached", "--name-only", "-z", "--", "."])
     if staged.returncode != 0:
@@ -435,7 +537,15 @@ def _validate_and_commit_memory_merge(side: SyncSideRecord, paired_code: PairedC
     )
     if refusal is not None:
         raise SyncKnowledgeValidationError(refusal)
-    _require_sync_git(worktree, ["commit", "--no-edit"])
+    _commit_staged_merge(worktree)
+
+
+def _commit_staged_merge(worktree: Path) -> None:
+    """Identify a commit-command failure separately from validation of its input and output."""
+    try:
+        _require_sync_git(worktree, ["commit", "--no-edit"])
+    except SyncGitProofError as error:
+        raise SyncMergeCommitError(str(error)) from error
 
 
 def staged_merge_repair_debt(
@@ -470,7 +580,7 @@ def continue_side_merge(side: SyncSideRecord, *, paired_code: PairedCode | None 
     if side.side == "memory":
         _remove_memory_cache_from_index(side)
         return _finish_staged_memory_merge(side, paired_code)
-    _require_sync_git(worktree, ["commit", "--no-edit"])
+    _commit_staged_merge(worktree)
     result_head = head_commit(worktree)
     if not exact_created_head(side, result_head):
         raise SyncGitProofError(f"{side.side} merge commit does not have the pinned parents")
@@ -478,7 +588,7 @@ def continue_side_merge(side: SyncSideRecord, *, paired_code: PairedCode | None 
 
 
 def validate_staged_resolution(side: SyncSideRecord) -> None:
-    """Read-only proof of the exact retained content merge, excluding the memory cache."""
+    """Check the staged merge against both pinned parents, excluding the memory cache."""
 
     worktree = Path(side.worktree)
     require_side_checkout(side)
@@ -491,11 +601,9 @@ def validate_staged_resolution(side: SyncSideRecord) -> None:
     unstaged = run_git(worktree, ["diff", "--quiet", *_content_pathspec(side)])
     if unstaged.returncode != 0:
         raise SyncGitProofError(f"{side.side} resolution has unstaged changes")
-    checked = run_git(worktree, ["diff", "--cached", "--check", *_content_pathspec(side)])
-    if checked.returncode != 0:
-        raise SyncGitProofError(
-            checked.stdout.strip() or checked.stderr.strip() or "staged resolution is invalid"
-        )
+    findings = _staged_merge_findings(side)
+    if findings:
+        raise SyncGitProofError("\n".join(findings))
 
 
 def _abort_failure(

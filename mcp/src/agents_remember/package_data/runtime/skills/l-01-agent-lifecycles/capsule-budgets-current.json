@@ -6626,8 +6626,8 @@
         "sha256": "c7e324024b92d3f63c62ea6f0e604002fd8b8ed94d846b04308a43b3b22273c0"
       },
       "skills/l-01-agent-lifecycles/templates/curator-handoff-ingestion.md": {
-        "size_words": 6287,
-        "sha256": "d3c1273715f3b7fcc23d52d26d9e97f95de76f183b00dd1411403b29f9e9b21b"
+        "size_words": 6357,
+        "sha256": "89e9707340785924a2cd4454c3a68d855357bf14caf42e83c78c59923870abd4"
       },
       "skills/l-01-agent-lifecycles/templates/curator-handoff-list.md": {
         "size_words": 3078,

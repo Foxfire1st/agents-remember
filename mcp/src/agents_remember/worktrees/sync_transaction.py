@@ -41,6 +41,7 @@ from agents_remember.worktrees.sync_transaction_git import (
     SyncFastForwardValidationError,
     SyncGitProofError,
     SyncKnowledgeValidationError,
+    SyncMergeCommitError,
     applied_restore_failures,
     apply_parked_wip,
     capture_retained_digests,
@@ -897,14 +898,20 @@ def _finish_retained_merge(
     except SyncKnowledgeValidationError as error:
         return _knowledge_validation_refused(store, error, record, fetch)
     except SyncGitProofError as error:
-        stopped = commit_check_report(side)
+        detail = str(error)
+        try:
+            stopped = commit_check_report(side) if isinstance(error, SyncMergeCommitError) else None
+        except SyncGitProofError as check_error:
+            stopped = None
+            if str(check_error) != detail:
+                detail = f"{detail}\n{check_error}"
         if stopped is not None:
-            return _commit_check_stopped(store, stopped, str(error), record, fetch)
+            return _commit_check_stopped(store, stopped, detail, record, fetch)
         refreshed = side.model_copy(update={"conflictFiles": content_conflicts(side)})
         record = update_record(store, record, phase=record.phase, side=refreshed)
         return manual_repair_result(
             "sync-resolution-incomplete",
-            _incomplete_resolution_summary(side, str(error)),
+            _incomplete_resolution_summary(side, detail),
             record,
             fetch,
         )
