@@ -45,6 +45,7 @@ LANDING_KEPT_KEYS: dict[str, frozenset[str]] = {
             "contract_path",
             "providers",
             "memory",
+            "briefsProblem",
             "leaf_id",
             "task_name",
             "admission",
@@ -114,6 +115,7 @@ LANDING_KEPT_KEYS: dict[str, frozenset[str]] = {
             "manualRepair",
             "codeBaseCommit",
             "memoryBaseCommit",
+            "briefsProblem",
             # The chosen sync source and the resolved branches and tips.
             "syncSource",
             "sources",
@@ -169,6 +171,7 @@ LANDING_KEPT_KEYS: dict[str, frozenset[str]] = {
             "correctedCall",
             "code_commit",
             "memory_content_commit",
+            "briefsProblem",
             "closeout_status",
             "contract_path",
             "nextTool",
@@ -273,6 +276,7 @@ LANDING_KEPT_KEYS: dict[str, frozenset[str]] = {
         {
             "state",
             "status",
+            "briefsProblem",
             "detail",
             "invalidFields",
             "resolvedPlan",

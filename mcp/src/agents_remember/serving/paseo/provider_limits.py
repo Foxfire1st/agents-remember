@@ -18,6 +18,8 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,11 +28,14 @@ from typing import Any
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import ConfigError, McpRuntimeConfig
 from agents_remember.observer.provider_limits import (
+    EMPTY_PROVIDER_LIMITS,
     PROVIDER_LIMITS_FILE,
     PROVIDER_LIMITS_SCHEMA,
+    ProviderLimitClear,
     ProviderLimitReport,
     ProviderLimits,
     ProviderLimitWindow,
+    limited_until,
     read_provider_limits,
 )
 from agents_remember.serving.paseo.paseo_plugin_files import AR_HOME_DIRECTORY, read_role_agents
@@ -39,8 +44,8 @@ logger = logging.getLogger(__name__)
 
 # A window is exhausted at this share of its use, or with nothing remaining.
 _EXHAUSTED_USED_PCT = 100.0
-# Rule 7's staleness mark, for the bridge's own refresh decision.
-_USAGE_REFRESH_AGE = timedelta(seconds=60)
+_USAGE_READ_PERIOD = timedelta(minutes=5)
+_LIMIT_RESUME_GRACE = timedelta(seconds=60)
 
 
 def provider_limits_path(config: McpRuntimeConfig) -> Path | None:
@@ -205,21 +210,68 @@ def judge_read(entries: object, now: datetime) -> dict[str, ProviderLimitReport 
 
 
 def _write_limits(path: Path, limits: ProviderLimits) -> None:
-    """Write the whole file atomically, under the product's own lock."""
+    """Replace the whole file atomically while the caller holds the writer lock."""
 
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     body = limits.model_dump(by_alias=True, mode="json")
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(body, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+        os.replace(temporary, path)
+    except BaseException:
+        with suppress(OSError):
+            os.unlink(temporary)
+        raise
+
+
+def claim_due_reports(
+    config: McpRuntimeConfig, *, now: datetime | None = None
+) -> tuple[ProviderLimits, tuple[str, ...]]:
+    """Record each due attempt before the host call, including attempts that may fail."""
+
+    path = provider_limits_path(config)
+    if path is None:
+        return EMPTY_PROVIDER_LIMITS, ()
+    current = read_provider_limits(path)
+    proposed, _ = _periodic_update(path, current, now or datetime.now(UTC))
+    if proposed is current:
+        return current, ()
     with exclusive_file_lock(path.with_suffix(".lock"), "provider limits"):
-        fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                json.dump(body, stream, ensure_ascii=False, indent=2)
-                stream.write("\n")
-            os.replace(temporary, path)
-        except BaseException:
-            with suppress(OSError):
-                os.unlink(temporary)
-            raise
+        current = read_provider_limits(path)
+        updated, due = _periodic_update(path, current, now or datetime.now(UTC))
+        if updated is not current:
+            _write_limits(path, updated)
+        return updated, due
+
+
+def _periodic_update(
+    path: Path, current: ProviderLimits, now: datetime
+) -> tuple[ProviderLimits, tuple[str, ...]]:
+    reports = _live_reports(current.reports, now)
+    cutoff = now - _USAGE_READ_PERIOD
+    due = tuple(
+        report_id
+        for report_id, fact in reports.items()
+        if max(fact.observedAt, fact.lastReadAttemptAt or fact.observedAt) <= cutoff
+    )
+    reports_changed = bool(due) or len(reports) != len(current.reports)
+    if not reports_changed and not current.clearedSeats:
+        return current, ()
+    records = read_role_agents(path.parent.parent)
+    markers = _kept_clear_markers(current, records, now)
+    if not reports_changed and len(markers) == len(current.clearedSeats):
+        return current, ()
+    for report_id in due:
+        reports[report_id] = reports[report_id].model_copy(update={"lastReadAttemptAt": now})
+    return current.model_copy(
+        update={
+            "reports": reports,
+            "agents": _updated_agents(current, {}, records),
+            "clearedSeats": markers,
+            "updatedAt": now,
+        }
+    ), due
 
 
 def record_usage_reads(
@@ -227,47 +279,117 @@ def record_usage_reads(
     reads: dict[str, object],
     *,
     now: datetime | None = None,
+    failed_refreshes: Mapping[str, AbstractSet[str]] | None = None,
+    preserved_reports: Mapping[str, AbstractSet[str]] | None = None,
 ) -> ProviderLimits | None:
-    """Store what one tick's reads said, and drop what no longer holds (rule 8)."""
+    """Store the tick's facts and preserve only current mappings for unresolved reports."""
 
     path = provider_limits_path(config)
     if path is None:
         return None
-    moment = now or datetime.now(UTC)
-    current = read_provider_limits(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with exclusive_file_lock(path.with_suffix(".lock"), "provider limits"):
+        moment = now or datetime.now(UTC)
+        current = read_provider_limits(path)
+        records = read_role_agents(path.parent.parent)
+        reports = _updated_reports(current, reads, failed_refreshes or {}, moment)
+        limits = ProviderLimits(
+            schema=PROVIDER_LIMITS_SCHEMA,
+            reports=_live_reports(reports, moment),
+            agents=_updated_agents(current, reads, records, preserved_reports),
+            clearedSeats=current.clearedSeats,
+            updatedAt=moment,
+        )
+        limits = limits.model_copy(
+            update={"clearedSeats": _updated_clear_markers(current, limits, records, moment)}
+        )
+        _write_limits(path, limits)
+        return limits
+
+
+def _updated_reports(
+    current: ProviderLimits,
+    reads: dict[str, object],
+    failed_refreshes: Mapping[str, AbstractSet[str]],
+    now: datetime,
+) -> dict[str, ProviderLimitReport]:
     reports = dict(current.reports)
-    for entries in reads.values():
-        for report_id, fact in judge_read(entries, moment).items():
+    for agent_id, entries in reads.items():
+        failed = failed_refreshes.get(agent_id, ())
+        for report_id, fact in judge_read(entries, now).items():
+            if report_id in failed:
+                continue
             if fact is None:
                 reports.pop(report_id, None)
             else:
-                reports[report_id] = fact
-    records = read_role_agents(path.parent.parent)
+                old = reports.get(report_id)
+                attempt = old.lastReadAttemptAt if old is not None and old.until > now else None
+                reports[report_id] = fact.model_copy(update={"lastReadAttemptAt": attempt})
+    return reports
+
+
+def _live_reports(
+    reports: Mapping[str, ProviderLimitReport], now: datetime
+) -> dict[str, ProviderLimitReport]:
+    return {report_id: report for report_id, report in reports.items() if report.until > now}
+
+
+def _updated_agents(
+    current: ProviderLimits,
+    reads: dict[str, object],
+    records: Mapping[str, object],
+    preserved_reports: Mapping[str, AbstractSet[str]] | None = None,
+) -> dict[str, tuple[str, ...]]:
     agents: dict[str, tuple[str, ...]] = {}
+    preserve = preserved_reports or {}
     for agent_id in records:
+        previous = current.agents.get(agent_id, ())
         if agent_id in reads:
-            # Rule 8: a successful read replaces this seat's row with exactly the report
-            # ids it named -- exhausted or not. The account identity is what a later
-            # exhaustion by another seat on the same account reaches, and a read that
-            # named nothing (an empty answer) leaves the seat no row at all.
+            # Keep unresolved periodic identities only if the seat still owns that
+            # mapping when the writer enters the lock. A successful empty read drops it.
             named = _named_reports(reads, agent_id)
             if named:
-                agents[agent_id] = named
+                unresolved = preserve.get(agent_id, ())
+                kept = (report_id for report_id in previous if report_id in unresolved)
+                agents[agent_id] = tuple(dict.fromkeys((*named, *kept)))
             continue
-        # A seat this tick did not read (a failed read, or none at all) keeps the ids its
-        # last successful read named; only a seat that left the role record loses its row.
-        kept = current.agents.get(agent_id, ())
-        if kept:
-            agents[agent_id] = kept
-    live = {report_id: report for report_id, report in reports.items() if report.until > moment}
-    limits = ProviderLimits(
-        schema=PROVIDER_LIMITS_SCHEMA,
-        reports=live,
-        agents=agents,
-        updatedAt=moment,
-    )
-    _write_limits(path, limits)
-    return limits
+        if previous:
+            agents[agent_id] = previous
+    return agents
+
+
+def _kept_clear_markers(
+    limits: ProviderLimits, records: Mapping[str, object], now: datetime
+) -> dict[str, ProviderLimitClear]:
+    return {
+        agent_id: marker
+        for agent_id, marker in limits.clearedSeats.items()
+        if agent_id in records
+        and marker.previousUntil + _LIMIT_RESUME_GRACE > now
+        and limited_until(limits, agent_id, now) is None
+    }
+
+
+def _updated_clear_markers(
+    previous: ProviderLimits,
+    updated: ProviderLimits,
+    records: Mapping[str, object],
+    now: datetime,
+) -> dict[str, ProviderLimitClear]:
+    kept = _kept_clear_markers(updated, records, now)
+    live = _live_reports(previous.reports, now)
+    removed = live.keys() - updated.reports.keys()
+    if not removed:
+        return kept
+    for agent_id, report_ids in previous.agents.items():
+        if agent_id not in records or limited_until(updated, agent_id, now) is not None:
+            continue
+        blockers = live.keys() & report_ids
+        if blockers and blockers <= removed:
+            kept[agent_id] = ProviderLimitClear(
+                clearedAt=now, previousUntil=max(live[report_id].until for report_id in blockers)
+            )
+    return kept
 
 
 def _named_reports(reads: dict[str, object], agent_id: str) -> tuple[str, ...]:

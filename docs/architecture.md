@@ -235,8 +235,14 @@ memory worktree stand in place of the two repositories.
 ## How agents reach knowledge
 
 Once the memory repository is resolved, an agent reaches memory by path: the card of a source file
-lies at the mirrored path under `onboarding/`. The tools `read_ar_files` and `knowledge_read` name
-the cards and knowledge records that belong to a path; the agent opens the named files itself.
+lies at the mirrored path under `onboarding/`, and its brief at the mirrored path under `briefs/`.
+The brief collects what the memory records about the file: its rules with their text, conditions
+and exclusions, its open weaknesses and the documents that stand on it. `read_ar_files` reports
+card information and gives the brief's path for eligible files with recorded knowledge. It includes
+rule text within the answer's bound. The reply reports when the saved brief is missing, older or
+of unknown freshness. A writing call that covers the file or folder renews it. Before editing a
+file, the agent opens its saved brief when available. `knowledge_read` names the records that
+belong to a path.
 The skill holds the
 [knowledge-use guidance](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/reference/knowledge/use.md).
 

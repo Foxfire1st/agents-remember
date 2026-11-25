@@ -407,7 +407,10 @@ def test_record_first_authored_in_leaf_needs_no_itemless_row(tmp_path: Path, sub
     )
     assert foreign.state == "written", foreign.render()
     assert foreign.rows[0].subject == authored.records[0].id
-    assert not (world.memory / f"knowledge/history/{LEAF_ID}.json").exists()
+    # The leaf's file names the revision it wrote and holds no judgment row.
+    own = read_json(world.memory, f"knowledge/history/{LEAF_ID}.json")
+    assert own["rows"] == []
+    assert [one["record"] for one in own["written"]] == [authored.records[0].id]
     before = tree_bytes(world.memory)
     for entries in ([], [entry("A1", scope=SCOPE, admission=ADMISSION)]):
         report = run(world, {"entries": entries, "history": history}, worklist=held)

@@ -67,6 +67,8 @@ def test_a_closeout_refusal_after_the_code_commit_says_what_is_true(
     _answer(world)
     code_commit = commit(world.code, {})
     write(world.memory, {"onboarding/pkg/a.py.md": "# a [4]\n"})
+    ignore = world.memory / ".gitignore"
+    original_ignore = ignore.read_bytes() if ignore.exists() else None
     never = mock.Mock(side_effect=AssertionError("committed an invalid tree"))
     with (
         mock.patch.object(closeout_external, "begin_git_mutation", never),
@@ -79,6 +81,8 @@ def test_a_closeout_refusal_after_the_code_commit_says_what_is_true(
     assert code_commit in detail
     assert "nothing is integrated" in detail
     assert "rerunning the closeout completes the pair" in detail
+    assert (ignore.read_bytes() if ignore.exists() else None) == original_ignore
+    assert not (world.memory / "briefs").exists()
 
 
 def test_a_refused_closeout_leaves_an_edited_ignore_file_alone_and_names_it(
@@ -92,19 +96,13 @@ def test_a_refused_closeout_leaves_an_edited_ignore_file_alone_and_names_it(
     ignore = world.memory / ".gitignore"
     code_commit = commit(world.code, {})
 
-    def _write_marker(repository: Path) -> bytes:
-        before = ignore.read_bytes() if ignore.is_file() else b""
-        marker = b"# closeout-test-ignore-rule\n"
-        if marker not in before:
-            ignore.write_bytes(before + marker)
-        return ignore.read_bytes()
-
     def _edit_then_refuse(_contract: Any, _code_commit: str, _judged: str) -> None:
-        ignore.write_bytes(ignore.read_bytes() + b"# edited while the gate ran\n")
+        prepared = ignore.read_bytes()
+        assert b"/briefs/\n" in prepared
+        ignore.write_bytes(prepared + b"# edited while the gate ran\n")
         raise RuntimeError("R52-rule-9-test-refusal")
 
     with (
-        mock.patch.object(closeout_external, "ignore_memory_cache", side_effect=_write_marker),
         mock.patch.object(
             closeout_external, "_refuse_ungated_memory", side_effect=_edit_then_refuse
         ),
@@ -115,7 +113,7 @@ def test_a_refused_closeout_leaves_an_edited_ignore_file_alone_and_names_it(
     assert "R52-rule-9-test-refusal" in detail
     assert ignore.as_posix() in detail  # the edited file is left alone and named
     assert b"# edited while the gate ran\n" in ignore.read_bytes()
-    assert b"# closeout-test-ignore-rule\n" in ignore.read_bytes()
+    assert b"/briefs/\n" in ignore.read_bytes()
     assert history.read_bytes() == open_bytes  # the unedited closing was taken back
     assert code_commit in detail  # the refusal is still after the code commit
     assert "rerunning the closeout completes the pair" in detail

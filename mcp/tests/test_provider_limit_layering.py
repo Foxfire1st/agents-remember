@@ -83,7 +83,7 @@ def test_the_tick_calls_the_port_with_the_agents_it_named(tmp_path: Path, monkey
         {},
         sweep=False,
         collaborators=life._DeliveryCollaborators(
-            usage_read=lambda _config, ids: seen.append(list(ids))
+            usage_read=lambda _config, batch: seen.append(batch.stamped_agents)
         ),
     )
 

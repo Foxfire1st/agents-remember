@@ -21,7 +21,9 @@ from agents_remember.cli import role_held_messages as held
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_status import AgentReading
 from agents_remember.cli.role_held_messages import HeldMessage, hold_message
+from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.serving.projections.host_activity import UsageReadBatch
 
 NOW = datetime(2026, 10, 20, 18, 0, tzinfo=UTC)
 RESET = NOW + timedelta(hours=2)
@@ -40,13 +42,15 @@ def _policy():
     return provider_limit_drain
 
 
-def _limits(path: Path, *, until: datetime = RESET) -> None:
+def _limits(
+    path: Path, *, until: datetime = RESET, report_ids: tuple[str, ...] = ("claude-max",)
+) -> None:
     path.write_text(
         json.dumps(
             {
                 "schema": "ar-provider-limits/v1",
                 "reports": {
-                    "claude-max": {
+                    report_id: {
                         "until": until.isoformat(),
                         "sourceLabel": "Claude",
                         "accountLabel": "Max 20x",
@@ -55,8 +59,9 @@ def _limits(path: Path, *, until: datetime = RESET) -> None:
                         ],
                         "observedAt": NOW.isoformat(),
                     }
+                    for report_id in report_ids
                 },
-                "agents": {AGENT: ["claude-max"]},
+                "agents": {AGENT: list(report_ids)},
             }
         ),
         encoding="utf-8",
@@ -99,10 +104,24 @@ def test_a_reset_that_has_passed_is_no_limit(monkeypatch, tmp_path: Path) -> Non
 
 
 def _batch(tmp_path: Path, folder: str) -> Any:
+    path = tmp_path / "receipt.json"
+    if not path.exists():
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": RECEIPT_SCHEMA,
+                    "requestId": "provider-limit-fixture",
+                    "agentId": AGENT,
+                    "status": "running",
+                    "workspace": {"path": folder},
+                }
+            ),
+            encoding="utf-8",
+        )
     return held._DrainBatch(
         config=NO_CONFIG,
-        path=tmp_path / "receipt.json",
-        receipt={},
+        path=path,
+        receipt=json.loads(path.read_text(encoding="utf-8")),
         folder=folder,
         agent_id=AGENT,
         messages=[],
@@ -460,7 +479,7 @@ def _usage_config(monkeypatch, tmp_path: Path) -> Path:
         },
     )
     monkeypatch.setattr(
-        hold, "record_usage_reads", lambda config, reads: {"recorded": sorted(reads)}
+        hold, "record_usage_reads", lambda config, reads, **_: {"recorded": sorted(reads)}
     )
     return path
 
@@ -484,7 +503,7 @@ def test_a_batch_of_failed_reads_writes_one_warning_line(
         },
     )
 
-    recorded = hold.read_usage_for_agents(NO_CONFIG, [AGENT, other, third])
+    recorded = hold.read_usage_for_agents(NO_CONFIG, UsageReadBatch([AGENT, other, third], {}))
 
     warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
     assert len(warnings) == 1
@@ -502,7 +521,7 @@ def test_a_timed_out_read_writes_one_warning_line(monkeypatch, tmp_path: Path, c
 
     monkeypatch.setattr(hold, "bridge_call", timeout)
 
-    assert hold.read_usage_for_agents(NO_CONFIG, [AGENT]) is None
+    assert hold.read_usage_for_agents(NO_CONFIG, UsageReadBatch([AGENT], {})) is None
     warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
     assert len(warnings) == 1
     assert "55 s" in warnings[0].getMessage()
@@ -516,5 +535,79 @@ def test_a_batch_without_failures_writes_no_warning(monkeypatch, tmp_path: Path,
         lambda config, command, payload: {"reports": [{"agentId": AGENT, "entries": []}]},
     )
 
-    assert hold.read_usage_for_agents(NO_CONFIG, [AGENT]) == {"recorded": [AGENT]}
+    assert hold.read_usage_for_agents(NO_CONFIG, UsageReadBatch([AGENT], {})) == {
+        "recorded": [AGENT]
+    }
     assert [record for record in caplog.records if record.levelno == logging.WARNING] == []
+
+
+def _two_usage_report_facts(tmp_path: Path) -> tuple[McpRuntimeConfig, datetime]:
+    directory = tmp_path / "agents-remember"
+    directory.mkdir()
+    manager = {"role": "manager", "task": "repo/master/leaf.json", "reportPath": "r"}
+    (directory / "role-agents.json").write_text(
+        json.dumps({"schema": "ar-role-agents/v1", "agents": {AGENT: manager}}),
+        encoding="utf-8",
+    )
+    until = datetime.now(UTC) + timedelta(days=3)
+    _limits(directory / "provider-limits.json", until=until, report_ids=("account-a", "account-b"))
+    config = cast(McpRuntimeConfig, SimpleNamespace(paseo_runtime=SimpleNamespace(home=tmp_path)))
+    return config, until
+
+
+def test_stamped_nonempty_usage_list_retains_the_mapping_during_a_periodic_miss(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config, until = _two_usage_report_facts(tmp_path)
+    monkeypatch.setattr(
+        hold,
+        "bridge_call",
+        lambda *_: {
+            "reports": [
+                {
+                    "agentId": AGENT,
+                    "entries": [{"id": "account-b", "report": {"status": "available"}}],
+                }
+            ],
+            "periodic": [
+                {"reportId": "account-a", "agentId": AGENT, "error": "the mapped report is absent"},
+                {"reportId": "account-b", "agentId": AGENT},
+            ],
+        },
+    )
+
+    result = hold.read_usage_for_agents(
+        config,
+        UsageReadBatch([AGENT], {"account-a": (AGENT,), "account-b": (AGENT,)}),
+    )
+
+    assert result is not None
+    assert set(result.reports) == {"account-a"}
+    assert set(result.agents[AGENT]) == {"account-a", "account-b"}
+    assert AGENT not in result.clearedSeats
+    message = hold.provider_limit_hold(config, AGENT)
+    assert message is not None
+    assert message["limitedUntil"] == until.isoformat()
+
+
+def test_stamped_empty_usage_list_can_remove_the_mapping_during_a_periodic_miss(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config, _ = _two_usage_report_facts(tmp_path)
+    monkeypatch.setattr(
+        hold,
+        "bridge_call",
+        lambda *_: {
+            "reports": [{"agentId": AGENT, "entries": []}],
+            "periodic": [
+                {"reportId": "account-a", "agentId": AGENT, "error": "the mapped report is absent"}
+            ],
+        },
+    )
+
+    result = hold.read_usage_for_agents(config, UsageReadBatch([AGENT], {"account-a": (AGENT,)}))
+
+    assert result is not None
+    assert set(result.reports) == {"account-a", "account-b"}
+    assert AGENT not in result.agents
+    assert hold.provider_limit_hold(config, AGENT) is None

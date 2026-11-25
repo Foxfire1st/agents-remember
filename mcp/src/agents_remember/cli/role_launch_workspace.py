@@ -14,6 +14,7 @@ from agents_remember.application.role_launch_context import (
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tool_requests import TaskIdentity
 from agents_remember.application.worktree_tools import worktree_status_tool
+from agents_remember.cli import role_launch_enclosure
 from agents_remember.cli.leaf_enclosure_start import start_leaf_enclosure_in_child
 from agents_remember.cli.role_message_files import (
     MESSAGES_LINK,
@@ -204,23 +205,17 @@ def _resolve_direct_workspace(
             str(error),
             f"Inspect worktree_status(repo_id={ref.repository!r}, contract_path={contract_path.as_posix()!r}) and repair the series checkouts before repeating this same request.",
         ) from error
-    workspace = workspace_folder(group)
     task_reports = context.task.path.parent / "notes" / "reports"
-    task_reports.mkdir(parents=True, exist_ok=True)
-    report_access = group / "role-reports"
-    report_access.mkdir(exist_ok=True)
-    if report_access.is_symlink():
-        raise ValueError(
-            "The new role-reports folder must be a real directory inside its working folder."
+    workspace = _enclosure_workspace(contract_path, group, series.lifecycle_id)
+    with role_launch_enclosure.publication_scope(config.coordination_root, workspace):
+        workspace.update(
+            enclosurePreparation="direct",
+            codeRoot=code.as_posix(),
+            taskReportAccessRoot=_ensure_role_reports_folder(group),
+            **_outside_scratch_field(series),
         )
-    workspace.update(
-        enclosurePreparation="direct",
-        contractPath=contract_path.as_posix(),
-        codeRoot=code.as_posix(),
-        taskReportRoot=task_reports.resolve().as_posix(),
-        taskReportAccessRoot=report_access.as_posix(),
-        **_outside_scratch_field(series),
-    )
+    task_reports.mkdir(parents=True, exist_ok=True)
+    workspace["taskReportRoot"] = task_reports.resolve().as_posix()
     if series.memory_worktree is not None:
         workspace["memoryRoot"] = _require_directory_of(
             series.memory_worktree, "memory checkout"
@@ -317,41 +312,59 @@ def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> 
             str(error),
             f"Inspect worktree_status(repo_id={context.task.ref.repository!r}, contract_path={contract_path.as_posix()!r}) and repair the contract-owned roots before repeating this same request.",
         ) from error
-    workspace = workspace_folder(group)
-    messages_warning = link_leaf_workspace_messages(
-        group, context.task.path.parent, context.task.ref.key
+    workspace = _enclosure_workspace(contract_path, group, status.get("lifecycle_id"))
+    workspace.update(
+        enclosurePreparation=str(status["enclosurePreparation"]),
+        codeRoot=code.as_posix(),
+        memoryRoot=memory.as_posix(),
     )
-    workspace["messagesLink"] = (group / MESSAGES_LINK).as_posix()
-    if messages_warning is not None:
-        workspace["messagesLinkWarning"] = messages_warning
-    reference_result = prepare_leaf_workspace_reference(
-        config.coordination_root, group, context.task.path
-    )
-    workspace["referenceRoot"] = str(
-        status.get("referenceRoot") or reference_result["referenceRoot"]
-    )
-    reference_warning = status.get("referenceWarning") or reference_result.get("warning")
-    if isinstance(reference_warning, str) and reference_warning:
-        workspace["referenceWarning"] = reference_warning
-    task_reports = context.task.path.parent / "notes" / "reports"
+    _prepare_enclosed_workspace(config, context.task, workspace, status)
+    _move_found_enclosure_to_in_progress(context, contract_path, status)
+    return workspace
+
+
+def _enclosure_workspace(contract_path: Path, group: Path, lifecycle_id: object) -> dict[str, str]:
+    workspace = {"path": group.as_posix(), "contractPath": contract_path.as_posix()}
+    if isinstance(lifecycle_id, str) and lifecycle_id:
+        workspace["lifecycleId"] = lifecycle_id
+    return workspace
+
+
+def _prepare_enclosed_workspace(
+    config: McpRuntimeConfig,
+    task: ResolvedTaskDocument,
+    workspace: dict[str, str],
+    status: dict[str, Any],
+) -> None:
+    group = Path(workspace["path"])
+    with role_launch_enclosure.publication_scope(config.coordination_root, workspace):
+        warning = link_leaf_workspace_messages(group, task.path.parent, task.ref.key)
+        workspace["messagesLink"] = (group / MESSAGES_LINK).as_posix()
+        if warning is not None:
+            workspace["messagesLinkWarning"] = warning
+        reference = prepare_leaf_workspace_reference(config.coordination_root, group, task.path)
+        workspace["referenceRoot"] = str(status.get("referenceRoot") or reference["referenceRoot"])
+        warning = status.get("referenceWarning") or reference.get("warning")
+        if isinstance(warning, str) and warning:
+            workspace["referenceWarning"] = warning
+        workspace["taskReportAccessRoot"] = _ensure_role_reports_folder(group)
+        workspace["outsideScratchRoot"] = _ensure_leaf_root(Path(workspace["contractPath"]), group)
+    briefs_problem = status.get("briefsProblem")
+    if isinstance(briefs_problem, str):
+        workspace["briefsProblem"] = briefs_problem
+    task_reports = task.path.parent / "notes" / "reports"
     task_reports.mkdir(parents=True, exist_ok=True)
+    workspace["taskReportRoot"] = task_reports.resolve().as_posix()
+
+
+def _ensure_role_reports_folder(group: Path) -> str:
     report_access = group / "role-reports"
     report_access.mkdir(exist_ok=True)
     if report_access.is_symlink():
         raise ValueError(
             "The new role-reports folder must be a real directory inside its working folder."
         )
-    workspace.update(
-        enclosurePreparation=str(status["enclosurePreparation"]),
-        contractPath=contract_path.as_posix(),
-        codeRoot=code.as_posix(),
-        memoryRoot=memory.as_posix(),
-        taskReportRoot=task_reports.resolve().as_posix(),
-        taskReportAccessRoot=report_access.as_posix(),
-        outsideScratchRoot=_ensure_leaf_root(contract_path, group),
-    )
-    _move_found_enclosure_to_in_progress(context, contract_path, status)
-    return workspace
+    return report_access.as_posix()
 
 
 def _outside_scratch_field(contract: WorktreeContract) -> dict[str, str]:
@@ -442,14 +455,17 @@ def _ensure_leaf_enclosure(
             config,
             TaskRef(repo_id=leaf.ref.repository, contract_path=contract_path.as_posix()),
         )
+        if "briefsProblem" in created:
+            status = {**status, "briefsProblem": created["briefsProblem"]}
     if status.get("ok") is not True:
         raise _preparation_refusal(status, contract_path, leaf.ref.repository)
     status = {**status, "enclosurePreparation": preparation}
     raw_group = status.get("worktree_group")
     if isinstance(raw_group, str) and raw_group and Path(raw_group).is_dir():
-        ref_copy = prepare_leaf_workspace_reference(
-            config.coordination_root, Path(raw_group).resolve(), leaf.path
-        )
+        group = Path(raw_group).resolve()
+        workspace = _enclosure_workspace(contract_path, group, status.get("lifecycle_id"))
+        with role_launch_enclosure.publication_scope(config.coordination_root, workspace):
+            ref_copy = prepare_leaf_workspace_reference(config.coordination_root, group, leaf.path)
         status["referenceRoot"] = ref_copy["referenceRoot"]
         if isinstance(ref_copy.get("warning"), str) and ref_copy["warning"]:
             status["referenceWarning"] = ref_copy["warning"]

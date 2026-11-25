@@ -339,6 +339,7 @@ def test_a_covered_hunk_is_answered_by_no_invariant_attach_or_author_and_never_b
         "statement": "The fifth value is five.",
         "kind": "clause",
         "scope": {"applicability": "Always.", "conditions": [], "exclusions": []},
+        "title": "The fifth value",
         "admission": {"criteria": ["prevents_costly_mistake"], "justification": "Callers rely."},
         "target": [
             {

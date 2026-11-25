@@ -324,8 +324,10 @@ class ReplacedExecutionTests(RepeatTestCase):
                 "execution": {"kind": "paseo-agent", "agentId": "a-reviewer-agent"},
             }
             history = path.parent / "history"
-            role_launch_receipts._write_receipt(
-                history / f"{other_selection['requestId']}.json", other_selection
+            self.assertTrue(
+                role_launch_receipts._create_receipt(
+                    history / f"{other_selection['requestId']}.json", other_selection
+                )
             )
             (history / "unreadable.json").write_text("{", encoding="utf-8")
             self.runtime.calls.clear()
@@ -717,7 +719,7 @@ class ReusedRequestIdTests(RepeatTestCase):
             request = self.request("worker")
             ended = RuntimeError("the process ended before its receipt was created")
             with (
-                patch.object(role_launch_routes, "_create_receipt", side_effect=ended),
+                patch.object(role_launch_routes, "_install_initial_receipt", side_effect=ended),
                 self.assertRaises(RuntimeError),
             ):
                 self.dispatch(request)

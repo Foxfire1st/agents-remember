@@ -124,6 +124,7 @@ def _drop_index_tables(path: Path) -> None:
             "ix_route",
             "ix_link",
             "ix_history_row",
+            "ix_revision",
             "ix_uuid",
         ):
             connection.execute(f"DROP TABLE {table}")

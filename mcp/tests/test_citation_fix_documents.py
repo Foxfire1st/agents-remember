@@ -20,7 +20,6 @@ import asyncio
 import io
 import json
 import os
-import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -29,20 +28,22 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest import mock
 
-MCP_SRC = Path(__file__).resolve().parents[1] / "src"
-MCP_TESTS = Path(__file__).resolve().parent
-sys.path.insert(0, str(MCP_SRC))
-sys.path.insert(0, str(MCP_TESTS))
-
+import knowledge_conversion_test_support as conversion_fixture
 from agents_remember.application import memory_tools
+from agents_remember.application.file_briefs.folder import tree_named
 from agents_remember.application.memory_tools import (
     CitationOperationScope,
 )
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.cli import memory_citations
+from agents_remember.kernel.memory_ignore import ignore_briefs
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.registration.memory import register_memory_tools
+from agents_remember.mcp.tools.read_files import read_ar_files_payload
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.conversion.convert import convert_memory
 from agents_remember.memory.conversion.inputs import memory_from_directory, write_changed
+from agents_remember.memory.knowledge_index.tree import directory_key
 from agents_remember.models.lifecycles.curator_coherence import MAX_CURATOR_SOURCE_CANDIDATES
 from knowledge_conversion_test_support import (
     APP,
@@ -51,6 +52,8 @@ from knowledge_conversion_test_support import (
     code_repository,
     memory_repository,
 )
+
+MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 
 # Git commit hashes seed the cards' verification stamps, so two fixture trees built by the
 # same test differ unless Git's clock is fixed. The fixer never writes a stamp: with a
@@ -134,13 +137,13 @@ def _convert(memory: Path, code: CodeFixture) -> None:
 class ConvertedListFixTests(unittest.TestCase):
     """One call with several cards on converted memory."""
 
-    def _stale_converted_tree(self, root: Path) -> tuple[CodeFixture, Path]:
+    def _stale_converted_tree(self, root: Path, *, source: str = APP) -> tuple[CodeFixture, Path]:
         code = code_repository(root / "code")
         memory = root / "memory"
         memory_repository(memory, code)
         _convert(memory, code)
         # A mechanical move elsewhere: the app card's and the route card's anchors re-record.
-        (code.root / APP).write_text("# moved\n" + APP_SOURCE, encoding="utf-8")
+        (code.root / source).write_text("# moved\n" + APP_SOURCE, encoding="utf-8")
         return code, memory
 
     def _tree_bytes(self, memory: Path) -> dict[str, bytes]:
@@ -158,12 +161,42 @@ class ConvertedListFixTests(unittest.TestCase):
             repo_id="demo", onboarding_root=memory / "onboarding", code_root=code.root
         )
         with mock.patch.object(memory_tools, "_leaf_memory_writer_scope", return_value=leaf):
+            # The coordination root holds the read index the briefs are written from after the
+            # fix.
             return memory_tools.citation_fix_tool(
-                cast(Any, None),
+                cast(Any, SimpleNamespace(coordination_root=memory.parent / "coordination")),
                 repo_id="demo",
                 contract_path="contract.md",
                 operation_scope=scope,
             )
+
+    def _assert_brief_read_is_current(self, memory: Path, code: CodeFixture, source: str) -> None:
+        coordination = memory.parent / "coordination"
+        official_memory = coordination / "memory-repos" / "ar-demo"
+        official_memory.parent.mkdir(parents=True)
+        (coordination / "tasks").mkdir()
+        (coordination / "system").mkdir()
+        memory.rename(official_memory)
+        config = McpRuntimeConfig(
+            config_path=coordination / "settings.json",
+            coordination_root=coordination,
+            workspace_root=memory.parent,
+            transcript_root=coordination / "logs",
+            repositories={
+                "demo": RepositoryScope(repo_id="demo", path=code.root, memory_root=official_memory)
+            },
+        )
+        before = {path: path.read_bytes() for path in official_memory.rglob("*") if path.is_file()}
+        with tool_call_context(
+            "read_ar_files", {"repo_id": "demo", "files": [source]}, config=config
+        ):
+            result = read_ar_files_payload(config, "demo", [source])
+        self.assertEqual(result["files"][0]["path"], source)
+        brief = result["files"][0]["brief"]
+        self.assertTrue(brief["current"], brief)
+        self.assertNotIn("freshness", brief)
+        after = {path: path.read_bytes() for path in official_memory.rglob("*") if path.is_file()}
+        self.assertEqual(before, after)
 
     def test_a_list_leaves_the_same_record_as_one_call_per_card(self) -> None:
         app_doc, route_doc = f"{APP}.md", "src/overview.md"
@@ -179,6 +212,68 @@ class ConvertedListFixTests(unittest.TestCase):
             self.assertEqual(self._tree_bytes(memory), listed_bytes)
         self.assertTrue(listed["ok"], listed)
         self.assertEqual(listed["documentCount"], 2)
+
+    def test_a_fix_writes_the_brief_of_its_card_again(self) -> None:
+        old_tree = "0" * 40
+        for source in (APP, "src/pkg/overview.py"):
+            with (
+                self.subTest(source=source),
+                _frozen_git(),
+                tempfile.TemporaryDirectory() as raw,
+                mock.patch.multiple(
+                    conversion_fixture,
+                    APP=source,
+                    APP_CARD=f"onboarding/{source}.md",
+                    APP_SIDECAR=f"onboarding/{source}.json",
+                    STRAY_ROW=conversion_fixture.STRAY_ROW.replace(APP, source),
+                ),
+            ):
+                code, memory = self._stale_converted_tree(Path(raw), source=source)
+                ignore_briefs(memory)
+                brief = memory / "briefs" / f"{source}.md"
+                brief.parent.mkdir(parents=True)
+                brief.write_text(f"<!-- memory tree {old_tree} -->\nold\n", encoding="utf-8")
+                result = self._fix(memory, code, CitationOperationScope(document=f"{source}.md"))
+                self.assertTrue(result["ok"], result)
+                self.assertNotIn("briefsProblem", result)
+                self.assertEqual(result["rewrittenSidecars"], [f"onboarding/{source}.json"])
+                self.assertEqual(tree_named(brief), directory_key(memory))
+                self.assertIn(f"# Brief: `{source}`", brief.read_text(encoding="utf-8"))
+                self._assert_brief_read_is_current(memory, code, source)
+
+    def test_a_leaf_fix_refreshes_after_authoring_without_a_mechanical_rewrite(self) -> None:
+        with _frozen_git(), tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            code = code_repository(root / "code")
+            memory = root / "memory"
+            memory_repository(memory, code)
+            _convert(memory, code)
+            ignore_briefs(memory)
+            card_path = f"onboarding/{APP}.md"
+            card = memory / card_path
+            card.write_text(
+                card.read_text(encoding="utf-8")
+                + "\n| Finding | Anchor | Source |\n| --- | --- | --- |\n"
+                + f"| Alpha is linked. | `alpha` | {APP}:4-5 |\n",
+                encoding="utf-8",
+            )
+            result = self._fix(memory, code, CitationOperationScope(document=f"{APP}.md"))
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["authoring"]["authoredCards"], [card_path])
+            self.assertEqual(result["rewrittenSidecars"], [])
+            self.assertTrue((memory / "briefs" / f"{APP}.md").is_file())
+
+    def test_a_leaf_fix_without_the_ignore_line_defers_briefs(self) -> None:
+        with _frozen_git(), tempfile.TemporaryDirectory() as raw:
+            code, memory = self._stale_converted_tree(Path(raw))
+            ignore = memory / ".gitignore"
+            previous = ignore.read_bytes() if ignore.exists() else None
+            result = self._fix(memory, code, CitationOperationScope(document=f"{APP}.md"))
+            self.assertTrue(result["ok"], result)
+            self.assertTrue(result["rewrittenSidecars"])
+            self.assertIn("effective /briefs/ rule", result["briefsProblem"])
+            self.assertEqual(ignore.read_bytes() if ignore.exists() else None, previous)
+            self.assertFalse((memory / "briefs").exists())
 
     def test_one_refused_card_does_not_stop_the_others(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -220,7 +315,7 @@ class ConvertedListFixTests(unittest.TestCase):
         # refused-byte preservation.
         seen: dict[str, Any] = {}
 
-        def fake_fix(memory_root: Any, code_root: Any, **kwargs: Any) -> dict[str, Any]:
+        def fake_fix(_memory_root: Any, _code_root: Any, **kwargs: Any) -> dict[str, Any]:
             seen.update(kwargs)
             return {
                 "ok": True,

@@ -13,12 +13,14 @@ import copy
 import json
 import os
 import threading
+import time
 from functools import partial
 from pathlib import Path
 from typing import Any, NamedTuple
 
 import uvicorn
 import uvicorn.config
+import uvicorn.logging
 
 import agents_remember
 from agents_remember.application.review_comparison_preparation import (
@@ -90,8 +92,16 @@ DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS = 3
 DASHBOARD_H11_MAX_INCOMPLETE_EVENT_SIZE = 64 * 1024
 
 
+class _UtcDefaultFormatter(uvicorn.logging.DefaultFormatter):
+    converter = staticmethod(time.gmtime)
+
+
+class _UtcAccessFormatter(uvicorn.logging.AccessFormatter):
+    converter = staticmethod(time.gmtime)
+
+
 def dashboard_log_config() -> dict[str, Any]:
-    """uvicorn's own logging, plus the package's INFO lines on the server's stderr (the journal).
+    """Uvicorn and package logging with UTC timestamps, including package INFO on stderr.
 
     Without it the package has no handler: Python's last resort prints WARNING and above only, so
     every INFO line of the serving process -- the worktree watch's plan, budget and coverage adds
@@ -101,9 +111,26 @@ def dashboard_log_config() -> dict[str, Any]:
     """
 
     config = copy.deepcopy(uvicorn.config.LOGGING_CONFIG)
+    datefmt = "%Y-%m-%dT%H:%M:%SZ"
+    default_formatter = "agents_remember.cli.dashboard._UtcDefaultFormatter"
+    config["formatters"]["default"].update(
+        {
+            "()": default_formatter,
+            "fmt": "%(asctime)s %(levelprefix)s %(message)s",
+            "datefmt": datefmt,
+        }
+    )
+    config["formatters"]["access"].update(
+        {
+            "()": "agents_remember.cli.dashboard._UtcAccessFormatter",
+            "fmt": '%(asctime)s %(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s',
+            "datefmt": datefmt,
+        }
+    )
     config["formatters"]["package"] = {
-        "()": "uvicorn.logging.DefaultFormatter",
-        "fmt": "%(levelprefix)s %(name)s: %(message)s",
+        "()": default_formatter,
+        "fmt": "%(asctime)s %(levelprefix)s %(name)s: %(message)s",
+        "datefmt": datefmt,
         "use_colors": False,
     }
     config["handlers"]["package"] = {

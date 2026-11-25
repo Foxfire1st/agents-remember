@@ -12,11 +12,13 @@ import json
 import shutil
 import tempfile
 import unittest
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from agents_remember.application.file_briefs.moments import StartRequest
 from agents_remember.application.role_launch_context import RoleLaunchContext
 from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_task
 from agents_remember.application.worktree_tool_requests import TaskIdentity
@@ -24,7 +26,8 @@ from agents_remember.application.worktree_tools import (
     _direct_leaf_start_refusal,
     worktree_start_tool,
 )
-from agents_remember.cli import role_launch_workspace
+from agents_remember.cli import role_launch_enclosure, role_launch_workspace
+from agents_remember.cli.product_start_message import start_request
 from agents_remember.cli.role_launch_preparation import _verify_leaf_revival_scope
 from agents_remember.cli.role_launch_workspace import _resolve_workspace
 from agents_remember.errors import RolePreparationError
@@ -210,7 +213,7 @@ def _fixture(root: Path) -> SimpleNamespace:
     )
 
 
-def _identity(fixture: SimpleNamespace, leaf_id: str | None) -> TaskIdentity:
+def _identity(_fixture: SimpleNamespace, leaf_id: str | None) -> TaskIdentity:
     return TaskIdentity(
         repo_id=REPO,
         task_name=MASTER_NAME,
@@ -242,6 +245,24 @@ class DirectLeafRoleStartTests(unittest.TestCase):
         self.assertFalse(
             Path(workspace["taskReportAccessRoot"]).is_relative_to(self.fixture.code.resolve())
         )
+
+    def test_a_direct_leafs_reviewer_gets_its_start_moment_from_the_series(self) -> None:
+        """The product's start message reads a direct leaf's checkouts from its series contract."""
+
+        workspace = _resolve_workspace(self.fixture.config, self.fixture.context)
+        receipt = {
+            "role": "reviewer",
+            "selection": {"taskDocumentRef": self.fixture.leaf_ref.model_dump(mode="json")},
+            "workspace": workspace,
+        }
+        request = start_request(self.fixture.config, receipt, "review-start", 1000)
+
+        self.assertIsInstance(request, StartRequest, request)
+        assert isinstance(request, StartRequest)
+        self.assertEqual(request.memory_root, self.fixture.series.memory_worktree)
+        self.assertEqual(request.code_root, self.fixture.series.code_worktree)
+        self.assertEqual(request.base_commit, self.fixture.series.code_base_commit)
+        self.assertEqual(request.leaf, LEAF_ID)
 
     def test_direct_workspace_without_series_contract_is_refused(self) -> None:
         self.fixture.series.contract_path.unlink()
@@ -465,6 +486,7 @@ class DirectLeafRoleStartTests(unittest.TestCase):
                 "_ensure_leaf_enclosure",
                 return_value=(expected_contract, status),
             ) as ensure,
+            patch.object(role_launch_enclosure, "publication_scope", return_value=nullcontext()),
         ):
             workspace = _resolve_workspace(self.fixture.config, self.fixture.context)
         ensure.assert_called_once()

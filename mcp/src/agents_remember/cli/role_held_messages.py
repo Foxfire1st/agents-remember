@@ -14,11 +14,11 @@ native attention queue reads it (MIK-R200 rule 3). What stays here is delivery: 
 that makes one batch, the drain that sends it, the record of how each message ended, and
 the sweep that drives the drains.
 
-Delivery: one process delivers (``drain_held`` under the store file's lock, so no two
-deliveries to one recipient run at once). Everything held for a recipient goes in one
+Delivery: one process claims a batch under the launch receipt's lock, so no two
+deliveries claim the same rows at once. Everything held for a recipient goes in one
 delivery, in the order taken, each under the line naming its sender; a further message
 is held behind what waits even when the host could take it at that moment. The store
-shares only the generic file lock with the rest of the product. How the product learns
+uses the same receipt lock when it changes a claim or publishes an end. How the product learns
 that a prompt was answered, a turn ended, or a start finished is one read of the agent
 before each drain; the dashboard sweep runs that read every
 ``HELD_DELIVERY_SWEEP_SECONDS``.
@@ -36,10 +36,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agents_remember.cli.paseo_bridge import (
     BRIDGE_REFUSED,
@@ -51,8 +50,27 @@ from agents_remember.cli.paseo_bridge import (
 from agents_remember.cli.paseo_launch import run_launch_call
 from agents_remember.cli.paseo_status import read_agent
 from agents_remember.cli.role_activity import publish_receipt_role_agent, resume_role_agent
+from agents_remember.cli.role_held_store import (
+    HeldSeatClosed,
+    HeldSeatRef,
+    HostClosure,
+    _batch_store,
+    _merge_pending_lines,
+    _release_claim,
+    _remove_ids,
+    held_seat_ref,
+    open_held_store,
+    receipt_is_closed,
+    settle_held_store,
+)
+from agents_remember.cli.role_held_store import (
+    refresh_waiting_count as _refresh_waiting_count,
+)
 from agents_remember.cli.role_launch_receipts import (
+    _leaf_before_create,
+    _leaf_is_closing,
     _read_receipt,
+    _refuse_closing_launch,
     _restore_launch_handover,
     _write_receipt,
 )
@@ -92,8 +110,8 @@ from agents_remember.controlplane.held_store_layout import (
     waiting_total,
     withdraw_message,
 )
-from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.serving.projections.host_activity import agent_in_turn
 
 # The store's own names are re-exported here on purpose: this module was their home, and its
@@ -148,90 +166,27 @@ def _live_claim(store: dict[str, Any]) -> str | None:
     return live_claim(store, STALE_CLAIM_SECONDS)
 
 
-def _remove_ids(
-    workspace_path: str | Path,
-    agent_id: str,
-    message_ids: set[str],
-    claim: str | None,
-    *,
-    clear_claim: bool = True,
-) -> list[dict[str, Any]]:
-    """Delete exactly the delivered texts; the receipt lines are the caller's to write.
-
-    A multi-part drain keeps its claim across its parts and releases it at the end;
-    only the final removal clears it.
-    """
-
-    path = store_path_for(workspace_path, agent_id)
-    removed: list[dict[str, Any]] = []
-    with exclusive_file_lock(path, "held-message store"):
-        store = _read_store_file(path, agent_id)
-        if claim is not None and store.get("deliveryClaim") != claim:
-            return []
-        kept = []
-        for row in store["messages"]:
-            if row.get("id") in message_ids:
-                removed.append(row)
-            else:
-                kept.append(row)
-        store["messages"] = kept
-        if clear_claim:
-            store.pop("deliveryClaim", None)
-            store.pop("deliveryClaimAt", None)
-            store.pop("deliveryClaimIds", None)
-        _write_store_file(path, store)
-    return removed
-
-
-def _flush_pending_lines(
-    workspace_path: str | Path,
-    agent_id: str,
-    receipt_path: Path,
-    receipt: dict[str, Any],
-) -> bool:
-    """Move staged ends into the receipt lines; best-effort, never raises.
-
-    Returns ``True`` when nothing is staged or the staged ends reached the
-    receipt file. Grouped by outcome so one shared writer keeps its rule.
-    """
-
+def _flush_pending_lines(ref: HeldSeatRef) -> bool:
+    """Publish the staged receipt lines before removing them from the store."""
+    path = _batch_store(ref)
     try:
-        path = store_path_for(workspace_path, agent_id)
-        with exclusive_file_lock(path, "held-message store"):
-            store = _read_store_file(path, agent_id)
-            staged = [e for e in store.get("pendingLines", []) if isinstance(e, dict)]
+        with open_held_store(ref) as transaction:
+            store = _read_store_file(path, ref.agent_id)
+            staged = [row for row in store.get("pendingLines", ()) if isinstance(row, dict)]
             if not staged:
                 return True
-        by_how: dict[str, list[dict[str, Any]]] = {}
-        for entry in staged:
-            rows = by_how.setdefault(str(entry.get("how") or _END_DELIVERED), [])
-            rows.append(
-                {
-                    "id": entry.get("messageId"),
-                    "senderLine": entry.get("sender"),
-                    "senderAgentId": entry.get("senderAgentId"),
-                }
-            )
-        for how, rows in by_how.items():
-            record_lines(receipt, rows, how)
-        try:
-            _write_receipt(receipt_path, receipt)
-        except OSError:
-            return False
-        with exclusive_file_lock(path, "held-message store"):
-            store = _read_store_file(path, agent_id)
-            staged_now = store.get("pendingLines")
-            if isinstance(staged_now, list):
-                store["pendingLines"] = [e for e in staged_now if not isinstance(e, dict)]
+            _merge_pending_lines(transaction.receipt, staged)
+            _write_receipt(ref.receipt_path, transaction.receipt)
+            store["pendingLines"] = []
             _write_store_file(path, store)
+    except HeldSeatClosed:
+        raise
     except (ValueError, OSError):
         return False
     return True
 
 
-def _claim_batch(
-    workspace_path: str | Path, agent_id: str
-) -> tuple[list[dict[str, Any]], str] | None:
+def _claim_batch(ref: HeldSeatRef) -> tuple[list[dict[str, Any]], str] | None:
     """Claim everything waiting for one delivery; a live claim is never taken over.
 
     A stale claim resumes exactly its batch, with its stable id: the earlier drain
@@ -241,9 +196,9 @@ def _claim_batch(
     would hand the resend a new id and defeat that same deduplication.
     """
 
-    path = store_path_for(workspace_path, agent_id)
-    with exclusive_file_lock(path, "held-message store"):
-        store = _read_store_file(path, agent_id)
+    path = _batch_store(ref)
+    with open_held_store(ref):
+        store = _read_store_file(path, ref.agent_id)
         messages = [row for row in store["messages"] if isinstance(row, dict)]
         if not messages:
             return None
@@ -270,21 +225,6 @@ def _claim_batch(
     return messages, claim
 
 
-def _release_claim(workspace_path: str | Path, agent_id: str, claim: str) -> None:
-    path = store_path_for(workspace_path, agent_id)
-    with exclusive_file_lock(path, "held-message store"):
-        try:
-            store = _read_store_file(path, agent_id)
-        except ValueError:
-            return
-        if store.get("deliveryClaim") == claim:
-            store.pop("deliveryClaim", None)
-            store.pop("deliveryClaimAt", None)
-            store.pop("deliveryClaimIds", None)
-            with suppress(OSError):
-                _write_store_file(path, store)
-
-
 def drain_held(
     config: McpRuntimeConfig, receipt_path: Path, receipt: dict[str, Any]
 ) -> dict[str, Any]:
@@ -297,17 +237,17 @@ def drain_held(
     staged ends left by an interrupted record are flushed first.
     """
 
-    endpoints = _store_endpoints(receipt)
-    if endpoints is not None:
-        _flush_pending_lines(endpoints[0], endpoints[1], receipt_path, receipt)
     try:
-        batch = _claimed_batch(config, receipt_path, receipt)
+        ref = held_seat_ref(receipt_path, receipt)
+        batch = _claimed_batch(config, ref)
         _check_drain_readiness(batch)
         if str(batch.receipt.get("status")) == "held":
             return _open_held_seat(batch)
         return _deliver_waiting(batch)
     except _DrainPause as paused:
         return paused.outcome
+    except HeldSeatClosed as error:
+        return _closed_drain(error)
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,6 +262,18 @@ class _DrainBatch:
     messages: list[dict[str, Any]]
     claim: str
 
+    @property
+    def ref(self) -> HeldSeatRef:
+        return held_seat_ref(self.path, self.receipt)
+
+
+def _closed_drain(error: HeldSeatClosed) -> dict[str, Any]:
+    outcome = {
+        "generation-changed": "recipient-generation-closed",
+        "workspace-missing": "nothing-waiting",
+    }.get(error.reason, "recipient-archived")
+    return {"outcome": outcome, "agentId": error.agent_id, "detail": str(error)}
+
 
 class _DrainPause(Exception):
     """Why a claimed batch stays held: the outcome its caller answers."""
@@ -331,37 +283,47 @@ class _DrainPause(Exception):
         self.outcome = outcome
 
 
-def _claimed_batch(
-    config: McpRuntimeConfig, receipt_path: Path, receipt: dict[str, Any]
-) -> _DrainBatch:
-    """The claimed batch of one recipient; pauses when there is nothing to deliver."""
-
-    fresh = _read_receipt(receipt_path) or receipt
-    execution = fresh.get("execution")
-    agent_id = execution.get("agentId") if isinstance(execution, dict) else None
-    workspace = fresh.get("workspace")
-    folder = workspace.get("path") if isinstance(workspace, dict) else None
-    if not isinstance(agent_id, str) or not agent_id or not isinstance(folder, str):
-        raise _DrainPause(
-            {"outcome": "cannot-hold", "detail": "The receipt names no agent or folder."}
-        )
+def _claimed_batch(config: McpRuntimeConfig, ref: HeldSeatRef) -> _DrainBatch:
+    """Claim from the same generation that was selected for this drain."""
     try:
-        claimed = _claim_batch(folder, agent_id)
+        with open_held_store(ref) as transaction:
+            _flush_pending_lines(ref)
+            claimed = _claim_batch(ref)
+            fresh = transaction.receipt
+    except HeldSeatClosed:
+        raise
     except (ValueError, OSError) as error:
-        # A removed working folder reads as unreadable, not as a crash.
         raise _DrainPause({"outcome": "store-unreadable", "detail": str(error)}) from error
     if claimed is None:
         raise _DrainPause({"outcome": "nothing-waiting"})
     messages, claim = claimed
     return _DrainBatch(
-        config=config,
-        path=receipt_path,
-        receipt=fresh,
-        folder=folder,
-        agent_id=agent_id,
-        messages=messages,
-        claim=claim,
+        config, ref.receipt_path, fresh, str(ref.workspace), ref.agent_id, messages, claim
     )
+
+
+def _end_batch(
+    batch: _DrainBatch,
+    status: Literal["stopped", "rejected"] = "stopped",
+    *,
+    host_state: HostClosure | None = None,
+) -> list[dict[str, Any]]:
+    """End an archived or lost recipient and save the still-waiting text."""
+    with open_held_store(batch.ref) as transaction:
+        if host_state == "gone":
+            _pause_unfinished_start(batch, transaction.receipt)
+        rows = _read_store_file(_batch_store(batch.ref), batch.agent_id)["messages"]
+        settle_held_store(
+            batch.ref,
+            host_state=host_state,
+            receipt_updates={"status": status, "updatedAt": _now_iso()},
+        )
+        return rows
+
+
+def _stage_batch_ends(batch: _DrainBatch, rows: list[dict[str, Any]], how: str) -> None:
+    with open_held_store(batch.ref):
+        _stage_pending_lines(batch.folder, batch.agent_id, rows, how)
 
 
 def _check_drain_readiness(batch: _DrainBatch) -> None:
@@ -379,14 +341,15 @@ def _check_drain_readiness(batch: _DrainBatch) -> None:
     )
 
     pause_for_provider_limit(batch)
+    _pause_unfinished_start(batch, batch.receipt)
     reading = read_agent(batch.config, batch.agent_id)
     if not reading.reachable:
-        _release_claim(batch.folder, batch.agent_id, batch.claim)
+        _release_claim(batch.ref, batch.claim)
         raise _DrainPause(
             {"outcome": "host-unreachable", "detail": str(reading.unreachable_reason)}
         )
     if not reading.found or reading.archived:
-        ended = end_waiting_as(batch.folder, batch.agent_id)
+        ended = _end_batch(batch, host_state="archived" if reading.archived else "gone")
         raise _DrainPause(
             {
                 "outcome": "recipient-gone",
@@ -396,7 +359,7 @@ def _check_drain_readiness(batch: _DrainBatch) -> None:
             }
         )
     if reading.pending_permission is not None:
-        _release_claim(batch.folder, batch.agent_id, batch.claim)
+        _release_claim(batch.ref, batch.claim)
         raise _DrainPause(
             {
                 "outcome": "permission-pending",
@@ -404,16 +367,22 @@ def _check_drain_readiness(batch: _DrainBatch) -> None:
                 "detail": "The recipient waits for a permission decision; the messages stay held.",
             }
         )
-    if str(batch.receipt.get("status")) in {"starting", "unknown"}:
-        _release_claim(batch.folder, batch.agent_id, batch.claim)
+    if reading.session_closed:
+        _resume_for_drain(batch)
+
+
+def _pause_unfinished_start(batch: _DrainBatch, current: dict[str, Any]) -> None:
+    if current.get("status") in {"starting", "unknown"} or batch.receipt.get("status") in {
+        "starting",
+        "unknown",
+    }:
+        _release_claim(batch.ref, batch.claim)
         raise _DrainPause(
             {
                 "outcome": "start-unfinished",
                 "detail": "The recipient's start has not finished; the messages stay held.",
             }
         )
-    if reading.session_closed:
-        _resume_for_drain(batch)
 
 
 def _resume_for_drain(batch: _DrainBatch) -> None:
@@ -421,12 +390,12 @@ def _resume_for_drain(batch: _DrainBatch) -> None:
 
     resumed = resume_role_agent(batch.config, batch.receipt)
     if not resumed.reading.reachable:
-        _release_claim(batch.folder, batch.agent_id, batch.claim)
+        _release_claim(batch.ref, batch.claim)
         raise _DrainPause(
             {"outcome": "host-unreachable", "detail": "The resume was not confirmed."}
         )
     if resumed.reading.session_closed or resumed.refusal is not None:
-        _release_claim(batch.folder, batch.agent_id, batch.claim)
+        _release_claim(batch.ref, batch.claim)
         raise _DrainPause(
             {
                 "outcome": "cannot-resume",
@@ -451,13 +420,13 @@ def _confirmed(batch: _DrainBatch) -> list[dict[str, Any]]:
     try:
         path = store_path_for(batch.folder, batch.agent_id)
     except ValueError as error:
-        _release_claim(batch.folder, batch.agent_id, batch.claim)
+        _release_claim(batch.ref, batch.claim)
         raise _DrainPause({"outcome": "store-unreadable", "detail": str(error)}) from error
-    with exclusive_file_lock(path, "held-message store"):
+    with open_held_store(batch.ref):
         try:
             store = _read_store_file(path, batch.agent_id)
         except ValueError as error:
-            _release_claim(batch.folder, batch.agent_id, batch.claim)
+            _release_claim(batch.ref, batch.claim)
             raise _DrainPause({"outcome": "store-unreadable", "detail": str(error)}) from error
         if store.get("deliveryClaim") != batch.claim:
             raise _DrainPause(
@@ -469,7 +438,7 @@ def _confirmed(batch: _DrainBatch) -> list[dict[str, Any]]:
         present = {row.get("id") for row in store["messages"] if isinstance(row, dict)}
     survivors = [row for row in batch.messages if row.get("id") in present]
     if not survivors:
-        _release_claim(batch.folder, batch.agent_id, batch.claim)
+        _release_claim(batch.ref, batch.claim)
         raise _DrainPause(
             {
                 "outcome": "still-held",
@@ -487,28 +456,55 @@ def _open_held_seat(batch: _DrainBatch) -> dict[str, Any]:
     launch_call = batch.receipt.get("replayRequest")
     opening = batch.receipt.get("heldOpeningPrompt")
     if not isinstance(launch_call, dict) or not isinstance(opening, str) or not opening:
-        _release_claim(batch.folder, batch.agent_id, batch.claim)
+        _release_claim(batch.ref, batch.claim)
         return {
             "outcome": "cannot-open",
             "detail": "The held seat kept no launch call or opening handover.",
         }
     try:
-        _restore_launch_handover(batch.path, batch.receipt, launch_call)
+        with open_held_store(batch.ref):
+            _restore_launch_handover(batch.path, batch.receipt, launch_call)
+    except HeldSeatClosed:
+        raise
     except ValueError as error:
-        _release_claim(batch.folder, batch.agent_id, batch.claim)
+        _release_claim(batch.ref, batch.claim)
         return {"outcome": "cannot-open", "detail": str(error)}
-    opening_text = opening + "\n\n" + combined_text(messages)
+    from agents_remember.cli.product_start_message import (  # noqa: PLC0415 - sends through the role tools, which import this module
+        held_seat_opening,
+    )
+
+    # A held Reviewer or Curator gets the product's start message as it opens.
+    product = held_seat_opening(batch.config, batch.path, batch.receipt)
+    opening_text = "\n\n".join(filter(None, (opening, product, combined_text(messages))))
     call = {
         **launch_call,
         "agent": {**(launch_call.get("agent") or {}), "prompt": opening_text},
     }
     publish_receipt_role_agent(batch.config, batch.receipt)
-    outcome = run_launch_call(batch.config, call)
-    if outcome.kind == "created":
-        _stage_pending_lines(batch.folder, batch.agent_id, messages, _END_DELIVERED)
-        removed = _remove_ids(
-            batch.folder, batch.agent_id, {row["id"] for row in messages}, batch.claim
+    if batch.receipt.get("role") in LEAF_ROLES:
+        outcome = run_launch_call(
+            batch.config,
+            call,
+            before_create=lambda: _leaf_before_create(batch.path, batch.receipt, opening_held=True),
         )
+        current = _read_receipt(batch.path)
+        if current is not None and _leaf_is_closing(current):
+            _refuse_closing_launch(
+                batch.config,
+                batch.path,
+                batch.receipt,
+                creation_returned=outcome.kind == "created" or outcome.lost_agent_id is not None,
+            )
+            raise HeldSeatClosed(batch.agent_id, "closed")
+        if outcome.kind != "no-answer":
+            with open_held_store(batch.ref) as transaction:
+                transaction.receipt.pop("heldOpenPending", None)
+                _write_receipt(batch.path, transaction.receipt)
+    else:
+        outcome = run_launch_call(batch.config, call)
+    if outcome.kind == "created":
+        _stage_batch_ends(batch, messages, _END_DELIVERED)
+        removed = _remove_ids(batch.ref, {row["id"] for row in messages}, batch.claim)
         return {
             "outcome": "opened",
             "detail": "The held seat opened with its handover and its waiting messages in one turn.",
@@ -518,7 +514,7 @@ def _open_held_seat(batch: _DrainBatch) -> dict[str, Any]:
             "applied": outcome.applied,
         }
     if outcome.kind == "refused" and outcome.lost_agent_id:
-        ended = end_waiting_as(batch.folder, batch.agent_id)
+        ended = _end_batch(batch, "rejected")
         return {
             "outcome": "seat-lost",
             "detail": (
@@ -528,7 +524,7 @@ def _open_held_seat(batch: _DrainBatch) -> dict[str, Any]:
             "ended": ended,
             "how": _END_NOT_DELIVERED,
         }
-    _release_claim(batch.folder, batch.agent_id, batch.claim)
+    _release_claim(batch.ref, batch.claim)
     return {
         "outcome": "open-failed",
         "detail": f"The held seat stays held: {outcome.message}",
@@ -661,7 +657,9 @@ def _deliver_waiting(batch: _DrainBatch) -> dict[str, Any]:
             continue
         refused = delivery.get("refused")
         if refused in {"archived", "not-found"}:
-            return _recipient_gone(batch, ended)
+            return _recipient_gone(
+                batch, ended, host_state="archived" if refused == "archived" else "gone"
+            )
         if refused == "host-unreachable":
             return _host_did_not_answer(batch, delivery, ended, deliveries)
         if refused == "busy" and len(piece) > 1:
@@ -670,7 +668,7 @@ def _deliver_waiting(batch: _DrainBatch) -> dict[str, Any]:
             probe_max = len(piece) - 1
             continue
         return _still_held(batch, delivery, ended, deliveries)
-    _release_claim(batch.folder, batch.agent_id, batch.claim)
+    _release_claim(batch.ref, batch.claim)
     return {
         "outcome": "delivered",
         "detail": (
@@ -719,11 +717,10 @@ def _commit_part(
 ) -> int:
     """Record one part the host took: stage its ends, remove its texts, count its bytes."""
 
-    _stage_pending_lines(batch.folder, batch.agent_id, piece, _END_DELIVERED)
+    _stage_batch_ends(batch, piece, _END_DELIVERED)
     ended.extend(
         _remove_ids(
-            batch.folder,
-            batch.agent_id,
+            batch.ref,
             {row["id"] for row in piece},
             batch.claim,
             clear_claim=False,
@@ -741,15 +738,18 @@ def _commit_part(
     return _part_text_bytes(piece)
 
 
-def _recipient_gone(batch: _DrainBatch, ended: list[dict[str, Any]]) -> dict[str, Any]:
+def _recipient_gone(
+    batch: _DrainBatch, ended: list[dict[str, Any]], *, host_state: HostClosure
+) -> dict[str, Any]:
     """The outcome when the host says the recipient is archived or gone."""
 
     if ended:
         apply_drain_to_receipt(
             batch.path,
             {"outcome": "delivered", "ended": ended, "how": _END_DELIVERED},
+            expected=batch.ref,
         )
-    missing = end_waiting_as(batch.folder, batch.agent_id)
+    missing = _end_batch(batch, host_state=host_state)
     return {
         "outcome": "recipient-gone",
         "detail": "The recipient is archived or gone; its waiting messages end as not delivered.",
@@ -783,7 +783,7 @@ def _host_did_not_answer(
 ) -> dict[str, Any]:
     """The outcome when the host did not answer: a delay, never a loss (rule 3)."""
 
-    _release_claim(batch.folder, batch.agent_id, batch.claim)
+    _release_claim(batch.ref, batch.claim)
     reason = str(delivery.get("detail") or "The Paseo runtime did not answer.")
     logger.warning(
         "Held messages for agent %s wait: the host did not answer (%s).",
@@ -803,7 +803,7 @@ def _still_held(
 ) -> dict[str, Any]:
     """The outcome when the host answered busy: what is left stays held."""
 
-    _release_claim(batch.folder, batch.agent_id, batch.claim)
+    _release_claim(batch.ref, batch.claim)
     reason = str(delivery.get("detail") or "The host cannot take a message now.")
     logger.warning("Held messages for agent %s stay held: %s.", batch.agent_id, reason)
     held = {
@@ -820,12 +820,12 @@ def _resume_for_send(batch: _DrainBatch) -> None:
 
     outcome = resume_role_agent(batch.config, batch.receipt)
     if not outcome.reading.reachable:
-        _release_claim(batch.folder, batch.agent_id, batch.claim)
+        _release_claim(batch.ref, batch.claim)
         raise _DrainPause(
             {"outcome": "host-unreachable", "detail": "The resume was not confirmed."}
         )
     if outcome.reading.session_closed or outcome.refusal is not None:
-        _release_claim(batch.folder, batch.agent_id, batch.claim)
+        _release_claim(batch.ref, batch.claim)
         raise _DrainPause(
             {
                 "outcome": "cannot-resume",
@@ -955,7 +955,7 @@ def sweep_held_messages(config: McpRuntimeConfig) -> dict[str, Any]:
     for path in ordered[:SWEEP_MAX_DRAINS_PER_TICK]:
         reads += 1
         visited.add(path.as_posix())
-        if _tally_drain(config, path, tally) in {None, "delivered"}:
+        if _tally_drain(config, path, tally) in {None, "delivered", "recipient-archived"}:
             # Nothing waits there now: a delivered receipt needs no further visit.
             forget_held_receipt(config, path)
         if tally["swept"] >= SWEEP_MAX_DRAINS_PER_TICK:
@@ -982,8 +982,8 @@ def _tally_drain(config: McpRuntimeConfig, path: Path, tally: dict[str, int]) ->
     """Drain one receipt and count it; ``None`` when it has nothing to drain."""
 
     outcome = _sweep_receipt(config, path)
-    if outcome is None:
-        return None
+    if outcome in {None, "recipient-archived"}:
+        return outcome
     tally["swept"] += 1
     if outcome == "delivered":
         tally["delivered"] += 1
@@ -1015,7 +1015,7 @@ def deliver_ended_turns(config: McpRuntimeConfig, agent_ids: Iterable[str]) -> d
             continue
         if _receipt_agent(receipt) not in ended:
             continue
-        if _tally_drain(config, path, tally) in {None, "delivered"}:
+        if _tally_drain(config, path, tally) in {None, "delivered", "recipient-archived"}:
             # Nothing waits there now: a delivered receipt needs no further visit.
             forget_held_receipt(config, path)
     return tally
@@ -1064,9 +1064,11 @@ def _sweep_receipt(config: McpRuntimeConfig, path: Path) -> str | None:
     except ValueError as error:
         logger.warning("A held-message sweep could not read receipt %s: %s.", path, error)
         return None
-    if not _receipt_needs_drain(receipt):
-        return None
+    closed = receipt is not None and receipt_is_closed(receipt)
+    if closed or not _receipt_needs_drain(receipt):
+        return "recipient-archived" if closed else None
     assert receipt is not None, "a drainable receipt was read"
+    ref = held_seat_ref(path, receipt)
     try:
         result = drain_held(config, path, receipt)
     except Exception as error:
@@ -1075,14 +1077,16 @@ def _sweep_receipt(config: McpRuntimeConfig, path: Path) -> str | None:
         logger.warning(
             "A held-message drain of agent %s failed: %r.", _receipt_agent(receipt), error
         )
-        _refresh_waiting_count(path)
+        _refresh_waiting_count(ref)
         return "still-held"
     outcome = result.get("outcome")
+    if outcome in {"recipient-archived", "recipient-generation-closed"}:
+        return str(outcome)
     if outcome in {"delivered", "opened"}:
-        _record_sweep_outcome(path, result)
+        apply_drain_to_receipt(path, result, expected=ref)
         return "delivered"
     if outcome in {"recipient-gone", "seat-lost", "partially-delivered"}:
-        _record_sweep_outcome(path, result)
+        apply_drain_to_receipt(path, result, expected=ref)
     else:
         if outcome != "nothing-waiting" and "permissionPending" not in result:
             # A drain that paused - the host unreachable, the resume unconfirmed, the
@@ -1094,7 +1098,7 @@ def _sweep_receipt(config: McpRuntimeConfig, path: Path) -> str | None:
                 _receipt_agent(receipt),
                 result.get("detail") or outcome or "the drain did not complete",
             )
-        _refresh_waiting_count(path)
+        _refresh_waiting_count(ref)
     return "still-held"
 
 
@@ -1114,7 +1118,9 @@ def _stage_and_record_ends(
     return rows, endpoints
 
 
-def apply_drain_to_receipt(path: Path, result: dict[str, Any]) -> bool:
+def apply_drain_to_receipt(
+    path: Path, result: dict[str, Any], *, expected: HeldSeatRef | None = None
+) -> bool:
     """Write one drain's ends into the recipient's launch record; ``False`` when untouched.
 
     Ended messages gain their line (sender, time, how); an opened seat becomes running;
@@ -1129,6 +1135,15 @@ def apply_drain_to_receipt(path: Path, result: dict[str, Any]) -> bool:
         return False
     if current is None:
         return False
+    ref = expected or held_seat_ref(path, current)
+    try:
+        with open_held_store(ref) as transaction:
+            return _apply_drain_result(path, transaction.receipt, result)
+    except HeldSeatClosed:
+        return False
+
+
+def _apply_drain_result(path: Path, current: dict[str, Any], result: dict[str, Any]) -> bool:
     rows, endpoints = _stage_and_record_ends(current, result)
     if result.get("outcome") == "opened":
         current.update(
@@ -1157,19 +1172,3 @@ def apply_drain_to_receipt(path: Path, result: dict[str, Any]) -> bool:
     if rows and endpoints is not None:
         _clear_pending_lines(endpoints[0], endpoints[1], [str(row.get("id")) for row in rows])
     return True
-
-
-def _record_sweep_outcome(path: Path, result: dict[str, Any]) -> None:
-    apply_drain_to_receipt(path, result)
-
-
-def _refresh_waiting_count(path: Path) -> None:
-    try:
-        current = _read_receipt(path)
-    except ValueError:
-        return
-    if current is None:
-        return
-    recount_waiting_for(current)
-    with suppress(OSError):
-        _write_receipt(path, current)

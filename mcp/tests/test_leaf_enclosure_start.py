@@ -150,6 +150,20 @@ class LeafEnclosureStartCommandTests(unittest.TestCase):
                 status, output, _order = self.run_command(sent, start)
                 self.assertEqual((status, json.loads(output)), (1, {"ok": False, "error": error}))
 
+    def test_advisory_survives_the_child_without_refusing_the_start(self) -> None:
+        expected = {"ok": True, "briefsProblem": "The memory does not ignore its briefs."}
+        status, output, _order = self.run_command(
+            request_of(self.loaded), {**expected, "state": "started"}
+        )
+        self.assertEqual((status, json.loads(output)), (0, expected))
+        with patch.object(
+            leaf_enclosure_start,
+            "_run_child",
+            return_value=SimpleNamespace(returncode=0, stdout=output.encode(), stderr=b""),
+        ):
+            projected = leaf_enclosure_start.start_leaf_enclosure_in_child(self.loaded, IDENTITY)
+        self.assertEqual(projected, expected)
+
     def test_native_stale_recovery_survives_the_child_and_both_entry_points(self) -> None:
         # The canned findings never consult the contract; it is scaffolding the
         # signature requires, like the SimpleNamespace context beside it.

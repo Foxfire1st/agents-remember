@@ -1,6 +1,6 @@
 """Card record states for ``read_ar_files`` (MIK-R109 rule 1).
 
-A read names where a thing is and does not carry it: for each requested
+The card part of the read names where the card is: for each requested
 source path the tool answers the governing card's location, the count of the
 card's records by state, and — only for records whose state asks the caller
 to act — the text ID, kind, state and card heading of each.

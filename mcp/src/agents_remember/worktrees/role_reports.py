@@ -17,11 +17,16 @@ from typing import Any
 
 from agents_remember.cli.role_handover_file import HANDOVER_FILE_SUFFIX
 from agents_remember.cli.role_instruction_links import relative_destinations
-from agents_remember.cli.role_message_files import MESSAGES_LINK
+from agents_remember.cli.role_message_files import (
+    MESSAGES_DIRECTORY,
+    MESSAGES_LINK,
+    leaf_messages_folder,
+)
 from agents_remember.errors import AgentsRememberError, AuthorityError
 from agents_remember.kernel.atomic_write import atomic_replace
 from agents_remember.kernel.sidecar_pairing import confine_non_symlink_rel
 from agents_remember.memory_quality.style.citations.model import code_span_texts
+from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
 from agents_remember.worktrees.role_handover_locator import (
     locator_directory,
     locator_root,
@@ -63,11 +68,11 @@ def collect_report_folder(
         paths, size = _collection_inventory(source)
         _prune_file_state(source, paths, file_state, dry_run=dry_run)
         for path in paths:
-            if dry_run:
-                continue
             relative = path.relative_to(source).as_posix()
             target = destination / relative
             _check_target(target)
+            if dry_run:
+                continue
             stamps = {"source": _file_stamp(path), "canonical": _file_stamp(target)}
             if file_state is not None and file_state.get(relative) == stamps:
                 continue
@@ -146,9 +151,20 @@ def _file_digest(path: Path) -> str:
 
 
 def _check_target(target: Path) -> None:
-    if any(ancestor.is_symlink() for ancestor in (target, *target.parents)):
+    if any(ancestor.is_symlink() for ancestor in (*reversed(target.parents), target)):
         raise RoleReportCollectionError(
             f"Canonical report target {target} contains a link; reconcile it before collection"
+        )
+    if any(ancestor.exists() and not ancestor.is_dir() for ancestor in target.parents):
+        raise RoleReportCollectionError(
+            f"Canonical report target {target} has a parent that is not a directory"
+        )
+    if target.exists() and not target.is_file():
+        raise RoleReportCollectionError(f"Canonical report target {target} is not a regular file")
+    existing_parent = next((parent for parent in target.parents if parent.exists()), None)
+    if existing_parent is not None and not os.access(existing_parent, os.W_OK | os.X_OK):
+        raise RoleReportCollectionError(
+            f"Canonical report directory {existing_parent} cannot be written"
         )
 
 
@@ -297,6 +313,18 @@ def collect_group_reports(contract: WorktreeContract, *, dry_run: bool) -> dict[
     return result
 
 
+def canonical_group_messages(contract: WorktreeContract) -> Path:
+    if contract.kind == "series":
+        return contract.task_root / "notes" / MESSAGES_DIRECTORY
+    leaf = resolve_terminal_leaf_doc(contract.task_root, contract.leaf_id)
+    if leaf is None:
+        raise AuthorityError(
+            f"No leaf document for {contract.leaf_id!r} identifies the canonical messages folder"
+        )
+    path, _document = leaf
+    return leaf_messages_folder(path.parent, path.name)
+
+
 def _remove_group_locators(contract: WorktreeContract, *, dry_run: bool) -> dict[str, object]:
     """Remove the launches' locators of this group's role folders, and only those aliases.
 
@@ -329,6 +357,10 @@ def _remove_group_locators(contract: WorktreeContract, *, dry_run: bool) -> dict
     }
 
 
+def remove_group_report_locators(contract: WorktreeContract) -> None:
+    _remove_group_locators(contract, dry_run=False)
+
+
 def remove_group_role_folders(
     contract: WorktreeContract, *, dry_run: bool
 ) -> dict[str, dict[str, object]]:
@@ -348,9 +380,8 @@ def remove_group_role_folders(
             "would_remove" if dry_run else "removed": present,
             "reason": None if present else "already-absent",
         }
-    # MIK-R117: cleanup of a workspace removes the messages link. No cleanup
-    # deletes a message file: a real directory or file at the link's name is
-    # left alone and reported.
+    # Directory-only sprint archive retirement unlinks the message alias.
+    # Whole-folder terminal reclamation preserves real messages before removal.
     link = contract.worktree_group / MESSAGES_LINK
     if link.is_symlink():
         if not dry_run:

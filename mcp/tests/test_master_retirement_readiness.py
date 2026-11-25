@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -24,6 +25,7 @@ from unittest.mock import patch
 
 import anyio
 import pytest
+from agents_remember.application import worktree_tools
 from agents_remember.application.agent_binding import AgentBinding
 from agents_remember.application.task_docs.task_doc_publication import run_task_doc_call
 from agents_remember.kernel.file_lock import lock_path_for
@@ -33,6 +35,7 @@ from agents_remember.worktrees import task_retirement as readiness
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     LifecycleLocatorObservation,
     lifecycle_operation_locator_path,
+    publish_new_lifecycle_operation_location,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location_errors import (
     LifecycleOperationLocationError,
@@ -45,12 +48,18 @@ from agents_remember.worktrees.sync_transaction_state import (
     SyncSideRecord,
     sync_operation_path,
 )
-from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
+from agents_remember.worktrees.worktree_contract import (
+    WorktreeContract,
+    contract_publication_text,
+    write_contract,
+)
 from lifecycle_enclosure_test_support import byte_tree
+from test_closeout_queue import MASTER_A, QueueFixture
 from test_master_retirement import World, _historical_operation
 from test_task_execution_topology import REPOSITORY
 from test_worktree_start_preview import LEAF, MASTER, REPO, PreviewFixture
 from test_worktree_support import commit_file, git, init_repo
+from transaction_only_worktree_delivery_test_support import _public_config
 
 pytestmark = pytest.mark.integration
 
@@ -729,3 +738,94 @@ def test_the_repositorys_own_checkout_is_nobodys_leaf_worktree(world):
     facts = _facts(world)
     assert any("records the repository's own checkout" in fact for fact in facts), facts
     assert any("which is the master's own line" in fact for fact in facts), facts
+
+
+def test_nonforced_abandon_removes_unlisted_task_folder_contents(paired_world) -> None:
+    world = paired_world
+    started = world.start(dry_run=False)
+    assert started.structuredContent is not None and started.structuredContent["ok"], started
+    path = Path(started.structuredContent["nextArgs"]["contract_path"])
+    group = readiness.load_contract(path).worktree_group
+    (group / "reference").mkdir(exist_ok=True)
+    (group / "reference" / "copied.md").write_text("copy", encoding="utf-8")
+    (group / "unlisted").write_text("working file", encoding="utf-8")
+
+    result = anyio.run(world._call, "worktree_abandon", {"contract_path": str(path)})
+
+    assert not result.isError and result.structuredContent is not None
+    assert result.structuredContent["ok"] and not group.exists(), (
+        f"abandoned leaf folder was not fully removed: {result.structuredContent}"
+    )
+    assert group.parent.is_dir()
+
+
+def test_series_abandon_removes_unlisted_task_folder_contents(tmp_path: Path) -> None:
+    fixture = QueueFixture(tmp_path, atomic_a=True)
+    child = fixture.contracts[MASTER_A]
+    # The series operation starts with a closed child, including absent Git resources.
+    # Set up that fixture directly so a separate child transition is not part of this proof.
+    assert child.memory_repo_path is not None and child.memory_worktree is not None
+    for repo, worktree, branch in (
+        (child.code_repo_path, child.code_worktree, child.code_work_branch),
+        (child.memory_repo_path, child.memory_worktree, child.memory_work_branch),
+    ):
+        git(repo, "worktree", "remove", "--force", str(worktree))
+        git(repo, "branch", "-D", branch)
+    shutil.rmtree(child.worktree_group)
+    write_contract(child.contract_path, replace(child, cleanup="abandoned"))
+    series = readiness.load_contract(fixture.tasks / "master-a" / "series-contract.md")
+    master = read_task_doc(series.task_root / "task.json")
+    master = master.model_copy(
+        update={
+            "status": "abandoned",
+            "subTasks": [row.model_copy(update={"status": "abandoned"}) for row in master.subTasks],
+        }
+    )
+    write_task_doc(series.task_root, master)
+    require_series_children_retired(series)
+    group = series.worktree_group
+    (group / "unlisted").write_text("working file", encoding="utf-8")
+
+    result = worktree_tools.worktree_abandon_tool(
+        fixture.cfg, contract_path=series.contract_path.as_posix()
+    )
+
+    assert result["ok"], json.dumps(result, default=str)
+    assert not group.exists(), f"abandoned series folder was not fully removed: {result}"
+    assert child.contract_path.is_file()
+    assert group.parent.is_dir()
+
+
+def test_series_cleanup_removes_unlisted_task_folder_contents(world, tmp_path: Path) -> None:
+    # The existing fixture establishes merged series branches and its completed master.
+    series = replace(world.series(), cleanup="pending")
+    write_contract(series.contract_path, series)
+    write_task_doc(
+        world.tasks / "sprint",
+        world.sprint().model_copy(update={"integrationBranch": series.code_source_branch}),
+    )
+    child = _leaf(
+        world,
+        series,
+        cleanup="completed",
+        memory_source_branch=series.memory_work_branch,
+        memory_work_branch="leaf-l1",
+    )
+    require_series_children_retired(series)
+    publish_new_lifecycle_operation_location(
+        series, contract_text=contract_publication_text(series.contract_path, series)
+    )
+    config = _public_config(tmp_path, series)
+    group = series.worktree_group
+    (group / "unlisted").write_text("working file", encoding="utf-8")
+    arguments = {"contract_path": series.contract_path.as_posix()}
+
+    preview = worktree_tools.worktree_cleanup_tool(config, dry_run=True, **arguments)
+    assert preview["ok"], json.dumps(preview, default=str)
+    assert (group / "unlisted").is_file()
+    result = worktree_tools.worktree_cleanup_tool(config, **arguments)
+
+    assert result["ok"], json.dumps(result, default=str)
+    assert not group.exists(), f"finished series folder was not fully removed: {result}"
+    assert child.contract_path.is_file()
+    assert group.parent.is_dir()

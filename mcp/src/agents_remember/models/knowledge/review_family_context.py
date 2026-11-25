@@ -50,6 +50,7 @@ from agents_remember.models.knowledge.review_family_source import (
     source_locator_state,
 )
 from agents_remember.models.knowledge.revision_selection import ReviewRevisionSelection
+from agents_remember.models.knowledge_files.record_state import RecordState
 
 __all__ = [
     "FAMILY_CONTEXT_JOIN_KEY",
@@ -120,16 +121,15 @@ class ReviewFamilyGuarantee(KnowledgeModel):
     The guarantee is the family's own claim about a set of invariant revisions holding together; it
     is never assembled from its members and it is never rewritten when one of them changes, so this
     value is one immutable family revision's text with its own display version, provenance and
-    payload seal. ``state_at_origin`` and ``acceptance_ref`` travel together because an accepted
-    origin without the authority that accepted it would be an acceptance nobody recorded.
+    payload seal. ``state`` is the revision's derived state in the tree it was read from: proposed,
+    reviewed or consolidated (:mod:`agents_remember.models.knowledge_files.record_state`).
     """
 
     family_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     revision_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     display_version: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     joint_guarantee: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    state_at_origin: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    acceptance_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
+    state: RecordState
     provenance: dict[str, object] = Field(default_factory=dict)
     payload_digest: str = Field(pattern=SHA256_PATTERN)
 

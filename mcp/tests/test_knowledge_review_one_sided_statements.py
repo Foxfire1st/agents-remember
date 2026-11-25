@@ -3,7 +3,8 @@
 These cases drive the **real** adapter (:func:`compose_review`) over two **real** datasets, each
 built through the text-backed builder with whole extra invariants: the after snapshot holds an
 invariant the before snapshot does not, and the before snapshot holds one the after snapshot
-does not, while a third extra is shared proposed on one side and accepted on the other. Those
+does not, while a third extra is shared: proposed in the before tree and reviewed in the after
+tree, whose history file records its review. Those
 snapshots are what an addition and a removal *are*, and the reviewed subject is selected from
 each side in turn. Nothing here substitutes a payload or edits a stored row: every identity a
 case asserts against is the projection's own UUID for the text it wrote.
@@ -13,18 +14,19 @@ The load-bearing properties, one case each:
 * an **addition** serves the complete after statement beside an ``absent`` before side that names
   itself, with the comparison's own ``side_absence:before:selector_absent`` travelling beside it;
 * a **removal** serves the complete before statement beside an ``absent`` after side, symmetrically;
-* a field row whose **one side recorded no value** keeps the other side's value and reports the other
-  as absent -- the two are different facts and the row says which is which;
+* a field row keeps **each side's own value**: one revision whose derived state differs between the
+  trees (proposed before, reviewed after) is one ``lifecycle`` row carrying both, and its seal,
+  which covers no derived state, is not reported as changed;
 * a field whose value is **structured rather than text** carries the pane's own text projection of
   each side's value instead of ``None``, because ``None`` on a field row is the model's own spelling
   of "the field was absent there": a present value is never displayed as an absent one, and the two
   sides of a changed structured field stay as distinguishable as the comparison says they are;
 * a one-sided **record** reports its change through its coverage and keeps the field roster empty, so
-  a one-sided statement is never dressed up as nine field differences.
+  a one-sided statement is never dressed up as eight field differences.
 
-The statements and states these cases measure are the contract the dashboard's statement area
-renders; the renderer's own cases live in
-``dashboard/src/panels/review/KnowledgeStatements.test.tsx`` and use these same values.
+The dashboard's statement area renders the same present/absent contract. Its tests in
+``dashboard/src/panels/review/KnowledgeStatements.test.tsx`` cover the renderer with independently
+authored fixture text.
 """
 
 from __future__ import annotations
@@ -40,7 +42,6 @@ from agents_remember.application.knowledge_review import (
 from agents_remember.application.review_statement_sides import (
     structured_value_text,
 )
-from agents_remember.models.knowledge.base import KnowledgeState
 from agents_remember.models.knowledge.read import (
     InvariantIdentitySeed,
     KnowledgeReadSeed,
@@ -62,9 +63,9 @@ pytestmark = pytest.mark.evidence_unit
 
 # The authored identities and words. Every id is drawn once in the builder, so a case asserts against
 # the exact identity the review was asked for rather than against a shape that could be anything.
-# The acceptance reference is derived by the projection (``text-knowledge:<record path>``) rather
-# than stored: text records carry no authored acceptance event, so the accepting side's value is
-# the projection's own sentence, present only where the record is accepted.
+# The shared record keeps its authored revision on both sides. The after tree records a review fact
+# for that revision in closed history. The comparison reports one lifecycle row from proposed to
+# reviewed, and the authored seal stays the same.
 ADDED_LABEL = "candidate-only-refusal-record"
 ADDED_STATEMENT = "Every refused candidate write records the identity that refused it."
 REMOVED_LABEL = "retired-batch-obligation"
@@ -75,6 +76,7 @@ SHARED_APPLICABILITY = "Every recorded identity in this repository namespace."
 
 MASTER = "260921_complete-code-and-intent-review"
 LEAF = "260921-ICR-L6"
+REVIEWING_LEAF = "261112-FIX-L1"
 
 
 @dataclass(frozen=True)
@@ -96,7 +98,7 @@ def _extra(
     label: str,
     statement: str,
     *,
-    state_at_origin: KnowledgeState = "proposed",
+    reviewed_by: str | None = None,
 ) -> ExtraInvariantSeed:
     """One whole extra invariant with the shared words, under fresh caller identities."""
 
@@ -108,7 +110,7 @@ def _extra(
         applicability=SHARED_APPLICABILITY,
         conditions=CONDITIONS,
         exclusions=EXCLUSIONS,
-        state_at_origin=state_at_origin,
+        reviewed_by=reviewed_by,
     )
 
 
@@ -126,7 +128,7 @@ def pair(tmp_path_factory: pytest.TempPathFactory) -> OneSidedPair:
     added = _extra(ADDED_LABEL, ADDED_STATEMENT)
     removed = _extra(REMOVED_LABEL, REMOVED_STATEMENT)
     shared_before = _extra(SHARED_LABEL, SHARED_STATEMENT)
-    shared_after = _extra(SHARED_LABEL, SHARED_STATEMENT, state_at_origin="accepted")
+    shared_after = _extra(SHARED_LABEL, SHARED_STATEMENT, reviewed_by=REVIEWING_LEAF)
     # The shared record is one caller identity on both sides, so both trees project it to one
     # record; the added and removed records are different caller identities and never share one.
     shared_after = ExtraInvariantSeed(
@@ -137,7 +139,7 @@ def pair(tmp_path_factory: pytest.TempPathFactory) -> OneSidedPair:
         applicability=shared_after.applicability,
         conditions=shared_after.conditions,
         exclusions=shared_after.exclusions,
-        state_at_origin="accepted",
+        reviewed_by=REVIEWING_LEAF,
     )
     before = build_read_scope_fixture(
         root / "before", repository_id=namespace, extra_invariants=(removed, shared_before)
@@ -223,16 +225,14 @@ def test_a_removed_statement_renders_its_before_text_beside_a_named_absent_after
     assert "side_absence:after:selector_absent" in payload.limitations
 
 
-def test_a_field_row_keeps_the_side_that_recorded_a_value_and_names_the_side_that_did_not(
+def test_a_field_row_keeps_each_sides_value_for_a_state_that_changed(
     pair: OneSidedPair,
 ) -> None:
-    """One subject, two sides, and a field only one of them recorded a value for.
+    """One subject, two sides, and a field whose value differs between them.
 
-    The same revision identity is proposed in the before snapshot and accepted in the after one, so
-    the comparison reports the transition and each side's value for it: the acceptance reference is
-    the projection's own sentence, recorded only on the accepting side. The row is the whole point
-    -- dropping it, or printing the side that did record a value as blank, is what a one-sided
-    statement must not become.
+    The same revision identity is proposed in the before snapshot and reviewed in the after one,
+    whose history file records the review, so the comparison reports the transition with each
+    side's value. The seal covers only authored content, so it is no row: the revision is the same.
     """
 
     payload = review(pair, InvariantIdentitySeed(invariant_id=pair.shared_invariant_id))
@@ -246,17 +246,9 @@ def test_a_field_row_keeps_the_side_that_recorded_a_value_and_names_the_side_tha
     # the same value and no provenance row is reported: only the fields the sides genuinely
     # differ on are rows.
     rows = {(row.item_id, row.field): row for row in knowledge.field_changes}
-    assert set(rows) == {
-        (pair.shared_revision_id, "acceptance_ref"),
-        (pair.shared_revision_id, "lifecycle"),
-        (pair.shared_revision_id, "payload_digest"),
-    }
-    acceptance = rows[(pair.shared_revision_id, "acceptance_ref")]
-    assert acceptance.before_value is None
-    assert acceptance.after_value is not None
-    assert acceptance.after_value.startswith("text-knowledge:")
+    assert set(rows) == {(pair.shared_revision_id, "lifecycle")}
     lifecycle = rows[(pair.shared_revision_id, "lifecycle")]
-    assert (lifecycle.before_value, lifecycle.after_value) == ("proposed", "accepted")
+    assert (lifecycle.before_value, lifecycle.after_value) == ("proposed", "reviewed")
 
 
 def test_a_structured_field_value_is_rendered_as_its_own_text_and_never_as_an_absence() -> None:
@@ -279,10 +271,10 @@ def test_a_structured_field_value_is_rendered_as_its_own_text_and_never_as_an_ab
 def test_a_one_sided_record_is_reported_by_its_coverage_and_not_by_a_roster_of_field_rows(
     pair: OneSidedPair,
 ) -> None:
-    """An addition keeps its field roster empty, because nine rows would state nine differences.
+    """An addition keeps its field roster empty, because eight rows would state eight differences.
 
     The comparison reports a record only one snapshot holds through that item's coverage; widening it
-    into "every field changed" would turn one absence into nine, so the pane's roster stays empty and
+    into "every field changed" would turn one absence into eight, so the pane's roster stays empty and
     the statement sides carry the whole fact.
     """
 

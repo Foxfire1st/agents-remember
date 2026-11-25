@@ -8,6 +8,7 @@ from unittest import mock
 
 from agents_remember.application import worktree_tools
 from agents_remember.kernel.memory_cache import derive_memory_ledger
+from agents_remember.kernel.memory_ignore import BRIEFS_IGNORE_TEXT
 from agents_remember.worktrees.integration import integration_ref_transaction
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.integrate import (
@@ -28,6 +29,7 @@ from checkpoint_landing_test_support import (
     close_out_leaf,
     closeout_messages,
     commit_code,
+    committed_ignore,
     master_status,
     memory_repository,
     payload_text,
@@ -35,6 +37,7 @@ from checkpoint_landing_test_support import (
     set_master_status,
 )
 from test_closeout_queue import MASTER_B, QueueFixture
+from test_worktree_support import git
 
 
 class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
@@ -121,9 +124,29 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         self.assertEqual(result["integrated_memory_content_commit"], row.memory_commit)
 
     def test_a_master_line_that_merged_its_source_still_checkpoints(self) -> None:
+        self._unclosed_contract()
+        memory = memory_repository(self.series)
         first = accumulate_master_line(self.fixture, self.series, self.scratch, label="first")
         source = advance_source_line(self.series, self.scratch, label="source")
+        base = git(memory, "merge-base", first.memory_commit, source.memory_commit)
+        self.assertEqual(git(memory, "ls-tree", base, "--", ".gitignore"), "")
+        expected_ignore = b"/memory.md\n\n" + BRIEFS_IGNORE_TEXT.encode()
+        self.assertEqual(committed_ignore(memory, first.memory_commit), expected_ignore)
+        self.assertEqual(committed_ignore(memory, source.memory_commit), b"/memory.md\n")
+
         absorb_source_into_master_line(self.series, self.scratch, label="source")
+        merged = rev(memory, self.series.memory_work_branch)
+        self.assertEqual(
+            git(memory, "rev-list", "--parents", "-n", "1", merged).split(),
+            [merged, first.memory_commit, source.memory_commit],
+        )
+        self.assertEqual(committed_ignore(memory, merged), expected_ignore)
+        with branch_checkout(
+            memory, self.series.memory_work_branch, self.scratch / "merged"
+        ) as tree:
+            ignored = git(tree, "check-ignore", "--no-index", "memory.md", "briefs/src.md")
+            self.assertEqual(ignored.splitlines(), ["memory.md", "briefs/src.md"])
+
         # The sync rebound the series contract it wrote; reload before touching its cells
         # so the journal it journaled survives the base update below.
         self.series = load_contract(self.series.contract_path)
@@ -135,14 +158,16 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         )
         write_contract(self.series.contract_path, self.series)
         last = accumulate_master_line(self.fixture, self.series, self.scratch, label="last")
-        memory = memory_repository(self.series)
         memory_tip = rev(memory, self.series.memory_work_branch)
+        code_tip = rev(self.series.code_repo_path, self.series.code_work_branch)
 
         preview = checkpoint(self.fixture, self.series, dry_run=True)
         self.assertEqual(preview["state"], "would-checkpoint", preview)
+        self.assertEqual(rev(memory, self.series.memory_source_branch), source.memory_commit)
         result = checkpoint(self.fixture, self.series, dry_run=False)
 
         self.assertEqual(result["state"], "checkpointed", result)
+        self.assertEqual(rev(self.series.code_repo_path, self.series.code_source_branch), code_tip)
         self.assertEqual(rev(memory, self.series.memory_source_branch), memory_tip)
         rows = derive_memory_ledger(memory, memory_tip).rows
         for pair in (first, source, last):

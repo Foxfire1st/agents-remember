@@ -61,7 +61,7 @@ def _product_node(tmp_path: Path) -> NodeRuntime:
 
 def _no_product_node() -> NodeRuntime:
     raise PaseoRuntimeFailure(
-        "node_platform_unsupported", "node", "Node 26.11.1 for the host supports Linux x86_64"
+        "node_platform_unsupported", "node", "Node 26.13.1 for the host supports Linux x86_64"
     )
 
 

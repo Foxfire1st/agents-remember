@@ -58,14 +58,14 @@ More folders appear when the product is used:
 | `<coordination-root>/runtime/review-answers/`, `runtime/review-memos/`, `runtime/changeset-ranges/` and `runtime/capture-indexes/` | what the product keeps for the review page: prepared answers, memos, the ranges of change sets and the indexes of kept comparisons | the product's own processes |
 | `<coordination-root>/controlplane/` | state that the product keeps between calls, among them `attention-notices.json` and the folder `lifecycle-enclosures/` | the product's own processes |
 | `<coordination-root>/temp/tool-reports/<tool>/` | the full result of a tool call as one JSON file | the tool |
-| `<coordination-root>/notes/reports/paseo-native-executions/` | the receipts of role starts that belong to no task, for example those of the Bootstrap role agent | `role_start` |
+| `<coordination-root>/notes/reports/paseo-native-executions/` | the receipts of role starts that belong to no task, for example those of the Bootstrap role agent | `role_start`; `runtime_install` with `reconcile_shared_held_stores=true` writes waiting messages into closed seats' receipts |
 | `<coordination-root>/benchmarks/` | the benchmark material; see [Benchmarks](#benchmarks) | `runtime_install` with `include_benchmarks=true` |
 
 ## What `runtime_install` writes, removes and leaves
 
-The tool takes five arguments. This page names `dry_run` and `include_benchmarks`;
-[Tool details](../tool-details.md#runtime_install) describes all five, among them
-`install_provider_deps`, `no_cache` and `experiment`.
+The tool takes six arguments. This page names `dry_run` and `include_benchmarks`;
+[Tool details](../tool-details.md#runtime_install) describes all six, among them
+`install_provider_deps`, `no_cache`, `experiment` and `reconcile_shared_held_stores`.
 
 **It writes:**
 
@@ -87,8 +87,10 @@ The tool takes five arguments. This page names `dry_run` and `include_benchmarks
 - a file under `<coordination-root>/providers/` that the package does not carry, except in
   `data/`, and with `install_provider_deps=false` also except in `runners/`.
 
-**It leaves alone** the memory repositories, the task documents, the enclosures and the notes. It
-writes neither the user settings file nor the `paseoRuntime` block of the settings file.
+**It leaves alone** the memory repositories, the task documents, the enclosures and, by default,
+the notes; with `reconcile_shared_held_stores=true`, it writes waiting messages into closed
+seats' launch receipts under `notes/reports/paseo-native-executions/`. It writes neither the
+user settings file nor the `paseoRuntime` block of the settings file.
 
 With `dry_run=true` the call changes nothing. It counts what it would create, copy and remove,
 says what it would do for the host, and writes no result file.
@@ -141,7 +143,7 @@ Agents Remember keeps its own files in the host's home under `<home>/agents-reme
 | `role-agents.json` | each registered role agent's role, task and report path; a closed session keeps its record | Agents Remember's Python registration and dashboard reconciliation |
 | `host-activity.json` | the host activity the dashboard reads, including `closed` for a resumable session and `ended` with `archivedAt` for an archive | the plug-in |
 | `acp-providers.json` | which harnesses the host runs over the Agent Client Protocol | the plug-in |
-| `provider-limits.json` | the provider limits: for each usage report of the host that shows a used-up limit of a [model provider](../concepts.md#model-provider) account, the time work may resume; and for each role agent, the reports that its last usage read named | the product |
+| `provider-limits.json` | active limits for each [model provider](../concepts.md#model-provider) account report, their last recheck attempts, and the reports last read for each seat. The product records when an early clear releases a seat so the plug-in can resume pending work. | the product |
 | `turn-ends.jsonl` | one JSON line for each message the plug-in sent back to an agent, each line it sent to a parent agent and each turn end it left alone | the plug-in |
 | `turn-ends.1.jsonl` | the earlier `turn-ends.jsonl`; the plug-in turns the file over at 2 MiB | the plug-in |
 | `turn-ends.error.json` | a failed write of `turn-ends.jsonl`, with its time and error | the plug-in |

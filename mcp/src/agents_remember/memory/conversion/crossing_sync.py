@@ -23,7 +23,9 @@ left to plain Git, and :func:`cross` refuses to be asked about one.
    the own side's paired code commit on every side. (The commit route's converted base,
    ``base.GitBaseConverter``, uses the base's own ``Code-Commit`` instead; the two differ only for
    rule 2 fallback cards -- see there.)
-3. **Merge structurally** (:mod:`.crossing`).
+3. **Merge structurally** (:mod:`.crossing`). Records merge without their ``writer``; each record
+   stored cleanly then takes the stamp of the line whose record it is, or the product's stamp where
+   it combines both lines' edits (:mod:`.crossing_writer`).
 4. **Conflicts** are returned for the curator: overlapping authored edits and reference-number
    collisions. A record conflict is resolved through the writer; its row belongs to the leaf's
    history file, or on a master line to ``<task-id>-crossing-<n>``, which the plan names.
@@ -49,7 +51,8 @@ from agents_remember.memory.conversion.convert import (
     convert_memory,
     route_of,
 )
-from agents_remember.memory.conversion.crossing import Conflict, merge_trees
+from agents_remember.memory.conversion.crossing import Conflict
+from agents_remember.memory.conversion.crossing_writer import merge_with_writers, product_write
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
 from agents_remember.models.knowledge_files.canonical import canonical_text, parse_json
 from agents_remember.models.knowledge_files.documents import (
@@ -77,10 +80,15 @@ class CrossingError(RuntimeError):
 
 @dataclass(frozen=True)
 class HistoryOwner:
-    """Who performs the sync: a leaf (its ID) or a master line (its task ID)."""
+    """Who performs the sync: a leaf (its ID) or a master line (its task ID), and when.
+
+    ``at`` is the time of the product's stamp on a record the merge combines: the later commit time
+    of the two lines, so the plan is a function of its inputs. Without it no record may combine.
+    """
 
     kind: Literal["leaf", "master"]
     id: str
+    at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -308,16 +316,6 @@ def cross(
         name: _structural_files(files, destination.git_owned_paths)
         for name, files in converted.items()
     }
-    try:
-        merged = merge_trees(
-            *(modeled[name] for name in _SIDE_NAMES), repository=destination.repository
-        )
-    except (RuntimeError, ValueError) as error:
-        raise CrossingError("merge", str(error)) from error
-    plan = CrossingPlan(files=merged.files, conflicts=merged.conflicts)
-    for path in merged.conflicted_paths:
-        base_bytes, own_bytes, incoming_bytes = (modeled[name].get(path) for name in _SIDE_NAMES)
-        plan.conflict_versions[path] = (base_bytes, own_bytes, incoming_bytes)
     record_owner = None
     if owner is not None:
         record_owner = (
@@ -325,13 +323,39 @@ def cross(
             if owner.kind == "leaf"
             else next_crossing_owner(owner.id, *converted.values(), destination.git_owned_paths)
         )
-        if owner.kind == "master" and _record_conflicts(merged.conflicted_paths):
-            # Rule 8 step 4: a master line has no leaf, so the resolved record's row goes into
-            # <task-id>-crossing-<n>.json. The file is opened here for the curator's row and
-            # closed by the sync in the merge commit itself.
-            plan.files[history_path(record_owner)] = canonical_text(
-                empty_history("crossing", record_owner).to_document()
-            ).encode("utf-8")
+    product = None
+    if owner is not None and record_owner is not None and owner.at is not None:
+        crossing_owner = (
+            record_owner
+            if owner.kind == "master"
+            else next_crossing_owner(owner.id, *converted.values(), destination.git_owned_paths)
+        )
+        product = product_write(owner.kind, owner.id, crossing_owner, modeled["own"], owner.at)
+    try:
+        merged = merge_with_writers(
+            *(modeled[name] for name in _SIDE_NAMES),
+            repository=destination.repository,
+            product=product,
+        )
+    except (RuntimeError, ValueError) as error:
+        raise CrossingError("merge", str(error)) from error
+    plan = CrossingPlan(files=merged.files, conflicts=merged.conflicts)
+    for path in merged.conflicted_paths:
+        base_bytes, own_bytes, incoming_bytes = (modeled[name].get(path) for name in _SIDE_NAMES)
+        plan.conflict_versions[path] = (base_bytes, own_bytes, incoming_bytes)
+    if (
+        owner is not None
+        and record_owner is not None
+        and owner.kind == "master"
+        and _record_conflicts(merged.conflicted_paths)
+        and history_path(record_owner) not in plan.files
+    ):
+        # Rule 8 step 4: a master line has no leaf, so the resolved record's row goes into
+        # <task-id>-crossing-<n>.json. The file is opened here for the curator's row (or already
+        # holds the product's rows) and is closed by the sync in the merge commit itself.
+        plan.files[history_path(record_owner)] = canonical_text(
+            empty_history("crossing", record_owner).to_document()
+        ).encode("utf-8")
     plan.report = {
         "version": version,
         "converted": [

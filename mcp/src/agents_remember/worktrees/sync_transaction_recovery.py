@@ -12,6 +12,7 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import head_commit, is_ancestor
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.services import WorktreeServicesUnboundError, worktree_services
+from agents_remember.worktrees.sync_briefs import refresh_synced_memory_briefs
 from agents_remember.worktrees.sync_source_strategy import (
     source_strategy,
     sync_log_entry,
@@ -99,7 +100,11 @@ def finalize_sync(
     _retire_restored_stashes(record)
     remove_temporary_worktrees(record)
     delete_authority(record)
-    return with_recomputed_worklist(completed_sync_result(current, record, fetch), current)
+    result = completed_sync_result(current, record, fetch)
+    briefs_problem = refresh_synced_memory_briefs(record, current.coordination_root)
+    if briefs_problem is not None:
+        result.payload["briefsProblem"] = briefs_problem
+    return with_recomputed_worklist(result, current)
 
 
 def with_recomputed_worklist(

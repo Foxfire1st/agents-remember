@@ -20,6 +20,10 @@ The lookups:
 * :meth:`KnowledgeIndex.invariants_without_proof` -- the live invariants no proof names (MIK-R28
   rule 5);
 * :meth:`KnowledgeIndex.record_ids` -- every record ID of one kind (MIK-R25's per-side currentness);
+* :meth:`KnowledgeIndex.standing` -- record -> its derived state and the writer of its current
+  revision, stored by the build, so no history file is read;
+* :meth:`KnowledgeIndex.writer_revisions` -- every revision a file names, with its writer, and each
+  record's current revision: the writer table's input, so no history file is read;
 * :meth:`KnowledgeIndex.entries_under`, :meth:`KnowledgeIndex.entries_in_directory`,
   :meth:`KnowledgeIndex.live_entry_paths_under`, :meth:`KnowledgeIndex.links_to_path` and
   :meth:`KnowledgeIndex.records_of_kind` -- the reader's directory, path and record lookups
@@ -37,8 +41,14 @@ from typing import Any, Literal
 import apsw
 
 from agents_remember.memory.knowledge.connection import open_read_only_database
-from agents_remember.memory.knowledge_index.projection import INDEX_REPOSITORY_ID
+from agents_remember.memory.knowledge_index.projection import INDEX_REPOSITORY_ID, RETIRED_STATUS
+from agents_remember.memory.knowledge_index.record_standing import (
+    UNKNOWN_WRITER,
+    RecordStanding,
+    RecordWriter,
+)
 from agents_remember.memory.knowledge_index.schema import INDEX_FORMAT
+from agents_remember.memory.knowledge_index.writer_table import LiveRevision, NamedRevision
 from agents_remember.models.knowledge_files.sidecars import ROOT_ROUTE_PATH
 
 IndexCompleteness = Literal["complete", "partial"]
@@ -404,6 +414,58 @@ class KnowledgeIndex:
     def record(self, record_id: str) -> Answer[Record | None]:
         return self._answer(self._record(record_id))
 
+    def standing(self, record_id: str) -> Answer[RecordStanding | None]:
+        """The record's derived state and its current revision's writer, by one row lookup."""
+
+        rows = self._rows(
+            "SELECT id, revision, state, writer_role, writer_harness, writer_model "
+            "FROM ix_record WHERE id = ?",
+            (record_id,),
+        )
+        return self._answer(_standing(rows[0]) if rows else None)
+
+    def standings(self, record_ids: Sequence[str]) -> Answer[dict[str, RecordStanding]]:
+        """The standing of every record of ``record_ids`` the tree holds, by one query.
+
+        A page of rows asks once for all its records; an ID the tree does not hold is absent.
+        """
+
+        wanted = sorted(set(record_ids))
+        if not wanted:
+            return self._answer({})
+        rows = self._rows(
+            "SELECT id, revision, state, writer_role, writer_harness, writer_model "
+            "FROM ix_record WHERE id IN (SELECT value FROM json_each(?))",
+            (json.dumps(wanted),),
+        )
+        return self._answer({str(row[0]): _standing(row) for row in rows})
+
+    def writer_revisions(
+        self,
+    ) -> Answer[tuple[tuple[NamedRevision, ...], dict[str, LiveRevision]]]:
+        """Every revision a file names with its writer, and each record's current revision."""
+
+        named = tuple(
+            NamedRevision(
+                record=str(record),
+                revision=int(revision),
+                writer=None if role is None else (str(role), str(harness), str(model)),
+                seat=None if seat is None else str(seat),
+                reviewed=bool(reviewed),
+            )
+            for record, revision, role, harness, model, seat, reviewed in self._rows(
+                "SELECT record, revision, writer_role, writer_harness, writer_model, seat, "
+                "reviewed FROM ix_revision"
+            )
+        )
+        live = {
+            str(record): LiveRevision(int(revision), status == RETIRED_STATUS)
+            for record, revision, status in self._rows(
+                "SELECT id, revision, status FROM ix_record WHERE revision IS NOT NULL"
+            )
+        }
+        return self._answer((named, live))
+
     def record_ids(self, kind: str) -> Answer[tuple[str, ...]]:
         """Every record ID of one kind in the tree, sorted (the reviewer's per-side currentness)."""
 
@@ -535,6 +597,18 @@ class KnowledgeIndex:
             status=str(row[4]),
             document=json.loads(row[5]),
         )
+
+
+def _standing(row: Sequence[Any]) -> RecordStanding:
+    role, harness, model = row[3], row[4], row[5]
+    return RecordStanding(
+        id=str(row[0]),
+        revision=None if row[1] is None else int(row[1]),
+        state=row[2],
+        writer=UNKNOWN_WRITER
+        if role is None
+        else RecordWriter(str(role), str(harness), str(model)),
+    )
 
 
 def _entry(row: Sequence[Any]) -> Entry:

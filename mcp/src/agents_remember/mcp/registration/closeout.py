@@ -47,10 +47,7 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         dry_run: bool = False,
         leaf_id: str | None = None,
     ) -> dict[str, Any]:
-        """Land one verified series code commit with its memory content through a durable direct-
-        landing generation, recovering through worktree_operation_control. States: landed,
-        would-land, refused. Answers the state, what blocks and the next call; the whole result
-        is in the log file. Reference: docs/reference/mcp-tools.md."""
+        """Land a grant-gated leaf's verified series code commit and memory via a durable generation (recover via worktree_operation_control). States: landed, would-land, refused. Docs: docs/reference/mcp-tools.md."""
         return tools.direct_landing_payload(
             config,
             import_module(
@@ -73,17 +70,7 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         task_document_ref: TaskDocumentRef,
         action: str,
     ) -> dict[str, Any]:
-        """Give, take back, or reclaim direct-execution grants, as an architect.
-
-        A leaf runs directly on its master's branch only while a grant for
-        it exists, and only a caller bound to the architect role may call
-        this. ``action`` is ``give``, ``revoke`` or ``reclaim``; giving a
-        grant that exists, or taking back one that does not, changes nothing
-        and says so. Reclaim takes back one task's grants that no leaf still
-        requires. The grant is read at the moment of every call.
-        MUTATING (grant record only).
-        Reference: docs/reference/mcp-tools.md.
-        """
+        """Architect-only: give, revoke, or reclaim direct-execution grants so a leaf can run on its master's branch. give/revoke are idempotent; reclaim clears unneeded grants. MUTATING (grant record only). Docs: docs/reference/mcp-tools.md."""
         return tools.direct_execution_grant_payload(config, task_document_ref, action)
 
 
@@ -95,12 +82,7 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         code_commit_message: str | None = None,
         memory_commit_message: str | None = None,
     ) -> dict[str, Any]:
-        """Preview a worktree closeout without mutating: the count of changed code paths and
-        proposed commits with subjects up to the list bound, and what blocks (states:
-        would-closeout, blocked, closeout-gate-blocked). A preview is a read; the whole result
-        is in the log file. On converted memory, the invariant gate judges the exact candidate
-        trees; knowledge-gate-refused carries its findings.
-        Reference: docs/reference/mcp-tools.md."""
+        """Read-only preview of worktree closeout: changed path count, proposed commits, blockers, and invariant gate check (knowledge-gate-refused carries findings). States: would-closeout, blocked, closeout-gate-blocked. Docs: docs/reference/mcp-tools.md."""
         return tools.worktree_closeout_preview_payload(
             config,
             contract_path,
@@ -120,12 +102,7 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         dry_run: bool = False,
         corrective_dispositions: list[RedCatalogDisposition] | None = None,
     ) -> dict[str, Any]:
-        """Apply an approved worktree closeout in one call. States: closed, blocked,
-        closeout-gate-blocked. Returns the state reached and the next call. The whole result
-        is in the log file. Delivered-against-reviewed names same, different, or no review
-        recorded. On converted memory, the invariant gate judges the exact candidate trees.
-        A knowledge-gate-refused answer carries its findings.
-        Reference: docs/reference/mcp-tools.md."""
+        """Apply an approved worktree closeout in one call; judges candidate trees via the invariant gate (knowledge-gate-refused carries findings) and reports delivered-vs-reviewed status. States: closed, blocked, closeout-gate-blocked. Docs: docs/reference/mcp-tools.md."""
         return tools.worktree_closeout_apply_payload(
             config,
             contract_path,
@@ -146,12 +123,7 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         strategy: IntegrateStrategy = "ff-only",
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Land a task onto its target branch, ff-only or replay. Answers the state (integrated,
-        would-integrate, blocked, handover-gate-blocked), the commit, and cleanup with its
-        arguments as the next call.
-        A refusal names the unfinished step and the call that finishes it. Delivered-against-
-        reviewed names same, different, or no review recorded. Reference:
-        docs/reference/mcp-tools.md."""
+        """Land a closed-out task onto its target branch (ff-only or replay) and report delivered-vs-reviewed status. States: integrated, would-integrate, blocked, handover-gate-blocked. Docs: docs/reference/mcp-tools.md."""
         return tools.worktree_integrate_payload(
             config,
             contract_path,
@@ -166,7 +138,7 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         strategy: IntegrateStrategy = "ff-only",
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """PUBLISH the finished leaves of an unfinished series master; this call is not a pause. Pausing is a separate matter and is NOT this call: use worktree_pause to stop a master. States: checkpointed, would-checkpoint, blocked, handover-gate-blocked. Answers the state reached and the next call. Reference: docs/reference/mcp-tools.md."""
+        """PUBLISH finished leaves of an unfinished series master; not a pause (pausing is a separate matter and is NOT this call: use worktree_pause). States: checkpointed, would-checkpoint, blocked, handover-gate-blocked. Docs: docs/reference/mcp-tools.md."""
         return tools.worktree_checkpoint_landing_payload(
             config,
             contract_path,
@@ -182,9 +154,7 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         landed_memory_content_commit: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Record a commit the landing target already holds. States: recorded, already-recorded, would-record, blocked. Answers the state reached; a refusal
-        names the commit that is missing or elsewhere and what to do. Reference:
-        docs/reference/mcp-tools.md."""
+        """Record a commit already on the landing target. States: recorded, already-recorded, would-record, blocked. Docs: docs/reference/mcp-tools.md."""
         return tools.worktree_record_landing_payload(
             config,
             contract_path,
@@ -211,12 +181,7 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         dry_run: bool = False,
         caller: DeclaredCaller | None = None,
     ) -> dict[str, Any]:
-        """Retry, recover, resume, cancel, retire or supersede one direct-landing generation.
-        States: refused, or the controlled generation's status. Answers the state reached and the
-        next call; the whole result is in the log file. For closeout or integration, an absent
-        or matching journal record returns the replacement tool. When a record exists and its
-        generation differs, the response shows the requested and observed generations.
-        Reference: docs/reference/mcp-tools.md."""
+        """Control one direct-landing journal generation (retry, recover, resume, cancel, retire, supersede); closeout/integrate return their replacement tool or generation mismatch. States: refused or generation status. Docs: docs/reference/mcp-tools.md."""
         return tools.worktree_operation_control_payload(
             config,
             OperationControlRequest(
@@ -241,10 +206,7 @@ def _register_reclamation_command_tools(server: FastMCP, config: McpRuntimeConfi
     def worktree_cleanup(
         *, contract_path: str, dry_run: bool = False, teardown_providers: bool = True
     ) -> dict[str, Any]:
-        """Archive lifecycle evidence, then remove worktrees, merged branches, reports, logs and
-        the enclosure root once integrated. States: cleanup-completed, already-clean, would-cleanup,
-        blocked, provider-setup-running. Answers the state reached; a dry run with
-        blockers answers a blocked state. Reference: docs/reference/mcp-tools.md."""
+        """After integration, archive lifecycle evidence and remove worktrees, merged branches, reports, and enclosure. States: cleanup-completed, already-clean, would-cleanup, blocked, provider-setup-running. Docs: docs/reference/mcp-tools.md."""
         return tools.worktree_cleanup_payload(
             config, contract_path, dry_run=dry_run, teardown_providers=teardown_providers
         )
@@ -253,6 +215,5 @@ def _register_reclamation_command_tools(server: FastMCP, config: McpRuntimeConfi
     def worktree_abandon(
         *, contract_path: str, dry_run: bool = False, force: bool = False
     ) -> dict[str, Any]:
-        """Abandon a worktree task without integrating, preserving terminal archive proof. States: abandoned, would-abandon, abandon-blocked, blocked. Answers the state reached
-        and the next call. Reference: docs/reference/mcp-tools.md."""
+        """Abandon an unintegrated worktree task while preserving terminal archive proof. States: abandoned, would-abandon, abandon-blocked, blocked. Docs: docs/reference/mcp-tools.md."""
         return tools.worktree_abandon_payload(config, contract_path, dry_run=dry_run, force=force)

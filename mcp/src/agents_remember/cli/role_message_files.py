@@ -14,9 +14,10 @@ The files of a task lie in one folder in the task's record: the narrowest
 task sender and recipient share (the leaf, else the master, else the
 sprint). For agents without a shared task the folder lies beside the start
 briefs of the sender's class. Nothing of it lies in a Git worktree: every
-folder is under the coordination record, and a leaf workspace only carries
-a ``messages`` link to its own leaf folder. Cleanup removes the link; no
-cleanup deletes a message file.
+folder is under the coordination record, and a leaf workspace carries a
+``messages`` link to its own leaf folder. Cleanup unlinks it without following
+it. When the workspace has a real messages directory, cleanup preserves its
+files in the canonical message folder before removing the workspace.
 """
 
 from __future__ import annotations

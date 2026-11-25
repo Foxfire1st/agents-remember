@@ -9,9 +9,9 @@
  * exactly while `now` is before the `until` of one of its report ids.
  *
  * The read is stat-keyed like `role_agents.ts`: the plugin asks at the send-back's
- * end of the wait, at the parent gate and when a resume fires, and never on a
- * timer of its own (rule 15). A missing or malformed file reads as "nothing is
- * limited", which is rule 14: where Paseo has no report, nothing changes.
+ * end of the wait, at the parent gate and when a resume fires. One shared check
+ * reads it while a limit resume or flush is pending, so a written early clear
+ * can release the action. A missing or malformed file supplies no clear.
  */
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -32,12 +32,32 @@ export interface ProviderLimitFact {
 export interface ProviderLimitDocument {
   readonly reports: Record<string, ProviderLimitFact>;
   readonly agents: Record<string, readonly string[]>;
+  readonly clearedSeats: Readonly<Record<string, ProviderLimitClear>>;
 }
 
-const EMPTY: ProviderLimitDocument = { reports: {}, agents: {} };
+export interface ProviderLimitClear {
+  readonly clearedAt: string;
+  readonly previousUntil: string;
+}
+
+const EMPTY: ProviderLimitDocument = { reports: {}, agents: {}, clearedSeats: {} };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function readClearedSeats(value: unknown): Record<string, ProviderLimitClear> {
+  const seats: Record<string, ProviderLimitClear> = {};
+  for (const [seat, entry] of Object.entries(asRecord(value) ?? {})) {
+    const clear = asRecord(entry);
+    const clearedAt = clear?.["clearedAt"];
+    const previousUntil = clear?.["previousUntil"];
+    if (typeof clearedAt === "string" && typeof previousUntil === "string" &&
+        Date.parse(clearedAt) < Date.parse(previousUntil)) {
+      seats[seat] = { clearedAt, previousUntil };
+    }
+  }
+  return seats;
 }
 
 function readDocument(text: string): ProviderLimitDocument {
@@ -74,7 +94,7 @@ function readDocument(text: string): ProviderLimitDocument {
     if (!Array.isArray(value)) continue;
     keptAgents[agentId] = value.filter((entry): entry is string => typeof entry === "string");
   }
-  return { reports: keptReports, agents: keptAgents };
+  return { reports: keptReports, agents: keptAgents, clearedSeats: readClearedSeats(root["clearedSeats"]) };
 }
 
 let cached: { path: string; generation: string; document: ProviderLimitDocument } | undefined;

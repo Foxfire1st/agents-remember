@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Any
 
 from agents_remember.application.agent_binding import (
@@ -143,7 +144,13 @@ def runtime_install_payload(
     server cannot leave an ambient switch behind unnoticed.
     """
 
-    full = run_runtime_install(config, request)
+    if request.reconcile_shared_held_stores:
+        reconcile = import_module("agents_remember.cli.shared_held_store_reconciliation")
+        full = run_runtime_install(
+            config, request, reconcile_shared_stores=reconcile.reconcile_shared_held_stores
+        )
+    else:
+        full = run_runtime_install(config, request)
     # A dry run is a preview and files nothing (rule 6); only an executed install files
     # its report, and only then does the answer carry the path.
     report_path = (
@@ -207,6 +214,11 @@ def compact_runtime_install_payload(
     if isinstance(stores, dict):
         compact["removedPartStores"] = {
             key: value for key, value in stores.items() if key != "stores"
+        }
+    reconciled = full.get("sharedHeldStores")
+    if isinstance(reconciled, dict):
+        compact["sharedHeldStores"] = {
+            key: value for key, value in reconciled.items() if key != "stores"
         }
     if report_path is not None:
         compact["reportPath"] = report_path

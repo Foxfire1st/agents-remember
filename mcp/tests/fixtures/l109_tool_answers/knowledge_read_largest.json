@@ -158,8 +158,10 @@
      "file": "knowledge/invariants/INV-P00001-member-1.json",
      "line": 8
     },
+    "recordState": "proposed",
     "role": "member",
-    "state": "unverifiable"
+    "state": "unverifiable",
+    "writer": "unknown/unknown"
    },
    {
     "id": "RLZ-P00001",
@@ -177,8 +179,10 @@
      "file": "knowledge/families/FAM-PG0001-paged-family.json",
      "line": 4
     },
+    "recordState": "proposed",
     "role": "header",
-    "state": "unverifiable"
+    "state": "unverifiable",
+    "writer": "unknown/unknown"
    },
    {
     "id": "INV-P00000",
@@ -187,8 +191,10 @@
      "file": "knowledge/invariants/INV-P00000-member-0.json",
      "line": 8
     },
+    "recordState": "proposed",
     "role": "member",
-    "state": "unverifiable"
+    "state": "unverifiable",
+    "writer": "unknown/unknown"
    },
    {
     "id": "RLZ-P00000",
@@ -206,8 +212,10 @@
      "file": "knowledge/invariants/INV-P00002-member-2.json",
      "line": 8
     },
+    "recordState": "proposed",
     "role": "member",
-    "state": "unverifiable"
+    "state": "unverifiable",
+    "writer": "unknown/unknown"
    },
    {
     "id": "RLZ-P00002",
@@ -225,8 +233,10 @@
      "file": "knowledge/invariants/INV-P00003-member-3.json",
      "line": 8
     },
+    "recordState": "proposed",
     "role": "member",
-    "state": "unverifiable"
+    "state": "unverifiable",
+    "writer": "unknown/unknown"
    },
    {
     "id": "RLZ-P00003",
@@ -244,8 +254,10 @@
      "file": "knowledge/invariants/INV-P00004-member-4.json",
      "line": 8
     },
+    "recordState": "proposed",
     "role": "member",
-    "state": "unverifiable"
+    "state": "unverifiable",
+    "writer": "unknown/unknown"
    },
    {
     "id": "RLZ-P00004",
@@ -263,8 +275,10 @@
      "file": "knowledge/invariants/INV-P00005-member-5.json",
      "line": 8
     },
+    "recordState": "proposed",
     "role": "member",
-    "state": "unverifiable"
+    "state": "unverifiable",
+    "writer": "unknown/unknown"
    }
   ],
   "seed": {

@@ -1,11 +1,12 @@
-"""``read_ar_files`` names where a thing is and does not carry it (MIK-R109 rule 1).
+"""``read_ar_files`` names where a card is and carries the short answer of the file's brief.
 
 For each requested path (as strings, up to twenty) the tool answers whether
 the file exists in the caller's code checkout, the governing card as a
 location in the caller's memory worktree (or that it has none), the card's
 record counts by state on the code the caller sees, and — only for records
 whose state asks the caller to act — the text ID, kind, state and card
-heading of each. Overviews are listed once per call as locations, nearest
+heading of each, and the short answer of the file's brief with its rules' text.
+Overviews are listed once per call as locations, nearest
 first. No source text, card text or overview text is returned; removed
 parameters and object-form entries are refused with ``argument-removed``;
 the same call on the same state gives the same answer.
@@ -32,6 +33,7 @@ CARRIER = MCP_SRC / "agents_remember/models/read_files.py"
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.application.file_briefs.short_answer import NOTHING_RECORDED
 from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.application.published_intent import (
     PublishedIntentSelection,
@@ -45,11 +47,13 @@ from agents_remember.kernel.coordination_context.models import (
     CrossRepoSettings,
     StorageSettings,
 )
+from agents_remember.kernel.memory_ignore import ignore_briefs
 from agents_remember.kernel.primitives.runtime_config import (
     load_config,
 )
 from agents_remember.mcp.registration import TOOL_REGISTRARS
 from agents_remember.mcp.tools import read_ar_files_payload
+from agents_remember.memory.knowledge_index.tree import directory_key
 from agents_remember.models.knowledge_files import (
     derived_realization_id,
     derived_record_id,
@@ -338,7 +342,9 @@ class NamingTests(unittest.TestCase):
         self.assertEqual(
             set(row["recordCounts"]), {"stale", "unverifiable", "unrealized", "current"}
         )
-        # No text of any kind travels: the recorded statement stays out.
+        # No source text travels (the docstring of land_pair stays out), and no other record's
+        # statement does; this file's own rule rides in the brief's short answer alone, which
+        # BriefShortAnswerTests check.
         dumped = json.dumps(result)
         self.assertNotIn("a landing is one recorded pair", dumped)
         self.assertNotIn("Land both halves", dumped)
@@ -1751,3 +1757,76 @@ class RegisteredSameBlobSectionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BriefShortAnswerTests(NamingTests):
+    """Each named path carries the short answer of its brief, beside today's row."""
+
+    def test_a_cold_read_carries_rule_text_without_writing_memory(self) -> None:
+        before = directory_key(self.memory)
+        row = self._read([CODE_FILE])["files"][0]
+        brief = row["brief"]
+        (rule,) = brief["rules"]
+        self.assertEqual(rule["id"], "INV-JJK8R702")
+        self.assertEqual(rule["rule"], "Code and memory land as one pair.")
+        self.assertEqual((rule["state"], rule["writer"]), ("proposed", "unknown"))
+        self.assertNotIn("mark", rule)  # a rule shows its state and writer, no mark
+        self.assertEqual(rule["anchors"], "1 of 1 current")
+        self.assertFalse(brief["current"])
+        self.assertIn("brief on disk is missing", brief["freshness"])
+        self.assertIn("next write covering this file or the whole folder", brief["freshness"])
+        self.assertTrue(brief["path"].endswith(f"briefs/{CODE_FILE}.md"), brief["path"])
+        self.assertFalse((self.memory / "briefs").exists())
+        self.assertEqual(directory_key(self.memory), before)
+        self.assertTrue(row["card"].endswith(f"onboarding/{CODE_FILE}.md"))
+        self.assertEqual(row["recordCounts"]["current"], 1)
+
+    def test_paths_the_tool_cannot_name_are_answered_as_today(self) -> None:
+        result = self._read([CODE_FILE, "pkg/ghost.py", "pkg", "../outside.py"])
+        rows = {row["path"]: row for row in result["files"]}
+        self.assertIn("brief", rows[CODE_FILE])
+        for path in ("pkg/ghost.py", "pkg", "../outside.py"):
+            self.assertNotIn("brief", rows[path], rows[path])
+
+    def test_a_file_with_only_a_card_says_that_nothing_is_recorded(self) -> None:
+        source = "pkg/onlycard.py"
+        (self.code / source).write_text("x = 1\n", encoding="utf-8")
+        onboarding = self.memory / "onboarding"
+        _write_sidecar(onboarding, source, "## Purpose\n\nA card and nothing else.")
+        (onboarding / f"{source}.json").write_text(
+            json.dumps(
+                {
+                    "path": source,
+                    "realizes": [],
+                    "references": {},
+                    "schema": "ar-onboarding-file/v1",
+                }
+            ),
+            encoding="utf-8",
+        )
+        row = self._read([source])["files"][0]
+        self.assertTrue(row["card"].endswith(f"onboarding/{source}.md"), row)
+        self.assertEqual(row["brief"], {"none": NOTHING_RECORDED})
+        self.assertFalse((self.memory / "briefs" / f"{source}.md").exists())
+
+    def test_the_read_reports_the_disk_header_and_keeps_its_bytes(self) -> None:
+        ignore_briefs(self.memory)
+        written = self.memory / "briefs" / f"{CODE_FILE}.md"
+        written.parent.mkdir(parents=True)
+        current, older = directory_key(self.memory), "0" * 64
+        for before, age in (
+            (f"<!-- memory tree {older} -->\n".encode(), f"older tree {older}"),
+            (b"<!-- memory tree unknown -->\n", "tree is unknown"),
+            (b"\xff\n", "tree is unknown"),
+            (f"<!-- memory tree {current} -->\n".encode() + b"\xff\n", None),
+        ):
+            with self.subTest(header=before):
+                written.write_bytes(before)
+                brief = self._read([CODE_FILE])["files"][0]["brief"]
+                self.assertEqual(brief["current"], age is None)
+                if age is not None:
+                    self.assertIn(age, brief["freshness"])
+                    self.assertIn("write covering this file or", brief["freshness"])
+                else:
+                    self.assertNotIn("freshness", brief)
+                self.assertEqual(written.read_bytes(), before)

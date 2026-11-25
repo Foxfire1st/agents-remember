@@ -40,6 +40,7 @@ from agents_remember.kernel.direct_execution_grants import (
 )
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.tasks import read_task_doc, write_task_doc
+from agents_remember.worktrees.review_fact_source import NO_PASS_SENTENCE
 from agents_remember.worktrees.services import (
     bind_worktree_services,
     reset_worktree_services,
@@ -346,6 +347,31 @@ def _without_conversion_row(response: Any, marker_commits: set[str]) -> Any:
     return cleaned
 
 
+def _without_no_pass_sentence(response: Any) -> tuple[Any, int]:
+    """Take the closeout's sentence that no passed memory review is recorded out of a summary.
+
+    The world of before wrote no review fact, so its summaries never say it. The current worlds
+    record no memory review either, so a leaf closeout's summary ends with that sentence. Returns
+    the response without it and how many summaries ended with it.
+    """
+
+    if isinstance(response, list):
+        parts = [_without_no_pass_sentence(value) for value in response]
+        return [part for part, _ in parts], sum(count for _, count in parts)
+    if not isinstance(response, dict):
+        return response, 0
+    cleaned: dict[str, Any] = {}
+    found = 0
+    for key, value in response.items():
+        if key == "summary" and isinstance(value, str) and value.endswith(f" {NO_PASS_SENTENCE}"):
+            cleaned[key] = value.removesuffix(f" {NO_PASS_SENTENCE}")
+            found += 1
+            continue
+        cleaned[key], inner = _without_no_pass_sentence(value)
+        found += inner
+    return cleaned, found
+
+
 class NoGrantCloseoutParityTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory(prefix="parity-")
@@ -499,6 +525,11 @@ class NoGrantCloseoutParityTest(unittest.TestCase):
                     for world, marker_commits in worlds
                 ]
                 taken[0] = _without_seat_fields(taken[0])
+                # A leaf closeout now says that its revisions stay proposed; the world of before
+                # did not. The sentence is taken out of the current worlds where it must be.
+                for index in (1, 2):
+                    taken[index], said = _without_no_pass_sentence(taken[index])
+                    self.assertEqual(said, 1 if phase == "leaf_apply" else 0)
                 # The baseline's landing labels are ported to the contract's own labels, field by
                 # field; see LANDING_LABEL_FIELD for which field feeds which row.
                 taken[0] = _port_landing_labels(taken[0])

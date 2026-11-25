@@ -1,6 +1,7 @@
 """Name-not-carry projection for ``knowledge_read`` answers (MIK-R109 rule 2).
 
-A read names where a thing is and does not carry it. The application layer
+``knowledge_read`` names where a thing is and does not carry it (the rules' text of
+a source file comes with ``read_ar_files``' short answer instead). The application layer
 keeps computing the whole result — the dashboard reader and the command line
 call the same functions and keep getting everything (MIK-R108 rule 5) — and
 the projection runs where the answer leaves the server for an agent, in
@@ -18,19 +19,21 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.memory_checkout_state import (
+    memory_checkout_commit,
+    memory_checkout_dirty,
+)
 from agents_remember.application.read_file_cards import SectionAnchors, _select_section
+from agents_remember.application.record_standing_answers import RowStandings
 from agents_remember.kernel import filesystem
 from agents_remember.memory.knowledge_index import KnowledgeIndex
 from agents_remember.models.tools.tool_answer import TOOL_ANSWER_LIST_MAX
 
 _ENTRY_ID_RE = re.compile(r"\b(?:RLZ|PRF)-[A-Z0-9]+\b")
-
-_GIT_TIMEOUT_SECONDS = 20
 
 
 class SelectionMovedError(Exception):
@@ -76,6 +79,8 @@ class NameResolver:
     memory_dirty: bool = False
     relative_locations: bool = False
     files: dict[str, str] = field(default_factory=dict)
+    # Each row's derived state and writer, read once per record per answer.
+    standings: RowStandings | None = None
     _indexed_sidecars: dict[str, str] = field(default_factory=dict, repr=False)
     _indexed_sidecars_loaded: bool = field(default=False, repr=False)
     _lookups_loaded: bool = field(default=False, repr=False)
@@ -114,8 +119,8 @@ class NameResolver:
         """
 
         root = Path(memory_root).resolve()
-        current_commit = _memory_commit(root)
-        current_dirty = _memory_dirty(root)
+        current_commit = memory_checkout_commit(root)
+        current_dirty = memory_checkout_dirty(root)
         if selection is not None and selection.commit != current_commit:
             raise SelectionMovedError(selection.commit, current_commit)
         files: dict[str, str] = {}
@@ -133,6 +138,7 @@ class NameResolver:
             memory_dirty=selection.dirty if selection is not None else current_dirty,
             relative_locations=relative_locations,
             files=files,
+            standings=RowStandings(index_path, tree_key),
             _selection_commit=selection.commit if selection is not None else None,
         )
 
@@ -145,7 +151,7 @@ class NameResolver:
         instead of projecting mixed rows.
         """
 
-        current = _memory_commit(self.memory_root)
+        current = memory_checkout_commit(self.memory_root)
         if self._selection_commit is not None and self._selection_commit != current:
             raise SelectionMovedError(self._selection_commit, current)
         return self
@@ -410,44 +416,6 @@ def _declares_in(value: Any, entry_id: str) -> bool:
     return False
 
 
-def _memory_dirty(memory_root: Path) -> bool:
-    """Whether the memory checkout holds uncommitted knowledge changes.
-
-    Tracked modifications and untracked files both count: an untracked
-    record file is a change the index has not seen, so it dirties the
-    checkout like any other uncommitted change.
-    """
-
-    try:
-        completed = subprocess.run(
-            ["git", "-C", str(memory_root), "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=_GIT_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return completed.returncode == 0 and bool(completed.stdout.strip())
-
-
-def _memory_commit(memory_root: Path) -> str | None:
-    """The commit the memory checkout was read at, best effort."""
-
-    try:
-        completed = subprocess.run(
-            ["git", "-C", str(memory_root), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=_GIT_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    commit = completed.stdout.strip()
-    return commit if completed.returncode == 0 and commit else None
-
-
 def project_knowledge_body(body: dict[str, Any], resolver: NameResolver) -> dict[str, Any]:
     """Project one full ``knowledge_read`` body to names (MIK-R109 rule 2).
 
@@ -504,6 +472,8 @@ def project_knowledge_body(body: dict[str, Any], resolver: NameResolver) -> dict
         page = dict(body["page"])
         page["headerReference"] = _project_reference(header, resolver, states, fallen_back)
         projected["page"] = page
+    if resolver.standings is not None:
+        resolver.standings.stamp(projected)
     projected["memoryCommit"] = getattr(resolver, "memory_commit", None)
     projected["memoryDirty"] = bool(getattr(resolver, "memory_dirty", False))
     return projected

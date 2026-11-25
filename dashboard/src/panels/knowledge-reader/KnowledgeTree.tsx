@@ -10,11 +10,13 @@ import {
   type WithoutProofAnswer,
 } from '../../data/knowledgeReader';
 import { ExplorerTree, type ExplorerRow } from '../../grammar/ExplorerTree';
+import { recordStandingText } from './RecordStanding';
 
 interface Row extends ExplorerRow {
   address?: ReaderAddress;
   child?: TreeChild;
   count?: number | string;
+  standing?: string;
 }
 type At = Pick<ReaderAddress, 'repo' | 'commit'>;
 const KIND_NAMES: Record<string, string> = {
@@ -108,11 +110,14 @@ function recordRows(answer: RecordListAnswer, directory: string, at: At): Row[] 
         kind: 'dir',
         count: rows.length,
       }));
+  // A record row's second line is its state and writer, when the record has them: it wraps
+  // rather than being cut, so the writer's role and model stay readable in a narrow sidebar.
   return (answer.kinds[directory.slice(5)] ?? []).map((record) => ({
     name: record.title ?? record.id,
     path: `record:${record.id}`,
     kind: 'file',
     address: { ...at, view: 'record', id: record.id },
+    standing: recordStandingText(record) || undefined,
   }));
 }
 function useKnowledgeLoader(at: At, allPaths: boolean, loadRecords: () => Promise<RecordListAnswer>, currentPath?: string) {
@@ -215,6 +220,7 @@ export function KnowledgeTree({
             : { 'data-record-row': row.path }
         }
         renderSuffix={(row) => <RowSuffix row={row} counts={counts} />}
+        renderDetail={(row) => row.standing}
       />
     </nav>
   );

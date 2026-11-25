@@ -635,13 +635,16 @@ def _provider_blockers(providers: Mapping[str, object]) -> list[dict[str, object
             blockers.append(_blocker({"provider": collection}, "invalid-result"))
             continue
         for index, item in enumerate(values):
-            if not isinstance(item, dict) or _blocked(item, pending_key="would_remove"):
+            if not isinstance(item, dict) or _blocked(
+                item, done_key="removed", pending_key="would_remove"
+            ):
                 blockers.append(
                     _blocker({"provider": f"{collection}[{index}]"}, _blocked_reason(item))
                 )
     runtime = providers.get("providerRuntime")
     if runtime is not None and (
-        not isinstance(runtime, dict) or _blocked(runtime, pending_key="would_remove")
+        not isinstance(runtime, dict)
+        or _blocked(runtime, done_key="removed", pending_key="would_remove")
     ):
         blockers.append(_blocker({"provider": "providerRuntime"}, _blocked_reason(runtime)))
     return blockers

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -20,18 +21,27 @@ from agents_remember.observer.host_activity import (
 from agents_remember.observer.host_activity import (
     read_host_activity_publication as _read_publication,
 )
-from agents_remember.observer.provider_limits import read_provider_limits_file
+from agents_remember.observer.provider_limits import ProviderLimits, read_provider_limits_file
 from agents_remember.serving.paseo.paseo_plugin_files import (
     AR_HOME_DIRECTORY,
     read_role_agents,
     role_agents_path,
 )
+from agents_remember.serving.paseo.provider_limits import claim_due_reports
 
 logger = logging.getLogger(__name__)
 type HostActivityReconcile = Callable[[McpRuntimeConfig], dict[str, Any]]
 # MIK-R190 rule 7's one usage read per tick, as the composition root binds it: the read is a
 # bridge process, and the bridge's caller ranks above this package (rule 19).
-type UsageReadPort = Callable[[McpRuntimeConfig, list[str]], object]
+type UsageReadPort = Callable[[McpRuntimeConfig, UsageReadBatch], object]
+
+
+@dataclass(frozen=True)
+class UsageReadBatch:
+    """The stamped ends and the ordered seat candidates for each due report."""
+
+    stamped_agents: list[str]
+    periodic_candidates: dict[str, tuple[str, ...]]
 
 
 def activity_directory(config: McpRuntimeConfig) -> Path | None:
@@ -60,6 +70,7 @@ class _ParsedPublication(NamedTuple):
     stamp: tuple[int, int, int, int]
     endings: tuple[tuple[str, str], ...]
     idle: tuple[tuple[str, str], ...]
+    ended: frozenset[str]
 
 
 # The last parsed publication per file, with the stamp it was parsed at. The 3 s
@@ -122,11 +133,11 @@ def turn_ended_agents(config: McpRuntimeConfig, seen: dict[str, str]) -> list[st
 def new_stamped_ends(config: McpRuntimeConfig, seen: dict[str, str]) -> list[str]:
     """MIK-R190 rule 7's trigger: the agents whose idle end this plugin boot has not read.
 
-    A read of usage follows a **new, stamped** end only: the agent is in the role
+    For the turn-end trigger the agent is in the role
     record, its published state is ``idle``, and its ``eventAt`` is
     present and differs from the one last read for it. An agent handed over without
-    a stamp — an idle agent after a plugin boot — triggers nothing, which keeps the
-    tick's cost at zero after every reload. ``seen`` is this reader's own memory;
+    a stamp — an idle agent after a plugin boot — does not trigger a read.
+    ``seen`` is this reader's own memory;
     the delivery's own stamps live in the caller's other map.
 
     Both of this reader's inputs are the tick's inputs too, so it shares their stat-bound
@@ -151,6 +162,33 @@ def new_stamped_ends(config: McpRuntimeConfig, seen: dict[str, str]) -> list[str
         seen[agent_id] = stamp
         fresh.append(agent_id)
     return fresh
+
+
+def usage_read_batch(config: McpRuntimeConfig, seen: dict[str, str]) -> UsageReadBatch:
+    """Claim due reports and combine them with this tick's new stamped ends."""
+
+    stamped = new_stamped_ends(config, seen)
+    limits, due = claim_due_reports(config)
+    directory = activity_directory(config) if due else None
+    if directory is None:
+        return UsageReadBatch(stamped, {})
+    parsed = _parsed_publication(directory / HOST_ACTIVITY_FILE)
+    ended = parsed.ended if parsed is not None else frozenset()
+    eligible = _role_records(directory.parent).keys() - ended
+    return UsageReadBatch(stamped, _periodic_candidates(limits, due, eligible))
+
+
+def _periodic_candidates(
+    limits: ProviderLimits, due: tuple[str, ...], eligible: set[str]
+) -> dict[str, tuple[str, ...]]:
+    candidates: dict[str, list[str]] = {report_id: [] for report_id in due}
+    for agent_id, report_ids in limits.agents.items():
+        if agent_id not in eligible:
+            continue
+        for report_id in report_ids:
+            if report_id in candidates:
+                candidates[report_id].append(agent_id)
+    return {report_id: tuple(ids) for report_id, ids in candidates.items()}
 
 
 def _file_stamp(path: Path) -> tuple[int, int, int, int] | None:
@@ -200,7 +238,10 @@ def _parsed_publication(path: Path) -> _ParsedPublication | None:
             if activity.state == "idle" and activity.eventAt is not None
         )
     )
-    parsed = _ParsedPublication(stamp=stamp, endings=endings, idle=idle)
+    ended = frozenset(
+        agent_id for agent_id, activity in publication.agents.items() if activity.state == "ended"
+    )
+    parsed = _ParsedPublication(stamp=stamp, endings=endings, idle=idle, ended=ended)
     while len(_ENDINGS) >= _ENDINGS_LIMIT:
         _ENDINGS.pop(next(iter(_ENDINGS)))
     _ENDINGS[key] = parsed

@@ -648,12 +648,11 @@ def test_the_record_comparison_reports_exactly_the_payload_field_that_changed(
 # for that field and so the comparison has something real to detect. Each one is a value the field's
 # own type admits, so a substitution can never be mistaken for a malformed payload.
 _SUBSTITUTIONS: Mapping[str, object] = {
-    "acceptance_ref": "requirement:KS-R08@v1",
     "applicability": "A substituted applicability for the record comparison case.",
     "essential_conditions": ("A substituted condition.",),
     "exclusions": ("A substituted exclusion.",),
     "joint_guarantee": "A substituted joint guarantee.",
-    "lifecycle": "accepted",
+    "lifecycle": "reviewed",
     "payload_digest": "0" * 64,
     "provenance": {"actor_ref": "agent:substituted", "operation_id": "0" * 8},
     "statement": "A substituted statement for the record comparison case.",

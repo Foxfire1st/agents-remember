@@ -30,9 +30,13 @@ from __future__ import annotations
 import shutil
 import tempfile
 import unittest
+from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
+from types import ModuleType
 from typing import Any
+from unittest.mock import patch
 
 from agents_remember.application import worktree_tools
 from agents_remember.application.role_launch_context import RoleLaunchContext
@@ -40,10 +44,12 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
     TaskDocTarget,
     task_doc_tool,
+    task_reopen_tool,
 )
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tool_requests import StartExecution, TaskIdentity
 from agents_remember.cli import role_launch_workspace
+from agents_remember.memory_quality.style.citations.source_index_cache import TerminalNamespaceGuard
 from agents_remember.models.lifecycles.enclosure import TerminalWorktreeCleanupArguments
 from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.models.role_launcher import LauncherRole
@@ -54,6 +60,7 @@ from agents_remember.tasks.task_paths import leaf_enclosure_path
 from agents_remember.worktrees.integration.terminal_enclosure_archive import (
     terminal_archive_required_result,
 )
+from agents_remember.worktrees.modules import abandon, cleanup
 from agents_remember.worktrees.modules.git import branch_commit, is_ancestor, require_git
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
@@ -105,6 +112,20 @@ def _remove_generation(contract: WorktreeContract) -> None:
 def _reopened(contract_path: Path) -> dict[str, Any]:
     result = reopen_task(contract_path)
     return {**result.payload, "returncode": result.returncode}
+
+
+def _registered_git_state(contract: WorktreeContract) -> tuple[tuple[str, str], ...]:
+    assert contract.memory_repo_path is not None
+    return tuple(
+        (
+            require_git(repository, ["worktree", "list", "--porcelain"]),
+            branch_commit(repository, branch),
+        )
+        for repository, branch in (
+            (contract.code_repo_path, contract.code_work_branch),
+            (contract.memory_repo_path, contract.memory_work_branch),
+        )
+    )
 
 
 class _LeafWorld:
@@ -228,6 +249,141 @@ class _LeafWorld:
 
 class ArchivedLeafReopenTests(unittest.TestCase):
     """The three refusals the developer hit on 2026-10-23, and the cycle behind them."""
+
+    def test_accepted_cleanup_retry_leaves_the_reopen_reset_in_place(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            world = _LeafWorld(Path(tmp))
+            first = world.start_from_named_args(dry_run=False)
+            self.assertIs(first["ok"], True, first)
+            world.complete_and_clean_up()
+            contract_path = world.contract_path.as_posix()
+            reopened = task_reopen_tool(world.config, contract_path=contract_path)
+            self.assertEqual((reopened["ok"], reopened["state"]), (True, "reopened"), reopened)
+            workspace = world.contract.worktree_group
+            workspace.mkdir(exist_ok=True)
+            retained = workspace / "reopened-note.md"
+            retained.write_text("reopened task's working note", encoding="utf-8")
+            prior = world.status()["terminalArchive"]
+            archive_path = Path(prior["archivePath"])
+            receipt_path = Path(prior["receiptPath"])
+            retained_paths = (world.contract_path, archive_path, receipt_path, retained)
+            before = tuple(path.read_bytes() for path in retained_paths)
+            no_cache = nullcontext(TerminalNamespaceGuard(None, None, None))
+            citation_guard = cleanup.worktree_services().citation_guard
+
+            with patch.object(citation_guard, "guard", return_value=no_cache):
+                for dry_run in (False, True):
+                    result = worktree_tools.worktree_cleanup_tool(
+                        world.config,
+                        contract_path=contract_path,
+                        dry_run=dry_run,
+                        teardown_providers=False,
+                    )
+                    self.assertTrue(
+                        retained.is_file(),
+                        "accepted cleanup retry removed the reopened task's file",
+                    )
+                    self.assertEqual(
+                        tuple(path.read_bytes() for path in retained_paths),
+                        before,
+                        "accepted cleanup retry rewrote the reopened contract or terminal proof",
+                    )
+                    self.assertEqual(
+                        (result["ok"], result["code"]), (False, "reopen-reset"), result
+                    )
+                    self.assertEqual(result["nextStep"]["nextTool"], "worktree_status")
+
+            status = world.status()
+            self.assertEqual((status["state"], status["nextTool"]), ("reopened", "worktree_start"))
+
+    def test_completed_cleanup_retry_preserves_a_reopened_successor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            world = _LeafWorld(Path(tmp))
+            first = world.start_from_named_args(dry_run=False)
+            self.assertIs(first["ok"], True, first)
+            world.complete_and_clean_up()
+
+            def retry() -> dict[str, Any]:
+                return worktree_tools.worktree_cleanup_tool(
+                    world.config,
+                    contract_path=world.contract_path.as_posix(),
+                    teardown_providers=False,
+                )
+
+            self._assert_old_retry_preserves_successor(
+                world, cleanup, lambda: world.start_from_named_args(dry_run=False), retry
+            )
+
+    def test_completed_abandon_retry_preserves_a_restarted_successor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            world = _LeafWorld(Path(tmp))
+            first = world.start_from_named_args(dry_run=False)
+            self.assertIs(first["ok"], True, first)
+            started = load_contract(world.contract_path)
+
+            def retry() -> dict[str, Any]:
+                return worktree_tools.worktree_abandon_tool(
+                    world.config, contract_path=world.contract_path.as_posix()
+                )
+
+            abandoned = retry()
+            self.assertEqual((abandoned["ok"], abandoned["state"]), (True, "abandoned"), abandoned)
+
+            def restart() -> dict[str, Any]:
+                return worktree_tools.worktree_start_tool(
+                    world.config,
+                    TaskIdentity(
+                        repo_id=started.repo_name,
+                        task_name=started.task_root.name,
+                        worktree_name=started.code_worktree.name,
+                        leaf_id=started.leaf_id,
+                    ),
+                    execution=StartExecution(skip_provider_setup=True),
+                )
+
+            self._assert_old_retry_preserves_successor(world, abandon, restart, retry)
+
+    def _assert_old_retry_preserves_successor(
+        self,
+        world: _LeafWorld,
+        terminal_module: ModuleType,
+        start: Callable[[], dict[str, Any]],
+        retry: Callable[[], dict[str, Any]],
+    ) -> None:
+        terminal_contract = load_contract(world.contract_path)
+        observe = terminal_module._terminal_archive_observation
+        observed: list[tuple[WorktreeContract, Path, tuple[tuple[str, str], ...]]] = []
+
+        def observe_and_start(
+            contract: WorktreeContract, **arguments: bool
+        ) -> WorktreeCommandResult:
+            archive = observe(contract, **arguments)
+            self.assertEqual(archive.returncode, 0, archive.payload)
+            restarted = start()
+            self.assertIs(restarted["ok"], True, restarted)
+            current = load_contract(world.contract_path)
+            self.assertNotEqual(current.lifecycle_id, terminal_contract.lifecycle_id)
+            self.assertEqual(current.worktree_group, terminal_contract.worktree_group)
+            dirty = current.code_worktree / "successor-dirty.txt"
+            dirty.write_text("successor's uncommitted work", encoding="utf-8")
+            observed.append((current, dirty, _registered_git_state(current)))
+            return archive
+
+        with patch.object(
+            terminal_module, "_terminal_archive_observation", side_effect=observe_and_start
+        ):
+            result = retry()
+
+        self.assertEqual(len(observed), 1, result)
+        successor, dirty, git = observed[0]
+        self.assertTrue(
+            dirty.is_file(), f"stale terminal retry removed the successor worktree: {result}"
+        )
+        self.assertEqual(dirty.read_text(encoding="utf-8"), "successor's uncommitted work")
+        self.assertEqual(load_contract(world.contract_path), successor)
+        self.assertEqual(_registered_git_state(successor), git)
+        self.assertIs(result["ok"], False, result)
+        self.assertIn("changed generation", str(result["blockers"]))
 
     def test_a_completed_landed_cleaned_up_archived_leaf_reopens_and_its_seats_start(
         self,

@@ -47,8 +47,6 @@ from agents_remember.worktrees.integration.terminal_enclosure_archive import (
 from agents_remember.worktrees.modules import terminal_abandon
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
-    ENCLOSURE_LOGS_DIRECTORY,
-    ENCLOSURE_REPORTS_DIRECTORY,
     _terminal_mutation_authority,
     _with_terminal_archive,
     remove_empty_dir,
@@ -56,6 +54,7 @@ from agents_remember.worktrees.modules.cleanup import (
 )
 from agents_remember.worktrees.modules.git import branch_exists, is_ancestor
 from agents_remember.worktrees.modules.guidance import status_payload
+from agents_remember.worktrees.modules.kept_tool_calls import removal_after_keep
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.state_refusals import (
     provider_setup_blocked,
@@ -63,11 +62,17 @@ from agents_remember.worktrees.modules.state_refusals import (
     task_stage_refusal,
     terminal_state_refusal,
 )
-from agents_remember.worktrees.modules.terminal_agents import archive_terminal_agents
 from agents_remember.worktrees.modules.terminal_branch_retirement import (
     _TerminalMutationAuthority,
     delete_branch_force,
     delete_branch_if_merged,
+)
+from agents_remember.worktrees.modules.terminal_group import (
+    ENCLOSURE_LOGS_DIRECTORY,
+    ENCLOSURE_REPORTS_DIRECTORY,
+    preview_group_removal,
+    remove_terminal_group,
+    teardown_terminal_providers,
 )
 from agents_remember.worktrees.modules.terminal_inventory import (
     _absent_branch_entries,
@@ -77,6 +82,7 @@ from agents_remember.worktrees.modules.terminal_inventory import (
     local_branch_presence,
     terminal_without_remains_reason,
 )
+from agents_remember.worktrees.modules.terminal_retry import retry_terminal_group
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalPreflight,
     TerminalResult,
@@ -85,8 +91,6 @@ from agents_remember.worktrees.modules.terminal_validation import (
     terminal_result_blockers,
 )
 from agents_remember.worktrees.role_reports import (
-    RoleReportCollectionError,
-    collect_group_reports,
     remove_group_role_folders,
 )
 from agents_remember.worktrees.services import TerminalGuard, worktree_services
@@ -129,14 +133,10 @@ def _abandon_terminal_branch(
     if terminal.state == "cleanup-completed":
         result = with_terminal_atomic_series_release(
             contract,
-            _already_abandoned(contract, force=args.force, dry_run=args.dry_run),
+            _already_abandoned(terminal, force=args.force, dry_run=args.dry_run),
             dry_run=args.dry_run,
         )
-        agents = archive_terminal_agents(contract, dry_run=args.dry_run)
-        return contract, WorktreeCommandResult(
-            result.returncode,
-            {**result.payload, **({"agentArchive": agents} if agents else {})},
-        )
+        return contract, result
     return terminal.archived_contract, None
 
 
@@ -374,10 +374,10 @@ def _finish_abandon_without_remains(
         )
         removed_worktrees = _absent_worktree_entries(contract)
         branches = _absent_branch_entries(contract)
-        directories = _abandon_directories(
-            contract,
-            dry_run=args.dry_run,
-            force=args.force,
+        directories = (
+            preview_group_removal(contract, teardown_providers=True)
+            if args.dry_run
+            else remove_terminal_group(contract)
         )
         preflight = TerminalPreflight(
             worktrees=dict(removed_worktrees),
@@ -409,31 +409,30 @@ def _finish_abandon_without_remains(
 
 
 def _already_abandoned(
-    contract: WorktreeContract,
+    terminal: TerminalCleanupContractAuthority,
     *,
     force: bool,
     dry_run: bool,
 ) -> WorktreeCommandResult:
+    contract = terminal.current_contract
     terminal_archive = _terminal_archive_observation(
         contract,
         force=force,
     )
     if terminal_archive.returncode != 0:
         return terminal_archive
-    # MIK-R207 rule 4: a completed retry removes a registered root that is still there, and
-    # never answers a success while it remains.
-    outside, blockers = outside_scratch.terminal_blocker(contract, dry_run=dry_run)
-    if blockers:
+    residue = retry_terminal_group(terminal, dry_run=dry_run)
+    outside = residue.directories.get("outside_scratch")
+    if residue.blockers:
         return WorktreeCommandResult(
             2,
             {
                 "state": "abandon-blocked",
                 **status_payload(contract),
-                "summary": (
-                    "The worktree is already recorded as abandoned but its outside scratch root "
-                    "could not be removed."
-                ),
-                "blockers": blockers,
+                "summary": "Abandon is already recorded but its task resources could not be removed.",
+                "directories": residue.directories,
+                "blockers": residue.blockers,
+                **({"agentArchive": residue.agent_archive} if residue.agent_archive else {}),
                 **({"outsideScratch": outside} if outside is not None else {}),
             },
         )
@@ -447,9 +446,10 @@ def _already_abandoned(
                 "providers": {"state": "already-terminal"},
                 "removed_worktrees": {},
                 "branches": {},
-                "directories": {},
+                "directories": residue.directories,
                 "blockers": [],
                 "alreadyTerminal": True,
+                **({"agentArchive": residue.agent_archive} if residue.agent_archive else {}),
                 **({"outsideScratch": outside} if outside is not None else {}),
             },
         ),
@@ -476,13 +476,17 @@ def _abandon_outputs_result(  # noqa: PLR0913 -- terminal_note rides the no-rema
             preview=args.dry_run,
         )
     )
-    if blockers and not args.dry_run:
+    if blockers:
         return WorktreeCommandResult(
             2,
             {
                 "state": "abandon-blocked",
                 **status_payload(contract),
-                "summary": "Abandon terminal mutation failed; cache and contract stayed live.",
+                "summary": (
+                    "Abandon preview found a blocker before deletion."
+                    if args.dry_run
+                    else "Abandon terminal mutation failed; cache and contract stayed live."
+                ),
                 "providers": providers,
                 "citation_source_index": _preserved_cache(
                     guard.preview(), "terminal-operation-failed"
@@ -577,6 +581,7 @@ def _abandon_terminal_outputs(
     args: WorktreeArgs,
     contract: WorktreeContract,
     preflight: TerminalPreflight,
+    directory_preview: TerminalItems,
     *,
     series_permit: AtomicSeriesTerminalPermit | None = None,
 ) -> AbandonOutputs:
@@ -585,13 +590,7 @@ def _abandon_terminal_outputs(
         operation="worktree_abandon",
         series_permit=series_permit,
     )
-    try:
-        collect_group_reports(contract, dry_run=args.dry_run)
-    except RoleReportCollectionError as error:
-        return {}, {}, {}, {"role_reports": {"removed": False, "reason": str(error)}}
-    providers: dict[str, object] = worktree_services().provider_lifecycle.teardown(
-        contract, dry_run=args.dry_run
-    )
+    providers = teardown_terminal_providers(contract, dry_run=args.dry_run)
     if not args.dry_run and terminal_result_blockers(
         TerminalResult(providers=providers, worktrees={}, branches={}, directories={})
     ):
@@ -633,11 +632,7 @@ def _abandon_terminal_outputs(
         )
     ):
         return providers, removed_worktrees, branches, {}
-    directories = _abandon_directories(
-        contract,
-        dry_run=args.dry_run,
-        force=args.force,
-    )
+    directories = directory_preview if args.dry_run else remove_terminal_group(contract)
     return providers, removed_worktrees, branches, directories
 
 
@@ -861,6 +856,7 @@ def _preserved_cache(cache: dict[str, object], reason: str) -> dict[str, object]
 def _abandon_directories(
     contract: WorktreeContract, *, dry_run: bool, force: bool
 ) -> dict[str, dict[str, object]]:
+    """Preserve the directory-only retirement used by the sprint archive hook."""
     group = contract.worktree_group
     lifecycle = group / ".lifecycle"
     outside = outside_scratch.removal_entry_for(contract, dry_run=dry_run)
@@ -893,11 +889,14 @@ def _abandon_directories(
             ),
             **outside,
         }
+    # A leaf's own tool-call lines are kept in its master's
+    # notes before either branch below removes <enclosure>/logs/.
+    remove_tree = worktree_services().provider_lifecycle.remove_tree
     role_folders = remove_group_role_folders(contract, dry_run=dry_run)
     if force:
         directories = {
-            "worktree_group": worktree_services().provider_lifecycle.remove_tree(
-                group, dry_run=dry_run
+            "worktree_group": removal_after_keep(
+                contract, group, dry_run=dry_run, remove_tree=remove_tree
             ),
             **outside,
         }
@@ -911,10 +910,7 @@ def _abandon_directories(
         # Abandon removes <enclosure>/logs/ with the enclosure, as cleanup does
         # (MIK-R108 rule 3): the tool-call log is the product's own trace.
         logs_path = group / ENCLOSURE_LOGS_DIRECTORY
-        logs = worktree_services().provider_lifecycle.remove_tree(
-            logs_path,
-            dry_run=dry_run,
-        )
+        logs = removal_after_keep(contract, logs_path, dry_run=dry_run, remove_tree=remove_tree)
         planned: set[Path] = {
             Path(str(row["path"]))
             for row in role_folders.values()

@@ -15,7 +15,7 @@ could take for a recorded empty document (ICR-R06@v1, Failure And Recovery Behav
 **A field row's ``None`` is a statement about absence, and that is why a structured value carries a
 reason.** ``ReviewFieldChange`` declares that ``None`` on either value *is* the recorded fact that
 the field was absent on that side. A record can also carry a field whose value is structured rather
-than text -- ``provenance`` is the shipped example, and it is one of the nine fields the comparison
+than text -- ``provenance`` is the shipped example, and it is one of the eight fields the comparison
 projects and compares. Reporting that value as ``None`` would state an absence the snapshot does not
 hold, and on a field the comparison reports as *changed* it would state two of them at once; so each
 side is carried as the pane's own text projection of the value it really holds -- canonical compact
@@ -163,8 +163,8 @@ def field_changes(items: Sequence[KnowledgeDiffItem]) -> tuple[ReviewFieldChange
     The roster is the comparison's own ``changed_fields`` and nothing else: this function neither
     widens it with fields that did not move nor drops a transition because one of its two values is
     absent. A one-sided *record* reports no field rows at all, and that is the comparison's own rule
-    rather than an omission here -- it reports such a record through its coverage, because nine
-    field rows would state nine differences where there is one absence.
+    rather than an omission here -- it reports such a record through its coverage, because eight
+    field rows would state eight differences where there is one absence.
     """
 
     return tuple(

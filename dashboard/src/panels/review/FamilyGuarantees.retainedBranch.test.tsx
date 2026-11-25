@@ -14,19 +14,19 @@ const sameRevision = (JSON.parse(readFileSync(
 )) as ReviewResult).payload!.family_context!.entries[0];
 
 // Deliberately synthetic, independently authored operands: a family revision can change
-// metadata (here proposed -> accepted) without changing its only authored prose field.
+// metadata (here proposed -> reviewed) without changing its only authored prose field.
 // The current raw IDENTICAL capture now selects ONE revision, so it cannot defend this
 // still-shipped branch. Do not relabel or rewrite that capture to manufacture a witness.
 const familyId = 'synthetic-family-metadata-only';
 const wording = 'A published review retains the identities of both recorded operands.';
 const before: ReviewFamilyGuarantee = {
   family_id: familyId, revision_id: 'synthetic-family-before', display_version: 'r1',
-  joint_guarantee: wording, state_at_origin: 'proposed',
+  joint_guarantee: wording, state: 'proposed',
   provenance: { control: 'synthetic metadata-only revision' }, payload_digest: 'synthetic-before',
 };
 const after: ReviewFamilyGuarantee = {
   family_id: familyId, revision_id: 'synthetic-family-after', display_version: 'r2',
-  joint_guarantee: wording, state_at_origin: 'accepted', acceptance_ref: 'synthetic-acceptance',
+  joint_guarantee: wording, state: 'reviewed',
   provenance: { control: 'synthetic metadata-only revision' }, payload_digest: 'synthetic-after',
 };
 const distinctRevisions: ReviewFamilyContextEntry = {
@@ -102,4 +102,28 @@ it('draws a changed guarantee in a fit diff pane', async () => {
   const view = render(<GuaranteeComparisonBlock entry={changed} layout="inline" />);
   const block = view.getByTestId('review-center-guarantee-changed');
   expect(within(block).getByTestId('diff-pane').className).toBe(fitClass);
+});
+
+// A closeout turns a revision from proposed to reviewed without a new revision id: the two sides
+// then hold one revision in two states. One guarantee statement is drawn, and its state names the
+// side it belongs to, the candidate's first.
+it('names each side of one revision whose state differs between the two trees', () => {
+  const entry = structuredClone(sameRevision);
+  entry.before.guarantee!.state = 'proposed';
+  entry.after.guarantee!.state = 'reviewed';
+  expect(entry.before.guarantee!.revision_id).toBe(entry.after.guarantee!.revision_id);
+  const view = render(<GuaranteeComparisonBlock entry={entry} layout="inline" />);
+  const block = view.getByTestId('review-center-guarantee-unchanged');
+  expect(within(block).getAllByText(entry.after.guarantee!.joint_guarantee, { exact: true })).toHaveLength(1);
+  expect(within(block).getByTestId('review-center-guarantee-state').textContent).toBe(
+    'State: reviewed after · proposed before',
+  );
+});
+
+it('names the sides of an unchanged state once for one revision', () => {
+  const entry = structuredClone(sameRevision);
+  entry.before.guarantee!.state = 'reviewed';
+  entry.after.guarantee!.state = 'reviewed';
+  const view = render(<GuaranteeComparisonBlock entry={entry} layout="inline" />);
+  expect(view.getByTestId('review-center-guarantee-state').textContent).toBe('State: reviewed before and after');
 });

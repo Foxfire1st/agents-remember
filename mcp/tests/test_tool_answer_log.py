@@ -13,9 +13,9 @@ import shutil
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from threading import Event
-from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -48,7 +48,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 from agents_remember.models.tools.tool_answer import (
     strip_envelope,
 )
-from agents_remember.worktrees.modules import cleanup as cleanup_module
+from agents_remember.worktrees.modules import terminal_group
 from agents_remember.worktrees.modules.closeout import closeout_changed_paths
 from agents_remember.worktrees.modules.git import worktree_dirty
 from agents_remember.worktrees.worktree_contract import load_contract
@@ -803,6 +803,13 @@ class ToolAnswerEnclosureTests(unittest.TestCase):
             logs = group / ENCLOSURE_LOGS_DIRNAME
             logs.mkdir(parents=True)
             (logs / "ar-tools-2026-10-08.jsonl").write_text("{}\n", encoding="utf-8")
+            contract = replace(
+                load_contract(self.world.contract),
+                worktree_group=group,
+                outside_scratch_root="",
+                outside_scratch_generation="",
+                outside_scratch_marker_sha256="",
+            )
             removed: list[tuple[str, bool]] = []
 
             class FakeLifecycle:
@@ -814,16 +821,9 @@ class ToolAnswerEnclosureTests(unittest.TestCase):
 
             services = mock.Mock()
             services.provider_lifecycle = FakeLifecycle()
-            with mock.patch.object(cleanup_module, "worktree_services", return_value=services):
-                directories = cleanup_module._removed_directories(
-                    SimpleNamespace(worktree_group=group, kind="leaf", task_root=Path(tmp)),
-                    dry_run=False,
-                )
-            self.assertIn(
-                (logs.as_posix(), False),
-                removed,
-                "cleanup never offered the enclosure logs/ to removal",
-            )
+            with mock.patch.object(terminal_group, "worktree_services", return_value=services):
+                directories = terminal_group.remove_terminal_group(contract)
+            self.assertEqual(removed, [(group.as_posix(), False)])
             self.assertIn("logs", directories)
             self.assertFalse(logs.exists(), "cleanup left the enclosure logs/ behind")
 

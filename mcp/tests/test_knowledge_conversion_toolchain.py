@@ -129,9 +129,13 @@ def test_read_ar_files_names_the_converted_records_without_carrying_them(
     naming = read_ar_files_tool(config, repo_id=REPO, files=[APP], _context=context)
     assert naming["state"] == "named", naming
     assert naming["files"][0]["exists"] is True, naming
-    # No record, card or overview text rides the answer: the converted
-    # invariant realized in this file is named, not carried.
-    assert "Alpha adds one." not in json.dumps(naming), naming
+    # The converted invariant realized in this file rides the answer only as its
+    # rule's text in the file's short brief; no card or overview text rides it.
+    (row,) = naming["files"]
+    (rule,) = row["brief"]["rules"]
+    assert rule["rule"] == "Alpha adds one.", rule
+    without_brief = {**naming, "files": [{k: v for k, v in row.items() if k != "brief"}]}
+    assert "Alpha adds one." not in json.dumps(without_brief), naming
 
 
 def test_references_are_checked_and_only_mechanical_moves_are_fixed(
@@ -577,8 +581,9 @@ def test_one_converted_card_is_fixed_by_its_document_alone_and_unconverted_is_re
     one = CitationOperationScope(document=f"{EXTRA}.md")  # shaped for either format
 
     def fix(scope: CitationOperationScope) -> dict[str, Any]:
+        # The coordination root holds the read index the briefs are written from after the fix.
         return memory_tools.citation_fix_tool(
-            cast(Any, None),
+            cast(Any, SimpleNamespace(coordination_root=tmp_path / "coordination")),
             repo_id="demo",
             contract_path="contract.md",
             operation_scope=scope,

@@ -4,7 +4,7 @@ All eight roles use this file to read code with attributed knowledge, bind and c
 
 ## Read code and knowledge together
 
-Start with either a text search or `knowledge_read`; the tool needs a seed, file path or identifier. When a search finds candidates, use `knowledge_read` to expand them to the full map of attributed records, sibling realizations and proofs.
+Start with a text search or `knowledge_read`, which needs a seed, file path or identifier. Use `knowledge_read` to expand candidates to attributed records, sibling realizations and proofs. Compact `read_ar_files` rows give card status and any brief path with saved freshness. Fuller replies can include rule text. Open an available saved brief at `briefs/<path>.md` under the memory root with your file tool before editing. The next write covering the file or folder renews a missing or older brief when the writer can refresh it. When current memory identifies neither a card nor a qualifying brief for a file it can assess, no rule, weakness, decision or standing document is recorded there.
 
 Use both knowledge and code reads. Attributions find what text search misses; code reads fill gaps when memory is stale or missing. Stale memory may guide orientation when you label it explicitly as stale and check current claims against code. Informative evidence is not publication-ready evidence.
 

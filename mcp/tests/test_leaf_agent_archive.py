@@ -9,11 +9,14 @@ import threading
 import uuid
 from dataclasses import replace
 from functools import partial
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock, patch
 
+import integration_branch_authority_test_support as authority_fixtures
 import pytest
+from agents_remember.application import worktree_tools
 from agents_remember.cli import paseo_launch, role_launch_receipts
 from agents_remember.cli import role_launch_archive as archive
 from agents_remember.cli import role_launch_archive_recovery as recovery
@@ -21,6 +24,7 @@ from agents_remember.cli.paseo_bridge import DAEMON_UNREACHABLE, PaseoBridgeFail
 from agents_remember.cli.role_launch_liveness import _reconcile_prior_execution
 from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA
 from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
+from agents_remember.controlplane.held_store_layout import HeldMessage, hold_message, store_path_for
 from agents_remember.kernel.file_lock import lock_held
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleDispatchRequest
@@ -30,14 +34,18 @@ from agents_remember.serving._app_common import _ServingRuntime
 from agents_remember.serving.background_accounting import BackgroundLedger
 from agents_remember.serving.stream_shutdown import StreamShutdown
 from agents_remember.tasks import read_task_doc
+from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
 from agents_remember.worktrees.modules import cleanup, terminal_abandon, terminal_cleanup
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.finalize import FinalizeArgs, finalize_result
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.terminal_group import prepare_terminal_group
 from agents_remember.worktrees.services import bind_worktree_services, worktree_services
+from agents_remember.worktrees.worktree_contract import write_contract
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from fastapi import HTTPException
 from test_lifecycle_finalize import _FinalizeFixtures, _payload
+from test_terminal_blocker_reasons import _landed_leaf, _landed_leaf_config, _public_config
 
 pytestmark = pytest.mark.integration
 
@@ -99,7 +107,24 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
             with self.subTest(phase=phase, created_first=created_first):
                 self._assert_terminal_launch_interleaving(phase, created_first)
 
-    def _assert_terminal_launch_interleaving(self, phase, created_first):
+    def test_enumerated_receipt_preserves_debt_when_native_create_enters(self):
+        self.contract.worktree_group.mkdir(parents=True)
+        bind_worktree_services(
+            replace(worktree_services(), leaf_agent_archive=archive.LeafAgentArchive(self.config))
+        )
+        self._assert_terminal_launch_interleaving("agent-create", False, archive_reads_first=True)
+        result = prepare_terminal_group(self.contract, dry_run=True, teardown_providers=True)
+        self.assertFalse(result.blockers, result)
+        self.assertTrue(result.directories["worktree_group"]["would_remove"])
+
+    def _allow_prepared_start(self):
+        self.contract = replace(self.contract, cleanup="pending")
+        write_contract(self.contract.contract_path, self.contract)
+
+    def _assert_terminal_launch_interleaving(
+        self, phase, created_first, *, archive_reads_first=False
+    ):
+        self._allow_prepared_start()
         path, body = self.prepared_receipt()
         entered, release = threading.Event(), threading.Event()
         live, failures, answers, calls = {}, [], [], []
@@ -128,44 +153,98 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
             patch.object(archive, "bridge_call", side_effect=host),
         ):
             thread = threading.Thread(target=launch)
-            thread.start()
             try:
-                self.assertTrue(entered.wait(HANG_GUARD_SECONDS))
-                closing = archive.LeafAgentArchive(self.config).archive(self.contract)
+                if archive_reads_first:
+                    closing = self._start_during_archive_census(thread, state)
+                else:
+                    thread.start()
+                    self.assertTrue(entered.wait(HANG_GUARD_SECONDS))
+                    closing = archive.LeafAgentArchive(self.config).archive(self.contract)
                 self.assertTrue(thread.is_alive())
                 self.assertFalse(release.is_set(), "closing waited for the opaque creation call")
                 before = json.loads(path.read_text())
-                if created_first:
-                    self.assertIn(body["agentId"], {row["agentId"] for row in closing["archived"]})
+                if phase == "workspace-open":
+                    self.assertIn(
+                        body["agentId"],
+                        {row["agentId"] for row in cast(list[dict[str, object]], closing["gone"])},
+                    )
+                    self.assertNotIn(
+                        body["agentId"],
+                        {row["agentId"] for row in cast(list[dict[str, object]], closing["owed"])},
+                    )
+                    self.assertFalse(before["leafArchive"]["creationPending"])
+                elif created_first:
+                    self.assertIn(
+                        body["agentId"],
+                        {
+                            row["agentId"]
+                            for row in cast(list[dict[str, object]], closing["archived"])
+                        },
+                    )
                 else:
-                    self.assertIn(body["agentId"], {row["agentId"] for row in closing["owed"]})
-                    self.assertNotIn(body["agentId"], {row["agentId"] for row in closing["gone"]})
+                    self.assertIn(
+                        body["agentId"],
+                        {row["agentId"] for row in cast(list[dict[str, object]], closing["owed"])},
+                    )
+                    self.assertNotIn(
+                        body["agentId"],
+                        {row["agentId"] for row in cast(list[dict[str, object]], closing["gone"])},
+                    )
             finally:
                 release.set()
-                thread.join(HANG_GUARD_SECONDS)
-            self.assertFalse(thread.is_alive())
-            self.assertFalse(failures)
-            self.assertEqual(answers[0].status_code, 409)
-            self.assertEqual(json.loads(bytes(answers[0].body))["status"], "rejected")
-            self.assertFalse(live.get(body["agentId"], False))
-            after = json.loads(path.read_text())
-            self.assertEqual(after["status"], "rejected")
-            self.assertTrue(after["leafArchive"]["closing"])
-            self.assertTrue(after["leafArchive"]["startRefused"])
-            self.assertEqual(after["requestId"], body["requestId"])
+                if thread.ident is not None:
+                    thread.join(HANG_GUARD_SECONDS)
+            self._assert_completed_launch(state, before, thread, failures, answers)
+
+    def _assert_completed_launch(self, state, before, thread, failures, answers):
+        path, body, live, calls = state.path, state.body, state.live, state.calls
+        phase, created_first = state.phase, state.created_first
+        self.assertFalse(thread.is_alive())
+        self.assertFalse(failures)
+        self.assertEqual(answers[0].status_code, 409)
+        self.assertEqual(json.loads(bytes(answers[0].body))["status"], "rejected")
+        self.assertFalse(live.get(body["agentId"], False))
+        after = json.loads(path.read_text())
+        self.assertEqual(after["status"], "rejected")
+        self.assertTrue(after["leafArchive"]["closing"])
+        self.assertTrue(after["leafArchive"]["startRefused"])
+        self.assertEqual(after["requestId"], body["requestId"])
+        self.assertEqual(
+            after["leafArchive"]["outcomes"][body["agentId"]]["state"],
+            "gone" if phase == "workspace-open" else "archived",
+        )
+        self.assertEqual(calls.count("agent-create"), 0 if phase == "workspace-open" else 1)
+        if phase == "agent-create":
+            self.assertEqual(after["execution"]["agentId"], body["agentId"])
+            self.assertTrue(after["hostAgentExists"])
+        if created_first:
             self.assertEqual(
-                after["leafArchive"]["outcomes"][body["agentId"]]["state"],
-                "gone" if phase == "workspace-open" else "archived",
+                after["leafArchive"]["outcomes"][body["agentId"]],
+                before["leafArchive"]["outcomes"][body["agentId"]],
             )
-            self.assertEqual(calls.count("agent-create"), 0 if phase == "workspace-open" else 1)
-            if phase == "agent-create":
-                self.assertEqual(after["execution"]["agentId"], body["agentId"])
-                self.assertTrue(after["hostAgentExists"])
-            if created_first:
-                self.assertEqual(
-                    after["leafArchive"]["outcomes"][body["agentId"]],
-                    before["leafArchive"]["outcomes"][body["agentId"]],
-                )
+
+    def _start_during_archive_census(self, thread, state):
+        prepare = archive.ArchiveAttempt.prepare
+
+        def start_after_snapshot(attempt, path, snapshot):
+            if thread.ident is None:
+                self.assertEqual(path, state.path)
+                self.assertNotIn("leafCreateEntered", snapshot)
+                thread.start()
+                self.assertTrue(state.entered.wait(HANG_GUARD_SECONDS))
+                self.assertTrue(json.loads(path.read_text())["leafCreateEntered"])
+            return prepare(attempt, path, snapshot)
+
+        with patch.object(archive.ArchiveAttempt, "prepare", start_after_snapshot):
+            result = prepare_terminal_group(self.contract, dry_run=False, teardown_providers=True)
+        agent_id = state.body["agentId"]
+        self.assertTrue(result.blockers, "entered native create lost its archive debt")
+        self.assertTrue(self.contract.worktree_group.exists())
+        self.assertIn(agent_id, {row["agent"] for row in result.blockers})
+        self.assertTrue(json.loads(state.path.read_text())["leafArchive"]["creationPending"])
+        preview = prepare_terminal_group(self.contract, dry_run=True, teardown_providers=True)
+        self.assertIn(agent_id, {row["agent"] for row in preview.blockers})
+        return result.agent_archive
 
     def _paused_creation_host(self, state, _config, command, _payload, **_kwargs):
         self.assertFalse(lock_held(state.path), "host call held the receipt lock")
@@ -175,6 +254,8 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
                 state.live[state.body["agentId"]] = False
                 return {"found": True, "archived": True}
             return {"found": False}
+        if command == "agent-state":
+            return {"agent": None}
         if command == "agent-create" and state.created_first:
             state.live[state.body["agentId"]] = True
         if command == state.phase:
@@ -281,6 +362,7 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
         self.assertEqual(json.loads(reviewer_path.read_text())["status"], "rejected")
 
     def test_stale_publication_keeps_archive_and_only_exact_leaf_mark_refuses(self):
+        self._allow_prepared_start()
         path, body = self.prepared_receipt()
         with patch.object(archive, "bridge_call", return_value={"found": False}):
             archive.LeafAgentArchive(self.config).archive(self.contract)
@@ -334,6 +416,20 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
             all(json.loads(path.read_text())["status"] == "running" for path, _body in records)
         )
 
+    def test_archive_preserves_the_successor_lifecycle_receipt(self):
+        contract = replace(self.contract, lifecycle_id="01ARZ3NDEKTSV4RRFFQ69G5FAV")
+        path, receipt = self.receipt()
+        receipt["workspace"]["lifecycleId"] = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+        path.write_text(json.dumps(receipt))
+        expected = path.read_bytes()
+        with patch.object(
+            archive, "bridge_call", return_value={"found": True, "archived": True}
+        ) as host:
+            report = archive.LeafAgentArchive(self.config).archive(contract)
+        self.assertEqual(path.read_bytes(), expected, "archive rewrote a successor receipt")
+        host.assert_not_called()
+        self.assertFalse(report["archived"])
+
     def test_predecessor_debt_survives_host_failure_and_automatic_recovery_advances_it(self):
         path, body = self.receipt()
         predecessor = str(uuid.uuid4())
@@ -376,11 +472,18 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
                 archive,
                 "bridge_call",
                 side_effect=PaseoBridgeFailure(DAEMON_UNREACHABLE, "Host stopped."),
-            ),
+            ) as host,
         ):
             result = archive.LeafAgentArchive(self.config).archive(self.contract)
-        self.assertTrue(result["owed"])
-        self.assertTrue(result["leftAlone"])
+        host.assert_not_called()
+        self.assertFalse(result["owed"])
+        self.assertTrue(
+            any(
+                row["recordPath"] == str(path) and "Read only." in row["reason"]
+                for row in result["leftAlone"]
+            ),
+            result,
+        )
         self.assertEqual(path.read_bytes(), original)
         with patch.object(archive, "bridge_call", return_value={"found": False}) as call:
             recovery.LeafArchiveRecovery(self.config).tick()
@@ -539,7 +642,7 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
 
                 def archived(contract, order=order):
                     order.append("archive")
-                    return {"owed": [{"reason": "Host stopped."}]}
+                    return {"archived": [{"agentId": "archived-agent"}]}
 
                 port = SimpleNamespace(archive=archived)
                 bind_worktree_services(replace(worktree_services(), leaf_agent_archive=port))
@@ -565,7 +668,172 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
                     )
                 self.assertEqual(order, ["archive", "remove"])
                 self.assertEqual(result.returncode, 0)
-                self.assertTrue(_payload(result)["agentArchive"]["owed"])
+                self.assertTrue(_payload(result)["agentArchive"]["archived"])
+
+    def _native_terminal_receipt(self, *, landed: bool):
+        fixture_root = self.tmp / "native-terminal"
+        fixture_root.mkdir()
+        native_fixture = authority_fixtures._fixture
+
+        def fixture_with_lifecycle(root: Path, *, publish_locations: bool, selected_profile: bool):
+            assert not publish_locations
+            fixture = native_fixture(
+                root, publish_locations=publish_locations, selected_profile=selected_profile
+            )
+            fixture.leaf_contract = replace(
+                fixture.leaf_contract, lifecycle_id="01ARZ3NDEKTSV4RRFFQ69G5FAV"
+            )
+            return fixture
+
+        # The locator and the citation-cache guard must observe the same leaf generation.
+        with patch.object(authority_fixtures, "_fixture", side_effect=fixture_with_lifecycle):
+            contract = _landed_leaf(fixture_root)
+        config = (
+            _landed_leaf_config(fixture_root, contract)
+            if landed
+            else _public_config(fixture_root, contract)
+        )
+        leaf = resolve_terminal_leaf_doc(contract.task_root, contract.leaf_id)
+        assert leaf is not None
+        path = contract.task_root / "notes" / "reports" / EXECUTIONS_DIRECTORY / "worker.json"
+        path.parent.mkdir(parents=True)
+        agent_id = str(uuid.uuid4())
+        ref = {
+            "repository": contract.repo_name,
+            "path": leaf[0]
+            .relative_to(contract.coordination_root / "tasks" / contract.repo_name)
+            .as_posix(),
+        }
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": RECEIPT_SCHEMA,
+                    "requestId": str(uuid.uuid4()),
+                    "role": "worker",
+                    "agentId": agent_id,
+                    "status": "running",
+                    "selection": {"role": "worker", "taskDocumentRef": ref},
+                    "workspace": {
+                        "contractPath": str(contract.contract_path),
+                        "lifecycleId": contract.lifecycle_id,
+                        "path": str(contract.worktree_group),
+                    },
+                }
+            )
+        )
+        bind_worktree_services(
+            replace(worktree_services(), leaf_agent_archive=archive.LeafAgentArchive(config))
+        )
+        return contract, config, path, agent_id
+
+    def _assert_terminal_waiting_message(self, *, force: bool) -> None:
+        contract, config, receipt, agent_id = self._native_terminal_receipt(landed=not force)
+        text = "A still waiting message with exact text.\nPreserve the second line."
+        hold_message(
+            contract.worktree_group,
+            agent_id,
+            HeldMessage(
+                sender_line="From manager",
+                sender_agent_id=str(uuid.uuid4()),
+                text=text,
+                reason="test",
+            ),
+        )
+        with patch.object(archive, "bridge_call", return_value={"found": True, "archived": True}):
+            if force:
+                result = worktree_tools.worktree_abandon_tool(
+                    config, contract_path=contract.contract_path.as_posix(), force=True
+                )
+            else:
+                result = worktree_tools.worktree_cleanup_tool(
+                    config, contract_path=contract.contract_path.as_posix()
+                )
+        self.assertTrue(result["ok"], result)
+        self.assertFalse(contract.worktree_group.exists())
+        closed = json.loads(receipt.read_text())
+        waiting = closed["heldStoreClosures"]["0"]["waitingMessages"]
+        self.assertEqual([row["text"] for row in waiting], [text])
+
+    def test_cleanup_records_held_message_before_group_removal(self) -> None:
+        self._assert_terminal_waiting_message(force=False)
+
+    def test_forced_abandon_records_held_message_before_group_removal(self) -> None:
+        self._assert_terminal_waiting_message(force=True)
+
+    def test_cleanup_blocks_on_owed_in_group_seat(self) -> None:
+        contract, config, receipt, agent_id = self._native_terminal_receipt(landed=True)
+        with patch.object(
+            archive,
+            "bridge_call",
+            side_effect=PaseoBridgeFailure(DAEMON_UNREACHABLE, "Host stopped."),
+        ):
+            result = worktree_tools.worktree_cleanup_tool(
+                config, contract_path=contract.contract_path.as_posix()
+            )
+        self.assertFalse(result["ok"], result)
+        self.assertIn("blockers", result, result)
+        self.assertTrue(any(row.get("agent") == agent_id for row in result["blockers"]), result)
+        self.assertTrue(contract.code_worktree.exists())
+        self.assertTrue(json.loads(receipt.read_text())["leafArchive"]["closing"])
+
+    def test_cleanup_preview_reports_persisted_archive_debt_without_writing(self) -> None:
+        contract, config, receipt, agent_id = self._native_terminal_receipt(landed=True)
+        run = partial(
+            worktree_tools.worktree_cleanup_tool, config, contract_path=str(contract.contract_path)
+        )
+        store = store_path_for(contract.worktree_group, agent_id)
+        hold_message(
+            contract.worktree_group,
+            agent_id,
+            HeldMessage(
+                sender_line="From manager",
+                sender_agent_id=str(uuid.uuid4()),
+                text="Preserve this waiting message.",
+                reason="test",
+            ),
+        )
+        self.assertTrue(store.is_file())
+        with patch.object(
+            archive,
+            "bridge_call",
+            side_effect=PaseoBridgeFailure(DAEMON_UNREACHABLE, "Host stopped."),
+        ) as host:
+            applied = run()
+            self.assertIn(agent_id, {row.get("agent") for row in applied["blockers"]})
+            self.assertFalse(store.exists())
+            closed_bytes = receipt.read_bytes()
+            host.reset_mock()
+            preview = run(dry_run=True)
+            self.assertEqual(
+                {row.get("agent") for row in preview.get("blockers", [])},
+                {agent_id},
+                "preview omitted the persisted archive debt",
+            )
+            self.assertFalse(preview["ok"], preview)
+            self.assertEqual([call.args[1] for call in host.call_args_list], ["agent-state"])
+            self.assertEqual(receipt.read_bytes(), closed_bytes)
+            self.assertFalse(store.exists())
+        self.assertTrue(contract.code_worktree.exists())
+
+        def archived(_config, command, _payload, **_kwargs):
+            if command == "agent-state":
+                return {"agent": {"id": agent_id, "status": "idle", "archivedAt": "now"}}
+            self.assertEqual(command, "agent-archive")
+            return {"found": True, "archived": True, "alreadyArchived": True}
+
+        with patch.object(archive, "bridge_call", side_effect=archived) as host:
+            preview = run(dry_run=True)
+            self.assertTrue(preview["ok"], preview)
+            self.assertEqual([call.args[1] for call in host.call_args_list], ["agent-state"])
+            self.assertEqual(receipt.read_bytes(), closed_bytes)
+            self.assertFalse(store.exists())
+            applied = run()
+        self.assertTrue(applied["ok"], applied)
+        self.assertFalse(contract.worktree_group.exists())
+        self.assertEqual(
+            json.loads(receipt.read_text())["leafArchive"]["outcomes"][agent_id]["state"],
+            "archived",
+        )
 
     def test_rejected_terminal_archive_never_calls_the_host_or_removes_worktrees(self):
         port = Mock()

@@ -12,8 +12,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
+from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.kernel.git_command import GitRunnerOptions, run_git, run_git_bytes
 from agents_remember.kernel.memory_cache import prepare_memory_cache
+from agents_remember.kernel.memory_ignore import with_briefs_ignore
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.worktrees.knowledge_crossing import (
     CrossingSyncError,
     apply_crossing,
@@ -40,6 +43,9 @@ from agents_remember.worktrees.sync_transaction_git._base import (
     SyncGitProofError,
     SyncKnowledgeValidationError,
     SyncMergeCommitError,
+)
+from agents_remember.worktrees.sync_transaction_git._ignore_merge import (
+    settle_generated_briefs_ignore,
 )
 from agents_remember.worktrees.sync_transaction_git._read import (
     _content_pathspec,
@@ -309,6 +315,9 @@ def _continue_memory_merge(
     _restore_open_memory_history(side)
     _remove_memory_cache_from_index(side)
     conflicts = content_conflicts(side)
+    if ".gitignore" in conflicts:
+        settle_generated_briefs_ignore(Path(side.worktree), side.preSyncHead, side.sourceCommit)
+        conflicts = content_conflicts(side)
     if conflicts:
         return SideMergeOutcome(state="resolution-required", conflicts=conflicts)
     validate_staged_resolution(side)
@@ -517,7 +526,7 @@ def _finish_staged_memory_merge(side: SyncSideRecord, paired_code: PairedCode | 
     _require_sync_git(worktree, ["add", "--", ".gitignore"])
     try:
         with close_crossing_history(worktree, (side.preSyncHead, side.sourceCommit)):
-            _validate_and_commit_memory_merge(side, paired_code)
+            _commit_staged_memory_merge(side, paired_code, worktree)
     except CrossingSyncError as error:
         raise SyncGitProofError(str(error)) from error
     result_head = head_commit(worktree)
@@ -527,8 +536,43 @@ def _finish_staged_memory_merge(side: SyncSideRecord, paired_code: PairedCode | 
     return result_head
 
 
-def _validate_and_commit_memory_merge(side: SyncSideRecord, paired_code: PairedCode | None) -> None:
-    worktree = Path(side.worktree)
+def _commit_staged_memory_merge(
+    side: SyncSideRecord, paired_code: PairedCode | None, worktree: Path
+) -> None:
+    ignore = worktree / ".gitignore"
+    previous_ignore = _briefs_ignore_before_memory_commit(side, worktree, ignore)
+    try:
+        if previous_ignore is not None:
+            prepared = with_briefs_ignore(previous_ignore.decode("utf-8")).encode("utf-8")
+            atomic_write_bytes(ignore, prepared)
+            _require_sync_git(worktree, ["add", "--", ".gitignore"])
+        _validate_and_commit_memory_merge(side, paired_code, worktree)
+    except BaseException:
+        # Leave a refused merge staged for repair with its original ignore preparation.
+        if previous_ignore is not None and merge_head(worktree) is not None:
+            atomic_write_bytes(ignore, previous_ignore)
+            _require_sync_git(worktree, ["add", "--", ".gitignore"])
+        raise
+
+
+def _briefs_ignore_before_memory_commit(
+    side: SyncSideRecord, worktree: Path, ignore: Path
+) -> bytes | None:
+    if side.temporary or not (worktree / LAYOUT_MARKER_PATH).is_file():
+        return None
+    previous = ignore.read_bytes()
+    text = previous.decode("utf-8")
+    if with_briefs_ignore(text) == text:
+        return None
+    changed_paths = _require_sync_git(
+        worktree, ["diff", "--cached", "--name-only", side.preSyncHead, *_content_pathspec(side)]
+    )
+    return previous if changed_paths else None
+
+
+def _validate_and_commit_memory_merge(
+    side: SyncSideRecord, paired_code: PairedCode | None, worktree: Path
+) -> None:
     refusal = memory_commit_refusal(
         memory_repository=worktree,
         candidate_tree=_require_sync_git(worktree, ["write-tree"]),

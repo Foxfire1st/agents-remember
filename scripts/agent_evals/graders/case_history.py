@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.application.knowledge_writer.authoring_rows import meaning
+from agents_remember.application.knowledge_writer.revision_stamps import meaning
 from agents_remember.errors import AuthorityError
 from agents_remember.models.knowledge_files.history import FamilyRow, HistoryFile, InvariantRow
 from agents_remember.models.knowledge_files.records import FamilyRecord, InvariantRecord

@@ -17,6 +17,8 @@ from agents_remember.application.memory_tools import (
     MemoryBranches,
     memory_baseline_adopt_tool,
 )
+from agents_remember.memory import baseline
+from agents_remember.worktrees.knowledge_validation import PairedCode
 from converted_onboarding_drift_support import (
     REPO_ID,
     _adoptable_converted_world,
@@ -64,3 +66,36 @@ def test_stale_anchors_refuse_the_baseline_even_when_drift_is_accepted(
     assert adopted["ok"] is True and adopted["state"] == "adopted", adopted
     message = git(repaired[2], "log", "-1", "--format=%B")
     assert f"Code-Commit: {git(repaired[1], 'rev-parse', 'main')}" in message, adopted
+
+
+def test_baseline_refreshes_only_the_forward_adoption_at_the_adopted_pair(
+    tmp_path: Path, bound_validation: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, code, memory = _adoptable_converted_world(tmp_path, card=True)
+    ignore = memory / ".gitignore"
+    original_ignore = ignore.read_bytes() if ignore.exists() else None
+    code_commit = git(code, "rev-parse", "main")
+    branches = MemoryBranches(source_branch="main", work_branch="main")
+    calls: list[PairedCode] = []
+
+    def rendering_problem(memory_root: Path, pair: PairedCode, coordination_root: Path) -> str:
+        assert memory_root == memory
+        assert coordination_root == config.coordination_root
+        assert "/briefs/" in git(memory, "show", "HEAD:.gitignore").splitlines()
+        calls.append(pair)
+        return "source brief rendering failed"
+
+    monkeypatch.setattr(baseline, "refresh_written_memory_briefs", rendering_problem)
+    preview = memory_baseline_adopt_tool(config, repo_id=REPO_ID, branches=branches, dry_run=True)
+    assert preview["state"] == "would-adopt", preview
+    assert (ignore.read_bytes() if ignore.exists() else None) == original_ignore
+    assert not calls
+
+    adopted = memory_baseline_adopt_tool(config, repo_id=REPO_ID, branches=branches)
+    assert adopted["ok"] and adopted["state"] == "adopted", adopted
+    assert adopted["bootstrap"]["briefsProblem"] == "source brief rendering failed"
+    assert calls == [PairedCode(code, code_commit)]
+
+    replay = memory_baseline_adopt_tool(config, repo_id=REPO_ID, branches=branches)
+    assert replay["state"] == "already-adopted", replay
+    assert calls == [PairedCode(code, code_commit)]

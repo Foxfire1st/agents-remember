@@ -195,8 +195,13 @@ An agent often has to find the right file before it can read that file's card. I
 - **By path.** The agent holds a file; the card lies at the mirrored path.
 - **By tool.** `read_ar_files` names, for up to 20 paths, the governing card and the knowledge
   records of each path. `knowledge_read` names the invariants and families attributed to one
-  source file, and the realizations and proofs of a named record. Both return names and locations,
-  never text; the agent opens the named files itself.
+  source file, and the realizations and proofs of a named record. `read_ar_files` also carries, per file, the
+  short answer of its brief: the rules recorded at the file with their text. As the answer nears
+  its size bound, the further paths get their counts and the path of their brief. If those rows
+  would pass the bound too, every path gets a compact row instead: its path and, where applicable,
+  whether it exists, its card's status and the path of its brief, marked when that brief is missing
+  or older. The brief holds the full story. See the [tool reference](reference/mcp-tools.md).
+  `knowledge_read` returns names and locations only; the agent opens the named files itself.
 - **By text search.** An agent that knows a concept but no file searches the code and the cards as
   text, then expands the hits with `knowledge_read`.
 

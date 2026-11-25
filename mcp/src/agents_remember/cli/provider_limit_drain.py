@@ -22,13 +22,13 @@ from agents_remember.cli.role_held_messages import (
     _END_NOT_DELIVERED,
     _DrainBatch,
     _DrainPause,
+    _end_batch,
     _read_store_file,
     _release_claim,
     _write_store_file,
-    end_waiting_as,
     store_path_for,
 )
-from agents_remember.kernel.file_lock import exclusive_file_lock
+from agents_remember.cli.role_held_store import open_held_store
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.observer.host_activity import (
     HOST_ACTIVITY_FILE,
@@ -55,12 +55,12 @@ def pause_for_provider_limit(batch: _DrainBatch) -> None:
     if stamp is not None and claim_ended_stamp(batch, stamp):
         reading = read_agent(batch.config, batch.agent_id)
         if not reading.reachable:
-            _release_claim(batch.folder, batch.agent_id, batch.claim)
+            _release_claim(batch.ref, batch.claim)
             raise _DrainPause(
                 {"outcome": "host-unreachable", "detail": str(reading.unreachable_reason)}
             )
         if not reading.found or reading.archived:
-            ended = end_waiting_as(batch.folder, batch.agent_id)
+            ended = _end_batch(batch, host_state="archived" if reading.archived else "gone")
             raise _DrainPause(
                 {
                     "outcome": "recipient-gone",
@@ -72,7 +72,7 @@ def pause_for_provider_limit(batch: _DrainBatch) -> None:
                     "how": _END_NOT_DELIVERED,
                 }
             )
-    _release_claim(batch.folder, batch.agent_id, batch.claim)
+    _release_claim(batch.ref, batch.claim)
     raise _DrainPause(
         {
             "outcome": PROVIDER_LIMIT_REASON,
@@ -105,7 +105,7 @@ def claim_ended_stamp(batch: _DrainBatch, stamp: str) -> bool:
     """Take this stamp for one host read; ``False`` when a sweep already did."""
 
     path = store_path_for(batch.folder, batch.agent_id)
-    with exclusive_file_lock(path, "held-message store"):
+    with open_held_store(batch.ref):
         store = _read_store_file(path, batch.agent_id)
         if store.get(PROVIDER_LIMIT_STAMP_KEY) == stamp:
             return False

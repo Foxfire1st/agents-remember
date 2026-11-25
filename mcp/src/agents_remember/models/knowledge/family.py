@@ -16,20 +16,15 @@ from __future__ import annotations
 
 from pydantic import Field, field_validator, model_validator
 
-from agents_remember.models.knowledge.authorship import (
-    PROPOSED_STATE,
-    Authorship,
-    KnowledgeState,
-)
+from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.base import (
     LABEL_MAX_LENGTH,
     PROSE_MAX_LENGTH,
-    REFERENCE_MAX_LENGTH,
     SHA256_PATTERN,
     UUID_PATTERN,
     KnowledgeModel,
-    require_consistent_acceptance,
 )
+from agents_remember.models.knowledge_files.record_state import RecordState
 
 
 class FamilyDraft(KnowledgeModel):
@@ -61,6 +56,9 @@ class FamilyRevisionDraft(KnowledgeModel):
     The digest is absent by design: the store recomputes and stores it, so a caller cannot
     present a payload whose seal belongs to different content. ``predecessors`` is the declared
     predecessor set within the same family; the guarantee text carries no member obligation.
+    ``state`` is the revision's derived state in the tree it was read from (proposed, reviewed or
+    consolidated, :mod:`agents_remember.models.knowledge_files.record_state`); it is never authored
+    and the seal does not cover it.
     """
 
     family_id: str = Field(pattern=UUID_PATTERN)
@@ -68,8 +66,7 @@ class FamilyRevisionDraft(KnowledgeModel):
     display_version: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     joint_guarantee: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
     predecessors: tuple[str, ...] = ()
-    state_at_origin: KnowledgeState = PROPOSED_STATE
-    acceptance_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
+    state: RecordState = "proposed"
     provenance: Authorship
 
     @field_validator("display_version", "joint_guarantee")
@@ -89,14 +86,12 @@ class FamilyRevisionDraft(KnowledgeModel):
 
     @model_validator(mode="after")
     def _require_self_consistent_aggregate(self) -> FamilyRevisionDraft:
-        """Refuse an aggregate whose own parts contradict each other.
+        """Refuse a revision that declares itself as its own predecessor.
 
-        Both rules are properties of the authored value rather than of the database, so they are
-        refused at construction: a revision that declares itself as its own predecessor, and an
-        origin state whose acceptance reference is missing or belongs to a proposed revision.
+        The rule is a property of the authored value rather than of the database, so it is refused
+        at construction.
         """
 
-        require_consistent_acceptance(self.state_at_origin, self.acceptance_ref)
         if self.revision_id in self.predecessors:
             raise ValueError("a revision must not declare itself as its own predecessor")
         return self

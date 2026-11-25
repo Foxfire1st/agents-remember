@@ -1,0 +1,291 @@
+"""Lossless JSON-Schema compaction unit and server-parity tests."""
+
+from __future__ import annotations
+
+import asyncio
+import copy
+import json
+import os
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+import pytest
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
+from agents_remember.mcp import server as server_module
+from agents_remember.mcp.registration.explainer_surface import EXPLAINER_BINDING_ENV
+from agents_remember.mcp.server import create_server
+from agents_remember.models.tools.tool_schema_compaction import compact_tool_schema
+
+REPO = "agents-remember"
+TASK = "261124_cap"
+LEAF = "261124-CAP-L4"
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_binding(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in list(os.environ):
+        if key.startswith("AR_"):
+            monkeypatch.delenv(key, raising=False)
+
+
+def _world(root: Path) -> tuple[McpRuntimeConfig, Path]:
+    (root / "tasks" / REPO / TASK).mkdir(parents=True, exist_ok=True)
+    (root / "repo").mkdir(exist_ok=True)
+    (root / "memory").mkdir(exist_ok=True)
+    workspace = root / "explainer" / REPO / TASK / LEAF
+    workspace.mkdir(parents=True)
+    config = McpRuntimeConfig(
+        config_path=root / "settings.json",
+        coordination_root=root,
+        workspace_root=root / "workspace",
+        transcript_root=root / "transcripts",
+        repositories={
+            REPO: RepositoryScope(repo_id=REPO, path=root / "repo", memory_root=root / "memory")
+        },
+    )
+    return config, workspace
+
+
+def _explainer_binding(workspace: Path) -> str:
+    return json.dumps(
+        {
+            "capability": "explainer",
+            "agent": "ca6f591f-1b27-4554-a530-0cca576b7529",
+            "request": "req-1",
+            "repository": REPO,
+            "task": TASK,
+            "leaf": LEAF,
+            "workspace": str(workspace),
+            "generation": 1,
+            "seat": "ca6f591f-1b27-4554-a530-0cca576b7529",
+        }
+    )
+
+
+def _map_children(
+    node: Mapping[str, Any], path: str, *, is_root: bool
+) -> list[tuple[str, Mapping[str, Any], bool]]:
+    children: list[tuple[str, Mapping[str, Any], bool]] = []
+    for key in ("properties", "patternProperties", "dependentSchemas", "$defs"):
+        mapping = node.get(key)
+        if isinstance(mapping, Mapping):
+            children.extend(
+                (f"{path}.{key}.{name}", sub, is_root and key == "$defs")
+                for name, sub in mapping.items()
+                if isinstance(sub, Mapping)
+            )
+    return children
+
+
+def _other_children(
+    node: Mapping[str, Any], path: str
+) -> list[tuple[str, Mapping[str, Any], bool]]:
+    children: list[tuple[str, Mapping[str, Any], bool]] = []
+    for key in ("items", "not", "if", "then", "else", "additionalProperties"):
+        sub = node.get(key)
+        if isinstance(sub, Mapping):
+            children.append((f"{path}.{key}", sub, False))
+    for key in ("items", "anyOf", "oneOf", "allOf", "prefixItems"):
+        seq = node.get(key)
+        if isinstance(seq, list):
+            children.extend(
+                (f"{path}.{key}[{idx}]", item, False)
+                for idx, item in enumerate(seq)
+                if isinstance(item, Mapping)
+            )
+    return children
+
+
+def _schema_compaction_violations(
+    node: Mapping[str, Any], *, is_root: bool = True, path: str = "$"
+) -> list[str]:
+    """Return any unstripped schema-level title, default:null, or top-level $defs description."""
+
+    violations: list[str] = []
+    if "title" in node:
+        violations.append(f"{path}.title")
+    if "default" in node and node["default"] is None:
+        violations.append(f"{path}.default=null")
+    for sub_path, sub, check_desc in (
+        *_map_children(node, path, is_root=is_root),
+        *_other_children(node, path),
+    ):
+        if check_desc and "description" in sub:
+            violations.append(f"{sub_path}.description")
+        violations.extend(_schema_compaction_violations(sub, is_root=False, path=sub_path))
+    return violations
+
+
+def _contract_signature(node: Any, *, is_root: bool = True) -> Any:
+    """Strip only the lossless compacted metadata keys so wire contracts can be compared."""
+
+    if isinstance(node, list):
+        return [_contract_signature(item, is_root=False) for item in node]
+    if not isinstance(node, Mapping):
+        return node
+    out: dict[str, Any] = {}
+    for key, value in node.items():
+        if key == "title" or (key == "default" and value is None):
+            continue
+        if key in ("properties", "patternProperties", "dependentSchemas", "$defs") and isinstance(
+            value, Mapping
+        ):
+            out[key] = {
+                name: (
+                    {
+                        k: v
+                        for k, v in _contract_signature(sub, is_root=False).items()
+                        if not (is_root and key == "$defs" and k == "description")
+                    }
+                    if isinstance(sub, Mapping)
+                    else sub
+                )
+                for name, sub in value.items()
+            }
+        else:
+            out[key] = _contract_signature(value, is_root=False)
+    return out
+
+
+def _sample_compaction_schema() -> dict[str, Any]:
+    return {
+        "title": "RootArgs",
+        "default": None,
+        "type": "object",
+        "required": ["title", "default"],
+        "additionalProperties": False,
+        "properties": {
+            "title": {
+                "title": "Title",
+                "type": "string",
+                "description": "User-supplied title field.",
+                "default": None,
+                "pattern": "^[a-z]+$",
+            },
+            "description": {
+                "title": "Description",
+                "type": "string",
+                "description": "User-supplied description field.",
+                "const": "fixed",
+            },
+            "default": {"title": "Default", "type": "boolean", "default": False},
+            "defaults_kept": {
+                "title": "DefaultsKept",
+                "type": "object",
+                "properties": {
+                    "flag": {"title": "Flag", "type": "boolean", "default": True},
+                    "zero": {"title": "Zero", "type": "integer", "default": 0},
+                    "empty": {"title": "Empty", "type": "string", "default": ""},
+                    "items": {"title": "Items", "type": "array", "default": []},
+                    "limit": {"title": "Limit", "type": "integer", "default": 50},
+                    "schema": {"title": "Schema", "type": "string", "default": "task-intent/v1"},
+                },
+                "additionalProperties": {"title": "ExtraVal", "type": "string", "default": None},
+            },
+            "tuple_items": {
+                "title": "TupleItems",
+                "type": "array",
+                "items": [{"title": "First", "type": "string", "default": None}, "malformed-entry"],
+                "prefixItems": [{"title": "Prefix", "type": "integer", "default": None}],
+            },
+            "combinators": {
+                "title": "Combinators",
+                "anyOf": [
+                    {"$ref": "#/$defs/title"},
+                    {"type": "null", "title": "NullBranch"},
+                    "malformed-branch",
+                ],
+                "oneOf": [{"title": "One", "enum": ["a", "b"]}],
+                "allOf": [{"title": "All", "type": "object"}],
+                "not": {"title": "Not", "type": "integer"},
+                "if": {"title": "If", "type": "object"},
+                "then": {"title": "Then", "required": ["title"]},
+                "else": {"title": "Else", "type": "null"},
+            },
+        },
+        "patternProperties": {"title": {"title": "PatTitle", "type": "string", "default": None}},
+        "dependentSchemas": {
+            "title": {"title": "DepTitle", "required": ["description"], "default": None}
+        },
+        "$defs": {
+            "title": {
+                "title": "TitleModel",
+                "description": "Top-level model docstring to strip.",
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "title": "NestedDesc",
+                        "type": "string",
+                        "description": "Nested property description survives.",
+                        "default": None,
+                    }
+                },
+            }
+        },
+    }
+
+
+def test_compact_tool_schema_is_lossless_and_immutable() -> None:
+    """Compaction strips only lossless metadata, preserves literal property names, and never aliases."""
+
+    raw = _sample_compaction_schema()
+    snapshot = copy.deepcopy(raw)
+    compacted = compact_tool_schema(raw)
+
+    assert raw == snapshot
+    assert _schema_compaction_violations(compacted) == []
+    assert compact_tool_schema(compacted) == compacted
+    assert set(compacted["properties"]) >= {"title", "description", "default"}
+    assert compacted["properties"]["title"]["description"] == "User-supplied title field."
+    assert compacted["properties"]["title"]["pattern"] == "^[a-z]+$"
+    assert compacted["properties"]["description"]["const"] == "fixed"
+    assert compacted["properties"]["default"]["default"] is False
+    kept = compacted["properties"]["defaults_kept"]["properties"]
+    assert [kept[k]["default"] for k in ("flag", "zero", "empty", "items", "limit", "schema")] == [
+        True,
+        0,
+        "",
+        [],
+        50,
+        "task-intent/v1",
+    ]
+    assert compacted["properties"]["defaults_kept"]["additionalProperties"] == {"type": "string"}
+    assert compacted["additionalProperties"] is False
+    assert compacted["properties"]["tuple_items"]["items"] == [
+        {"type": "string"},
+        "malformed-entry",
+    ]
+    assert "title" in compacted["patternProperties"]
+    assert "title" in compacted["dependentSchemas"]
+    assert "title" in compacted["$defs"]
+    assert "description" not in compacted["$defs"]["title"]
+    assert (
+        compacted["$defs"]["title"]["properties"]["description"]["description"]
+        == "Nested property description survives."
+    )
+
+    compacted["required"].append("mutated")
+    compacted["properties"]["combinators"]["oneOf"][0]["enum"].append("c")
+    compacted["properties"]["defaults_kept"]["properties"]["items"]["default"].append("x")
+    assert raw == snapshot
+
+
+@pytest.mark.parametrize("with_explainer", [False, True])
+def test_create_server_compacts_every_advertised_schema_with_contract_parity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_explainer: bool
+) -> None:
+    """create_server compacts unbound and explainer surfaces without altering any wire contract."""
+
+    config, workspace = _world(tmp_path)
+    if with_explainer:
+        monkeypatch.setenv(EXPLAINER_BINDING_ENV, _explainer_binding(workspace))
+    compacted_tools = asyncio.run(create_server(config).list_tools())
+    monkeypatch.setattr(server_module, "_compact_server_tool_schemas", lambda _server: None)
+    raw_tools = asyncio.run(create_server(config).list_tools())
+
+    assert [tool.name for tool in compacted_tools] == [tool.name for tool in raw_tools]
+    for compacted, raw in zip(compacted_tools, raw_tools, strict=True):
+        assert compacted.annotations == raw.annotations
+        assert _schema_compaction_violations(compacted.inputSchema) == []
+        assert compacted.inputSchema == _contract_signature(raw.inputSchema)

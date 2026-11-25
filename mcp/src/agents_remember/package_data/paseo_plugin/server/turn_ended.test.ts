@@ -6,10 +6,17 @@
  * running child, the permission wait, the unrecorded parent, the batch, the
  * limit, and exactly-once delivery.
  */
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, renameSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PluginLifecycleRegistration } from "@getpaseo/plugin/server";
+import {
+  limitedUntil,
+  providerLimitsPath,
+  readProviderLimits,
+  type ProviderLimitClear,
+  type ProviderLimitDocument,
+} from "./provider_limits.ts";
 import { registerParentWakeEvents } from "./turn_events.ts";
 import {
   TURN_END_LOG_ARCHIVE,
@@ -2502,12 +2509,12 @@ test("L181-C1-F06 (R2): an unreadable or incomplete host listing sends nothing",
 /** A clock a limit case moves by hand, with every timer it was given. */
 function movingClock(start: string = WAKE_TIME) {
   let current = Date.parse(start);
-  const timers: FakeTimer[] = [];
+  const timers: (FakeTimer & { readonly dueAt: number })[] = [];
   return {
     timers,
     now: (): Date => new Date(current),
     setTimeout: (callback: () => void, delayMs: number): unknown => {
-      const timer: FakeTimer = { callback, delayMs, cleared: false };
+      const timer = { callback, delayMs, cleared: false, dueAt: current + delayMs };
       timers.push(timer);
       return timer;
     },
@@ -2520,6 +2527,14 @@ function movingClock(start: string = WAKE_TIME) {
     live: (): FakeTimer[] => timers.filter((timer) => !timer.cleared),
     async fire(): Promise<void> {
       for (const timer of timers.splice(0)) if (!timer.cleared) timer.callback();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    },
+    async fireDue(): Promise<void> {
+      for (const timer of timers.splice(0).sort((a, b) => a.dueAt - b.dueAt)) {
+        if (timer.cleared) continue;
+        if (timer.dueAt <= current) timer.callback();
+        else timers.push(timer);
+      }
       await new Promise<void>((resolve) => setImmediate(resolve));
     },
   };
@@ -2550,6 +2565,55 @@ function limitTracker(
   return createTurnEndedTracker(undefined, (row) => rows.push(row as LogRow), {
     limitedUntil: limits.limitedUntil,
   });
+}
+
+function publishedLimits(untils: Readonly<Record<string, string>>) {
+  const clearedSeats: Record<string, ProviderLimitClear> = {};
+  const reports = Object.fromEntries(Object.entries(untils).map(([agent, until]) => [
+    agent, { until, sourceLabel: "", accountLabel: "", windows: [], observedAt: WAKE_TIME },
+  ]));
+  const agents = Object.fromEntries(Object.keys(untils).map((agent) => [agent, [agent]]));
+  const readProviderLimits = (): ProviderLimitDocument => ({
+    reports: { ...reports },
+    agents,
+    clearedSeats: { ...clearedSeats },
+  });
+  return {
+    readProviderLimits,
+    limitedUntil: (agent: string, now: Date) => limitedUntil(readProviderLimits(), agent, now),
+    clear(agent: string, clearedAt: string): void {
+      const { until: previousUntil } = reports[agent];
+      delete reports[agent];
+      clearedSeats[agent] = { previousUntil, clearedAt };
+    },
+  };
+}
+
+const LONG_LIMIT = "2026-10-22T08:00:00.000Z";
+const PROVIDER_CHECK_WAIT = 15_000;
+
+function clearDuringObservation(agent: string, clock: MovingClock) {
+  const limits = publishedLimits({ [agent]: LONG_LIMIT });
+  let clearedAt = "";
+  return {
+    clearTime: () => clearedAt,
+    readProviderLimits: limits.readProviderLimits,
+    limitedUntil: (id: string, now: Date) => {
+      const observed = limits.limitedUntil(id, now);
+      if (id === agent && observed !== null && clearedAt === "") {
+        // The writer can publish a fraction inside the clock's observed millisecond.
+        clearedAt = clock.now().toISOString().replace("Z", "500Z");
+        limits.clear(id, clearedAt);
+        clock.advance(1);
+      }
+      return observed;
+    },
+  };
+}
+
+async function fireNaturalLimitDeadline(clock: MovingClock, until: string): Promise<void> {
+  clock.advance(Date.parse(until) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+  await clock.fireDue();
 }
 
 /** One ended turn on the moving clock, with the host's state where a case reads it. */
@@ -2664,6 +2728,296 @@ test("L184-R1-F06: a limited parent's reset flush is armed even when nothing can
     assert.equal(lines.length, 1, "the line arrives once the parent is free");
     assert.ok(lines[0].text.includes("child"));
   });
+});
+
+test("an early provider clear resumes a skipped send-back and flushes a held line", async (t) => {
+  const clock = movingClock();
+  const until = new Date(clock.now().getTime() + 3 * 24 * 60 * 60_000).toISOString();
+  const home = mkdtempSync(join(tmpdir(), "ar-provider-clear-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  mkdirSync(join(home, "agents-remember"));
+  const path = providerLimitsPath(home);
+  const agents = { seat: ["r1"], parent: ["r1"] };
+  const publish = (document: unknown): void => {
+    writeFileSync(`${path}.new`, JSON.stringify(document));
+    renameSync(`${path}.new`, path);
+  };
+  publish({ reports: { r1: { until, observedAt: clock.now().toISOString() } }, agents });
+
+  let snapshots = 0;
+  const signals = {
+    limitedUntil: (agentId: string, now: Date) => limitedUntil(readProviderLimits(home), agentId, now),
+    readProviderLimits: () => {
+      snapshots += 1;
+      return readProviderLimits(home);
+    },
+  };
+  const tracker = createTurnEndedTracker(undefined, undefined, signals);
+  const sender = makeSender();
+  await runEnd(tracker, sender, clock, SEAT_AGENT, SEAT_RECORDS);
+  clock.advance(TURN_ENDED_WAIT_MS);
+  await clock.fireDue();
+  await runEnd(tracker, sender, clock, CHILD_AGENT, SEAT_RECORDS);
+  assert.equal(tracker.resumes.size, 1);
+  assert.equal(tracker.held.length, 1);
+
+  clock.advance(15_000);
+  await clock.fireDue();
+  assert.equal(sender.sent.length, 0, "the stored fact still holds both actions");
+
+  clock.advance(1_000);
+  const clearedAt = clock.now().toISOString();
+  const marker = { clearedAt, previousUntil: until };
+  const cleared = { reports: {}, agents, clearedSeats: { seat: marker, parent: marker } };
+  publish({ ...cleared, updatedAt: clearedAt });
+  clock.advance(1_000);
+  publish({ ...cleared, updatedAt: clock.now().toISOString() });
+
+  const snapshotsBeforeClearCheck = snapshots;
+  clock.advance(13_000);
+  await clock.fireDue();
+  assert.deepEqual(
+    sender.sent.map(({ agentId }) => agentId).sort(),
+    ["parent", "seat"],
+    "one check releases both actions before the old deadline, without a turn ending",
+  );
+  assert.equal(snapshots - snapshotsBeforeClearCheck, 1, "both actions share one snapshot");
+  assert.match(sender.sent.find(({ agentId }) => agentId === "parent")!.text, /turn ended: architect child/);
+  assert.ok(sender.sent.find(({ agentId }) => agentId === "seat")!.text.includes(`usage limit reset at ${clearedAt}`));
+  assert.equal(tracker.held.length, 0);
+  assert.equal(clock.live().length, 0, "the deadline timers and shared check have stopped");
+
+  clock.advance(Date.parse(until) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+  await clock.fireDue();
+  assert.equal(sender.sent.length, 2, "the old deadline does not send again");
+  assert.equal(snapshots - snapshotsBeforeClearCheck, 1, "no snapshot is taken without pending actions");
+});
+
+test("a clear sampled before the last limited reads releases the seat and parent after publication", async (t) => {
+  const clock = movingClock();
+  const home = mkdtempSync(join(tmpdir(), "ar-staged-clear-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  mkdirSync(join(home, "agents-remember"));
+  const path = providerLimitsPath(home);
+  const staged = `${path}.new`;
+  const agents = { seat: ["r1"], parent: ["r1"], "gated-parent": ["r1"] };
+  writeFileSync(path, JSON.stringify({
+    reports: { r1: { until: LONG_LIMIT, observedAt: clock.now().toISOString() } },
+    agents,
+  }));
+
+  const lastLimitedRead = new Map<string, number>();
+  const tracker = createTurnEndedTracker(undefined, undefined, {
+    readProviderLimits: () => readProviderLimits(home),
+    limitedUntil: (id, now) => {
+      const until = limitedUntil(readProviderLimits(home), id, now);
+      if (until !== null) lastLimitedRead.set(id, now.getTime());
+      return until;
+    },
+  });
+  const sender = makeSender();
+  const records = { ...SEAT_RECORDS, "gated-parent": PARENT, "gated-child": CHILD };
+  await runEnd(tracker, sender, clock, SEAT_AGENT, records);
+
+  clock.advance(TURN_ENDED_WAIT_MS - 5_000);
+  const clearedAt = clock.now().toISOString();
+  const marker = { clearedAt, previousUntil: LONG_LIMIT };
+  writeFileSync(staged, JSON.stringify({
+    reports: {},
+    agents,
+    clearedSeats: { seat: marker, parent: marker, "gated-parent": marker },
+    updatedAt: clearedAt,
+  }));
+
+  // The writer has sampled the clear time, but the old generation still holds the seats.
+  clock.advance(5_000);
+  await clock.fireDue();
+  await runEnd(tracker, sender, clock, CHILD_AGENT, records);
+  notePermissionRequested("gated-parent", tracker);
+  await runEnd(tracker, sender, clock, { id: "gated-child", parentAgentId: "gated-parent" }, records);
+  for (const id of Object.keys(agents)) {
+    assert.ok((lastLimitedRead.get(id) ?? 0) > Date.parse(clearedAt), `${id} read the old limit after sampling`);
+  }
+  assert.equal(sender.sent.length, 0);
+  assert.equal(tracker.resumes.size, 1);
+  assert.equal(tracker.held.length, 2);
+
+  clock.advance(1_000);
+  renameSync(staged, path);
+  clock.advance(PROVIDER_CHECK_WAIT);
+  await clock.fireDue();
+  assert.deepEqual(
+    sender.sent.map(({ agentId }) => agentId).sort(),
+    ["parent", "seat"],
+    "both eligible actions release within one check of the replacement",
+  );
+  assert.ok(sender.sent.find(({ agentId }) => agentId === "seat")!.text.includes(`usage limit reset at ${clearedAt}`));
+  assert.deepEqual(tracker.held.map(({ parent }) => parent), ["gated-parent"], "the permission gate still holds the line");
+  await fireNaturalLimitDeadline(clock, LONG_LIMIT);
+  assert.equal(sender.sent.length, 2, "the old deadlines do not send again");
+
+  await notePermissionResolved("gated-parent", tracker, sender, records, clock);
+  assert.equal(sender.sent.length, 3);
+  assert.equal(sender.sent[2].agentId, "gated-parent");
+});
+
+test("a provider clear during send-back registration resumes the seat", async () => {
+  const clock = movingClock();
+  const limits = clearDuringObservation("seat", clock);
+  const tracker = createTurnEndedTracker(undefined, undefined, limits);
+  const sender = makeSender();
+  await runEnd(tracker, sender, clock, SEAT_AGENT, SEAT_RECORDS);
+  clock.advance(TURN_ENDED_WAIT_MS);
+  await clock.fireDue();
+  assert.equal(sender.sent.length, 0, "the positive observation initially holds the send-back");
+
+  clock.advance(Date.parse(limits.clearTime()) + PROVIDER_CHECK_WAIT - clock.now().getTime());
+  await clock.fireDue();
+  assert.deepEqual(sender.sent.map(({ agentId }) => agentId), ["seat"]);
+  assert.ok(sender.sent[0].text.includes(`usage limit reset at ${limits.clearTime()}`));
+  await fireNaturalLimitDeadline(clock, LONG_LIMIT);
+  assert.equal(sender.sent.length, 1);
+});
+
+test("a provider clear during parent-flush registration releases the line", async (t) => {
+  for (const runningChild of [false, true]) {
+    await t.test(runningChild ? "clear after the timer's observation" : "clear after the initial parent gate", async () => {
+      const clock = movingClock();
+      const limits = clearDuringObservation("parent", clock);
+      const tracker = createTurnEndedTracker(undefined, undefined, limits);
+      const sender = makeSender();
+      if (runningChild) noteTurnStarted({ id: "helper", parentAgentId: "child" }, tracker, clock.now);
+      await runEnd(tracker, sender, clock, CHILD_AGENT, RECORDS);
+      assert.equal(tracker.held.length, 1, "the positive observation initially holds the line");
+      assert.equal(sender.sent.length, 0);
+      if (runningChild) noteAgentClosed("helper", tracker, clock.now);
+
+      clock.advance(Date.parse(limits.clearTime()) + PROVIDER_CHECK_WAIT - clock.now().getTime());
+      await clock.fireDue();
+      assert.deepEqual(sender.sent.map(({ agentId }) => agentId), ["parent"]);
+      await fireNaturalLimitDeadline(clock, LONG_LIMIT);
+      assert.equal(sender.sent.length, 1);
+    });
+  }
+  await t.test("clear after the send-time gate before requeue registration", async () => {
+    const clock = movingClock();
+    const limits = clearDuringObservation("parent-2", clock);
+    let secondLimitApplies = false;
+    const tracker = createTurnEndedTracker(undefined, undefined, {
+      readProviderLimits: limits.readProviderLimits,
+      limitedUntil: (id, now) => secondLimitApplies ? limits.limitedUntil(id, now) : null,
+    });
+    const sent = makeSender();
+    const sender: TurnEndedSender = {
+      async sendMessage(id, text) {
+        if (id === "parent") secondLimitApplies = true;
+        await sent.sendMessage(id, text);
+      },
+    };
+    const records = { ...RECORDS, "parent-2": PARENT, "child-2": CHILD };
+    notePermissionRequested("parent", tracker);
+    notePermissionRequested("parent-2", tracker);
+    await runEnd(tracker, sender, clock, CHILD_AGENT, records);
+    await runEnd(tracker, sender, clock, { id: "child-2", parentAgentId: "parent-2" }, records);
+    noteAgentClosed("parent", tracker, clock.now);
+    noteAgentClosed("parent-2", tracker, clock.now);
+    await flushHeldLines(tracker, sender, records, clock);
+    assert.deepEqual(sent.sent.map(({ agentId }) => agentId), ["parent"]);
+    assert.deepEqual(tracker.held.map(({ parent }) => parent), ["parent-2"]);
+
+    clock.advance(Date.parse(limits.clearTime()) + PROVIDER_CHECK_WAIT - clock.now().getTime());
+    await clock.fireDue();
+    assert.deepEqual(sent.sent.map(({ agentId }) => agentId), ["parent", "parent-2"]);
+    await fireNaturalLimitDeadline(clock, LONG_LIMIT);
+    assert.equal(sent.sent.length, 2);
+  });
+});
+
+test("archiving a child stops the provider check when no line is owed", async () => {
+  for (const scenario of ["sole", "sibling-clear", "sibling-natural"] as const) {
+    const clock = movingClock();
+    const limits = publishedLimits({ parent: LONG_LIMIT });
+    let snapshots = 0;
+    const tracker = createTurnEndedTracker(undefined, undefined, {
+      limitedUntil: limits.limitedUntil,
+      readProviderLimits: () => {
+        snapshots += 1;
+        return limits.readProviderLimits();
+      },
+    });
+    const sender = makeSender();
+    const records = { ...RECORDS, "child-2": CHILD };
+    await runEnd(tracker, sender, clock, CHILD_AGENT, records);
+    if (scenario !== "sole") {
+      await runEnd(tracker, sender, clock, { id: "child-2", parentAgentId: "parent" }, records);
+    }
+    clock.advance(PROVIDER_CHECK_WAIT);
+    await clock.fireDue();
+    assert.equal(snapshots, 1, "the check ran before the archive");
+    noteAgentArchived("child", tracker, clock.now);
+
+    if (scenario === "sole") {
+      clock.advance(PROVIDER_CHECK_WAIT);
+      await clock.fireDue();
+      assert.equal(snapshots, 1, "archiving the sole subject stops the provider check");
+      assert.equal(clock.live().length, 0);
+      continue;
+    }
+    if (scenario === "sibling-clear") {
+      limits.clear("parent", clock.now().toISOString());
+      clock.advance(PROVIDER_CHECK_WAIT);
+      await clock.fireDue();
+      assert.equal(sender.sent.length, 1, "the surviving sibling keeps the early check");
+    }
+    await fireNaturalLimitDeadline(clock, LONG_LIMIT);
+    assert.equal(sender.sent.length, 1, scenario);
+    assert.match(sender.sent[0].text, /architect child-2/);
+    assert.equal(clock.live().length, 0);
+  }
+});
+
+test("simultaneous early parent releases share one ordered host-state pass", async () => {
+  for (const size of [4, 16]) {
+    const clock = movingClock();
+    const parents = Array.from({ length: size }, (_, index) => `parent-${index}`);
+    const untils = Object.fromEntries(parents.map((parent, index) => [
+      parent, new Date(Date.parse(LONG_LIMIT) + index * 60_000).toISOString(),
+    ]));
+    const limits = publishedLimits(untils);
+    const records = Object.fromEntries(parents.flatMap((parent, index) => [
+      [parent, PARENT],
+      [`child-${index}`, CHILD],
+    ]));
+    const states = Object.keys(records).map((id) => hostState({ id }));
+    let reads = 0;
+    const readHost = async () => {
+      reads += 1;
+      return states;
+    };
+    const tracker = createTurnEndedTracker(undefined, undefined, {
+      ...limits, roleRecord: () => records,
+    });
+    const sender = makeSender();
+    for (const [index, parent] of parents.entries()) {
+      await runEnd(tracker, sender, clock, { id: `child-${index}`, parentAgentId: parent }, records, [], { readHost });
+    }
+    assert.equal(tracker.held.length, size);
+    const waiting = parents[size - 1];
+    notePermissionRequested(waiting, tracker);
+    for (const parent of parents) limits.clear(parent, clock.now().toISOString());
+    const previousReads = reads;
+
+    clock.advance(PROVIDER_CHECK_WAIT);
+    await clock.fireDue();
+    assert.equal(reads - previousReads, 1, `one host-state pass for ${size} released parents`);
+    assert.deepEqual(sender.sent.map(({ agentId }) => agentId), parents.slice(0, -1));
+    assert.deepEqual(tracker.held.map(({ parent }) => parent), [waiting]);
+    await fireNaturalLimitDeadline(clock, untils[waiting]);
+    assert.equal(reads - previousReads, 1, "cancelled natural deadlines did not reread the host");
+    assert.equal(sender.sent.length, size - 1);
+    await notePermissionResolved(waiting, tracker, sender, records);
+    assert.deepEqual(sender.sent.map(({ agentId }) => agentId), parents);
+  }
 });
 
 test("L184-R1-F07: a later limit reset leaves one replacement resume timer", async (t) => {

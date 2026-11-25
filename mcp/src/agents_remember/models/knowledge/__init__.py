@@ -7,12 +7,7 @@ something lives here and is imported by the decider, never defined by it and imp
 down.
 """
 
-from agents_remember.models.knowledge.authorship import (
-    ACCEPTED_STATE,
-    PROPOSED_STATE,
-    Authorship,
-    KnowledgeState,
-)
+from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.context import (
     KNOWLEDGE_SCHEMA_NAME,
     KnowledgeSchemaIdentity,
@@ -84,11 +79,9 @@ from agents_remember.models.knowledge.source import (
 )
 
 __all__ = [
-    "ACCEPTED_STATE",
     "FAMILY_REVISION_PAYLOAD_VERSION",
     "KNOWLEDGE_READ_POLICY_VERSION",
     "KNOWLEDGE_SCHEMA_NAME",
-    "PROPOSED_STATE",
     "REVISION_PAYLOAD_VERSION",
     "UNCLASSIFIED_ROLE",
     "AdvertisedExpansion",
@@ -122,7 +115,6 @@ __all__ = [
     "KnowledgeRefusal",
     "KnowledgeRefusalCode",
     "KnowledgeSchemaIdentity",
-    "KnowledgeState",
     "LineRangeLocator",
     "PathSeed",
     "ReadItem",

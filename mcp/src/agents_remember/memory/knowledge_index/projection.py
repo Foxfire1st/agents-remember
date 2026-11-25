@@ -20,11 +20,13 @@ The mapping is a pure function of the files:
 * **Provenance.** The files carry origin (task, leaf or wave) but no time of recording -- time is
   in ``git log``. The projected ``Authorship`` therefore names the origin and the record file, and
   its ``recorded_at`` is the fixed epoch instant, which no reader may read as a recording time.
-* **Retired records are not live, so they are not projected.** The logical vocabulary has only the
-  live states ``proposed`` and ``accepted`` (``KnowledgeState``); the database expressed "no longer
-  current" by lineage (a superseded revision), which a text record does not have. Projecting a
-  ``status: retired`` invariant or family under either live state would present it as current, so
-  :func:`project` leaves it out: the reused read, views, comparison and scope construction never
+* **State.** A projected revision's ``state`` is the state the build derived from the tree's
+  history files (proposed, reviewed or consolidated, :mod:`.record_standing`); nothing is read from
+  a record's own ``status``, and no acceptance is invented.
+* **Retired records are not live, so they are not projected.** A retired record has no state; the
+  database expressed "no longer current" by lineage (a superseded revision), which a text record
+  does not have. Projecting a ``status: retired`` invariant or family under a state would present
+  it as current, so :func:`project` leaves it out: the reused read, views, comparison and scope construction never
   select it, a family's projected membership omits a retired member, and a realization of a retired
   invariant is not projected. The record, its entries, its memberships, links and history rows stay
   in the ``ix_*`` tables, where :mod:`.query` answers them with ``status: "retired"`` on the record.
@@ -48,13 +50,13 @@ import apsw
 from agents_remember.kernel.canonical_json import canonical_json_bytes
 from agents_remember.memory.knowledge.records import decode_authorship
 from agents_remember.memory_quality.style.citations.grammars import grammar_of
-from agents_remember.models.knowledge.base import KnowledgeState
 from agents_remember.models.knowledge.digest import (
     family_revision_payload_digest,
     revision_payload_digest,
 )
 from agents_remember.models.knowledge.family import FamilyRevision
 from agents_remember.models.knowledge.invariant import InvariantRevision
+from agents_remember.models.knowledge_files.record_state import RecordState
 from agents_remember.models.knowledge_files.records import FamilyRecord, InvariantRecord
 from agents_remember.models.knowledge_files.shapes import (
     LineRangeLocator,
@@ -65,6 +67,7 @@ from agents_remember.models.knowledge_files.sidecars import RealizationEntry
 
 if TYPE_CHECKING:
     from agents_remember.memory.knowledge_index.build import IndexedEntry, ParsedTree
+    from agents_remember.memory.knowledge_index.record_standing import RecordStanding
 
 # The fixed uuid5 namespace every projected identity is derived in (a chosen constant; any change
 # would change every projected UUID, so it never changes within one index format).
@@ -96,8 +99,13 @@ def text_uuid(role: str, text_id: str) -> str:
     return str(uuid.uuid5(INDEX_NAMESPACE, f"{role}:{text_id}"))
 
 
-def project(connection: apsw.Connection, parsed: ParsedTree) -> None:
-    """Fill the logical tables from ``parsed`` inside the caller's transaction."""
+def project(
+    connection: apsw.Connection, parsed: ParsedTree, standings: dict[str, RecordStanding]
+) -> None:
+    """Fill the logical tables from ``parsed`` inside the caller's transaction.
+
+    ``standings`` holds each record's derived state (:func:`.build.record_standings`).
+    """
 
     connection.execute(UUID_DDL)
     connection.execute(
@@ -108,11 +116,13 @@ def project(connection: apsw.Connection, parsed: ParsedTree) -> None:
     for indexed in parsed.records.values():
         record = indexed.record
         if isinstance(record, InvariantRecord) and record.status != RETIRED_STATUS:
-            invariant_revisions[record.id] = _invariant(connection, record, indexed.path)
+            state = _live_state(standings[record.id])
+            invariant_revisions[record.id] = _invariant(connection, record, indexed.path, state)
     for indexed in parsed.records.values():
         record = indexed.record
         if isinstance(record, FamilyRecord) and record.status != RETIRED_STATUS:
-            _family(connection, record, indexed.path, invariant_revisions)
+            state = _live_state(standings[record.id])
+            _family(connection, record, indexed.path, state, invariant_revisions)
     for indexed in parsed.entries.values():
         revision = invariant_revisions.get(indexed.entry.invariant)
         if isinstance(indexed.entry, RealizationEntry) and revision is not None:
@@ -148,17 +158,19 @@ def _provenance(origin: Origin | None, path: str) -> str:
     )
 
 
-def _state(status: str, path: str) -> tuple[KnowledgeState, str | None]:
-    """Map a live text status to the logical vocabulary; ``retired`` never reaches here."""
+def _live_state(standing: RecordStanding) -> RecordState:
+    """The derived state of a live record: only a retired record has none, and it is not projected."""
 
-    return ("accepted", f"text-knowledge:{path}") if status == "accepted" else ("proposed", None)
+    assert standing.state is not None
+    return standing.state
 
 
-def _invariant(connection: apsw.Connection, record: InvariantRecord, path: str) -> str:
+def _invariant(
+    connection: apsw.Connection, record: InvariantRecord, path: str, state: RecordState
+) -> str:
     identity = _map(connection, "identity", record.id)
     revision = _map(connection, "revision", f"{record.id}@{record.revision}")
     provenance = _provenance(record.origin, path)
-    state, acceptance = _state(record.status, path)
     connection.execute(
         "INSERT INTO invariant (repository_id, invariant_id, display_label, label_provenance) "
         "VALUES (?, ?, ?, ?)",
@@ -174,16 +186,15 @@ def _invariant(connection: apsw.Connection, record: InvariantRecord, path: str) 
             applicability=record.applicability,
             conditions=tuple(record.conditions),
             exclusions=tuple(record.exclusions),
-            state_at_origin=state,
-            acceptance_ref=acceptance,
+            state=state,
             provenance=decode_authorship(provenance),
             payload_digest=_UNSEALED,
         )
     )
     connection.execute(
         "INSERT INTO invariant_revision (repository_id, invariant_id, revision_id, display_version, "
-        "statement, applicability, conditions, exclusions, state_at_origin, acceptance_ref, "
-        "provenance, payload_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "statement, applicability, conditions, exclusions, state, provenance, payload_digest) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             INDEX_REPOSITORY_ID,
             identity,
@@ -194,7 +205,6 @@ def _invariant(connection: apsw.Connection, record: InvariantRecord, path: str) 
             _cell(list(record.conditions)),
             _cell(list(record.exclusions)),
             state,
-            acceptance,
             provenance,
             seal,
         ),
@@ -206,12 +216,12 @@ def _family(
     connection: apsw.Connection,
     record: FamilyRecord,
     path: str,
+    state: RecordState,
     invariant_revisions: dict[str, str],
 ) -> None:
     identity = _map(connection, "identity", record.id)
     revision = _map(connection, "revision", f"{record.id}@{record.revision}")
     provenance = _provenance(record.origin, path)
-    state, acceptance = _state(record.status, path)
     connection.execute(
         "INSERT INTO family (repository_id, family_id, display_label, label_provenance) "
         "VALUES (?, ?, ?, ?)",
@@ -224,16 +234,14 @@ def _family(
             revision_id=revision,
             display_version=f"{DISPLAY_VERSION_PREFIX}{record.revision}",
             joint_guarantee=record.guarantee,
-            state_at_origin=state,
-            acceptance_ref=acceptance,
+            state=state,
             provenance=decode_authorship(provenance),
             payload_digest=_UNSEALED,
         )
     )
     connection.execute(
         "INSERT INTO family_revision (repository_id, family_id, revision_id, display_version, "
-        "joint_guarantee, state_at_origin, acceptance_ref, provenance, payload_digest) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "joint_guarantee, state, provenance, payload_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
             INDEX_REPOSITORY_ID,
             identity,
@@ -241,7 +249,6 @@ def _family(
             f"{DISPLAY_VERSION_PREFIX}{record.revision}",
             record.guarantee,
             state,
-            acceptance,
             provenance,
             seal,
         ),

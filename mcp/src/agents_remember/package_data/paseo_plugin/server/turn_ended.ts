@@ -82,6 +82,16 @@ import {
   declaredNames,
   judgeDeclaredEnd,
 } from "./declared_wait_state.ts";
+import {
+  startTimer,
+  stopTimer,
+  syncProviderLimitCheck,
+  type DeferredProviderLimitAction,
+  type DeferredProviderLimitResume,
+  type ProviderLimitCheckScope,
+  type ProviderLimitScheduling,
+} from "./provider_limit_check.ts";
+import type { ProviderLimitDocument } from "./provider_limits.ts";
 import { isoWithOffset, turnEndRow, type TurnEndLogRow } from "./turn_log.ts";
 
 export { openDeclaredWait } from "./declared_wait_state.ts";
@@ -154,6 +164,7 @@ export interface TurnEndedSignals {
   readonly runningSubagents?: (agentId: string) => number;
   /** The seat's own `until` while it is limited now, else `null` (rules 11 and 12). */
   readonly limitedUntil?: (agentId: string, now: Date) => string | null;
+  readonly readProviderLimits?: () => ProviderLimitDocument;
   /**
    * L184-R1-F13: the role record as it stands now. A deferred action reads it at
    * its own moment, as it reads the host's state, so one armed for a seat that has
@@ -193,8 +204,8 @@ export interface DeclaredWait {
   readonly since: string;
 }
 
-/** Rule 11: the one resume armed at a limited seat's `until` plus the lag. */
-export interface PendingLimitResume {
+/** The resume takes a written early clear or reaches `until` plus the lag. */
+export interface PendingLimitResume extends DeferredProviderLimitResume {
   readonly seat: string;
   readonly facts: TurnEndedFacts;
   /** The standard seat-back message the one reset sentence is added to (rule 11). */
@@ -216,16 +227,17 @@ export interface PendingLimitResume {
 }
 
 /** Rule 12: the one timer armed for a limited parent that has a held line. */
-export interface PendingLimitFlush {
+export interface PendingLimitFlush extends DeferredProviderLimitAction {
   readonly parent: string;
   until: string;
   timer: unknown;
   readonly epoch: number;
   /** L184-R1-F06/F13: the ports of the flush that armed it, so it can re-arm and be reclaimed. */
   readonly scheduling: TurnEndScheduling;
+  readonly flush: (records?: Readonly<Record<string, TurnEndedFacts>>) => Promise<FlushOutcome>;
 }
 
-export interface TurnEndedTracker {
+export interface TurnEndedTracker extends ProviderLimitCheckScope {
   readonly inTurn: Set<string>;
   readonly permissionWait: Set<string>;
   readonly parentOf: Map<string, string>;
@@ -441,7 +453,7 @@ export function createTurnEndedTracker(
   append: (row: TurnEndLogRow) => void = () => {},
   signals: TurnEndedSignals = {},
 ): TurnEndedTracker {
-  return {
+  const tracker: TurnEndedTracker = {
     inTurn: new Set(),
     permissionWait: new Set(),
     parentOf: new Map(),
@@ -464,9 +476,12 @@ export function createTurnEndedTracker(
     subagentEnds: new Map(),
     resumes: new Map(),
     limitFlushes: new Map(),
+    providerLimitCheck: null,
+    flushClearedParents: (parents) => flushClearedParents(tracker, parents),
     declarations: new Map(),
     append,
   };
+  return tracker;
 }
 
 export function composeTurnEndedLine(
@@ -1405,6 +1420,18 @@ function limitedUntilNow(tracker: TurnEndedTracker, agentId: string, now: Date):
   return tracker.signals.limitedUntil?.(agentId, now) ?? null;
 }
 
+interface ProviderLimitObservation {
+  readonly until: string;
+  readonly observedAt: number;
+}
+
+function observeProviderLimit(tracker: TurnEndedTracker, agent: string, at: Date): ProviderLimitObservation | null {
+  const until = limitedUntilNow(tracker, agent, at);
+  // Schedule the first check from the read's start so registration time
+  // does not add to the interval.
+  return until === null ? null : { until, observedAt: at.getTime() };
+}
+
 /**
  * Whether the line may be sent to this parent now (MIK-R172@v2 rule 6). A free
  * parent takes it at once. A parent in a turn takes it at once only when the
@@ -1415,9 +1442,14 @@ function limitedUntilNow(tracker: TurnEndedTracker, agentId: string, now: Date):
  * idle or in a turn — a line delivered into a limit starts a turn that ends at
  * once on it, which is the "messaging an agent that cannot respond" of row 178.
  */
-function parentMayTakeLineNow(parent: string, tracker: TurnEndedTracker, now: Date, states: HostStates): boolean {
+function parentMayTakeLineNow(
+  parent: string,
+  tracker: TurnEndedTracker,
+  limit: ProviderLimitObservation | null,
+  states: HostStates,
+): boolean {
   if (archivedNow(parent, states, tracker) || tracker.permissionWait.has(parent)) return false;
-  if (limitedUntilNow(tracker, parent, now) !== null) return false;
+  if (limit !== null) return false;
   if (!tracker.inTurn.has(parent)) return true;
   const provider = tracker.providerOf.get(parent) ?? UNKNOWN;
   return provider !== UNKNOWN && tracker.steeringProviders.has(provider);
@@ -1560,6 +1592,7 @@ export function noteTurnStarted(
   for (const line of tracker.claimed) {
     if (ancestors.has(line.subject)) tracker.claimed.delete(line);
   }
+  pruneLimitFlushes(tracker);
 }
 
 export function notePermissionRequested(agentId: string, tracker: TurnEndedTracker): void {
@@ -1624,6 +1657,7 @@ export function noteAgentArchived(
     kept.push(line);
   }
   tracker.held.splice(0, tracker.held.length, ...kept);
+  pruneLimitFlushes(tracker);
 }
 
 /** Whole lines partitioned into messages that each fit the cap. */
@@ -1738,15 +1772,14 @@ async function flushOnce(
     tracker.held.splice(0, tracker.held.length, ...rebound);
   }
   keepTurnEndOrder(tracker);
+  // Keep the observation that holds a line together with the timer that can
+  // release it. The file may change before another read.
+  const heldLimits = armHeldParentLimits(tracker, sender, records, scheduling);
   const claimed = tracker.held.filter(
     (line) =>
-      !childrenInTurn(line.subject, tracker) && parentMayTakeLineNow(line.parent, tracker, now(), states),
+      !childrenInTurn(line.subject, tracker) &&
+      parentMayTakeLineNow(line.parent, tracker, heldLimits.get(line.parent) ?? null, states),
   );
-  // MIK-R190 rule 12 / L184-R1-F06: every limited parent with a line waiting gets
-  // its one reset timer here, before this flush decides it can send anything. A
-  // flush that claims nothing is the normal case for a limited parent, and quiet
-  // correctness cannot wait for another parent's traffic to reach the loop below.
-  armLimitedParents(tracker, sender, records, now, scheduling);
   if (claimed.length === 0) return { sent: [], failed: [], dropped: [] };
   const owned = new Set<HeldLine>(claimed);
   tracker.held.splice(
@@ -1765,18 +1798,18 @@ async function flushOnce(
   const failed: { readonly parent: string; readonly error: string }[] = [];
   const dropped: HeldLine[] = [];
   const requeue: HeldLine[] = [];
+  const requeueLimits = new Map<string, ProviderLimitObservation>();
   for (const [parent, lines] of byParent) {
     // Recheck at the send point: the claim may have been invalidated, the
     // parent may have grown busy, or one of the subject's own may have begun
     // again, while an earlier send awaited.
     const valid = lines.filter((line) => tracker.claimed.has(line));
     dropped.push(...lines.filter((line) => !tracker.claimed.has(line)));
-    const readyNow = new Set(
-      valid.filter(
-        (line) =>
-          !childrenInTurn(line.subject, tracker) && parentMayTakeLineNow(parent, tracker, now(), states),
-      ),
-    );
+    const limit = observeProviderLimit(tracker, parent, now());
+    if (limit !== null) requeueLimits.set(parent, limit);
+    const readyNow = new Set(parentMayTakeLineNow(parent, tracker, limit, states)
+      ? valid.filter((line) => !childrenInTurn(line.subject, tracker))
+      : []);
     requeue.push(...valid.filter((line) => !readyNow.has(line)));
     if (readyNow.size === 0) continue;
     // Whole lines only: the ready lines are partitioned into messages that each
@@ -1790,7 +1823,9 @@ async function flushOnce(
       // turn in a parent that does not steer. The gate is asked again at every
       // actual send, and what could not be sent stays owed, in order.
       if (tracker.epoch !== epoch) return { sent, failed, dropped };
-      if (!parentMayTakeLineNow(parent, tracker, now(), states)) {
+      const sendLimit = observeProviderLimit(tracker, parent, now());
+      if (sendLimit !== null) requeueLimits.set(parent, sendLimit);
+      if (!parentMayTakeLineNow(parent, tracker, sendLimit, states)) {
         for (const unsent of batches.messages.slice(index)) requeue.push(...unsent.lines);
         break;
       }
@@ -1805,30 +1840,34 @@ async function flushOnce(
     }
   }
   if (tracker.epoch !== epoch) return { sent, failed, dropped };
+  for (const line of requeue) {
+    if (tracker.claimed.has(line)) tracker.held.push(line);
+    else dropped.push(line);
+  }
   for (const line of claimed) tracker.claimed.delete(line);
-  if (requeue.length > 0) tracker.held.push(...requeue);
   keepTurnEndOrder(tracker);
-  // MIK-R190 rule 12: a line held for a limited parent gets one timer at that
-  // parent's `until` plus the provider's lag; when it fires and the parent is no
-  // longer limited, the existing flush sends what waits for it in order.
-  armLimitedParents(tracker, sender, records, now, scheduling);
+  armHeldParentLimits(tracker, sender, records, scheduling, requeueLimits);
   return { sent, failed, dropped };
 }
 
-/** Rule 12: one timer for each distinct limited parent of the lines still owed. */
-function armLimitedParents(
+/** Read once per owed parent and arm from the same observation used to hold its lines. */
+function armHeldParentLimits(
   tracker: TurnEndedTracker,
   sender: TurnEndedSender,
   records: Readonly<Record<string, TurnEndedFacts>> | undefined,
-  now: () => Date,
   scheduling: TurnEndScheduling,
-): void {
-  const parents = new Set<string>();
+  requeueLimits?: ReadonlyMap<string, ProviderLimitObservation>,
+): ReadonlyMap<string, ProviderLimitObservation | null> {
+  const now = clockOf(scheduling);
+  const limits = new Map<string, ProviderLimitObservation | null>();
   for (const line of tracker.held) {
-    if (parents.has(line.parent)) continue;
-    parents.add(line.parent);
-    armLimitFlush(tracker, line.parent, sender, records, now, scheduling);
+    if (limits.has(line.parent)) continue;
+    const limit = observeProviderLimit(tracker, line.parent, now()) ?? requeueLimits?.get(line.parent) ?? null;
+    limits.set(line.parent, limit);
+    if (limit !== null) armLimitFlush(tracker, line.parent, sender, records, scheduling, limit);
   }
+  pruneLimitFlushes(tracker, limits);
+  return limits;
 }
 
 /** Rule 12's one timer per limited parent; a later `until` re-arms it. */
@@ -1837,11 +1876,11 @@ function armLimitFlush(
   parent: string,
   sender: TurnEndedSender,
   records: Readonly<Record<string, TurnEndedFacts>> | undefined,
-  now: () => Date,
   scheduling: TurnEndScheduling,
+  limit: ProviderLimitObservation,
 ): void {
-  const until = limitedUntilNow(tracker, parent, now());
-  if (until === null) return;
+  const now = clockOf(scheduling);
+  const { until, observedAt } = limit;
   const existing = tracker.limitFlushes.get(parent);
   if (existing !== undefined && existing.until === until) return;
   if (existing !== undefined) stopTimer(existing.scheduling, existing.timer);
@@ -1859,18 +1898,15 @@ function armLimitFlush(
   const pending: PendingLimitFlush = {
     parent,
     until,
+    observedAt,
     epoch: tracker.epoch,
     scheduling,
-    timer: undefined as unknown,
+    timer: undefined,
+    flush: (live) => flushHeldLines(tracker, sender, live ?? records, scheduling),
   };
   tracker.limitFlushes.set(parent, pending);
-  pending.timer = startTimer(
-    scheduling,
-    () => {
-      void fireLimitFlush(pending, tracker, sender, records, now, scheduling);
-    },
-    delay,
-  );
+  pending.timer = startTimer(scheduling, () => { void fireLimitFlush(pending, tracker, sender, records); }, delay);
+  syncProviderLimitCheck(tracker);
 }
 
 /** Rule 15 / CS-6: the deferred stores together are bounded. */
@@ -1883,25 +1919,42 @@ async function fireLimitFlush(
   tracker: TurnEndedTracker,
   sender: TurnEndedSender,
   records: Readonly<Record<string, TurnEndedFacts>> | undefined,
-  now: () => Date,
-  scheduling: TurnEndScheduling,
 ): Promise<void> {
   if (tracker.limitFlushes.get(pending.parent) !== pending) return;
   tracker.limitFlushes.delete(pending.parent);
+  const scheduling = pending.scheduling;
+  stopTimer(scheduling, pending.timer);
+  syncProviderLimitCheck(tracker);
   // A reload or a shutdown loses the timer, as it loses every held line (rule 12).
   if (tracker.epoch !== pending.epoch) return;
   // L184-R1-F13: a parent that left the role record is departed like an archived
   // one, so its reset flush is reclaimed here rather than flushing to it.
   const live = tracker.signals.roleRecord?.();
   if (live !== undefined && !Object.hasOwn(live, pending.parent)) return;
-  const later = limitedUntilNow(tracker, pending.parent, now());
-  if (later !== null) {
-    armLimitFlush(tracker, pending.parent, sender, records, now, scheduling);
+  const limit = observeProviderLimit(tracker, pending.parent, clockOf(scheduling)());
+  if (limit !== null) {
+    armLimitFlush(tracker, pending.parent, sender, records, scheduling, limit);
     return;
   }
   // A turn event that flushes first makes this a no-op: nothing of this parent's is owed.
   if (!tracker.held.some((line) => line.parent === pending.parent)) return;
-  await flushHeldLines(tracker, sender, records, scheduling);
+  await pending.flush();
+}
+
+/** Claim every cleared timer in this snapshot before one ordered flush. */
+function flushClearedParents(tracker: TurnEndedTracker, parents: readonly string[]): void {
+  const owed = owedParentIds(tracker);
+  const live = tracker.signals.roleRecord?.();
+  let flush: PendingLimitFlush["flush"] | undefined;
+  for (const parent of parents) {
+    const pending = tracker.limitFlushes.get(parent);
+    if (pending === undefined) continue;
+    dropLimitFlush(tracker, parent);
+    if (tracker.epoch !== pending.epoch || !owed.has(parent)) continue;
+    if (live !== undefined && !Object.hasOwn(live, parent)) continue;
+    flush ??= pending.flush;
+  }
+  void flush?.(live);
 }
 
 export type TurnEndedOutcome =
@@ -1912,10 +1965,7 @@ export type TurnEndedOutcome =
   | { readonly kind: "none"; readonly log?: string };
 
 /** The clock and timers a caller lets the decision use, so tests can drive them. */
-export interface TurnEndScheduling {
-  readonly now?: () => Date;
-  readonly setTimeout?: (callback: () => void, delayMs: number) => unknown;
-  readonly clearTimeout?: (handle: unknown) => void;
+export interface TurnEndScheduling extends ProviderLimitScheduling {
   /** The host's agent state, absent when the decision is driven by events alone. */
   readonly readHost?: HostStateReader;
 }
@@ -1930,17 +1980,6 @@ export interface TurnEndOptions extends TurnEndScheduling {
 
 function clockOf(scheduling: TurnEndScheduling): () => Date {
   return scheduling.now ?? (() => new Date());
-}
-
-function startTimer(scheduling: TurnEndScheduling, callback: () => void, delayMs: number): unknown {
-  if (scheduling.setTimeout !== undefined) return scheduling.setTimeout(callback, delayMs);
-  return setTimeout(callback, delayMs);
-}
-
-function stopTimer(scheduling: TurnEndScheduling, handle: unknown): void {
-  if (handle === undefined) return;
-  if (scheduling.clearTimeout !== undefined) scheduling.clearTimeout(handle);
-  else clearTimeout(handle as ReturnType<typeof setTimeout>);
 }
 
 /** The wait owed to this seat, if one is running. */
@@ -1985,6 +2024,7 @@ function cancelLimitResume(
   if (resume === undefined) return;
   tracker.resumes.delete(seat);
   stopTimer(resume.scheduling, resume.timer);
+  syncProviderLimitCheck(tracker);
   tracker.append(
     turnEndRow("wait-cancelled", resume.facts, seat, resume.ordinal, reason, isoWithOffset(now())),
   );
@@ -1999,6 +2039,21 @@ function dropLimitFlush(tracker: TurnEndedTracker, parent: string): void {
   if (pending === undefined) return;
   tracker.limitFlushes.delete(parent);
   stopTimer(pending.scheduling, pending.timer);
+  syncProviderLimitCheck(tracker);
+}
+
+function owedParentIds(tracker: TurnEndedTracker): ReadonlySet<string> {
+  const parents = new Set(tracker.held.map(({ parent }) => parent));
+  for (const line of tracker.claimed) parents.add(line.parent);
+  return parents;
+}
+
+function pruneLimitFlushes(tracker: TurnEndedTracker, owed?: Pick<ReadonlySet<string>, "has">): void {
+  if (tracker.limitFlushes.size === 0) return;
+  const parents = owed ?? owedParentIds(tracker);
+  for (const parent of tracker.limitFlushes.keys()) {
+    if (!parents.has(parent)) dropLimitFlush(tracker, parent);
+  }
 }
 
 /** Rule 5: a turn of the seat started, so the existing rules judge its next end. */
@@ -2156,13 +2211,13 @@ async function deliverSeatWake(
   if (tracker.epoch !== wait.epoch || seatGeneration(tracker, wait.seat).work !== wait.seatEpoch) return;
   // Rule 11: a limited seat gets nothing — no seat message and, from the third end
   // on, no marked line — and the end is not counted. One resume is armed at its
-  // provider's `until` plus the lag.
+  // provider's `until` plus the lag or released by a written early clear.
   //
   // L184-R1-F09: a limit defers a send, it never authorises one. A seat the host
   // already reports closed or archived, or whose state cannot be read, gets no
   // resume armed for it either: the resume would have nowhere to go, and the skip
   // is the row rule 7 wants.
-  const limited = limitedUntilNow(tracker, wait.seat, now());
+  const limited = observeProviderLimit(tracker, wait.seat, now());
   if (limited !== null) {
     const terminal = hostFactsUnavailable(readHost, states, wait.seat)
       ? "host-state-unavailable"
@@ -2179,7 +2234,7 @@ async function deliverSeatWake(
       appendSkipRows(tracker, wait, "over-capacity", now);
       return;
     }
-    appendSkipRows(tracker, wait, `provider-limit until ${limited}`, now);
+    appendSkipRows(tracker, wait, `provider-limit until ${limited.until}`, now);
     armLimitResume(wait, limited, tracker, sender, now, scheduling, readHost);
     return;
   }
@@ -2216,10 +2271,10 @@ async function deliverSeatWake(
 }
 
 /**
- * Rule 11's one resume. It is armed at the seat's `until` plus the lag, and a
- * later `until` in the file re-arms it. The resume is the plugin's own message,
- * so it does not reset the seat's count; a turn of the seat that starts first
- * cancels it.
+ * A written early clear releases this resume before its timer at the seat's
+ * `until` plus the lag. A later `until` in the file re-arms it. The resume is
+ * the plugin's own message, so it does not reset the seat's count. A turn of
+ * the seat that starts first cancels it.
  *
  * L184-R1-F07/F09: the record keeps the scheduling and host ports of the decision
  * that armed it — a later `until` must be able to install its own timer, and the
@@ -2227,7 +2282,7 @@ async function deliverSeatWake(
  */
 function armLimitResume(
   wait: PendingSeatWake,
-  until: string,
+  limit: ProviderLimitObservation,
   tracker: TurnEndedTracker,
   sender: TurnEndedSender,
   now: () => Date,
@@ -2242,18 +2297,19 @@ function armLimitResume(
     appendSkipRows(tracker, wait, "over-capacity", now);
     return;
   }
-  const resume: PendingLimitResume = {
+  const { until, observedAt } = limit;
+  const resume = {
     seat: wait.seat,
     facts: wait.facts,
     base: wait.message,
     message: composeLimitResumeMessage(wait.message, until),
     ordinal: wait.ordinal,
     until,
+    observedAt,
     epoch: tracker.epoch,
     seatEpoch: seatGeneration(tracker, wait.seat).work,
     scheduling,
     ...(readHost === undefined ? {} : { readHost }),
-    timer: undefined as unknown,
   };
   installLimitResume(resume, tracker, sender, now);
 }
@@ -2263,23 +2319,39 @@ function armLimitResume(
  * stopped first, so one seat never holds two timers and one row.
  */
 function installLimitResume(
-  resume: PendingLimitResume,
+  resume: Omit<PendingLimitResume, "timer" | "fire">,
   tracker: TurnEndedTracker,
   sender: TurnEndedSender,
   now: () => Date,
 ): void {
   const existing = tracker.resumes.get(resume.seat);
   if (existing !== undefined) stopTimer(existing.scheduling, existing.timer);
-  const pending: PendingLimitResume = { ...resume, timer: undefined as unknown };
+  const pending: PendingLimitResume = {
+    ...resume,
+    timer: undefined,
+    fire: (clearedAt) => { void fireLimitResume(pending, tracker, sender, now, clearedAt); },
+  };
   tracker.resumes.set(pending.seat, pending);
   const delay = Math.max(0, Date.parse(pending.until) + PROVIDER_LIMIT_RESUME_MS - now().getTime());
-  pending.timer = startTimer(
-    pending.scheduling,
-    () => {
-      void fireLimitResume(pending, tracker, sender, now);
-    },
-    delay,
+  pending.timer = startTimer(pending.scheduling, pending.fire, delay);
+  syncProviderLimitCheck(tracker);
+}
+
+function rearmIfLimited(
+  resume: PendingLimitResume,
+  tracker: TurnEndedTracker,
+  sender: TurnEndedSender,
+  now: () => Date,
+): boolean {
+  const later = observeProviderLimit(tracker, resume.seat, now());
+  if (later === null) return false;
+  installLimitResume(
+    { ...resume, ...later, message: composeLimitResumeMessage(resume.base, later.until) },
+    tracker,
+    sender,
+    now,
   );
+  return true;
 }
 
 async function fireLimitResume(
@@ -2287,9 +2359,12 @@ async function fireLimitResume(
   tracker: TurnEndedTracker,
   sender: TurnEndedSender,
   now: () => Date,
+  clearedAt?: string,
 ): Promise<void> {
   if (tracker.resumes.get(resume.seat) !== resume) return;
   tracker.resumes.delete(resume.seat);
+  stopTimer(resume.scheduling, resume.timer);
+  syncProviderLimitCheck(tracker);
   if (tracker.epoch !== resume.epoch || seatGeneration(tracker, resume.seat).work !== resume.seatEpoch) {
     return;
   }
@@ -2306,22 +2381,14 @@ async function fireLimitResume(
   // A later `until` in the file re-arms the resume for it — one replacement timer
   // at that `until` plus the lag, from the same base message, so the reset
   // sentence is never added twice.
-  const later = limitedUntilNow(tracker, resume.seat, now());
-  if (later !== null) {
-    installLimitResume(
-      { ...resume, until: later, message: composeLimitResumeMessage(resume.base, later) },
-      tracker,
-      sender,
-      now,
-    );
-    return;
-  }
+  if (clearedAt === undefined && rearmIfLimited(resume, tracker, sender, now)) return;
   // L184-R1-F09: a deferred send asks the same safety gates as any other send —
   // the host's own state, read at this moment and never polled.
   const states = await readHostStates(resume.readHost);
   if (tracker.epoch !== resume.epoch || seatGeneration(tracker, resume.seat).work !== resume.seatEpoch) {
     return;
   }
+  if (clearedAt !== undefined && rearmIfLimited(resume, tracker, sender, now)) return;
   const skipped = hostFactsUnavailable(resume.readHost, states, resume.seat)
     ? "host-state-unavailable"
     : seatWakeBlocked(resume.seat, states, tracker);
@@ -2331,8 +2398,9 @@ async function fireLimitResume(
     );
     return;
   }
+  const message = clearedAt === undefined ? resume.message : composeLimitResumeMessage(resume.base, clearedAt);
   try {
-    await sender.sendMessage(resume.seat, resume.message);
+    await sender.sendMessage(resume.seat, message);
   } catch (error) {
     tracker.append(
       turnEndRow(
@@ -2346,14 +2414,13 @@ async function fireLimitResume(
     );
     return;
   }
-  tracker.append(
-    turnEndRow("limit-resume", resume.facts, resume.seat, resume.ordinal, `provider-limit until ${resume.until}`, isoWithOffset(now())),
-  );
+  const reason = clearedAt === undefined ? `provider-limit until ${resume.until}` : `provider-limit cleared at ${clearedAt}`;
+  tracker.append(turnEndRow("limit-resume", resume.facts, resume.seat, resume.ordinal, reason, isoWithOffset(now())));
 }
 
 /** Rule 11: the seat-back message with the one added sentence, both kept whole. */
-export function composeLimitResumeMessage(base: string, until: string): string {
-  const added = ` Your provider's usage limit reset at ${until}: go on with your stage.`;
+export function composeLimitResumeMessage(base: string, resetAt: string): string {
+  const added = ` Your provider's usage limit reset at ${resetAt}: go on with your stage.`;
   const room = Math.max(0, TURN_ENDED_LINE_LIMIT - added.length);
   return `${base.length <= room ? base : base.slice(0, room)}${added}`;
 }
@@ -2747,6 +2814,7 @@ export function cleanupSeatWaits(tracker: TurnEndedTracker, scheduling: TurnEndS
     tracker.limitFlushes.delete(parent);
     stopTimer(scheduling, pending.timer);
   }
+  syncProviderLimitCheck(tracker);
   tracker.silentEnds.clear();
   tracker.turnMarks.clear();
   // MIK-R216 rule 4: a declared wait is the plugin's own state and is not carried

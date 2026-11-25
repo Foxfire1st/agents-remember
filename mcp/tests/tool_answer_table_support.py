@@ -281,6 +281,7 @@ _INSTALL_FIELDS = {
     "providerWatcherRebind": "see whether watcher recovery was attempted and which phases ran",
     "recoveryActions": "perform the recovery actions the run lists",
     "removedPartStores": "tell the user that stores of removed parts remain and which command lists or removes them",
+    "sharedHeldStores": "read proposed or completed shared-store and lock removals, preserved seats, or the blocker",
     "log": "open the detail file holding the whole install result",
 }
 
@@ -357,6 +358,8 @@ L109_SHAPED_ROWS: dict[tuple[str, str | None], ToolAnswerRow] = {
                 "statesProblem",
                 "routeIndexStale",
                 "routeIndexRefresh",
+                "briefsProblem",
+                "briefsLeftOut",
                 "refusalCode",
                 "refusalDetail",
             }
@@ -375,6 +378,8 @@ L109_SHAPED_ROWS: dict[tuple[str, str | None], ToolAnswerRow] = {
             "statesProblem": "the caller learns why no state could be measured",
             "routeIndexStale": "the caller learns the route index missed a card the answer served",
             "routeIndexRefresh": "the operation the caller runs to bring the route index back",
+            "briefsProblem": "the caller learns why the read could not assemble a file's brief",
+            "briefsLeftOut": "the caller learns how to open current briefs for details that did not fit",
             "refusalCode": "the refusal identity the caller branches on",
             "refusalDetail": "what the caller can do instead of this call",
         },

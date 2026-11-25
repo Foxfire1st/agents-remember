@@ -110,8 +110,9 @@ TOOL_ANSWER_EXCEPTIONS: dict[tuple[str, str | None], tuple[int, str]] = {
         4000,
         "the designated place for roots, build and identity (rule 2)",
     ),
-    # L109: a read names where a thing is. Each bound is set from the
-    # largest case of its row, within twice that case and at most 4,000.
+    # L109: each bound is set from the largest case of its row, within twice
+    # that case and at most 4,000. read_ar_files' short answers of briefs are
+    # fitted inside its bound before the answer leaves.
     ("read_ar_files", None): (
         2400,
         "twenty named paths with their cards, counts and overviews",
@@ -255,6 +256,7 @@ RUNTIME_INSTALL_ANSWER_FIELDS = frozenset(
         "providerWatcherRebind",
         "recoveryActions",
         "removedPartStores",
+        "sharedHeldStores",
         "log",
     }
 )

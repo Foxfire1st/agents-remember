@@ -7,11 +7,11 @@ and nothing else stores a limit. This module is the read side and sits at
 ``observer`` so that the one status function can use it without an upward import
 (rule 19).
 
-The file holds, per report id, the moment work may resume, the report's source
-and account labels, the exhausted windows and when the fact was observed; and,
-per agent, the report ids its last read named. An agent is limited while now is
-before the ``until`` of one of its report ids, so one exhausted account stops
-every seat on it — which is row 178's case.
+The file holds each report's reset time, labels, exhausted windows, observation
+time and latest periodic attempt. It maps each agent to the reports its last
+read named, and records the most recent early release for a seat while that
+release can still wake pending work. An agent is limited while now is before
+the ``until`` of one of its report ids.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 PROVIDER_LIMITS_FILE = "provider-limits.json"
 PROVIDER_LIMITS_SCHEMA = "ar-provider-limits/v1"
@@ -69,6 +69,7 @@ class ProviderLimitReport(BaseModel):
     accountLabel: str = ""
     windows: tuple[ProviderLimitWindow, ...] = ()
     observedAt: datetime
+    lastReadAttemptAt: AwareDatetime | None = None
 
     @field_validator("until", "observedAt")
     @classmethod
@@ -76,6 +77,15 @@ class ProviderLimitReport(BaseModel):
         if value.tzinfo is None:
             raise ValueError("a provider limit time must carry its timezone")
         return value
+
+
+class ProviderLimitClear(BaseModel):
+    """An early release and the old deadline that bounds how long it is kept."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    clearedAt: AwareDatetime
+    previousUntil: AwareDatetime
 
 
 class ProviderLimits(BaseModel):
@@ -86,6 +96,7 @@ class ProviderLimits(BaseModel):
     schema_: str = Field(default=PROVIDER_LIMITS_SCHEMA, alias="schema")
     reports: dict[str, ProviderLimitReport] = Field(default_factory=dict)
     agents: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    clearedSeats: dict[str, ProviderLimitClear] = Field(default_factory=dict)
     updatedAt: datetime | None = None
 
 

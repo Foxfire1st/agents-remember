@@ -16,7 +16,7 @@ decisions and calls a few tools. It writes these files and no others:
 | --- | --- |
 | The user settings file, `~/.config/agents-remember/settings.json` | `user_settings_init`. The file records the harness of each role and nothing else. A file that exists stays as it is. |
 | The folders and first files of `<coordination-root>/memory-repos/ar-<repo-id>/` | `memory_init`; see [Onboard An Existing Repository](onboard-existing-repo.md#2-create-the-memory-repository). |
-| The first commit of the memory repository and the cache `<memory-root>/memory.md` | `memory_baseline_adopt`; see [Adopt Existing Memory](adopt-existing-memory.md). |
+| The first commit of the memory repository and the cache `<memory-root>/memory.md`. After publishing a new converted baseline, a successful refresh writes any eligible source briefs, the generated folder indexes and the `briefs/TREE` stamp when Git effectively ignores the `briefs/` folder. | `memory_baseline_adopt`; see [Adopt Existing Memory](adopt-existing-memory.md). |
 | The folders and files of the coordination root, only when they are missing | `runtime_install`. In a first setup the Bootstrap call has created them before Bootstrap starts. |
 | One report file | Bootstrap itself. The first line of the report states its path. |
 

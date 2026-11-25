@@ -439,7 +439,9 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
             self.assertEqual(created.count(True), 1)
             winner = receipts[created.index(True)]
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), winner)
-            self.assertEqual([entry.name for entry in path.parent.iterdir()], [path.name])
+            self.assertEqual(
+                {entry.name for entry in path.parent.iterdir()}, {path.name, f"{path.name}.lock"}
+            )
         # The other process's receipt is still open, or already closed, when this launch loses.
         losing = {
             "starting": "still in flight (request {theirs}, status starting)",
