@@ -22,7 +22,7 @@ def register_seat_retirement_tools(server: FastMCP, config: McpRuntimeConfig) ->
         agent_id: str | None = None,
         interrupt_turn: bool = False,
     ) -> dict[str, Any]:
-        """Retire one authorized direct child seat using task_document_ref, role and reason. Only its starter may retire it; interrupt_turn is required for a running turn. Repeats are inert. More: docs/tool-details.md."""
+        """Retire one direct child seat (starter only). Requires interrupt_turn=true if a turn is running; repeats are inert. Docs: docs/tool-details.md."""
         return tools.retire_child_payload(
             config,
             RetireChildRequest(

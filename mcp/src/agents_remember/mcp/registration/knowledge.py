@@ -103,18 +103,7 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         staleOnly: bool = False,
         standsOn: str | None = None,
     ) -> dict[str, Any]:
-        """
-        Read memory.
-
-        Views: source_context, invariant, family, record, weakness (open by file, kind or sentence),
-        dependent (document links), writers (per-writer revision counts and full report path).
-        Record rows name ID, kind, state and location, never text.
-        The `read_ar_files` short answer carries a file's rule text.
-        Use a text `recordId` (INV-…, WKN-…, DPD-…). Filters: sourcePath, weaknessKind,
-        includeClosed, staleOnly, standsOn. repositoryRoot and codeTreeId select the code tree.
-        Writes: `agents-remember knowledge-ingest` or `agents-remember knowledge-bootstrap`.
-        See docs/reference/mcp-tools.md.
-        """
+        """Read memory views: source_context, invariant, family, record, weakness, dependent, writers (per-writer revision counts and full report path). Rows name ID, kind, state, and location, never text. The `read_ar_files` short answer carries a file's rule text. recordId takes text IDs (INV-/WKN-/DPD-); repositoryRoot/codeTreeId select the code tree. Writes: `agents-remember knowledge-ingest` or `agents-remember knowledge-bootstrap`. Docs: docs/reference/mcp-tools.md."""
 
         return tools.knowledge_read_payload(
             tools.ReadToolRequest(
@@ -156,17 +145,7 @@ def _register_knowledge_write(server: FastMCP, config: McpRuntimeConfig) -> None
         repoId: str | None = None,
         wave: str | None = None,
     ) -> dict[str, Any]:
-        """
-        Plan or commit one knowledge write (MIK-R73 rule 1).
-
-        `contractPath` names a leaf, or with `crossing` a master's open crossing sync; the
-        contract guards the write and names the only memory worktree it may write. `repoId`
-        with `wave` writes a taskless wave. Give the hand-off as `handoff` with
-        `handoffName`, or as `handoffPath`. Without `commit` (the default) it plans,
-        validates and writes nothing; with it, it writes files and commits nothing to Git. A
-        refusal lists every problem, and the whole report is a file the answer names. Longer
-        explanation: docs/reference/mcp-tools.md.
-        """
+        """Plan or write one knowledge handoff. Target a leaf via contractPath (with crossing for a master's open crossing sync) or a taskless wave via repoId+wave; pass handoff+handoffName or handoffPath. Default commit=false plans and validates only; commit=true writes files without a Git commit. Refusals list all problems and return the report path. Docs: docs/reference/mcp-tools.md."""
         return tools.knowledge_write_payload(
             tools.WriteToolRequest(
                 contract_path=contractPath,
@@ -194,15 +173,7 @@ def _register_knowledge_diff(server: FastMCP, config: McpRuntimeConfig) -> None:
         recordId: str | None = None,
         path: str | None = None,
     ) -> dict[str, Any]:
-        """Name the changed records of two memory trees beside a report (MIK-R109).
-
-        The whole comparison is a caller-readable report: every changed file
-        with its patch, grouped by record and source path. The answer holds
-        the two trees, the counts by kind, the changed records, and the
-        report's location. With no `afterRevision`, HEAD meets the working
-        tree, which writes loose, unreferenced objects. Narrow with
-        `recordId`/`path`; absent selectors refused, unconverted sides as
-        `legacy-format`. Longer explanation: docs/reference/mcp-tools.md."""
+        """Compare two memory trees and write a caller-readable patch report; returns both trees, counts by kind, changed records, and report path. With no `afterRevision`, compares against the working tree, which writes loose, unreferenced objects. Filter with recordId/path; refuses absent selectors or legacy-format sides. Docs: docs/reference/mcp-tools.md."""
         return tools.knowledge_diff_payload(
             tools.DiffToolRequest(
                 memory_root=memoryRoot,
@@ -226,17 +197,7 @@ def _register_knowledge_integrity_check(server: FastMCP) -> None:
         baseCommits: list[str] | None = None,
         contractPath: str | None = None,
     ) -> dict[str, Any]:
-        """Run the knowledge validator (MIK-R22) over one converted memory tree and return its
-        report: `validation.ok`, the refusal and report-only counts, the counts by rule, and the
-        first violations (refusing ones first; `violationsTruncated` says when more exist). Name a
-        leaf by `contractPath`: the validator reads the leaf's memory worktree against its
-        recorded memory base and its code worktree, and the response adds the leaf's latest
-        change-to-knowledge worklist (MIK-R08): its state, digest, item counts and items, with the
-        persisted file's path for every item's facts. Or name a tree directly with `memoryRoot`
-        and its paired code checkout `codeRoot`. `baseCommits` are memory commits to compare
-        anchors with; with none, every anchor is checked for path existence. An unconverted tree
-        or a database file is refused as `legacy-format`. The tool reads only: it writes no file
-        and opens no database."""
+        """Validate a converted memory tree (read-only): validation.ok, rule counts, bounded violations. Pass contractPath for a leaf (adds its latest worklist) or memoryRoot+codeRoot (optional baseCommits; omitted checks anchor paths). Refuses unconverted trees as legacy-format. Docs: docs/reference/mcp-tools.md."""
         return tools.knowledge_integrity_check_payload(
             tools.IntegrityCheckRequest(
                 memoryRoot=memoryRoot,

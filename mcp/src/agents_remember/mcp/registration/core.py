@@ -62,10 +62,7 @@ def _register_identity_tools(
         )
     )
     def server_info() -> dict[str, Any]:
-        """Report the resolved configuration: build, roots, allowed repos, provider keys left
-        unused, and, on a role-launched server, the tool server name and agent binding.
-        Read-only; reflects the settings and runtime loaded at startup. Longer explanation:
-        docs/tool-details.md."""
+        """Report resolved server config: build, roots, allowed repos, unused provider keys, and (when role-launched) tool server name and agent binding. Read-only snapshot of startup state. Docs: docs/tool-details.md."""
         return server_info_payload(config, serving_build)
 
 
@@ -81,7 +78,7 @@ def _register_orientation_tools(
         include_freshness: bool = False,
         task_context: TaskScopedReaderContext | None = None,
     ) -> dict[str, Any]:
-        """Orient a repository or leaf; leaf calls pass task_context. include_drift measures the reference anchors of onboarding cards and validity of the tree; omit it and nothing is measured. Staleness never blocks by itself. Currentness: knowledge_read and knowledge_integrity_check. MIK-R30: update the card or record why not; citation_fix repairs moved anchors, a curator re-authors stale ones. Nothing is repaired here. include_freshness fetches remotes and writes FETCH_HEAD. More: docs/tool-details.md."""
+        """Orient repo/leaf (pass task_context). include_drift checks reference anchors of onboarding cards and validity of the tree (omit: nothing is measured; never blocks by itself). Currentness: knowledge_read, knowledge_integrity_check. MIK-R30: update card or note why not; citation_fix fixes moved anchors, curator re-authors stale ones (repairs nothing). include_freshness fetches remotes (writes FETCH_HEAD). Docs: docs/tool-details.md."""
         return tools.context_packet_payload(
             config,
             import_module("agents_remember.application.context_packet").ContextPacketRequest(
@@ -100,15 +97,7 @@ def _register_orientation_tools(
         refresh: Any = _REMOVED_ARGUMENT,
         task_context: TaskScopedReaderContext | None = None,
     ) -> dict[str, Any]:
-        """
-        Name up to 20 paths. A compact row gives its path and, where applicable, whether
-        it exists, its card's status and the path of its brief with saved freshness. Fuller
-        rows may give rule text. Open saved briefs before edits. A missing or older brief is
-        renewed by the next writing call that covers the file when that writer can refresh
-        briefs; otherwise the writer's answer reports the problem (briefsProblem) and the brief
-        stays as it was. Records may lack briefs. Open source and cards. refresh removed. Leaf
-        calls use task_context. worktreeScope, sourceRoot, memoryRoot. docs/reference/mcp-tools.md.
-        """
+        """Name up to 20 paths: compact rows give path, existence, cardStatus, and brief path with saved freshness; fuller rows may give rule text. Open saved briefs before edits (records may lack briefs; open source/cards yourself). Covering writes renew missing or older briefs when supported, else report briefsProblem and leave the brief unchanged. Leaf calls pass task_context (worktreeScope, sourceRoot, memoryRoot). Docs: docs/reference/mcp-tools.md."""
         return tools.read_ar_files_payload(
             config,
             repo_id,
@@ -131,14 +120,7 @@ def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> N
         no_cache: bool = False,
         experiment: str | None = None,
     ) -> dict[str, Any]:
-        """Install/refresh coordinator scaffold: instructions, docs, provider assets. Keep
-        memory-repos/ and providers/data/; prune legacy binaries. Skills stay package-served;
-        install no skill folder. Stop leftover provider watchers, report unused provider keys;
-        start none. Provision pinned host/plugin from active MCP authority's paseoRuntime;
-        daemon settings may be reconciled; user settings protections and host restart deferrals
-        remain. Report running server currentness and all host actions; refresh a running
-        dashboard. dry_run=true previews install actions. Longer explanation:
-        docs/tool-details.md."""
+        """Install/refresh coordinator scaffold (docs, provider assets), preserving memory-repos/ and providers/data/. Skills stay package-served. Stops leftover watchers (starts none), provisions pinned paseoRuntime host/plugin (defers host restart; keeps user-settings protections), refreshes running dashboard, reports server currentness. Preview with dry_run=true. Docs: docs/tool-details.md."""
         return tools.runtime_install_payload(
             config,
             import_module("agents_remember.application.runtime.install").RuntimeInstallRequest(

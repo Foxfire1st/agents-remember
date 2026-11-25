@@ -100,7 +100,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         replaces_interrupt_turn: bool = False,
         step_up: str | None = None,
     ) -> dict[str, object]:
-        """Start one role agent for one canonical selection with the caller as parent, starting in Paseo. Only a role agent that AR launched can call this. A request id reconciles the same agent, never a second. Only the agent that started an execution repeats its request_id. Answers ok, the agent id and the handover location; rejected (the launch is closed; no usable agent exists). Starts run one at a time. A call waits up to 60 seconds for another start to end, then is refused; nextAction says to call again with the same arguments. Reference: docs/reference/mcp-tools.md."""
+        """Start one role agent in Paseo (caller as parent). Only a role agent that AR launched can call this. Only the agent that started an execution repeats its request_id. Returns agent id or rejected (the launch is closed; no usable agent exists). Starts run one at a time. Call waits up to 60 seconds, then refuses; nextAction says to call again with the same arguments. Docs: docs/reference/mcp-tools.md."""
         call = RoleStartCall(
             role=role,
             request_id=request_id,
@@ -132,7 +132,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         replaces: dict[str, str] | None = None,
         replaces_interrupt_turn: bool = False,
     ) -> dict[str, object]:
-        """Start a leaf's Worker, Reviewer and Curator in one call (MIK-R100 rule 1). Only a role agent that AR launched can call this. Only the leaf's owning Manager may call it. Pass selection, request_id and per-seat launch choices. Worker opens; Reviewer and Curator are held unless reviewer_message opens the Reviewer. A repeat with the same request id reconciles the same three agents: it creates no fourth and opens no held seat. More: docs/tool-details.md."""
+        """Start a leaf's Worker, Reviewer and Curator in one call (MIK-R100 rule 1). Only a role agent that AR launched can call this (owning Manager only). Worker opens; Reviewer/Curator stay held unless reviewer_message opens Reviewer. A repeat with the same request id reconciles the same three agents: it creates no fourth and opens no held seat. Docs: docs/tool-details.md."""
         try:
             call = RoleStartSetCall(
                 request_id=request_id,
@@ -166,7 +166,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         roles: dict[str, str] | None = None,
         dry_run: bool = False,
     ) -> dict[str, object]:
-        """Preview or create role-settings with a harness per named role; model and effort stay unset. Name one harness or a harness per role. Existing choices are read and never overwritten. Call dry_run first. host-authority is refused: host preparation writes paseoRuntime in the active MCP settings file. The answer names state, path and changes. More: docs/reference/mcp-tools.md."""
+        """Preview (dry_run) or create role-settings with one harness or per-role harnesses (model/effort stay unset; never overwrites existing choices). host-authority is refused. Docs: docs/reference/mcp-tools.md."""
         return await run_in_detached_request_thread(
             tools.user_settings_init_payload,
             config,
@@ -191,7 +191,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         timeout_seconds: Annotated[int, Field(ge=1, le=MAX_WAIT_SECONDS)] = DEFAULT_WAIT_SECONDS,
         withdraw_held_message_id: str | None = None,
     ) -> dict[str, object]:
-        """Send one text message to one role agent, by agent_id or role plus task references. Only the host request is promised: without wait, host acceptance; with wait, the consuming turn ends, not AR acceptance. A mid-turn message reaches the running turn, which the host may cancel. Held means queued for delivery when the recipient can take it, not refusal; never resend held. Only a full hold store (twenty) is recipient-busy. Reference: docs/reference/mcp-tools.md."""
+        """Send a text message to one role agent. Only the host request is promised: without wait, host acceptance; with wait, the consuming turn ends, not AR acceptance. A mid-turn message reaches the running turn, which the host may cancel. Held means queued for delivery when the recipient can take it, not refusal; never resend held. Reference: docs/reference/mcp-tools.md."""
         call = RoleMessageCall(
             text=text,
             agent_id=agent_id,

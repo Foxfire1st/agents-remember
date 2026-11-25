@@ -43,6 +43,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 from agents_remember.kernel.request_memo import request_memo_scope
 from agents_remember.memory_quality.style.citations.extents import definition_scope
 from agents_remember.models.tools.role_tool_scope import tools_for_role
+from agents_remember.models.tools.tool_schema_compaction import compact_tool_schema
 from agents_remember.serving.build_currentness import build_currentness
 from agents_remember.serving.server_registry import register_server
 
@@ -407,6 +408,14 @@ def _bound_role_tools(explainer_present: bool) -> frozenset[str] | None:
     return frozenset(allowed)
 
 
+def _compact_server_tool_schemas(server: FastMCP) -> None:
+    """Compact every registered tool's advertised inputSchema in place before role narrowing."""
+
+    tools: dict[str, Any] = server._tool_manager._tools
+    for tool in tools.values():
+        tool.parameters = compact_tool_schema(tool.parameters)
+
+
 def _scope_server_tools(server: FastMCP, allowed: frozenset[str]) -> None:
     """Remove every registered tool outside ``allowed``, keeping the survivors' order.
 
@@ -452,6 +461,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     # registered surface, before any role narrowing, so a tool excluded for this
     # role is still classified.
     apply_read_only_marks(server)
+    _compact_server_tool_schemas(server)
     # The role binding narrows what this process advertises and dispatches, after every tool has
     # been registered and marked: the surviving tools keep their order, schemas and annotations.
     allowed = _bound_role_tools(explainer_present=explainer is not None)
