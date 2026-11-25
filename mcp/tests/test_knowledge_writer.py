@@ -32,12 +32,7 @@ from agents_remember.memory_quality.knowledge_validator import (
 )
 from agents_remember.models.knowledge_files import Anchor, parse_document_text
 from agents_remember.models.knowledge_files.history import InvariantRow
-from agents_remember.worktrees.worktree_contract import (
-    ContractTask,
-    RepoBranchPlan,
-    default_series_contract,
-    load_contract,
-)
+from agents_remember.worktrees.worktree_contract import load_contract
 from knowledge_writer_test_support import (
     ADMISSION,
     BASE_FAMILY,
@@ -50,6 +45,7 @@ from knowledge_writer_test_support import (
     TASK_ID,
     TEST_FILE,
     World,
+    build_crossing_world,
     build_world,
     commit_all,
     entry,
@@ -1075,22 +1071,10 @@ def test_a_master_line_crossing_records_its_rows_through_the_writer(tmp_path: Pa
     ``<task-id>-crossing-<n>.json``, through ``knowledge-ingest --crossing``; rows only."""
 
     world = build_world(tmp_path)
-    series = default_series_contract(
-        ContractTask(
-            name="landing",
-            repo_name="agents-remember",
-            coordination_root=world.root,
-            workflow_kind="light-task",
-            memory_mode="external",
-        ),
-        code=RepoBranchPlan(world.code, "main", "main", git(world.code, "rev-parse", "HEAD")),
-        memory=RepoBranchPlan(world.memory, "main", "main", git(world.memory, "rev-parse", "HEAD")),
-        task_root=world.task_root,
-    )
-    crossing = f"{series.task_id}-crossing-1"
-    history = world.memory / f"knowledge/history/{crossing}.json"
-    opened = {"schema": "ar-history/v1", "crossing": crossing, "closed": False, "rows": []}
-    write(world.memory, {history.relative_to(world.memory).as_posix(): json.dumps(opened)})
+    parked = build_crossing_world(world)
+    parked.store.write(parked.record)
+    series, crossing = parked.contract, parked.owner
+    history = parked.memory / f"knowledge/history/{crossing}.json"
     row = {"subject": BASE_INVARIANT, "disposition": "no_impact", "reason": "Both sides agree."}
     listed = tmp_path / "rows.json"
     listed.write_text(json.dumps({"history": [row]}), encoding="utf-8")
@@ -1105,22 +1089,20 @@ def test_a_master_line_crossing_records_its_rows_through_the_writer(tmp_path: Pa
         )
         for key, value in fields.items():
             setattr(args, key, value)
-        locations = (world.memory, world.memory, "main", "main")
-        with mock.patch.object(write_body, "side_locations", return_value=locations):
-            return knowledge_write_route.run_crossing_write(args, contract)
+        return knowledge_write_route.run_crossing_write(args, contract)
 
     refused, written = knowledge_write_route.EXIT_REFUSED, knowledge_write_route.EXIT_WRITTEN
     leaf = load_contract(world.contract)
     with mock.patch("builtins.print") as printed:
         assert run(leaf, f"{leaf.task_id}-crossing-1") == refused  # a leaf contract, its own id
     assert "names the master's series contract" in str(printed.call_args.args[0])
-    assert run(series, f"{series.task_id}-crossing-2") == refused  # no such open file
+    assert run(series, f"{series.task_id}-crossing-2") == refused  # a different crossing
     assert run(series, crossing, authorization_ref=" ") == refused  # a blank authorization
     assert run("no such contract", crossing) == refused  # an unreadable contract
     wraps = mock.patch.object(write_body, "write_knowledge", wraps=write_knowledge)
     with wraps as wrote:
         assert run(series, crossing) == written
-    assert wrote.call_args.args[0].code_base == "refs/heads/main"  # the crossing's paired code
+    assert wrote.call_args.args[0].code_base == parked.record.code.resultHead
     recorded = json.loads(history.read_text())
     assert (recorded["crossing"], recorded["closed"]) == (crossing, False)
     assert [one["subject"] for one in recorded["rows"]] == [BASE_INVARIANT]
@@ -1128,7 +1110,7 @@ def test_a_master_line_crossing_records_its_rows_through_the_writer(tmp_path: Pa
 
     entries = write_knowledge(
         WriteRequest(
-            memory_root=world.memory,
+            memory_root=parked.memory,
             code_root=world.code,
             owner=Owner(task=TASK_ID, kind="crossing", id=crossing),
             handoff_path="rows.json",
@@ -1138,7 +1120,7 @@ def test_a_master_line_crossing_records_its_rows_through_the_writer(tmp_path: Pa
     assert entries.state == "refused" and "no entry, ruling or new record" in entries.render()
 
     write(
-        world.memory,
-        {history.relative_to(world.memory).as_posix(): json.dumps({**recorded, "closed": True})},
+        parked.memory,
+        {history.relative_to(parked.memory).as_posix(): json.dumps({**recorded, "closed": True})},
     )
     assert run(series, crossing) == refused  # frozen at the crossing sync's commit
