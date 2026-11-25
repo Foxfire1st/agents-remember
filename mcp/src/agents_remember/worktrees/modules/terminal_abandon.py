@@ -17,7 +17,7 @@ from agents_remember.worktrees.modules.cleanup import _with_terminal_archive
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.state_refusals import task_stage_refusal
-from agents_remember.worktrees.modules.terminal_agents import archive_terminal_agents
+from agents_remember.worktrees.modules.terminal_group import prepare_terminal_group
 from agents_remember.worktrees.modules.terminal_validation import TerminalPreflight
 from agents_remember.worktrees.services import TerminalGuard
 from agents_remember.worktrees.task_stage import plan_task_stage
@@ -62,14 +62,30 @@ def _abandon_with_guard(
                     raise RuntimeError("abandon lost terminal archive authority before mutation")
                 current = terminal.archived_contract
             plan_task_stage(current, "abandoned")
-            agents = archive_terminal_agents(current, dry_run=args.dry_run)
-            outputs = abandon._abandon_terminal_outputs(
-                args,
-                current,
-                preflight,
-                series_permit=series_permit,
+            prepared = prepare_terminal_group(
+                current, dry_run=args.dry_run, teardown_providers=True
             )
-            result = abandon._abandon_outputs_result(args, current, preflight, guard, outputs)
+            if prepared.blockers:
+                result = WorktreeCommandResult(
+                    2,
+                    {
+                        "state": "abandon-blocked",
+                        **status_payload(current),
+                        "summary": "The task folder cannot be removed. Resolve the listed blockers and retry.",
+                        "directories": prepared.directories,
+                        "blockers": prepared.blockers,
+                    },
+                )
+            else:
+                outputs = abandon._abandon_terminal_outputs(
+                    args,
+                    current,
+                    preflight,
+                    prepared.directories,
+                    series_permit=series_permit,
+                )
+                result = abandon._abandon_outputs_result(args, current, preflight, guard, outputs)
+            agents = prepared.agent_archive
             result = _with_terminal_archive(result, terminal_archive)
             return WorktreeCommandResult(
                 result.returncode,

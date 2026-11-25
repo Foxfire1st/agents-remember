@@ -30,9 +30,12 @@ from agents_remember.cli.paseo_role_caller import (
 from agents_remember.cli.paseo_role_tools import (
     _deliver_or_hold,
     _file_message,
+    _held_refusal,
     _hold_for_seat,
+    _message_seats,
     _MessageSend,
 )
+from agents_remember.cli.role_held_store import HeldSeatClosed
 from agents_remember.cli.role_message_delivery import (
     _keep_refused_file,
     _MessageParties,
@@ -104,11 +107,13 @@ def file_product_message(config: McpRuntimeConfig, message: ProductMessage) -> d
     parties = _MessageParties(
         binding, sender, _Recipient(message.recipient_agent_id, message.receipt), None
     )
+    located = _located(message)
     try:
         limit = role_message_limit(config, binding)
         _refuse_over_limit(call, limit)
-        return _file_message(config, call, parties, limit)
-    except _Refused as refused:
+        return _file_message(config, call, parties, limit, _message_seats(None, located, parties))
+    except (_Refused, HeldSeatClosed) as refusal:
+        refused = _held_refusal(refusal) if isinstance(refusal, HeldSeatClosed) else refusal
         return refused.payload()
 
 
@@ -122,19 +127,19 @@ def send_product_message(config: McpRuntimeConfig, message: ProductMessage) -> d
     binding, sender = product_sender(message.receipt, message.leaf)
     recipient = _Recipient(message.recipient_agent_id, message.receipt)
     call = RoleMessageCall(text=message.text, agent_id=message.recipient_agent_id)
+    parties = _MessageParties(binding, sender, recipient, None)
+    located = _located(message)
     filed: dict[str, Any] | None = None
     try:
         limit = role_message_limit(config, binding)
         _refuse_over_limit(call, limit)
-        filed = _file_message(
-            config, call, _MessageParties(binding, sender, recipient, None), limit
-        )
-        located = _located(message)
+        filed = _file_message(config, call, parties, limit, _message_seats(None, located, parties))
         send = _MessageSend(config, call, sender, recipient, located, None, None, filed)
         if located is not None and message.receipt.get("status") in _UNFINISHED_START_STATUSES:
             return _hold_for_seat(send, reason="start-unfinished")
         return _deliver_or_hold(send)
-    except _Refused as refused:
+    except (_Refused, HeldSeatClosed) as refusal:
+        refused = _held_refusal(refusal) if isinstance(refusal, HeldSeatClosed) else refusal
         if filed is not None:
             _keep_refused_file(Path(filed["path"]), refused)
         return refused.payload()

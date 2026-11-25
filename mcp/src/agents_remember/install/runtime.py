@@ -138,6 +138,7 @@ class RuntimeInstallRequest:
     provider_deps_timeout: int | None = None
     source_root: Path | None = None
     experiment: str | None = None
+    reconcile_shared_held_stores: bool = False
 
 
 @dataclass(frozen=True)

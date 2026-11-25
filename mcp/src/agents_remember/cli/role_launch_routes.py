@@ -43,27 +43,16 @@ from agents_remember.cli.paseo_catalog import (
 from agents_remember.cli.paseo_catalog_features import launcher_model_options
 from agents_remember.cli.paseo_catalog_snapshot import register_saved_catalog_route
 from agents_remember.cli.paseo_frame import frame_answer
-from agents_remember.cli.paseo_launch import (
-    RoleLaunch,
-    StartingAgent,
-    applied_to_agent,
-    build_launch_call,
-    mint_agent_id,
-)
+from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.paseo_status import read_agent
 from agents_remember.cli.paseo_warmup import register_warmup_route
 from agents_remember.cli.role_answers import alias_response
 from agents_remember.cli.role_document_chat_tree import register_document_chat_tree_route
 from agents_remember.cli.role_document_chats import register_document_chat_route
-from agents_remember.cli.role_handover_artifacts import (
-    first_message,
-)
-from agents_remember.cli.role_handover_publication import publish_handover_files
-from agents_remember.cli.role_instructions import launch_choice_metadata
 from agents_remember.cli.role_launch_admission import admit, prepare_first_run_for
+from agents_remember.cli.role_launch_enclosure import EnclosurePublicationRefusal
 from agents_remember.cli.role_launch_first_run import (
     _FIRST_RUN_REPORT,
-    recall_first_run_report,
     refuse_after_preparation,
 )
 from agents_remember.cli.role_launch_liveness import (
@@ -80,14 +69,16 @@ from agents_remember.cli.role_launch_preparation import (
     _verify_leaf_revival_scope,
     prepare_role_handover,
 )
+from agents_remember.cli.role_launch_publication import (
+    LaunchPublication,
+    publish_prepared_launch,
+)
 from agents_remember.cli.role_launch_receipts import (
-    RECEIPT_SCHEMA,
     _archived_receipt_for_selection,
     _create_receipt,
     _discard_message_binding_projection,
     _execute_prepared_launch,
     _migrate_taskless_legacy_receipt,
-    _now_iso,
     _place_message_binding_projection,
     _read_receipt,
     _receipt_address_matches,
@@ -97,20 +88,14 @@ from agents_remember.cli.role_launch_receipts import (
     _request_digest,
     _verify_message_binding_projection,
 )
-from agents_remember.cli.role_launch_receipts import (
-    digest as _digest,
-)
 from agents_remember.cli.role_launch_request_rules import (
     bridge_http_error,
-    missing_copies_receipt_warning,
     with_caller_harness,
 )
+from agents_remember.cli.role_receipt_files import _install_initial_receipt
 from agents_remember.cli.role_report import register_role_report_route
 from agents_remember.cli.role_start_execution import start_execution
-from agents_remember.cli.role_step_up_runtime import (
-    bind_step_up_predecessor,
-    successor_prompt,
-)
+from agents_remember.cli.role_step_up_runtime import bind_step_up_predecessor
 from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_agents import RoleStartSetCall
@@ -579,141 +564,26 @@ def _start_execution(
 
 def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> JSONResponse:
     request = start.request
-    role_handover = start.role_handover
-    workspace = role_handover.workspace
-    provider = role_handover.agent_id
-    session_options = {
-        **role_handover.session_options,
-        "choices": launch_choice_metadata(role_handover.session_options.get("choices", {})),
-    }
-    prepared = role_handover.handover
-    # The agent id is chosen here: before the receipt is written and before the runtime is called.
-    agent_id = mint_agent_id()
-    # The compiled first message is stored once; what the agent receives names that file first.
-    # A successor names the earlier agent's report paths, so that it takes over from what is
-    # written (MIK-R100 rule 9).
-    prompt = successor_prompt(start, prompt)
-    if start.opening_message and not start.held:
-        # First work carried with the start (MIK-R100 rule 3): the seat opens at once
-        # with its handover and that message.
-        prompt = f"{prompt}\n{start.opening_message}"
-    # MIK-R216 rule 3: a seat on an ACP connection is told at launch how to wait for its own
-    # helpers, and the sentence joins the message that is stored below, so the saved first
-    # message already carries it. Nothing else about the launch changes: the capsule, the
-    # artifact line and the retry check read the same prompt they always did.
+    provider = start.role_handover.agent_id
     instruction, acp_instruction = _acp_launch_instruction(start.config, provider)
-    if instruction is not None:
-        prompt = f"{prompt}\n\n{instruction}"
-    # The message's artifact and the complete hand-over are written before the message that
-    # names them is sent; both targets are checked first, so a refusal creates neither.
-    artifact, handover_file = publish_handover_files(
-        prepared["taskReportPath"],
-        prompt,
-        prepared["handoverFileContent"],
-        expected=prepared["handoverFile"],
-        request_id=str(request.request_id),
+    preparation = LaunchPublication(
+        prompt=prompt,
+        instruction=instruction,
+        acp_instruction=acp_instruction,
+        accepts_tool_servers=provider_accepts_tool_servers(start.config, provider),
+        host_denied_tools=_host_denied_tools(start.config, provider),
     )
-    launch_call = build_launch_call(
-        RoleLaunch(
-            agent_id=agent_id,
-            request_id=request.request_id,
-            context=start.context,
-            folder=workspace["path"],
-            provider=provider,
-            session_options=session_options,
-            prompt=first_message(artifact, prompt, handover_file),
-            report_path=prepared["taskReportPath"],
-            handover_artifact=artifact,
-            settings_file=start.config.config_path,
-            accepts_tool_servers=provider_accepts_tool_servers(start.config, provider),
-            host_denied_tools=_host_denied_tools(start.config, provider),
-            replaces_agent_id=start.replaces_agent_id,
-            parent_agent_id=start.started_by.agent_id if start.started_by else None,
-            held=start.held,
-        )
+    installer = (
+        _install_initial_receipt
+        if "contractPath" in start.role_handover.workspace
+        else _create_receipt
     )
-    receipt: dict[str, Any] = {
-        "schema": RECEIPT_SCHEMA,
-        "requestId": str(request.request_id),
-        "role": request.role,
-        "selection": start.binding,
-        "requestDigest": start.request_digest,
-        "bindingDigest": _digest(
-            {
-                "requestDigest": start.request_digest,
-                "requestId": str(request.request_id),
-                "taskDocumentDigest": prepared["taskDocumentDigest"],
-                "capsuleDigest": prepared["capsuleDigest"],
-                "capsuleOperation": prepared["capsuleOperation"],
-                "workspace": workspace,
-                "agent": provider,
-                "sessionOptions": session_options,
-                "arMcpContext": prepared.get("arMcpContext"),
-                "stepUpArtifact": prepared.get("stepUpArtifact"),
-            }
-        ),
-        "capsuleDigest": prepared["capsuleDigest"],
-        "instructionComposition": prepared.get("instructionComposition"),
-        "taskDocumentFiles": prepared.get("taskDocumentFiles"),
-        "predecessorReports": prepared.get("predecessorReports"),
-        **missing_copies_receipt_warning(
-            prepared.get("taskDocumentFiles"), session_options.get("stepUpWarning")
-        ),
-        # MIK-R216 rule 3: the launch's own answer about this seat's provider, beside the
-        # warnings — what was added, or that nothing was and why.
-        "acpInstruction": acp_instruction,
-        "choices": session_options.get("choices", {}),
-        "capsuleOperation": prepared["capsuleOperation"],
-        "taskDocumentDigest": prepared["taskDocumentDigest"],
-        "messageBindingProjection": start.message_binding_projection,
-        "report": {
-            "path": prepared["taskReportPath"],
-            "canonicalPath": prepared["canonicalTaskReportPath"],
-        },
-        **(
-            {"arMcpContext": prepared["arMcpContext"]}
-            if isinstance(prepared.get("arMcpContext"), dict)
-            else {}
-        ),
-        "agentId": agent_id,
-        # The role agent that started this one; a start from the launcher has no parent.
-        **({"parentAgentId": start.started_by.agent_id} if start.started_by else {}),
-        "status": "starting",
-        "createdAt": _now_iso(),
-        "workspace": workspace,
-        "agent": {"id": provider, **session_options},
-        "sessionOptions": session_options,
-        "requestedAgentOverride": (
-            request.agent_override.model_dump(mode="json", by_alias=True, exclude_none=True)
-            if request.agent_override
-            else None
-        ),
-        "stepUp": session_options.get("stepUp"),
-        "requestedStepUp": request.step_up,
-        "execution": {},
-        "preparation": {
-            "enclosure": workspace.get("enclosurePreparation", "not-applicable"),
-            **({"briefsProblem": problem} if (problem := workspace.get("briefsProblem")) else {}),
-            **({"firstRun": report} if (report := recall_first_run_report()) is not None else {}),
-        },
-        "handoverArtifact": artifact,
-        "handoverFile": {**handover_file, "content": prepared["handoverFileContent"]},
-        "stepUpArtifact": prepared.get("stepUpArtifact"),
-        # A held seat keeps its opening handover for its first message (MIK-R100 rules 2/4).
-        **(
-            {
-                "heldSeat": True,
-                "heldOpeningPrompt": first_message(artifact, prompt, handover_file),
-            }
-            if start.held
-            else {}
-        ),
-        # What the launch call gives the agent: its tool server, or why none, and the note.
-        **applied_to_agent(launch_call),
-        "replayRequest": launch_call,
-        "detail": "The Paseo runtime is creating the AR role agent.",
-    }
-    if not _create_receipt(start.receipt_path, receipt):
+    try:
+        receipt, created = publish_prepared_launch(start, preparation, installer)
+    except EnclosurePublicationRefusal:
+        _take_back_message_binding(start)
+        raise
+    if not created:
         # Another process created a receipt at this address since it was last read here.
         try:
             _refuse_another_starter(start.receipt_path, request, start.started_by)

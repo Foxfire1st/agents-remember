@@ -97,6 +97,11 @@ Arguments:
   observable.
 - `experiment=null`: selects an experimental install for this one call. It is never a setting,
   and the record of the run names its source.
+- `reconcile_shared_held_stores=false`: set to `true` to inspect the shared workspace's held
+  stores. Preview with `dry_run=true`. Apply in a separate call after installing and restarting
+  the new build and retiring its older writers. The installer records waiting message text in
+  each closed seat's launch record before removing its store and obsolete lock. It names the
+  stores it keeps, including seats that are still running or whose closure cannot be verified.
 
 `experiment=role-capsules` is the one supported experiment. Selection precedence:
 the request field, then the environment variable `AR_EXPERIMENT`; empty at
@@ -142,6 +147,12 @@ Answer fields (delivered):
 - `dashboard`, when a dashboard runs: `action`, `detail`, `pid` and `sourceDigest`;
 - `runningServers`: the tool servers and dashboards that run on the coordination root with their
   build state, as in `server_info`;
+- `sharedHeldStores`, when requested: the reconciliation state, `path`, and counts
+  (`wouldRemoveStores`, `wouldRemoveLocks`, and `preserved` on preview; `removedStores`,
+  `removedLocks`, and `preserved` on an executed install, or `reason` when blocked). The
+  delivered MCP answer omits the per-seat `stores` list on both preview and executed runs; a
+  preview writes no report, and an executed install records the individual seats in the report
+  named by `reportPath`.
 - `summary`: `createdDirs`, `copiedFiles`, `unchangedFiles`, `replacedLinks` and
   `removedPaths`; `dependencyRuns`, which is `0` on every run; and `unusedProviderKeys`, the ids
   of the search providers that the settings enable under `contextProviders`, on which the install
@@ -150,7 +161,8 @@ Answer fields (delivered):
 - `reportPath`: the report file of an executed install. A dry run files no report and carries no
   `reportPath`;
 - `recoveryActions`, when the run lists any;
-- `log`: the detail file that holds the whole result.
+- `log`: the detail file that holds the delivered answer (for an executed install, `reportPath`
+  holds the full uncompacted install result).
 
 Refusals: an experimental install is refused before anything is written (nothing
 under the coordination root is created, replaced or removed, and the selected

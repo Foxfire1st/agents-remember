@@ -53,6 +53,7 @@ from agents_remember.canvas.paths import PathRefused
 from agents_remember.cli.role_launch_receipts import (
     RECEIPT_SCHEMA,
     _archive_receipt,
+    _create_receipt,
     _write_receipt,
 )
 from agents_remember.models.knowledge.review_frame import FrameBinding
@@ -181,7 +182,7 @@ def _collect_report_fixture(
     }
     collect_execution_reports(receipt)
     receipt_path = reports_root / "paseo-native-executions" / f"{request}.json"
-    _write_receipt(receipt_path, receipt)
+    assert _create_receipt(receipt_path, receipt)
     return receipt_path, receipt
 
 

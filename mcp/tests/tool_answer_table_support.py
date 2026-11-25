@@ -281,6 +281,7 @@ _INSTALL_FIELDS = {
     "providerWatcherRebind": "see whether watcher recovery was attempted and which phases ran",
     "recoveryActions": "perform the recovery actions the run lists",
     "removedPartStores": "tell the user that stores of removed parts remain and which command lists or removes them",
+    "sharedHeldStores": "read proposed or completed shared-store and lock removals, preserved seats, or the blocker",
     "log": "open the detail file holding the whole install result",
 }
 

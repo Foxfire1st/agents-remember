@@ -20,6 +20,12 @@ from typing import Any
 from agents_remember.application.agent_binding import AgentBinding, read_agent_binding
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.cli.paseo_status import read_agent
+from agents_remember.cli.role_held_store import (
+    HeldSeatClosed,
+    HeldSeatRef,
+    held_seat_ref,
+    settle_held_store,
+)
 from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_identity import LEAF_ROLES
@@ -129,8 +135,23 @@ def _retire_seat(
                 f"only {owner} can. Nothing was archived.",
             )
         )
-    if isinstance(receipt.get("retiredBy"), dict):
-        retired = receipt["retiredBy"]
+    archive = receipt.get("leafArchive")
+    retired = receipt.get("retiredBy")
+    if isinstance(retired, dict) or (isinstance(archive, dict) and archive.get("closing") is True):
+        ref = held_seat_ref(path, receipt)
+        if ref.store_path is not None and ref.store_path.exists():
+            try:
+                settle_held_store(ref)
+            except (ValueError, OSError) as error:
+                raise _RetireTerminal(
+                    _refusal(_task_ref_of(receipt), seat_role, "retire-record-failed", str(error))
+                ) from error
+        detail = (
+            f"Agent {agent_id} was already retired by {retired.get('caller')} for "
+            f"{retired.get('reason')!r}; nothing changed."
+            if isinstance(retired, dict)
+            else f"Agent {agent_id} is already closing under its task's archive."
+        )
         raise _RetireTerminal(
             {
                 "ok": True,
@@ -138,10 +159,7 @@ def _retire_seat(
                 "status": "already-retired",
                 "role": seat_role,
                 **({"taskDocumentRef": _task_ref_of(receipt)} if _task_ref_of(receipt) else {}),
-                "detail": (
-                    f"Agent {agent_id} was already retired by {retired.get('caller')} for "
-                    f"{retired.get('reason')!r}; nothing changed."
-                ),
+                "detail": detail,
             }
         )
     return _RetireSeat(path, receipt, seat_role, caller)
@@ -153,6 +171,7 @@ def _archive_retiree(
     """Archive the checked seat's agent on the host and record it (rule 8)."""
 
     agent_id = request.agent_id or ""
+    ref = held_seat_ref(seat.path, seat.receipt)
     reading = read_agent(config, agent_id)
     if not reading.reachable:
         raise _RetireTerminal(
@@ -166,9 +185,8 @@ def _archive_retiree(
         )
     if not reading.found or reading.archived:
         recorded = _record_retirement(
-            seat.path,
+            ref,
             seat.caller,
-            agent_id,
             request.reason,
         )
         if recorded != "recorded":
@@ -248,7 +266,7 @@ def _archive_retiree(
                 "The Paseo bridge returned an unreadable archive answer. Nothing was recorded.",
             )
         )
-    recorded = _record_retirement(seat.path, seat.caller, agent_id, request.reason)
+    recorded = _record_retirement(ref, seat.caller, request.reason)
     if recorded != "recorded":
         intent = {
             "caller": f"{seat.caller.role} agent {seat.caller.agent_id}",
@@ -392,9 +410,8 @@ def _locate_seat(
 
 
 def _record_retirement(
-    path: Path,
+    ref: HeldSeatRef,
     caller: AgentBinding,
-    agent_id: str,
     reason: str,
 ) -> str:
     """Write one retirement into its launch record; say what the write did.
@@ -405,48 +422,24 @@ def _record_retirement(
     report a partial failure truthfully instead of claiming the record.
     """
 
-    from agents_remember.cli.role_held_messages import (  # noqa: PLC0415
-        end_waiting_as,
-        record_lines,
-        recount_waiting_for,
-    )
-    from agents_remember.cli.role_launch_receipts import (  # noqa: PLC0415
-        _read_receipt,
-        _write_receipt,
-    )
-
     now = datetime.now(UTC).isoformat()
-    try:
-        current = _read_receipt(path)
-    except ValueError:
-        return "receipt-unreadable"
-    if current is None:
-        return "receipt-unreadable"
-    current.update(
-        status="stopped",
-        detail=f"Retired by {caller.role} agent {caller.agent_id}: {reason}",
-        retiredBy={
+    updates = {
+        "status": "stopped",
+        "detail": f"Retired by {caller.role} agent {caller.agent_id}: {reason}",
+        "retiredBy": {
             "caller": f"{caller.role} agent {caller.agent_id}",
             "callerAgentId": caller.agent_id,
             "reason": reason,
             "at": now,
         },
-        retireReason=reason,
-        updatedAt=now,
-    )
-    workspace = current.get("workspace")
-    folder = workspace.get("path") if isinstance(workspace, dict) else None
-    if isinstance(folder, str) and folder:
-        try:
-            ended = end_waiting_as(folder, agent_id)
-        except ValueError:
-            ended = []
-        if ended:
-            record_lines(current, ended, "not-delivered-archived-or-gone")
-    recount_waiting_for(current)
+        "retireReason": reason,
+        "updatedAt": now,
+    }
     try:
-        _write_receipt(path, current)
-    except OSError:
+        settle_held_store(ref, receipt_updates=updates)
+    except HeldSeatClosed:
+        return "receipt-unreadable"
+    except (OSError, ValueError):
         return "write-failed"
     return "recorded"
 

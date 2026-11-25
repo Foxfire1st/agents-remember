@@ -2,21 +2,32 @@ from __future__ import annotations
 
 import json
 import shutil
+import uuid
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 from _user_settings_guard import user_settings_path_for_write
 from agents_remember.application.runtime.install import RuntimeInstallRequest, run_runtime_install
+from agents_remember.cli.paseo_status import AgentReading
+from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA, _write_receipt
+from agents_remember.cli.shared_held_store_reconciliation import reconcile_shared_held_stores
+from agents_remember.controlplane.held_store_discovery import receipt_holder
+from agents_remember.controlplane.held_store_layout import HELD_STORE_SCHEMA, store_path_for
+from agents_remember.kernel.file_lock import lock_held, lock_path_for
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.mcp.tools.core import runtime_install_payload
+from agents_remember.models.build_currentness import BuildCurrentnessPayload
+from agents_remember.models.core import RunningServerPayload
+from agents_remember.serving.build_info import ServingBuild
 from agents_remember.serving.paseo import paseo_install
 from agents_remember.serving.paseo.paseo_daemon_config import write_provider_entries
 from agents_remember.serving.paseo.paseo_plugin_files import PLUGIN_ID, installed_plugin_path
 from agents_remember.serving.paseo.paseo_provision import provision_for_install
 from agents_remember.serving.paseo.paseo_settings import daemon_settings
+from agents_remember.serving.server_registry import _ServerRecord
 from paseo_runtime_test_support import FakePaseo, file_states, free, runtime_settings, write_plugin
 
 
@@ -50,6 +61,290 @@ def write_host(config, version_marker):
     document["paseoRuntime"] = block
     config.config_path.write_text(json.dumps(document))
     return settings
+
+
+def _shared_store(config, status, *, text=None, replay=None, lock_only=False):
+    agent_id = str(uuid.uuid4())
+    request_id = str(uuid.uuid4())
+    receipt = receipt_holder(config.coordination_root) / f"{request_id}.json"
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "schema": RECEIPT_SCHEMA,
+        "requestId": request_id,
+        "agentId": agent_id,
+        "status": status,
+        "workspace": {"path": str(config.workspace_root)},
+        "execution": {"agentId": agent_id},
+    }
+    if replay is not None:
+        record["replayRequest"] = replay
+    receipt.write_text(json.dumps(record))
+    store = store_path_for(config.workspace_root, agent_id)
+    store.parent.mkdir(parents=True, exist_ok=True)
+    if not lock_only:
+        messages = (
+            []
+            if text is None
+            else [
+                {
+                    "id": str(uuid.uuid4()),
+                    "senderAgentId": str(uuid.uuid4()),
+                    "senderLine": "From worker",
+                    "takenAt": "2026-11-24T00:00:00Z",
+                    "reason": "held",
+                    "text": text,
+                }
+            ]
+        )
+        store.write_text(
+            json.dumps({"schema": HELD_STORE_SCHEMA, "agentId": agent_id, "messages": messages})
+        )
+    lock = lock_path_for(store)
+    lock.touch()
+    return agent_id, receipt, store, lock
+
+
+def test_runtime_install_opt_in_previews_and_settles_only_proven_closed_shared_stores(tmp_path):
+    config = setup_config(tmp_path)
+    closed = _shared_store(config, "rejected", text="waiting until the seat closed")
+    gone = _shared_store(config, "running", text="waiting until the host went away")
+    archived = _shared_store(config, "held", text="waiting until archival", replay={})
+    live = _shared_store(config, "stopped", text="still waiting for the live seat")
+    unknown = _shared_store(config, "stopped", text="still waiting for a host reading")
+    deferred = _shared_store(config, "held", replay={"launch": "pending"})
+    lock_only = _shared_store(config, "rejected", lock_only=True)
+    readings = {
+        gone[0]: AgentReading(found=False),
+        archived[0]: AgentReading(archived=True),
+        live[0]: AgentReading(lifecycle="idle", last_turn="unreplied"),
+        unknown[0]: AgentReading(
+            reachable=False, unreachable_reason="The host did not answer for this seat."
+        ),
+        deferred[0]: AgentReading(found=False),
+    }
+    build = ServingBuild("test", None, "2026-11-24T00:00:00Z", source_digest="a" * 64)
+    before = file_states(tmp_path)
+    with (
+        patch(
+            "agents_remember.application.runtime.install.install_runtime_from_config",
+            side_effect=lambda *_: {"ok": True},
+        ),
+        patch(
+            "agents_remember.application.runtime.install.install_host", return_value={"ok": True}
+        ),
+        patch(
+            "agents_remember.application.runtime.install.plan_running_dashboard", return_value=None
+        ),
+        patch(
+            "agents_remember.application.runtime.install.ensure_running_dashboard",
+            return_value=None,
+        ),
+        patch("agents_remember.application.runtime.install.server_inventory", return_value=[]),
+        patch(
+            "agents_remember.cli.shared_held_store_reconciliation.process_serving_build",
+            return_value=build,
+        ),
+        patch(
+            "agents_remember.cli.shared_held_store_reconciliation.read_agent",
+            side_effect=lambda _, agent_id: readings[agent_id],
+        ) as read,
+    ):
+        ordinary = run_runtime_install(config, RuntimeInstallRequest(dry_run=True))
+        assert "sharedHeldStores" not in ordinary
+        assert not read.called
+        preview = run_runtime_install(
+            config,
+            RuntimeInstallRequest(dry_run=True, reconcile_shared_held_stores=True),
+            reconcile_shared_stores=reconcile_shared_held_stores,
+        )["sharedHeldStores"]
+        totals = (
+            preview["wouldRemoveStores"],
+            preview["wouldRemoveLocks"],
+            preview["preserved"],
+        )
+        assert totals == (3, 4, 3), "live or unknown stopped shared seat was not preserved"
+        assert file_states(tmp_path) == before
+        request = RuntimeInstallRequest(reconcile_shared_held_stores=True)
+        result = runtime_install_payload(config, request)
+        repeated = runtime_install_payload(config, request)["sharedHeldStores"]
+
+    assert result["ok"]
+    summary = result["sharedHeldStores"]
+    assert summary["state"] == "reconciled" and "stores" not in summary
+    assert (summary["removedStores"], summary["removedLocks"], summary["preserved"]) == (3, 4, 3)
+    assert (repeated["removedStores"], repeated["removedLocks"], repeated["preserved"]) == (0, 0, 3)
+    report = json.loads(Path(result["reportPath"]).read_text())
+    preserved = {
+        row["agentId"]: row["reason"]
+        for row in report["sharedHeldStores"]["stores"]
+        if row["state"] == "preserved"
+    }
+    assert preserved.keys() == {live[0], unknown[0], deferred[0]}
+    assert preserved[live[0]] == "The host still has this seat."
+    assert preserved[unknown[0]] == "The host did not answer for this seat."
+    for seat, text in (
+        (closed, "waiting until the seat closed"),
+        (gone, "waiting until the host went away"),
+        (archived, "waiting until archival"),
+    ):
+        _, receipt, store, lock = seat
+        assert text in receipt.read_text()
+        assert not store.exists()
+        assert not lock.exists()
+    assert not lock_only[3].exists()
+    after = file_states(tmp_path)
+    for _, receipt, store, lock in (live, unknown, deferred):
+        for path in (receipt, store, lock):
+            assert after[path.as_posix()] == before[path.as_posix()]
+
+
+def test_runtime_install_preview_preserves_dead_registry_and_shared_store(tmp_path: Path):
+    config = setup_config(tmp_path)
+    _, _, store, _ = _shared_store(config, "running", text="waiting for a live seat")
+    dead_server = _ServerRecord(
+        pid=2**30,
+        role="mcp",
+        loadedDigest="a" * 64,
+        startedAt="2026-11-24T00:00:00Z",
+        configPath=str(config.config_path),
+        packageRoot=None,
+        processStart=None,
+    )
+    record = config.coordination_root / "runtime" / "servers" / f"{dead_server.pid}.json"
+    record.parent.mkdir(parents=True)
+    record.write_text(dead_server.model_dump_json())
+    before = file_states(tmp_path)
+
+    with (
+        patch(
+            "agents_remember.application.runtime.install.install_runtime_from_config",
+            return_value={"ok": True},
+        ),
+        patch(
+            "agents_remember.application.runtime.install.plan_running_dashboard", return_value=None
+        ),
+        patch(
+            "agents_remember.cli.shared_held_store_reconciliation.read_agent",
+            return_value=AgentReading(lifecycle="idle"),
+        ),
+    ):
+        preview = runtime_install_payload(
+            config, RuntimeInstallRequest(dry_run=True, reconcile_shared_held_stores=True)
+        )
+
+    assert record.is_file(), "runtime installation preview removed the dead server record"
+    assert file_states(tmp_path) == before
+    assert preview["ok"] and preview["runningServers"] == []
+    assert preview["sharedHeldStores"] == {
+        "state": "previewed",
+        "path": str(store.parent),
+        "wouldRemoveStores": 0,
+        "wouldRemoveLocks": 0,
+        "preserved": 1,
+    }
+    assert "reportPath" not in preview
+
+
+def test_shared_reconciliation_reads_host_before_settling_stopped_seat(tmp_path: Path):
+    config = setup_config(tmp_path)
+    waiting = "waiting for a stopped seat to be confirmed gone"
+    agent_id, receipt, store, lock = _shared_store(config, "stopped", text=waiting)
+    build = ServingBuild("test", None, "2026-11-24T00:00:00Z", source_digest="a" * 64)
+
+    with (
+        patch(
+            "agents_remember.cli.shared_held_store_reconciliation.process_serving_build",
+            return_value=build,
+        ),
+        patch(
+            "agents_remember.cli.shared_held_store_reconciliation.read_agent",
+            return_value=AgentReading(found=False),
+        ) as read,
+    ):
+        result = reconcile_shared_held_stores(config, dry_run=False, servers=[])
+
+    assert read.call_args is not None, "stopped shared seat was settled without host proof"
+    read.assert_called_once_with(config, agent_id)
+    assert (result["removedStores"], result["removedLocks"], result["preserved"]) == (1, 1, 0)
+    closure = json.loads(receipt.read_text())["heldStoreClosures"]["0"]
+    assert [row["text"] for row in closure["waitingMessages"]] == [waiting]
+    assert not store.exists() and not lock.exists()
+
+
+def test_shared_reconciliation_preserves_new_generation_during_host_probe(tmp_path: Path):
+    config = setup_config(tmp_path)
+    agent_id, receipt, store, lock = _shared_store(config, "stopped", text="still waiting")
+    build = ServingBuild("test", None, "2026-11-24T00:00:00Z", source_digest="a" * 64)
+    before = store.read_bytes()
+
+    def observe(_config: object, target: str) -> AgentReading:
+        assert target == agent_id
+        assert not lock_held(receipt)
+        successor = json.loads(receipt.read_text())
+        successor.update(heldStoreGeneration=1, status="running")
+        _write_receipt(receipt, successor, prior_generation=0)
+        return AgentReading(archived=True)
+
+    with (
+        patch(
+            "agents_remember.cli.shared_held_store_reconciliation.process_serving_build",
+            return_value=build,
+        ),
+        patch(
+            "agents_remember.cli.shared_held_store_reconciliation.read_agent",
+            side_effect=observe,
+        ),
+    ):
+        result = reconcile_shared_held_stores(config, dry_run=False, servers=[])
+
+    (row,) = result["stores"]
+    assert row["state"] == "preserved", (
+        "host probe did not preserve the successor shared generation"
+    )
+    assert row["agentId"] == agent_id and "different generation" in row["reason"]
+    successor = json.loads(receipt.read_text())
+    assert successor["heldStoreGeneration"] == 1 and successor["status"] == "running"
+    assert "heldStoreClosures" not in successor
+    assert store.read_bytes() == before and lock.is_file()
+
+
+def test_runtime_install_preserves_shared_lock_until_registered_older_writer_restarts(tmp_path):
+    config = setup_config(tmp_path)
+    _, _, store, lock = _shared_store(config, "rejected")
+    build = ServingBuild("test", None, "2026-11-24T00:00:00Z", source_digest="a" * 64)
+    older = RunningServerPayload(
+        pid=100,
+        role="dashboard",
+        loadedDigest="b" * 64,
+        startedAt="2026-11-23T00:00:00Z",
+        configPath=str(config.config_path),
+        currentness=BuildCurrentnessPayload(mode="installed", state="current"),
+    )
+    with (
+        patch(
+            "agents_remember.application.runtime.install.install_runtime_from_config",
+            return_value={"ok": True},
+        ),
+        patch(
+            "agents_remember.application.runtime.install.install_host", return_value={"ok": True}
+        ),
+        patch(
+            "agents_remember.application.runtime.install.ensure_running_dashboard",
+            return_value=None,
+        ),
+        patch("agents_remember.application.runtime.install.server_inventory", return_value=[older]),
+        patch(
+            "agents_remember.cli.shared_held_store_reconciliation.process_serving_build",
+            return_value=build,
+        ),
+    ):
+        result = runtime_install_payload(
+            config, RuntimeInstallRequest(reconcile_shared_held_stores=True)
+        )
+    assert not result["ok"]
+    assert result["sharedHeldStores"]["state"] == "blocked"
+    assert "dashboard PID 100" in result["sharedHeldStores"]["reason"]
+    assert store.is_file() and lock.is_file()
 
 
 def test_install_reads_added_shared_block_at_call_and_provisions_once(tmp_path):

@@ -119,8 +119,10 @@ def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> N
         install_provider_deps: bool = True,
         no_cache: bool = False,
         experiment: str | None = None,
+        *,
+        reconcile_shared_held_stores: bool = False,
     ) -> dict[str, Any]:
-        """Install/refresh coordinator scaffold (docs, provider assets), preserving memory-repos/ and providers/data/. Skills stay package-served. Stops leftover watchers (starts none), provisions pinned paseoRuntime host/plugin (defers host restart; keeps user-settings protections), refreshes running dashboard, reports server currentness. Preview with dry_run=true. Docs: docs/tool-details.md."""
+        """Install/refresh coordinator scaffold (docs, provider assets), preserving memory-repos/ and providers/data/. Skills stay package-served. Stops leftover watchers (starts none), provisions pinned paseoRuntime host/plugin (defers host restart; keeps user-settings protections), refreshes running dashboard, reports server currentness. Preview with dry_run=true; opt into reconcile_shared_held_stores after restart. Docs: docs/tool-details.md."""
         return tools.runtime_install_payload(
             config,
             import_module("agents_remember.application.runtime.install").RuntimeInstallRequest(
@@ -129,5 +131,6 @@ def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> N
                 install_provider_deps=install_provider_deps,
                 no_cache=no_cache,
                 experiment=experiment,
+                reconcile_shared_held_stores=reconcile_shared_held_stores,
             ),
         )

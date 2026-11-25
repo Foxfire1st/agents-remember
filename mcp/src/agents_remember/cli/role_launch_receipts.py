@@ -36,12 +36,30 @@ from agents_remember.cli.message_binding_files import (
 from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, LaunchOutcome, run_launch_call
 from agents_remember.cli.role_activity import publish_receipt_role_agent
 from agents_remember.cli.role_handover_restore import HandoverFileRefusal, restore_launch_files
+from agents_remember.cli.role_held_store import (
+    HeldSeatClosed,
+    preserve_held_closure,
+    receipt_generation,
+    settle_held_store,
+)
 from agents_remember.cli.role_instruction_details import validate_instruction_detail_artifacts
 from agents_remember.cli.role_instructions import instruction_metadata, launch_choice_metadata
 from agents_remember.cli.role_launch_choices import (
     observe_launch_choices as _observe_launch_choices,
 )
 from agents_remember.cli.role_launch_outcome import publish_launch_outcome
+from agents_remember.cli.role_receipt_files import (
+    _archive_receipt as _archive_receipt,  # noqa: PLC0414 - receipt caller surface
+)
+from agents_remember.cli.role_receipt_files import (
+    _create_receipt as _create_receipt,  # noqa: PLC0414 - receipt caller surface
+)
+from agents_remember.cli.role_receipt_files import (
+    _leaf_before_create,
+    _predecessor_held_ref,
+    _require_live_launch_scope,
+    _write_receipt_aside,
+)
 from agents_remember.cli.role_receipt_listing import taskless_execution_receipts
 from agents_remember.cli.role_step_up_decisions import record_step_up
 from agents_remember.controlplane.held_store_discovery import (
@@ -100,7 +118,19 @@ def _execute_prepared_launch(
         closing = _leaf_is_closing(current)
     if closing:
         return _refuse_closing_launch(config, path, current)
+    _require_live_launch_scope(current)
     record_step_up(config, current)
+    with exclusive_file_lock(path, "role execution receipt"):
+        current = _same_request_receipt(path, current)
+        launch_call = None if _leaf_is_closing(current) else _prepare_saved_launch(path, current)
+    if launch_call is None:
+        return _refuse_closing_launch(config, path, current)
+    return _run_prepared_launch(config, path, current, launch_call)
+
+
+def _prepare_saved_launch(path: Path, current: dict[str, Any]) -> dict[str, Any]:
+    """Restore the handover while this discoverable receipt holds its archive fence."""
+    _require_live_launch_scope(current)
     launch_call = current.get("replayRequest")
     if not isinstance(launch_call, dict):
         raise HTTPException(
@@ -115,6 +145,12 @@ def _execute_prepared_launch(
             _restore_launch_handover(path, current, launch_call)
         except HandoverFileRefusal as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+    return launch_call
+
+
+def _run_prepared_launch(
+    config: McpRuntimeConfig, path: Path, current: dict[str, Any], launch_call: dict[str, Any]
+) -> JSONResponse:
     predecessor = current.get("predecessorReports")
     if isinstance(predecessor, dict):
         collect_execution_reports(predecessor)
@@ -125,14 +161,17 @@ def _execute_prepared_launch(
     )
 
     require_step_up_archive_idle(config, current, launch_call)
+    prior = _predecessor_held_ref(path, current, launch_call)
     if current.get("role") in LEAF_ROLES:
         outcome = run_launch_call(
             config, launch_call, before_create=lambda: _leaf_before_create(path, current)
         )
     else:
         outcome = run_launch_call(config, launch_call)
+    if prior is not None and outcome.predecessor_settled:
+        settle_held_store(prior, host_state="archived")
     with exclusive_file_lock(path, "role execution receipt"):
-        current = _same_request_receipt(path, receipt)
+        current = _same_request_receipt(path, current)
         _settle_predecessor_reports(current, outcome)
         if not _leaf_is_closing(current):
             response = _publish_launch_outcome(path, current, launch_call, outcome)
@@ -183,7 +222,12 @@ def _restored_message(current: dict[str, Any], launch_call: dict[str, Any]) -> s
 
 def _same_request_receipt(path: Path, receipt: dict[str, Any]) -> dict[str, Any]:
     current = _read_receipt(path)
-    if current is None or current.get("requestId") != receipt.get("requestId"):
+    if (
+        current is None
+        or current.get("requestId") != receipt.get("requestId")
+        or current.get("agentId") != receipt.get("agentId")
+        or receipt_generation(current) != receipt_generation(receipt)
+    ):
         raise HTTPException(status_code=409, detail="The prepared launch receipt was replaced.")
     return current
 
@@ -200,16 +244,6 @@ def _leaf_is_closing(receipt: dict[str, Any]) -> bool:
         and archive.get("closing") is True
         and archive.get("taskDocumentRef") == selection["taskDocumentRef"]
     )
-
-
-def _leaf_before_create(path: Path, receipt: dict[str, Any]) -> bool:
-    with exclusive_file_lock(path, "role execution receipt"):
-        current = _same_request_receipt(path, receipt)
-        if _leaf_is_closing(current):
-            return False
-        current["leafCreateEntered"] = True
-        _write_receipt(path, current)
-        return True
 
 
 def _refuse_closing_launch(
@@ -549,20 +583,26 @@ def _move_taskless_legacy_receipts(moves: list[_TasklessLegacyReceiptMove]) -> N
         targets.add(move.target)
         _require_taskless_migration_target_available(move.target)
     for move in moves:
-        move.target.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            os.link(move.source, move.target, follow_symlinks=False)
-            move.source.unlink()
-        except FileExistsError as error:
-            raise HTTPException(
-                status_code=409,
-                detail="A request-addressed taskless receipt appeared during migration; no receipt was overwritten.",
-            ) from error
-        except OSError as error:
-            raise HTTPException(
-                status_code=409,
-                detail="Legacy taskless receipts could not be moved without risking an overwrite.",
-            ) from error
+        with exclusive_file_lock(move.source, "role execution receipt"):
+            _same_request_receipt(move.source, move.receipt)
+            _place_migrated_receipt(move)
+
+
+def _place_migrated_receipt(move: _TasklessLegacyReceiptMove) -> None:
+    move.target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(move.source, move.target, follow_symlinks=False)
+        move.source.unlink()
+    except FileExistsError as error:
+        raise HTTPException(
+            status_code=409,
+            detail="A request-addressed taskless receipt appeared during migration; no receipt was overwritten.",
+        ) from error
+    except OSError as error:
+        raise HTTPException(
+            status_code=409,
+            detail="Legacy taskless receipts could not be moved without risking an overwrite.",
+        ) from error
 
 
 def _taskless_execution_receipts(
@@ -800,13 +840,23 @@ def _names_another_document(path: Path) -> bool:
     return not (isinstance(value, dict) and value.get("schema") == RECEIPT_SCHEMA)
 
 
-def _write_receipt(path: Path, receipt: dict[str, Any], *, archive_update: bool = False) -> None:
+def _write_receipt(
+    path: Path,
+    receipt: dict[str, Any],
+    *,
+    archive_update: bool = False,
+    prior_generation: int | None = None,
+) -> None:
     with exclusive_file_lock(path, "role execution receipt"):
         current = _read_receipt(path)
+        if current is None:
+            raise HeldSeatClosed(str(receipt.get("agentId")), "receipt-moved")
+        preserve_held_closure(current, receipt, prior_generation)
         if (
             current is not None
             and current.get("requestId") == receipt.get("requestId")
             and current.get("leafCreateEntered") is True
+            and prior_generation is None
         ):
             receipt["leafCreateEntered"] = True
         if (
@@ -833,61 +883,6 @@ def _write_receipt(path: Path, receipt: dict[str, Any], *, archive_update: bool 
         except BaseException:
             temporary.unlink(missing_ok=True)
             raise
-
-
-def _create_receipt(path: Path, receipt: dict[str, Any]) -> bool:
-    """Create a receipt only if none exists at its address; say whether this call created it.
-
-    The complete file appears under its name in one step, and that step fails when the name is
-    taken. Of two processes that launch the same selection at the same moment, one creates the
-    receipt and the other is told that it did not.
-    """
-
-    temporary = _write_receipt_aside(path, receipt)
-    try:
-        os.link(temporary, path, follow_symlinks=False)
-    except FileExistsError:
-        return False
-    finally:
-        temporary.unlink(missing_ok=True)
-    return True
-
-
-def _write_receipt_aside(path: Path, receipt: dict[str, Any]) -> Path:
-    """Write the receipt to a synced temporary file beside its address."""
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    body = json.dumps(receipt, ensure_ascii=False, indent=2) + "\n"
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent, text=True)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(body)
-            stream.flush()
-            os.fsync(stream.fileno())
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
-    return Path(temporary)
-
-
-def _archive_receipt(path: Path, receipt: dict[str, Any]) -> None:
-    request_id = receipt.get("requestId")
-    if not isinstance(request_id, str):
-        raise ValueError(
-            "The prior role execution receipt has no request identity and cannot be archived safely."
-        )
-    predecessor = receipt.get("predecessorReports")
-    if receipt.get("predecessorSettled") and isinstance(predecessor, dict):
-        close_execution_role_folders(predecessor)
-    history = path.parent / "history" / f"{request_id}.json"
-    if history.exists():
-        raise ValueError("A prior role execution archive already has this request identity.")
-    history.parent.mkdir(parents=True, exist_ok=True)
-    if "reportCollectionFiles" in receipt:
-        # History preserves the collected evidence/truth, not an inactive reuse cache.
-        receipt.pop("reportCollectionFiles")
-        _write_receipt(path, receipt)
-    path.replace(history)
 
 
 def _archived_receipt_for_selection(path: Path, selection: RoleSelection) -> dict[str, Any] | None:

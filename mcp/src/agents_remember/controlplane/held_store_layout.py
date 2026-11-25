@@ -9,8 +9,8 @@ which only *reads* them (MIK-R200 rule 3), take one definition instead of two th
 
 The queue is a visit order and never a census: it is bounded by age and by count, and a torn body
 reads as no entries. The authority is the store file, so :class:`HeldAuthorityReader` reads the
-stores themselves and says whether its census over them was complete. Nothing here sends, holds,
-withdraws or drains anything.
+stores themselves and says whether its census over them was complete. Delivery and closure
+callers own the recipient's launch-receipt lock while mutating a store.
 """
 
 from __future__ import annotations
@@ -242,9 +242,8 @@ def _read_store_file(path: Path, agent_id: str) -> dict[str, Any]:
     if body.get("agentId") != agent_id:
         raise ValueError(f"The held-message store {path} names another recipient.")
     messages = body.get("messages")
-    if not isinstance(messages, list):
+    if not isinstance(messages, list) or not all(isinstance(row, dict) for row in messages):
         raise ValueError(f"The held-message store {path} has no message list.")
-    body["messages"] = [row for row in messages if isinstance(row, dict)]
     return body
 
 
@@ -331,12 +330,11 @@ def waiting_total(workspace_path: str | Path, agent_id: str) -> int:
             return 0
     except OSError:
         return 0
-    with exclusive_file_lock(path, "held-message store"):
-        try:
-            store = _read_store_file(path, agent_id)
-        except ValueError:
-            return 0
-        return len(store.get("messages", []))
+    try:
+        store = _read_store_file(path, agent_id)
+    except ValueError:
+        return 0
+    return len(store.get("messages", []))
 
 
 def waiting_counts(store: dict[str, Any], sender_agent_id: str | None = None) -> tuple[int, int]:
@@ -399,43 +397,42 @@ def hold_message(workspace_path: str | Path, agent_id: str, message: HeldMessage
     """Take one message the host cannot take now; refuse a message beyond the bound."""
 
     path = store_path_for(workspace_path, agent_id)
-    with exclusive_file_lock(path, "held-message store"):
-        store = _read_store_file(path, agent_id)
-        messages = store["messages"]
-        attempted = message.attempted_message_id
-        if attempted and any(row.get("id") == attempted for row in messages):
-            # The same attempt is taken twice (a repeat after a stop): one waiting copy.
-            mine, total = waiting_counts(store, message.sender_agent_id)
-            return {
-                "heldMessageId": attempted,
-                "waitingMine": mine,
-                "waitingTotal": total,
-                "limitedUntil": limited_until_in(store, attempted),
-            }
-        if len(messages) >= MAX_HELD_PER_RECIPIENT:
-            raise HeldStoreFull(
-                f"Agent {agent_id} already holds {len(messages)} messages, the bound for one "
-                "recipient; none was dropped to make room."
-            )
-        message_id = attempted or str(uuid.uuid4())
-        row: dict[str, Any] = {
-            "id": message_id,
-            "senderLine": message.sender_line,
-            "senderAgentId": message.sender_agent_id,
-            "text": message.text,
-            "takenAt": _now_iso(),
-            "reason": message.reason,
-        }
-        if message.permission:
-            row["permission"] = message.permission
-        if message.attempted_message_id:
-            row["attemptedMessageId"] = message.attempted_message_id
-        if message.limited_until:
-            # Rule 9's reset time rides on the waiting row: why it waits, and until when.
-            row["limitedUntil"] = message.limited_until
-        messages.append(row)
-        _write_store_file(path, store)
+    store = _read_store_file(path, agent_id)
+    messages = store["messages"]
+    attempted = message.attempted_message_id
+    if attempted and any(row.get("id") == attempted for row in messages):
+        # The same attempt is taken twice (a repeat after a stop): one waiting copy.
         mine, total = waiting_counts(store, message.sender_agent_id)
+        return {
+            "heldMessageId": attempted,
+            "waitingMine": mine,
+            "waitingTotal": total,
+            "limitedUntil": limited_until_in(store, attempted),
+        }
+    if len(messages) >= MAX_HELD_PER_RECIPIENT:
+        raise HeldStoreFull(
+            f"Agent {agent_id} already holds {len(messages)} messages, the bound for one "
+            "recipient; none was dropped to make room."
+        )
+    message_id = attempted or str(uuid.uuid4())
+    row: dict[str, Any] = {
+        "id": message_id,
+        "senderLine": message.sender_line,
+        "senderAgentId": message.sender_agent_id,
+        "text": message.text,
+        "takenAt": _now_iso(),
+        "reason": message.reason,
+    }
+    if message.permission:
+        row["permission"] = message.permission
+    if message.attempted_message_id:
+        row["attemptedMessageId"] = message.attempted_message_id
+    if message.limited_until:
+        # Rule 9's reset time rides on the waiting row: why it waits, and until when.
+        row["limitedUntil"] = message.limited_until
+    messages.append(row)
+    _write_store_file(path, store)
+    mine, total = waiting_counts(store, message.sender_agent_id)
     return {
         "heldMessageId": message_id,
         "waitingMine": mine,
@@ -477,24 +474,23 @@ def withdraw_message(
     """
 
     path = store_path_for(workspace_path, agent_id)
-    with exclusive_file_lock(path, "held-message store"):
-        store = _read_store_file(path, agent_id)
-        if live_claim(store, stale_seconds) is not None:
-            raise HeldMessageCommitted(message_id)
-        ended = None
-        for index, row in enumerate(store["messages"]):
-            if row.get("id") == message_id and row.get("senderAgentId") == sender_agent_id:
-                ended = store["messages"].pop(index)
-                break
-        cleared = (
-            store.pop("deliveryClaim", None) is not None
-            or store.pop("deliveryClaimAt", None) is not None
-            or store.pop("deliveryClaimIds", None) is not None
-        )
-        if ended is None and not cleared:
-            return None
-        _write_store_file(path, store)
-        return ended
+    store = _read_store_file(path, agent_id)
+    if live_claim(store, stale_seconds) is not None:
+        raise HeldMessageCommitted(message_id)
+    ended = None
+    for index, row in enumerate(store["messages"]):
+        if row.get("id") == message_id and row.get("senderAgentId") == sender_agent_id:
+            ended = store["messages"].pop(index)
+            break
+    cleared = (
+        store.pop("deliveryClaim", None) is not None
+        or store.pop("deliveryClaimAt", None) is not None
+        or store.pop("deliveryClaimIds", None) is not None
+    )
+    if ended is None and not cleared:
+        return None
+    _write_store_file(path, store)
+    return ended
 
 
 def live_claim(store: dict[str, Any], stale_seconds: float) -> str | None:
@@ -515,14 +511,13 @@ def end_waiting_as(workspace_path: str | Path, agent_id: str) -> list[dict[str, 
     """End every waiting message (archived or gone); the texts are deleted."""
 
     path = store_path_for(workspace_path, agent_id)
-    with exclusive_file_lock(path, "held-message store"):
-        store = _read_store_file(path, agent_id)
-        ended = list(store["messages"])
-        store["messages"] = []
-        store.pop("deliveryClaim", None)
-        store.pop("deliveryClaimAt", None)
-        store.pop("deliveryClaimIds", None)
-        _write_store_file(path, store)
+    store = _read_store_file(path, agent_id)
+    ended = list(store["messages"])
+    store["messages"] = []
+    store.pop("deliveryClaim", None)
+    store.pop("deliveryClaimAt", None)
+    store.pop("deliveryClaimIds", None)
+    _write_store_file(path, store)
     return ended
 
 
@@ -570,33 +565,32 @@ def _stage_pending_lines(
         path = store_path_for(workspace_path, agent_id)
     except ValueError:
         return False
-    with exclusive_file_lock(path, "held-message store"):
-        try:
-            store = _read_store_file(path, agent_id)
-        except ValueError:
-            return False
-        staged = store.get("pendingLines")
-        if not isinstance(staged, list):
-            staged = []
-            store["pendingLines"] = staged
-        have = {entry.get("messageId") for entry in staged if isinstance(entry, dict)}
-        for row in ended:
-            if not isinstance(row, dict) or row.get("id") in have:
-                continue
-            have.add(row.get("id"))
-            staged.append(
-                {
-                    "messageId": row.get("id"),
-                    "sender": row.get("senderLine"),
-                    "senderAgentId": row.get("senderAgentId"),
-                    "time": _now_iso(),
-                    "how": how,
-                }
-            )
-        try:
-            _write_store_file(path, store)
-        except OSError:
-            return False
+    try:
+        store = _read_store_file(path, agent_id)
+    except ValueError:
+        return False
+    staged = store.get("pendingLines")
+    if not isinstance(staged, list):
+        staged = []
+        store["pendingLines"] = staged
+    have = {entry.get("messageId") for entry in staged if isinstance(entry, dict)}
+    for row in ended:
+        if not isinstance(row, dict) or row.get("id") in have:
+            continue
+        have.add(row.get("id"))
+        staged.append(
+            {
+                "messageId": row.get("id"),
+                "sender": row.get("senderLine"),
+                "senderAgentId": row.get("senderAgentId"),
+                "time": _now_iso(),
+                "how": how,
+            }
+        )
+    try:
+        _write_store_file(path, store)
+    except OSError:
+        return False
     return True
 
 
@@ -639,7 +633,7 @@ def _clear_pending_lines(workspace_path: str | Path, agent_id: str, ids: list[st
         path = store_path_for(workspace_path, agent_id)
     except ValueError:
         return
-    with suppress(OSError, ValueError), exclusive_file_lock(path, "held-message store"):
+    with suppress(OSError, ValueError):
         try:
             store = _read_store_file(path, agent_id)
         except ValueError:
@@ -664,12 +658,11 @@ def _read_store_counts(
         path = store_path_for(workspace_path, agent_id)
     except ValueError:
         return 0, 0
-    with exclusive_file_lock(path, "held-message store"):
-        try:
-            store = _read_store_file(path, agent_id)
-        except ValueError:
-            return 0, 0
-        rows = [row for row in store.get("messages", []) if isinstance(row, dict)]
+    try:
+        store = _read_store_file(path, agent_id)
+    except ValueError:
+        return 0, 0
+    rows = [row for row in store.get("messages", []) if isinstance(row, dict)]
     mine = sum(1 for row in rows if row.get("senderAgentId") == sender_agent_id)
     return mine, len(rows)
 
@@ -691,17 +684,16 @@ def recount_waiting(receipt: dict[str, Any]) -> None:
     except ValueError:
         receipt["heldWaiting"] = 0
         return
-    with exclusive_file_lock(path, "held-message store"):
-        try:
-            store = _read_store_file(path, agent_id)
-        except ValueError as error:
-            # The count is left as it stands rather than published as zero: a store that
-            # cannot be read is not a store that holds nothing (MIK-R171 rule 5).
-            logger.warning(
-                "The held-message count of agent %s could not be refreshed: %s.", agent_id, error
-            )
-            return
-        receipt["heldWaiting"] = len(store.get("messages", []))
+    try:
+        store = _read_store_file(path, agent_id)
+    except ValueError as error:
+        # The count is left as it stands rather than published as zero: a store that
+        # cannot be read is not a store that holds nothing (MIK-R171 rule 5).
+        logger.warning(
+            "The held-message count of agent %s could not be refreshed: %s.", agent_id, error
+        )
+        return
+    receipt["heldWaiting"] = len(store.get("messages", []))
 
 
 # The name the line writers use: both recount from the store, never from a retained count.

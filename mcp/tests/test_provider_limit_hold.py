@@ -21,6 +21,7 @@ from agents_remember.cli import role_held_messages as held
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_status import AgentReading
 from agents_remember.cli.role_held_messages import HeldMessage, hold_message
+from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving.projections.host_activity import UsageReadBatch
 
@@ -103,10 +104,24 @@ def test_a_reset_that_has_passed_is_no_limit(monkeypatch, tmp_path: Path) -> Non
 
 
 def _batch(tmp_path: Path, folder: str) -> Any:
+    path = tmp_path / "receipt.json"
+    if not path.exists():
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": RECEIPT_SCHEMA,
+                    "requestId": "provider-limit-fixture",
+                    "agentId": AGENT,
+                    "status": "running",
+                    "workspace": {"path": folder},
+                }
+            ),
+            encoding="utf-8",
+        )
     return held._DrainBatch(
         config=NO_CONFIG,
-        path=tmp_path / "receipt.json",
-        receipt={},
+        path=path,
+        receipt=json.loads(path.read_text(encoding="utf-8")),
         folder=folder,
         agent_id=AGENT,
         messages=[],

@@ -18,11 +18,13 @@ from unittest.mock import patch
 import agents_remember.cli.paseo_role_tools as tools
 import agents_remember.cli.role_held_messages as held
 from agents_remember.cli import role_launch_receipts as receipts_module
+from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND
 from agents_remember.cli.role_held_messages import (
     EXECUTIONS_DIRECTORY,
     HeldMessage,
     _reset_sweep_cursor,
 )
+from agents_remember.cli.role_held_store import GENERATION, held_seat_ref
 from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA
 from agents_remember.observer.host_activity import HOST_ACTIVITY_FILE
 from agents_remember.serving.projections import host_activity as host_activity_module
@@ -360,6 +362,16 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
         folder = str(self.config.coordination_root / "fleet" / "withdraw")
         agent = str(uuid.uuid4())
         sender = manager.agent_id
+        path = Path(folder).parent / "withdraw.json"
+        receipt = {
+            "schema": RECEIPT_SCHEMA,
+            "requestId": str(uuid.uuid4()),
+            "agentId": agent,
+            GENERATION: 0,
+            "status": "running",
+            "workspace": {"path": folder},
+        }
+        assert receipts_module._create_receipt(path, receipt)
         first = held.hold_message(
             folder,
             agent,
@@ -370,14 +382,15 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
                 reason="test",
             ),
         )
-        batch = held._claim_batch(folder, agent)
+        ref = held_seat_ref(path, receipt)
+        batch = held._claim_batch(ref)
         assert batch is not None
         claimed, _claim = batch
         self.assertEqual(len(claimed), 1)
 
         with self.assertRaises(held.HeldMessageCommitted):
             held.withdraw_message(folder, agent, first["heldMessageId"], sender)
-        held._release_claim(folder, agent, _claim)
+        held._release_claim(ref, _claim)
         ended = held.withdraw_message(folder, agent, first["heldMessageId"], sender)
         self.assertIsNotNone(ended)
         self.assertEqual(held.waiting_total(folder, agent), 0)
@@ -650,21 +663,19 @@ class HeldSweepBoundsTests(RoleToolsTestCase):
             ),
         )
         root = self.config.coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY
-        root.mkdir(parents=True, exist_ok=True)
         path = root / f"{name}.json"
-        path.write_text(
-            json.dumps(
-                {
-                    "schema": RECEIPT_SCHEMA,
-                    "execution": {"agentId": agent_id},
-                    "workspace": {"path": str(folder)},
-                    "status": "running",
-                    "heldWaiting": 1,
-                    "heldMessageLines": [],
-                }
-            ),
-            encoding="utf-8",
-        )
+        receipt = {
+            "schema": RECEIPT_SCHEMA,
+            "requestId": str(uuid.uuid4()),
+            "agentId": agent_id,
+            GENERATION: 0,
+            "execution": {"kind": PASEO_AGENT_KIND, "agentId": agent_id},
+            "workspace": {"path": str(folder)},
+            "status": "running",
+            "heldWaiting": 1,
+            "heldMessageLines": [],
+        }
+        assert receipts_module._create_receipt(path, receipt)
         return agent_id, path, str(folder)
 
     def test_a_queued_receipt_past_the_first_slice_is_reached_within_bounded_ticks(self) -> None:
@@ -706,10 +717,18 @@ class HeldSweepBoundsTests(RoleToolsTestCase):
         agent, path, _folder = self.craft_recipient("seed")
         held.sweep_held_messages(self.config)
         template = json.loads(path.read_text(encoding="utf-8"))
+        template["heldMessageLines"] = []
         root = path.parent
         for count in [64, 256]:
             for index in range(count - 1):
-                (root / f"empty-{index:04d}.json").write_text(json.dumps(template))
+                agent_id = str(uuid.uuid4())
+                idle = {
+                    **template,
+                    "requestId": str(uuid.uuid4()),
+                    "agentId": agent_id,
+                    "execution": {"kind": PASEO_AGENT_KIND, "agentId": agent_id},
+                }
+                assert receipts_module._create_receipt(root / f"empty-{index:04d}.json", idle)
             for _cycle in range(3):
                 yielded: list[str] = []
 

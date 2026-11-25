@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -19,6 +20,7 @@ from agents_remember.cli import (
     paseo_catalog,
     paseo_launch,
     paseo_status,
+    role_launch_enclosure,
     role_launch_preparation,
     role_launch_receipts,
     role_launch_routes,
@@ -783,6 +785,7 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
 
 
 class LeafEnclosureSprintBindingTests(unittest.TestCase):
+    @patch.object(role_launch_enclosure, "publication_scope", new=lambda *_: nullcontext())
     def test_missing_leaf_enclosure_passes_selected_sprint_to_worktree_owner(self) -> None:
         with TemporaryDirectory() as temporary:
             root = Path(temporary)

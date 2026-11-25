@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,18 +59,23 @@ class _ArchiveRefusal:
     next_args: dict[str, object] | None = None
 
 
+type _UnpublishedArchiveCheck = Callable[[WorktreeContract], WorktreeCommandResult | None]
+
+
 def terminal_archive_required_result(
     contract: WorktreeContract,
     *,
     operation: TerminalCleanupOperation,
     arguments: TerminalCleanupArguments,
     dry_run: bool,
+    check_unpublished: _UnpublishedArchiveCheck | None = None,
 ) -> WorktreeCommandResult:
     """Publish or re-observe the one archive receipt required before deletion.
 
     The caller holds the contract lifecycle lease. The helper is deliberately idempotent:
     a crash after archive, receipt, or locator publication reuses the exact bytes, while a
     different cleanup request or changed canonical source refuses without deleting the root.
+    An optional read-only check can refuse a fresh request before it publishes accepted bytes.
     """
 
     observation = inspect_lifecycle_operation_locator(
@@ -87,12 +93,15 @@ def terminal_archive_required_result(
         if existing is not None:
             return existing
         location = require_matching_lifecycle_operation_location(contract)
+        archive = _build_terminal_archive(
+            contract, location, operation=operation, arguments=arguments
+        )
         return _publish_terminal_archive(
             contract,
             location,
-            operation=operation,
-            arguments=arguments,
+            archive,
             dry_run=dry_run,
+            check_unpublished=check_unpublished,
         )
     except LifecycleOperationLocationError as error:
         return _archive_refusal(
@@ -148,22 +157,30 @@ def _existing_terminal_result(
 def _publish_terminal_archive(
     contract: WorktreeContract,
     location: LifecycleOperationLocation,
+    archive: TerminalEnclosureArchive,
     *,
-    operation: TerminalCleanupOperation,
-    arguments: TerminalCleanupArguments,
     dry_run: bool,
+    check_unpublished: _UnpublishedArchiveCheck | None,
 ) -> WorktreeCommandResult:
-    archive = _build_terminal_archive(
-        contract,
-        location,
-        operation=operation,
-        arguments=arguments,
-    )
-    archive_text = archive.model_dump_json(indent=2) + "\n"
+    operation = archive.cleanupOperation
     archive_path, receipt_path = terminal_enclosure_archive_paths(
         contract.coordination_root,
         location.locator.publicationRequestId,
     )
+    if archive_path.exists():
+        if not dry_run or check_unpublished is not None:
+            _require_accepted_archive_request(
+                _read_archive(archive_path, contract.contract_path),
+                location,
+                operation=operation,
+                arguments=archive.cleanupArguments,
+            )
+    elif check_unpublished is not None:
+        blocked = check_unpublished(contract)
+        if blocked is not None:
+            return blocked
+
+    archive_text = archive.model_dump_json(indent=2) + "\n"
     proof = _ArchiveProof(
         archive=archive,
         archive_path=archive_path,
@@ -177,13 +194,6 @@ def _publish_terminal_archive(
             "would-publish-terminal-archive",
             proof,
             dry_run=True,
-        )
-    if archive_path.exists():
-        _require_accepted_archive_request(
-            _read_archive(archive_path, contract.contract_path),
-            location,
-            operation=operation,
-            arguments=arguments,
         )
     _publish_exact_text(archive_path, archive_text, owner="terminal archive")
     _require_archive_readback(contract, proof)

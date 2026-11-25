@@ -31,7 +31,6 @@ import uuid
 from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -67,8 +66,10 @@ from agents_remember.cli.paseo_role_caller import (
 from agents_remember.cli.paseo_role_recipients import (
     _archived,
     _line_receipts,
+    _locate_recipient_store,
     _not_found,
     _resolve_recipient,
+    _unfinished_start,
 )
 from agents_remember.cli.paseo_role_start import (
     MAY_START,
@@ -94,6 +95,13 @@ from agents_remember.cli.role_held_messages import (
     waiting_total,
     withdraw_message,
 )
+from agents_remember.cli.role_held_store import (
+    HeldSeatClosed,
+    HeldSeatRef,
+    held_seat_ref,
+    open_held_store,
+    receipt_is_closed,
+)
 from agents_remember.cli.role_launch_preparation import (
     ROLE_START_TOOL,
     _verify_leaf_revival_scope,
@@ -101,28 +109,20 @@ from agents_remember.cli.role_launch_preparation import (
 from agents_remember.cli.role_launch_receipts import (
     _read_receipt,
     _receipt_path,
-    _taskless_execution_receipts,
     _write_receipt,
 )
 from agents_remember.cli.role_message_delivery import (
     _archived_with_successor,
-    _ensure_recipient_link,
-    _ensure_sender_link,
     _file_long_reply,
+    _file_message,
     _FiledMessage,
     _keep_refused_file,
-    _message_scope,
-    _MessageDraft,
     _MessageParties,
-    _prepare_attachments,
     _Recipient,
-    _recipient_role,
-    _recipient_subject,
     _refuse_over_limit,
     _Refused,
-    _store_message,
 )
-from agents_remember.cli.role_message_files import file_line, utc_stem
+from agents_remember.cli.role_message_files import file_line
 from agents_remember.cli.role_start_answer import second_copy_loaded
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_agents import (
@@ -192,60 +192,6 @@ class _MessageSend:
 # ---------------------------------------------------------------------------------------------
 
 
-def _file_message(
-    config: McpRuntimeConfig, call: RoleMessageCall, parties: _MessageParties, limit: int
-) -> dict[str, Any]:
-    """File one message before it reaches the host (MIK-R117 rules 2 to 4).
-
-    The filing is the all-or-nothing transaction of role_message_delivery: the scope,
-    the attachments, the workspace links and the staged write either all happen or a
-    preparation failure refuses the send as message-file-failed before anything is
-    delivered. The record carries the filed path, its SHA-256, the message id, the
-    folder, the recipient's role and task, and the text limit.
-    """
-
-    scope = _message_scope(config, parties)
-    sender = parties.sender
-    recipient = parties.recipient
-    when = datetime.now(UTC)
-    message_id = str(uuid.uuid4())
-    recipient_role = _recipient_role(recipient, call)
-    recipient_task = _recipient_subject(config, recipient)
-    stem = utc_stem(sender.role, sender.agent_id, recipient_role, recipient.agent_id, when=when)
-    attachments = _prepare_attachments(call, parties, scope, stem)
-    sender_warning = _ensure_sender_link(config, parties)
-    recipient_warning = _ensure_recipient_link(config, parties)
-    link_warning = recipient_warning
-    if sender_warning:
-        link_warning = (
-            f"{sender_warning} {recipient_warning}".strip() if recipient_warning else sender_warning
-        )
-    path, digest, _payload = _store_message(
-        call,
-        parties,
-        _MessageDraft(
-            scope.folder,
-            sender_line(sender),
-            stem,
-            when,
-            message_id,
-            recipient_role,
-            recipient_task,
-        ),
-        attachments,
-    )
-    return {
-        "path": path.as_posix(),
-        "sha256": digest,
-        "messageId": message_id,
-        "folder": scope.folder.as_posix(),
-        "recipientRole": recipient_role,
-        "recipientTask": recipient_task,
-        "limit": limit,
-        "linkWarning": link_warning or "",
-    }
-
-
 def send_role_message(
     config: McpRuntimeConfig,
     call: RoleMessageCall,
@@ -263,18 +209,18 @@ def send_role_message(
         _refuse_over_limit(call, limit)
         own_path, own_receipt = _own_receipt(config, binding)
         sender = starting_agent(config, binding)
-        try:
-            recipient = _resolve_recipient(config, call, binding)
-        except _Refused as unresolved:
-            if unresolved.refusal == "recipient-busy" and unresolved.fields.get("holdReason"):
-                return _hold_for_unresolved(config, call, sender, unresolved)
-            raise
+        recipient = _resolve_recipient(config, call, binding)
+        unresolved = _unfinished_start(recipient)
+        if unresolved is not None:
+            return _hold_for_unresolved(config, call, sender, recipient, unresolved)
         _carry_resolved_target_role(call, recipient)
         collection = _collect_own_reports(config, binding, own_path, own_receipt)
-        located = _locate_recipient_store(config, call, recipient.agent_id)
+        located = _locate_recipient_store(config, call, recipient.agent_id, selected=recipient)
         withdrawn, withdrawal_note = _withdraw_requested(config, call, sender, recipient, located)
         parties = _MessageParties(binding, sender, recipient, own_receipt)
-        filed = _file_message(config, call, parties, limit)
+        filed = _file_message(
+            config, call, parties, limit, _message_seats(own_path, located, parties)
+        )
         result = _deliver_or_hold(
             _MessageSend(config, call, sender, recipient, located, withdrawn, collection, filed)
         )
@@ -285,8 +231,15 @@ def send_role_message(
         if withdrawal_note is not None and isinstance(result.get("detail"), str):
             result["detail"] = f"{result['detail']} {withdrawal_note}"
         result.update(_held_readback(located[0] if located else None, sender.agent_id))
-    except _Refused as refused:
-        if refused.refusal == "recipient-archived" and recipient is not None and sender is not None:
+    except (_Refused, HeldSeatClosed) as refusal:
+        closed = refusal if isinstance(refusal, HeldSeatClosed) else refusal.__cause__
+        refused = _held_refusal(refusal) if isinstance(refusal, HeldSeatClosed) else refusal
+        if (
+            refused.refusal == "recipient-archived"
+            and recipient is not None
+            and sender is not None
+            and (not isinstance(closed, HeldSeatClosed) or closed.reason == "closed")
+        ):
             parties = _MessageParties(binding, sender, recipient, own_receipt)
             refused = _archived_with_successor(config, parties)
         if filed is not None:
@@ -296,6 +249,26 @@ def send_role_message(
         prior = str(result.get("warning", ""))
         result["warning"] = f"{prior} {ROLE_ALIAS_NOTICE}".strip()
     return result
+
+
+def _message_seats(
+    own_path: Path | None,
+    located: tuple[Path, dict[str, Any], str] | None,
+    parties: _MessageParties,
+) -> tuple[HeldSeatRef | None, HeldSeatRef | None]:
+    if receipt_is_closed(parties.recipient.receipt):
+        raise _archived(parties.recipient.agent_id)
+    own = parties.own_receipt
+    sender = (
+        held_seat_ref(own_path, own)
+        if own_path
+        and own
+        and parties.binding.task_ref
+        and own.get("agentId") == parties.sender.agent_id
+        else None
+    )
+    recipient = held_seat_ref(located[0], located[1]) if located is not None else None
+    return sender, recipient
 
 
 def _own_receipt(
@@ -361,63 +334,6 @@ def _carry_resolved_target_role(call: RoleMessageCall, recipient: _Recipient) ->
         call_target_role.set(role)
 
 
-def _locate_recipient_store(
-    config: McpRuntimeConfig, call: RoleMessageCall, agent_id: str
-) -> tuple[Path, dict[str, Any], str] | None:
-    """The current receipt and working folder of one recipient, when both name it.
-
-    History receipts never locate a store: a replaced agent's message is refused as
-    archived by the delivery, not held behind its successor.
-    """
-
-    candidates: list[tuple[Path, dict[str, Any]]] = []
-    if call.role is not None:
-        try:
-            selection = RoleSelection.model_validate(
-                {
-                    "role": call.role,
-                    "sprintDocumentRef": call.sprint_document_ref,
-                    "masterDocumentRef": call.master_document_ref,
-                    "taskDocumentRef": call.task_document_ref,
-                }
-            )
-        except (ValidationError, ValueError):
-            return None
-        if selection.role in TASKLESS_ROLES:
-            try:
-                candidates = [
-                    (path, receipt)
-                    for path, receipt in _taskless_execution_receipts(config, selection)
-                ]
-            except (ValueError, TaskDocumentRefError, HTTPException):
-                return None
-        else:
-            try:
-                path = _receipt_path(config, selection)
-                receipt = _read_receipt(path)
-            except HTTPException:
-                return None
-            candidates = [(path, receipt)] if receipt is not None else []
-    else:
-        candidates = [
-            (path, receipt)
-            for path, receipt in _line_receipts(config)
-            if path.parent.name != "history" and receipt.get("agentId") == agent_id
-        ]
-        if not candidates:
-            return None
-        # The current receipt first, as the recipient lookup prefers it.
-        candidates.sort(key=lambda item: item[0].parent.name == "history")
-    for path, receipt in candidates:
-        if receipt.get("agentId") != agent_id:
-            continue
-        workspace = receipt.get("workspace")
-        folder = workspace.get("path") if isinstance(workspace, dict) else None
-        if isinstance(folder, str) and folder:
-            return path, receipt, folder
-    return None
-
-
 def _withdraw_requested(
     config: McpRuntimeConfig,
     call: RoleMessageCall,
@@ -440,9 +356,15 @@ def _withdraw_requested(
             f"Agent {recipient.agent_id} keeps no held-message store to withdraw from.",
             recipientAgentId=recipient.agent_id,
         )
-    path, _receipt, folder = located
+    path, receipt, folder = located
+    ref = held_seat_ref(path, receipt)
     try:
-        ended = withdraw_message(folder, recipient.agent_id, message_id, sender.agent_id)
+        with open_held_store(ref) as transaction:
+            ended = withdraw_message(folder, recipient.agent_id, message_id, sender.agent_id)
+            if ended is not None:
+                _record_held_lines(path, transaction.receipt, [ended], "withdrawn")
+    except HeldSeatClosed:
+        raise
     except ValueError as error:
         raise _not_found(str(error), recipientAgentId=recipient.agent_id) from error
     except HeldMessageCommitted as committed:
@@ -455,11 +377,12 @@ def _withdraw_requested(
             f"No waiting message {message_id} of this sender for agent {recipient.agent_id}.",
             recipientAgentId=recipient.agent_id,
         )
-    _record_held_lines(path, [ended], "withdrawn")
     return message_id, None
 
 
-def _record_held_lines(path: Path, ended: list[dict[str, Any]], how: str) -> None:
+def _record_held_lines(
+    path: Path, current: dict[str, Any], ended: list[dict[str, Any]], how: str
+) -> None:
     """Write terminal lines for messages ended outside a drain (withdrawal)."""
 
     from agents_remember.cli.role_held_messages import (  # noqa: PLC0415
@@ -467,12 +390,6 @@ def _record_held_lines(path: Path, ended: list[dict[str, Any]], how: str) -> Non
         recount_waiting_for,
     )
 
-    try:
-        current = _read_receipt(path)
-    except HTTPException:
-        return
-    if current is None:
-        return
     record_lines(current, ended, how)
     recount_waiting_for(current)
     with suppress(OSError):
@@ -562,17 +479,14 @@ def _hold_for_unresolved(
     config: McpRuntimeConfig,
     call: RoleMessageCall,
     sender: StartingAgent,
+    recipient: _Recipient,
     unresolved: _Refused,
 ) -> dict[str, Any]:
     """Hold a message whose recipient's start has not finished (MIK-R100 rule 4b)."""
 
-    agent_id = str(unresolved.fields.get("recipientAgentId") or "")
-    located = _locate_recipient_store(config, call, agent_id)
+    located = _locate_recipient_store(config, call, recipient.agent_id, selected=recipient)
     if located is None:
         raise unresolved
-    path, _receipt, _folder = located
-    _ = path
-    recipient = _Recipient(agent_id, _receipt)
     withdrawn, _withdrawal_note = _withdraw_requested(config, call, sender, recipient, located)
     return _hold_for_seat(
         _MessageSend(config, call, sender, recipient, located, withdrawn, None),
@@ -610,20 +524,24 @@ def _hold_for_seat(  # noqa: PLR0913 -- each fact of the wait rides the take, pe
         # The whole text from body and the records or copies of attach ride in the file;
         # the held text names it so the recipient can read it on delivery (MIK-R117 rule 3).
         text += f"\n{file_line(Path(send.filed['path']), str(send.filed['sha256']))}"
+    ref = held_seat_ref(path, _receipt)
     try:
-        taken = hold_message(
-            folder,
-            send.recipient.agent_id,
-            HeldMessage(
-                sender_line=line,
-                sender_agent_id=send.sender.agent_id,
-                text=text,
-                reason=reason,
-                permission=permission,
-                attempted_message_id=attempted_message_id,
-                limited_until=limited_until,
-            ),
-        )
+        with open_held_store(ref):
+            taken = hold_message(
+                folder,
+                send.recipient.agent_id,
+                HeldMessage(
+                    sender_line=line,
+                    sender_agent_id=send.sender.agent_id,
+                    text=text,
+                    reason=reason,
+                    permission=permission,
+                    attempted_message_id=attempted_message_id,
+                    limited_until=limited_until,
+                ),
+            )
+    except HeldSeatClosed:
+        raise
     except HeldStoreFull as full:
         raise _Refused(
             "recipient-busy",
@@ -635,25 +553,15 @@ def _hold_for_seat(  # noqa: PLR0913 -- each fact of the wait rides the take, pe
     except ValueError as error:
         raise _not_found(str(error), recipientAgentId=send.recipient.agent_id) from error
     note_held_receipt(send.config, path)
-    _note_waiting(path, taken["waitingTotal"])
+    _note_waiting(ref, taken["waitingTotal"])
     try:
         drain = drain_held(send.config, path, _receipt)
     except Exception as error:
         drain = {"outcome": "drain-failed", "detail": str(error)}
     outcome = str(drain.get("outcome") or "")
-    if outcome in {"delivered", "opened"}:
-        apply_drain_to_receipt(path, drain)
-        return _held_then_delivered(send, taken, drain)
-    if outcome == "partially-delivered":
-        apply_drain_to_receipt(path, drain)
-        return _held_partial_progress(send, taken, drain)
-    if outcome == "recipient-gone":
-        apply_drain_to_receipt(path, drain)
-        raise _archived(send.recipient.agent_id)
-    if outcome == "permission-pending" and send.call.wait:
-        apply_drain_to_receipt(path, drain)
-        return _held_wait_permission(send, drain)
-    apply_drain_to_receipt(path, drain)
+    progress = _answer_finished_hold(send, taken, drain, ref)
+    if progress is not None:
+        return progress
     drain_permission = drain.get("permission")
     final_reason = (
         reason if outcome in {"still-held", "drain-failed", "nothing-waiting"} else outcome
@@ -671,6 +579,24 @@ def _hold_for_seat(  # noqa: PLR0913 -- each fact of the wait rides the take, pe
         permission=final_permission,
         detail=str(drain.get("detail") or "") or detail,
     )
+
+
+def _answer_finished_hold(
+    send: _MessageSend, taken: dict[str, Any], drain: dict[str, Any], ref: HeldSeatRef
+) -> dict[str, Any] | None:
+    outcome = drain.get("outcome")
+    apply_drain_to_receipt(ref.receipt_path, drain, expected=ref)
+    if outcome in {"delivered", "opened"}:
+        return _held_then_delivered(send, taken, drain)
+    if outcome == "partially-delivered":
+        return _held_partial_progress(send, taken, drain)
+    if outcome in {"recipient-gone", "recipient-archived"}:
+        raise _archived(send.recipient.agent_id)
+    if outcome == "recipient-generation-closed":
+        raise HeldSeatClosed(ref.agent_id, "generation-changed")
+    if outcome == "permission-pending" and send.call.wait:
+        return _held_wait_permission(send, drain)
+    return None
 
 
 def _trigger_delivery(drain: dict[str, Any], taken: dict[str, Any]) -> dict[str, Any]:
@@ -928,18 +854,20 @@ def _held_readback(path: Path | None, sender_agent_id: str) -> dict[str, Any]:
     return {"recentTerminal": recent} if recent else {}
 
 
-def _note_waiting(path: Path, total: int) -> None:
-    """Recount the recipient's waiting messages after one was taken."""
+def _held_refusal(error: HeldSeatClosed) -> _Refused:
+    return _Refused(
+        "recipient-archived",
+        str(error),
+        "Address the current role execution.",
+        recipientAgentId=error.agent_id,
+    )
 
-    try:
-        current = _read_receipt(path)
-    except HTTPException:
-        return
-    if current is None:
-        return
-    current["heldWaiting"] = total
-    with suppress(OSError):
-        _write_receipt(path, current)
+
+def _note_waiting(ref: HeldSeatRef, total: int) -> None:
+    """Record the waiting count on its own live launch generation."""
+    with suppress(OSError, HeldSeatClosed), open_held_store(ref) as transaction:
+        transaction.receipt["heldWaiting"] = total
+        _write_receipt(ref.receipt_path, transaction.receipt)
 
 
 def _deliver(

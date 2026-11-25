@@ -310,7 +310,9 @@ def _landed_commit(contract: WorktreeContract) -> str:
 
 
 def _run_or_verify_cleanup(contract: WorktreeContract, args: FinalizeArgs) -> WorktreeCommandResult:
-    if contract.cleanup == "completed":
+    if contract.cleanup == "completed" and not (
+        contract.worktree_group.is_symlink() or contract.worktree_group.exists()
+    ):
         # MIK-R207 rule 4: a completed retry removes a registered outside scratch root that is
         # still there, and reports one it could not remove instead of answering cleaned.
         outside, blockers = outside_scratch.terminal_blocker(contract, dry_run=args.dry_run)
@@ -326,7 +328,7 @@ def _run_or_verify_cleanup(contract: WorktreeContract, args: FinalizeArgs) -> Wo
                     "blockers": blockers,
                 },
             )
-        agents = archive_terminal_agents(contract, dry_run=args.dry_run)
+        agents = {} if args.dry_run else archive_terminal_agents(contract, dry_run=False)
         return WorktreeCommandResult(
             0,
             {

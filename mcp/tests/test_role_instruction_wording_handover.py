@@ -13,6 +13,7 @@ import json
 import tempfile
 import unittest
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -29,7 +30,7 @@ from agents_remember.application.skill_resources.capsule import (
     CapsuleSeatAddress,
     routed_admission_for,
 )
-from agents_remember.cli import role_launch_preparation
+from agents_remember.cli import role_launch_enclosure, role_launch_preparation
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.role_launch_preparation import (
     RoleHandoverRequest,
@@ -89,6 +90,10 @@ class HandoverTextWordingTests(unittest.TestCase):
                 )
             },
         )
+        # This wording fixture supplies an enclosure address without a worktree generation.
+        scope = patch.object(role_launch_enclosure, "publication_scope", return_value=nullcontext())
+        scope.start()
+        self.addCleanup(scope.stop)
         for name, stub in (
             ("compile_launch_capsule", self.role_capsule),
             (

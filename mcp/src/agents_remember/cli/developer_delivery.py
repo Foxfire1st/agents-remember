@@ -38,6 +38,7 @@ from agents_remember.cli.developer_explainer_seats import EXPLAINER_RECIPIENT
 from agents_remember.cli.investigator_receipts import investigator_message_capacity
 from agents_remember.cli.paseo_role_tools import (
     _archived,
+    _held_refusal,
     _note_waiting,
     _resume,
     _send,
@@ -54,6 +55,7 @@ from agents_remember.cli.role_held_messages import (
     note_held_receipt,
     waiting_total,
 )
+from agents_remember.cli.role_held_store import HeldSeatClosed, held_seat_ref, open_held_store
 from agents_remember.cli.role_message_delivery import _Recipient, _Refused
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving.projections.host_activity import agent_in_turn
@@ -100,6 +102,7 @@ def deliver_or_hold(delivery: DeveloperDelivery) -> dict[str, Any]:
     """``{state: delivered|held, ...}``; a refusal raises ``_Refused`` naming its reason."""
 
     folder = delivery.store_folder
+    _check_recipient(delivery)
     status = delivery.receipt.get("status")
     if folder is not None and status == "held":
         # F20: a message queued behind a waiting one is still held by the limit, so its answer
@@ -136,6 +139,16 @@ def deliver_or_hold(delivery: DeveloperDelivery) -> dict[str, Any]:
                 attempted_message_id=str(delivery.payload["messageId"]),
             )
         raise
+
+
+def _check_recipient(delivery: DeveloperDelivery) -> None:
+    if delivery.store_folder is not None and delivery.receipt.get("role") != EXPLAINER_RECIPIENT:
+        ref = held_seat_ref(delivery.receipt_path, delivery.receipt)
+        try:
+            with open_held_store(ref):
+                pass
+        except HeldSeatClosed as error:
+            raise _held_refusal(error) from error
 
 
 def _busy(delivery: DeveloperDelivery, why: str, reason: str) -> _Refused:
@@ -212,20 +225,24 @@ def _hold(  # noqa: PLR0913 - one hold states the message's own reasons
     folder = delivery.store_folder
     assert folder is not None, "held for a recipient without a store"
     path, receipt = delivery.receipt_path, delivery.receipt
+    ref = held_seat_ref(path, receipt)
     try:
-        taken = hold_message(
-            folder,
-            delivery.agent_id,
-            HeldMessage(
-                sender_line=delivery.first_line,
-                sender_agent_id=DEVELOPER_SENDER,
-                text=delivery.held_text,
-                reason=reason,
-                permission=permission,
-                attempted_message_id=attempted_message_id,
-                limited_until=limited_until,
-            ),
-        )
+        with open_held_store(ref):
+            taken = hold_message(
+                folder,
+                delivery.agent_id,
+                HeldMessage(
+                    sender_line=delivery.first_line,
+                    sender_agent_id=DEVELOPER_SENDER,
+                    text=delivery.held_text,
+                    reason=reason,
+                    permission=permission,
+                    attempted_message_id=attempted_message_id,
+                    limited_until=limited_until,
+                ),
+            )
+    except HeldSeatClosed as error:
+        raise _held_refusal(error) from error
     except HeldStoreFull as full:
         raise _Refused(
             "recipient-busy",
@@ -238,16 +255,18 @@ def _hold(  # noqa: PLR0913 - one hold states the message's own reasons
             "recipient-not-found", str(error), "", recipientAgentId=delivery.agent_id
         ) from error
     note_held_receipt(delivery.config, path)
-    _note_waiting(path, taken["waitingTotal"])
+    _note_waiting(ref, taken["waitingTotal"])
     try:
         drain = drain_held(delivery.config, path, receipt)
     except Exception as error:  # the drain is retried by the sweep; the message stays held
         drain = {"outcome": "drain-failed", "detail": str(error)}
-    apply_drain_to_receipt(path, drain)
+    apply_drain_to_receipt(path, drain, expected=ref)
     outcome = str(drain.get("outcome") or "")
     # Both end every waiting message as not delivered, this one with them: a loss, never a wait.
-    if outcome == "recipient-gone":
+    if outcome in {"recipient-gone", "recipient-archived"}:
         raise _archived(delivery.agent_id)
+    if outcome == "recipient-generation-closed":
+        raise _held_refusal(HeldSeatClosed(delivery.agent_id, "generation-changed"))
     if outcome == "seat-lost":
         raise _Refused(
             "seat-lost",
