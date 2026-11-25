@@ -78,17 +78,26 @@ class CodeSnapshot:
 
     @classmethod
     def at_commit(cls, repository: Path, commit: str) -> CodeSnapshot:
-        """The tree C of a committed code state (a master line's paired code commit)."""
+        """Read tree C and record the object ID of the commit selected by ``commit``."""
 
+        options = GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS)
         result = run_git(
             repository,
-            ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{commit}^{{tree}}"],
-            GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+            ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{commit}^{{commit}}"],
+            options,
+        )
+        commit_id = result.stdout.strip()
+        if result.returncode != 0 or not commit_id:
+            raise AnchorResolutionError(f"{commit!r} does not name a code commit in {repository}")
+        result = run_git(
+            repository,
+            ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{commit_id}^{{tree}}"],
+            options,
         )
         tree = result.stdout.strip()
         if result.returncode != 0 or not tree:
-            raise AnchorResolutionError(f"the code commit {commit!r} has no tree in {repository}")
-        return cls.of_tree(repository, tree, commit=commit)
+            raise AnchorResolutionError(f"the code commit {commit_id} has no tree in {repository}")
+        return cls.of_tree(repository, tree, commit=commit_id)
 
     @classmethod
     def of_tree(cls, root: Path, tree: str, *, commit: str | None = None) -> CodeSnapshot:

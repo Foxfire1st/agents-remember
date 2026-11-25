@@ -691,6 +691,7 @@ integration = [
   "mcp/tests/test_context_packet.py",
   "mcp/tests/test_controlplane_store_durability.py",
   "mcp/tests/test_cross_master_concurrency.py",
+  "mcp/tests/test_crossing_dependent_writer.py",
   "mcp/tests/test_curator_coherence_closed_out.py",
   "mcp/tests/test_curator_coherence_measured_quality.py",
   "mcp/tests/test_curator_review_assessment_publication.py",

@@ -64,6 +64,10 @@ class SyncGitProofError(RuntimeError):
     """Live Git state cannot be attributed exactly to the journaled sync."""
 
 
+class SyncMergeCommitError(SyncGitProofError):
+    """Git attempted the staged merge commit and returned a failure."""
+
+
 class SyncKnowledgeValidationError(SyncGitProofError):
     """The knowledge validator (MIK-R22) refuses the staged memory merge; it stays staged."""
 
