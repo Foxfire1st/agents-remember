@@ -35,6 +35,7 @@ from agents_remember.memory.conversion.crossing import (
 )
 from agents_remember.memory.conversion.crossing_sync import (
     MARKER_ROW_REASON,
+    CrossingDestination,
     CrossingError,
     CrossingPlan,
     HistoryOwner,
@@ -242,7 +243,7 @@ def test_a_crossing_moves_the_leaf_markers_converts_each_side_and_merges(tmp_pat
         (base, own, incoming),
         objects,
         own_paired_commit=code.head,
-        repository=base_root,
+        destination=CrossingDestination(base_root, frozenset()),
         owner=HistoryOwner(kind="leaf", id="260101-FIX-L9"),
     )
 
@@ -278,7 +279,11 @@ def test_a_crossing_moves_the_leaf_markers_converts_each_side_and_merges(tmp_pat
     assert validate_plan(plan, (converted_own.files, incoming.files), code_paths, "merged") == []
     with pytest.raises(CrossingError, match="no tree of this merge is converted"):
         cross(
-            (base, own, own), objects, own_paired_commit=code.head, repository=base_root, owner=None
+            (base, own, own),
+            objects,
+            own_paired_commit=code.head,
+            destination=CrossingDestination(base_root, frozenset()),
+            owner=None,
         )
 
 
@@ -334,7 +339,7 @@ def test_a_master_line_record_conflict_opens_a_crossing_history_file_closed_at_c
         (base, own, incoming),
         CodeObjects(code.root),
         own_paired_commit=code.head,
-        repository=base_root,
+        destination=CrossingDestination(base_root, frozenset()),
         owner=HistoryOwner(kind="master", id="260101-FIX"),
     )
 
@@ -353,9 +358,10 @@ def test_a_master_line_record_conflict_opens_a_crossing_history_file_closed_at_c
     (base_root / crossing).parent.mkdir(parents=True, exist_ok=True)
     (base_root / crossing).write_bytes(plan.files[crossing] or b"")
     git(base_root, "add", crossing)
-    assert close_crossing_history(base_root, (parent, parent)) == (crossing,)
-    staged = json.loads(git(base_root, "show", f":{crossing}"))
-    assert staged["closed"] is True
+    with close_crossing_history(base_root, (parent, parent)) as closed:
+        assert closed == (crossing,)
+        staged = json.loads(git(base_root, "show", f":{crossing}"))
+        assert staged["closed"] is True
 
 
 @pytest.mark.parametrize("own_converted", [True, False], ids=["own-converted", "own-unconverted"])
@@ -406,7 +412,7 @@ def test_a_record_both_sides_changed_is_resolved_at_one_more_than_the_higher_sid
         (base, own, MemoryInput(label="incoming", files=incoming_files, database=None)),
         CodeObjects(code.root),
         own_paired_commit=code.head,
-        repository=base_root,
+        destination=CrossingDestination(base_root, frozenset()),
         owner=HistoryOwner(kind="master", id="260101-FIX"),
     )
     assert [(one.path, one.item) for one in plan.conflicts] == [(record, "statement")]
@@ -1216,7 +1222,7 @@ def test_the_crossing_report_counts_alignment(tmp_path: Path) -> None:
         (base_in, own_in, incoming_in),
         CodeObjects(tmp_path),
         own_paired_commit="0" * 40,
-        repository=tmp_path,
+        destination=CrossingDestination(tmp_path, frozenset()),
         owner=HistoryOwner(kind="leaf", id="260928-MIK-L66"),
     )
 
@@ -1257,7 +1263,7 @@ def test_an_ordinary_converted_sync_aligns_through_the_same_merge(tmp_path: Path
         (base_in, own_in, incoming_in),
         CodeObjects(tmp_path),
         own_paired_commit="0" * 40,
-        repository=tmp_path,
+        destination=CrossingDestination(tmp_path, frozenset()),
         owner=HistoryOwner(kind="leaf", id="260928-MIK-L66"),
     )
 

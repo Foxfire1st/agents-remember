@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from agents_remember.errors import GrammarUnavailableError
 from agents_remember.kernel.git_command import (
@@ -30,6 +30,7 @@ from agents_remember.kernel.git_command import (
     read_git_tree_bytes,
     run_git,
 )
+from agents_remember.kernel.git_preparation import GitPreparationError, require_git_object_id
 from agents_remember.memory_quality.style.citations import extents, grammars
 from agents_remember.models.knowledge_files.anchor_content import (
     RangeOutsideBlobError,
@@ -68,6 +69,15 @@ class CodeSnapshot:
     from).
     """
 
+    def __post_init__(self) -> None:
+        if self.commit is not None:
+            try:
+                require_git_object_id(self.commit)
+            except GitPreparationError as error:
+                raise AnchorResolutionError(
+                    "the snapshot commit must be a full Git commit ID"
+                ) from error
+
     @classmethod
     def capture(cls, root: Path) -> CodeSnapshot:
         """Capture ``root``'s working tree (committed and uncommitted) as the tree C."""
@@ -78,25 +88,10 @@ class CodeSnapshot:
 
     @classmethod
     def at_commit(cls, repository: Path, commit: str) -> CodeSnapshot:
-        """Read tree C and record the object ID of the commit selected by ``commit``."""
+        """The tree C of a committed code state (a master line's paired code commit)."""
 
-        options = GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS)
-        result = run_git(
-            repository,
-            ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{commit}^{{commit}}"],
-            options,
-        )
-        commit_id = result.stdout.strip()
-        if result.returncode != 0 or not commit_id:
-            raise AnchorResolutionError(f"{commit!r} does not name a code commit in {repository}")
-        result = run_git(
-            repository,
-            ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{commit_id}^{{tree}}"],
-            options,
-        )
-        tree = result.stdout.strip()
-        if result.returncode != 0 or not tree:
-            raise AnchorResolutionError(f"the code commit {commit_id} has no tree in {repository}")
+        commit_id = _snapshot_revision(repository, commit, "commit")
+        tree = _snapshot_revision(repository, commit_id, "tree")
         return cls.of_tree(repository, tree, commit=commit_id)
 
     @classmethod
@@ -174,6 +169,20 @@ class CodeSnapshot:
                 "content": content_identity(located),
             }
         )
+
+
+def _snapshot_revision(repository: Path, revision: str, kind: Literal["commit", "tree"]) -> str:
+    result = run_git(
+        repository,
+        ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{revision}^{{{kind}}}"],
+        GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+    )
+    object_id = result.stdout.strip()
+    if result.returncode != 0 or not object_id:
+        raise AnchorResolutionError(
+            f"the code revision {revision!r} does not resolve to a Git {kind} in {repository}"
+        )
+    return object_id
 
 
 def _range_bytes(data: bytes, start: int, end: int) -> bytes:

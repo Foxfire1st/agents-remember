@@ -95,6 +95,7 @@ class SideMergeOutcome:
     conflicts: tuple[str, ...] = ()
     message: str = ""
     crossing_report: str = ""
+    crossing_history_owner: str = ""
     commit_check: str = ""
     #: Rule IDs the validator reported instead of refusing at this merge (MIK-R198 rule 7): named
     #: repair debt the route must carry, never silently dropped.

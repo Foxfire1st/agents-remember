@@ -11,21 +11,25 @@ import logging
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Literal
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_preparation import GitPreparationError
+from agents_remember.models.knowledge_files.documents import history_path
 from agents_remember.worktrees.knowledge_crossing import (
     CrossingSyncError,
     apply_crossing,
     crossing_plan,
     merge_base,
     merge_structure,
+    open_crossing_history,
+    write_crossing_report,
 )
 from agents_remember.worktrees.knowledge_validation import PairedCode
 from agents_remember.worktrees.modules.git import head_commit
+from agents_remember.worktrees.services import CrossingPlanView
 from agents_remember.worktrees.sync_transaction_git._base import (
     _OBJECT_ID,
     _REGULAR_BLOB_MODES,
@@ -42,6 +46,7 @@ from agents_remember.worktrees.sync_transaction_git._read import (
     _rev_mode,
     _spec_content,
     _untracked_names,
+    content_conflicts,
     merge_head,
     renamed_parked_paths,
     stash_entry_live,
@@ -330,52 +335,61 @@ def parked_path_content(side: SyncSideRecord, path: str) -> ExpectedReappliedCon
     return ExpectedReappliedContent("bytes", parked)
 
 
-def _scratch_tree_matches(side: SyncSideRecord, scratch: Path) -> bool:
-    """Whether a scratch reproduction holds exactly the live side's state."""
+def _scratch_tree_matches(side: SyncSideRecord, scratch: Path, *, except_path: str = "") -> bool:
+    """Whether the replay and live worktrees agree on all paths under comparison."""
 
     worktree = Path(side.worktree)
-    if _untracked_names(worktree, side.side) != _untracked_names(scratch, side.side):
+    if _untracked_names(worktree, side.side) - {except_path} != (
+        _untracked_names(scratch, side.side) - {except_path}
+    ):
         return False
-    live_dirty = _dirty_names(worktree, side.side)
-    if live_dirty != _dirty_names(scratch, side.side):
+    live_dirty = tuple(path for path in _dirty_names(worktree, side.side) if path != except_path)
+    if live_dirty != tuple(
+        path for path in _dirty_names(scratch, side.side) if path != except_path
+    ):
         return False
     return all(
         _fingerprint_at(worktree, path) == _fingerprint_at(scratch, path) for path in live_dirty
     )
 
 
-def _reproduce_in_scratch(side: SyncSideRecord, base: str, setup: Callable[[Path], None]) -> bool:
-    """Whether a scratch worktree running the same setup holds the live state.
-
-    A crash window may hold owner bytes the live tree cannot distinguish from
-    operation output; only an exact reproduction earns trust. Any scratch that
-    cannot be built or compared fails safe to False.
-    """
-
+@contextlib.contextmanager
+def _scratch_replay_worktree(side: SyncSideRecord, base: str) -> Iterator[Path | None]:
     repository = Path(side.repository)
     parent = Path(tempfile.mkdtemp(prefix="ar-sync-verify-"))
     scratch = parent / "worktree"
     try:
         added = run_git(repository, ["worktree", "add", "--detach", str(scratch), base])
-        if added.returncode != 0:
-            return False
-        try:
-            setup(scratch)
-        except (OSError, SyncGitProofError, CrossingSyncError):
-            return False
-        return _scratch_tree_matches(side, scratch)
-    except OSError:
-        return False
+        yield scratch if added.returncode == 0 else None
     finally:
         run_git(repository, ["worktree", "remove", "--force", str(scratch)])
         shutil.rmtree(parent, ignore_errors=True)
 
 
-def _git_setup(command: list[str]) -> Callable[[Path], None]:
+def _reproduce_in_scratch[T](
+    side: SyncSideRecord, base: str, setup: Callable[[Path], T]
+) -> T | None:
+    """Trust retained bytes only where a fresh scratch replay reproduces them."""
+
+    try:
+        with _scratch_replay_worktree(side, base) as scratch:
+            if scratch is None:
+                return None
+            try:
+                result = setup(scratch)
+            except (SyncGitProofError, CrossingSyncError):
+                return None
+            return result if _scratch_tree_matches(side, scratch) else None
+    except OSError:
+        return None
+
+
+def _git_setup(command: list[str]) -> Callable[[Path], bool]:
     """A scratch setup running one git command; the comparison decides the rest."""
 
-    def run(scratch: Path) -> None:
+    def run(scratch: Path) -> bool:
         run_git(scratch, command)
+        return True
 
     return run
 
@@ -390,10 +404,13 @@ def verify_crashed_reapply(side: SyncSideRecord) -> bool:
 
     if not side.wipStash or not stash_entry_live(side):
         return False
-    return _reproduce_in_scratch(
-        side,
-        head_commit(Path(side.worktree)),
-        _git_setup(["stash", "apply", "--quiet", side.wipStash]),
+    return (
+        _reproduce_in_scratch(
+            side,
+            head_commit(Path(side.worktree)),
+            _git_setup(["stash", "apply", "--quiet", side.wipStash]),
+        )
+        is True
     )
 
 
@@ -414,10 +431,10 @@ def _crossing_setup(
     base: str,
     paired_code: PairedCode | None,
     owner: tuple[Literal["leaf", "master"], str],
-) -> Callable[[Path], None]:
+) -> Callable[[Path], tuple[CrossingPlanView, str]]:
     """A scratch setup repeating the admitted merge plus its structural crossing."""
 
-    def run(scratch: Path) -> None:
+    def run(scratch: Path) -> tuple[CrossingPlanView, str]:
         merged = run_git(scratch, ["merge", "--no-commit", "--no-edit", side.sourceCommit])
         if merged.returncode not in {0, 1} or merge_head(scratch) != side.sourceCommit:
             raise SyncGitProofError("scratch crossing merge failed")
@@ -428,6 +445,13 @@ def _crossing_setup(
             owner=owner,
         )
         apply_crossing(scratch, plan)
+        scratch_side = side.model_copy(update={"worktree": str(scratch)})
+        history_owner = (
+            open_crossing_history(scratch, plan)
+            if owner[0] == "master" and content_conflicts(scratch_side)
+            else ""
+        )
+        return plan, history_owner
 
     return run
 
@@ -437,7 +461,7 @@ def recapture_resumed_merge(
     *,
     paired_code: PairedCode | None,
     owner: tuple[Literal["leaf", "master"], str],
-) -> dict[str, str]:
+) -> tuple[dict[str, str], str, str]:
     """Fingerprint a resumed merge only where its output is exactly reproducible.
 
     A merge that was already active when this call started crossed a crash
@@ -445,22 +469,82 @@ def recapture_resumed_merge(
     memory merges reproduce as pure git; a converted-memory merge reproduces the
     admitted merge plus its structural crossing, recomputed from the same
     commits with the same paired code and owner. Anything else stays empty and
-    its cancel refuses safely while continue still settles it.
+    its cancel refuses safely while continue still settles it. Return the fingerprints,
+    and the reproduced master park's owner and report path.
     """
 
     git_merge = _git_setup(["merge", "--no-commit", "--no-edit", side.sourceCommit])
-    if side.side != "memory":
-        if not _reproduce_in_scratch(side, side.preSyncHead, git_merge):
-            return {}
-        return {path: path_fingerprint(side, path) for path in worktree_dirty_paths(side)}
-    founded = _merge_base_and_structure(side)
-    if founded is None:
-        return {}
-    base, structure = founded
-    setup = git_merge if structure == "plain" else _crossing_setup(side, base, paired_code, owner)
-    if not _reproduce_in_scratch(side, side.preSyncHead, setup):
-        return {}
-    return {path: path_fingerprint(side, path) for path in worktree_dirty_paths(side)}
+    if side.side == "memory":
+        founded = _merge_base_and_structure(side)
+        if founded is None:
+            return {}, "", ""
+        base, structure = founded
+        if structure != "plain":
+            return _recapture_crossing(side, base, paired_code, owner)
+    if not _reproduce_in_scratch(side, side.preSyncHead, git_merge):
+        return {}, "", ""
+    return capture_retained_digests(side, include_untracked=True), "", ""
+
+
+def _history_pending_at_open(
+    side: SyncSideRecord, scratch: Path, plan: CrossingPlanView, owner: str
+) -> bool:
+    """Prove the new history is the only difference and has not entered the index yet."""
+
+    if not owner:
+        return False
+    path = history_path(owner)
+    if path in plan.files:
+        return False
+    worktree = Path(side.worktree)
+    staged = run_git(worktree, ["--literal-pathspecs", "ls-files", "--stage", "-z", "--", path])
+    if staged.returncode != 0 or staged.stdout:
+        return False
+    actual = worktree_entry_content(side, path)
+    target = worktree / path
+    if actual.kind != "absent" and (
+        target.is_symlink()
+        or actual
+        != worktree_entry_content(side.model_copy(update={"worktree": str(scratch)}), path)
+        or (target.stat().st_mode ^ (scratch / path).stat().st_mode) & 0o111
+    ):
+        return False
+    return _scratch_tree_matches(side, scratch, except_path=path)
+
+
+def _recapture_crossing(
+    side: SyncSideRecord,
+    base: str,
+    paired_code: PairedCode | None,
+    owner: tuple[Literal["leaf", "master"], str],
+) -> tuple[dict[str, str], str, str]:
+    setup = _crossing_setup(side, base, paired_code, owner)
+    try:
+        with _scratch_replay_worktree(side, side.preSyncHead) as scratch:
+            if scratch is None:
+                return {}, "", ""
+            try:
+                plan, history_owner = setup(scratch)
+            except (SyncGitProofError, CrossingSyncError):
+                return {}, "", ""
+            needs_open = not _scratch_tree_matches(side, scratch)
+            if needs_open and not _history_pending_at_open(side, scratch, plan, history_owner):
+                return {}, "", ""
+    except OSError:
+        return {}, "", ""
+
+    worktree = Path(side.worktree)
+    try:
+        if needs_open:
+            open_crossing_history(worktree, plan)
+        report = (
+            write_crossing_report(worktree, side.preSyncHead, side.sourceCommit, plan).as_posix()
+            if history_owner
+            else ""
+        )
+    except (OSError, CrossingSyncError) as error:
+        raise SyncGitProofError(str(error)) from error
+    return capture_retained_digests(side, include_untracked=True), history_owner, report
 
 
 def path_fingerprint(side: SyncSideRecord, path: str) -> str:

@@ -36,7 +36,7 @@ left to plain Git, and :func:`cross` refuses to be asked about one.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Final, Literal
@@ -58,7 +58,7 @@ from agents_remember.models.knowledge_files.documents import (
     RECORD_DIRECTORIES,
     history_path,
 )
-from agents_remember.models.knowledge_files.history import ABSENT
+from agents_remember.models.knowledge_files.history import ABSENT, empty_history
 from agents_remember.models.knowledge_files.ids import mint_id
 
 Step = Literal["markers", "convert", "merge", "validate"]
@@ -81,6 +81,14 @@ class HistoryOwner:
 
     kind: Literal["leaf", "master"]
     id: str
+
+
+@dataclass(frozen=True)
+class CrossingDestination:
+    """The memory repository and paths whose entries the native Git merge owns."""
+
+    repository: Path
+    git_owned_paths: frozenset[str]
 
 
 @dataclass
@@ -207,7 +215,7 @@ def with_markers(
     return files, [{"subject": row["subject"], "markers": row["markers"]} for row in not_moved]
 
 
-def next_crossing_owner(task_id: str, *trees: Mapping[str, bytes]) -> str:
+def next_crossing_owner(task_id: str, *trees: Iterable[str]) -> str:
     """``<task-id>-crossing-<n>``: one more than any crossing file of this task on any side."""
 
     numbers = [
@@ -252,12 +260,25 @@ def _convert_sides(
     return converted
 
 
+def _structural_files(files: dict[str, bytes], git_owned_paths: frozenset[str]) -> dict[str, bytes]:
+    """Keep paths whose contents can be merged independently of their Git entry type."""
+
+    if not git_owned_paths:
+        return files
+    return {
+        path: data
+        for path, data in files.items()
+        if path not in git_owned_paths
+        and all(parent.as_posix() not in git_owned_paths for parent in PurePosixPath(path).parents)
+    }
+
+
 def cross(
     sides: Sides,
     objects: CodeObjects,
     *,
     own_paired_commit: str,
-    repository: Path,
+    destination: CrossingDestination,
     owner: HistoryOwner | None,
 ) -> CrossingPlan:
     """Run rule 8 steps 1-4 over (base, own, incoming); raise :class:`CrossingError` on failure."""
@@ -283,25 +304,33 @@ def cross(
         converted["own"], not_moved = with_markers(
             MemoryInput(label=own.label, files=converted["own"], database=None), owner, rows
         )
+    modeled = {
+        name: _structural_files(files, destination.git_owned_paths)
+        for name, files in converted.items()
+    }
     try:
-        merged = merge_trees(*(converted[name] for name in _SIDE_NAMES), repository=repository)
+        merged = merge_trees(
+            *(modeled[name] for name in _SIDE_NAMES), repository=destination.repository
+        )
     except (RuntimeError, ValueError) as error:
         raise CrossingError("merge", str(error)) from error
     plan = CrossingPlan(files=merged.files, conflicts=merged.conflicts)
     for path in merged.conflicted_paths:
-        base_bytes, own_bytes, incoming_bytes = (converted[name].get(path) for name in _SIDE_NAMES)
+        base_bytes, own_bytes, incoming_bytes = (modeled[name].get(path) for name in _SIDE_NAMES)
         plan.conflict_versions[path] = (base_bytes, own_bytes, incoming_bytes)
     record_owner = None
     if owner is not None:
         record_owner = (
-            owner.id if owner.kind == "leaf" else next_crossing_owner(owner.id, *converted.values())
+            owner.id
+            if owner.kind == "leaf"
+            else next_crossing_owner(owner.id, *converted.values(), destination.git_owned_paths)
         )
         if owner.kind == "master" and _record_conflicts(merged.conflicted_paths):
             # Rule 8 step 4: a master line has no leaf, so the resolved record's row goes into
             # <task-id>-crossing-<n>.json. The file is opened here for the curator's row and
             # closed by the sync in the merge commit itself.
             plan.files[history_path(record_owner)] = canonical_text(
-                {"schema": "ar-history/v1", "crossing": record_owner, "closed": False, "rows": []}
+                empty_history("crossing", record_owner).to_document()
             ).encode("utf-8")
     plan.report = {
         "version": version,
@@ -311,7 +340,7 @@ def cross(
         "markerRows": len(rows) - len(not_moved),
         "markersNotMoved": not_moved,
         "taken": dict(sorted(merged.taken.items())),
-        "cards": _card_counts(converted, merged.files, merged.conflicted_paths),
+        "cards": _card_counts(modeled, merged.files, merged.conflicted_paths),
         "alignment": {
             "alignedCards": merged.alignment.aligned_cards,
             "renumberedReferences": merged.alignment.renumbered_references,
