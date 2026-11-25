@@ -17,6 +17,7 @@ from agents_remember.worktrees.sync_transaction_git._base import (
     SyncFastForwardValidationError,
     SyncGitProofError,
     SyncKnowledgeValidationError,
+    SyncMergeCommitError,
 )
 from agents_remember.worktrees.sync_transaction_git._cancel import (
     CancelSaveError,
@@ -94,6 +95,7 @@ __all__ = [
     "SyncFastForwardValidationError",
     "SyncGitProofError",
     "SyncKnowledgeValidationError",
+    "SyncMergeCommitError",
     "applied_restore_failures",
     "apply_parked_wip",
     "assess_retained_tree",

@@ -379,7 +379,7 @@ structure. Markdown merges by line; sidecars merge references by number and
 entries by ID; records merge by field. Reference numbers are aligned with their Markdown markers. Differently
 changed authored fields remain explicit conflicts for the Curator; mechanical
 anchor changes do not justify choosing between meanings. Record-conflict repair
-uses the writer and advances revision above both sides. Validation continues to
-refuse unresolved conflict markers. A sync that stops on a conflict names the next call in its
-answer: `worktree_sync` with `resolution_action: "continue"`. Make that call after the conflict is
-resolved and the resolved files are staged in the worktree (see [Worktrees](mcp-tools.md#worktrees)).
+uses the writer and advances revision above both sides. The staged check described in
+[Worktrees](mcp-tools.md#worktrees) also runs when a memory merge settles automatically.
+A sync that stops on a conflict names the next call in its answer. Continue after staging the
+resolution in the worktree.

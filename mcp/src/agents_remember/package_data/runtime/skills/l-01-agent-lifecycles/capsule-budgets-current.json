@@ -6330,8 +6330,8 @@
         "sha256": "702b67efa7c5f61f541dc44373b76a74b320d1ffb4a8b251354bb58625a494eb"
       },
       "skills/l-01-agent-lifecycles/composition-manifest.json": {
-        "size_words": 3593,
-        "sha256": "8ed97cba6c7933aded1ba950ce99b8c6e4c0a243e517897b1e59673d58581719"
+        "size_words": 3645,
+        "sha256": "7e882a8cb7ce70657940d3724027df8a5092cb1c1d15d6ed40d0167816d03247"
       },
       "skills/l-01-agent-lifecycles/core/acceptance.md": {
         "size_words": 1647,
@@ -6626,8 +6626,8 @@
         "sha256": "c7e324024b92d3f63c62ea6f0e604002fd8b8ed94d846b04308a43b3b22273c0"
       },
       "skills/l-01-agent-lifecycles/templates/curator-handoff-ingestion.md": {
-        "size_words": 6287,
-        "sha256": "d3c1273715f3b7fcc23d52d26d9e97f95de76f183b00dd1411403b29f9e9b21b"
+        "size_words": 6357,
+        "sha256": "89e9707340785924a2cd4454c3a68d855357bf14caf42e83c78c59923870abd4"
       },
       "skills/l-01-agent-lifecycles/templates/curator-handoff-list.md": {
         "size_words": 3078,
@@ -6688,7 +6688,7 @@
     },
     "compiler_input_revisions": {
       "SKILL.md": "sha256:702b67efa7c5f61f541dc44373b76a74b320d1ffb4a8b251354bb58625a494eb",
-      "composition-manifest.json": "sha256:8ed97cba6c7933aded1ba950ce99b8c6e4c0a243e517897b1e59673d58581719",
+      "composition-manifest.json": "sha256:7e882a8cb7ce70657940d3724027df8a5092cb1c1d15d6ed40d0167816d03247",
       "core/acceptance.md": "sha256:579904c9e64af0329dc249bcd3d95cf7af4e306321f1ffce0dca1a3f89dd41af",
       "core/authority.md": "sha256:c142da074d1cd549f0fd3725e3a3ef1412bfed722d3d6b3598b78012173a3236",
       "core/every-role.md": "sha256:5258a0a3b9d50a4e7b5fba3bdafde59bd139b5959876b4b3c6b2d81e3d50e7a7",
