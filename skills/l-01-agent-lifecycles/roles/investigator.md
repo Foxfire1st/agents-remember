@@ -25,7 +25,7 @@ Before using a knowledge command or interpreting its result, read [knowledge com
 
 Read the supplied rendered task documents and canonical JavaScript Object Notation (JSON) documents with your own file tools. The `task_doc` tool on `agents-remember-task` supports document authoring and linkage-report artifacts. Its `linkage_report` leaves task documents unchanged; `dry_run` writes neither documents nor artifacts.
 
-Before investigating repository code, call `knowledge_read` on `agents-remember-task` for the files involved; read [knowledge use]({{detail:reference/knowledge/use.md}}#investigator-distinguish-claims-observations-and-hypotheses) for the attributed records, related code and evidence to inspect.
+Before investigating repository code, call `read_ar_files` on `agents-remember-task` for the files involved. Compact rows give card status and any brief path with saved freshness. Fuller replies can include rule text. Open available saved briefs with your file tool for rules, conditions and exclusions. Call `knowledge_read` on `agents-remember-task` for the records you need whole; read [knowledge use]({{detail:reference/knowledge/use.md}}#investigator-distinguish-claims-observations-and-hypotheses) for the attributed records, related code and evidence to inspect.
 
 Before researching a repository for its first or resumed knowledge foundation, read [repository research](../reference/repository-research.md) for the source inventory the developer reviews, the bounded research and the evidence rules. Return the research report's path to the Architect for the foundation task's document, so the Curator finds it.
 

@@ -14,7 +14,8 @@ import { blockKey } from '../blockIdentity';
 import { EFFECT_RANK, type FamilyHeading, type SubjectGroup, type SubjectNode } from '../changeSetOrder';
 import { ReviewBlockCard } from '../ExpressionCards';
 import { SORT_LABELS } from '../reviewSelection';
-import { StaleMark } from '../tree/TreeRows';
+import { StaleMark, standingText } from '../tree/TreeRows';
+import type { ReviewOutlineStanding } from '../../../data/review';
 import { SlotPlaceContext, SubjectMeta, type LocationFacts } from '../ReviewWorkspace';
 import { groupDomId, subjectDomId } from './blockDom';
 import { leadClause } from './leadClause';
@@ -168,6 +169,18 @@ function selectedSubject(reading: ReturnType<typeof useReading>, kind: 'invarian
   return selection?.kind === 'subject' && selection.subject.kind === kind && selection.subject.id === id;
 }
 
+// The record's state in the candidate memory tree and its writer as role and model, in the same words
+// as the tree row's title; nothing when the candidate tree names no state.
+function RecordStanding({ standing, testid }: { standing?: ReviewOutlineStanding; testid: string }) {
+  const text = standingText(standing);
+  if (!text) return null;
+  return (
+    <span className={muted} data-testid={testid} data-record-state={standing?.record_state}>
+      {text}
+    </span>
+  );
+}
+
 // D576: 'true' while the latest move changed this invariant and its detail is not read again.
 function useStaleAttribute(place: ReviewPlace, id: string): 'true' | undefined {
   return useStaleInvariants(place.repo, place.master, place.leaf).has(id) ? 'true' : undefined;
@@ -222,6 +235,7 @@ export function SubjectSection({ node, family, ruled }: { node: SubjectNode; fam
             {row.badge}
           </span>
         ) : null}
+        <RecordStanding standing={row.standing} testid="review-subject-standing" />
         {reading.comparison ? (
           <AddToTray
             pick={invariantPick({
@@ -272,6 +286,7 @@ function FamilyHeadingLine({ heading }: { heading: FamilyHeading }) {
         </h3>
         {heading.reason ? <span className={badge}>{heading.reason}</span> : null}
         {heading.kept ? <span className={muted}>kept · read for {heading.kept}</span> : null}
+        <RecordStanding standing={row.standing} testid="review-subject-standing" />
         {reading.comparison ? (
           <AddToTray
             pick={invariantPick({
@@ -309,10 +324,16 @@ function locationSources(subjects: readonly SubjectNode[]): Map<string, SubjectN
   return new Map(subjects.filter((node) => node.first).map((node) => [node.row.selectorId, node]));
 }
 
-function MemberLocationCounts({ node }: { node: SubjectNode | undefined }) {
+function MemberStanding({ standing }: { standing?: ReviewOutlineStanding }) {
+  return <RecordStanding standing={standing} testid="review-member-standing" />;
+}
+
+// `lead`: the writer stands before the counts, so a dot keeps the model name and the first count apart.
+function MemberLocationCounts({ node, lead }: { node: SubjectNode | undefined; lead: boolean }) {
   if (!node?.counts) return null;
   return (
     <span className={muted} data-testid="review-member-location-counts">
+      {lead ? ' · ' : ''}
       {node.counts.changed} changed · {node.counts.unchanged} unchanged · {node.counts.not_comparable} not comparable
     </span>
   );
@@ -350,7 +371,8 @@ function MemberSummaries({ group, sources }: { group: SubjectGroup; sources: Rea
           </button>
           {node.row.badge ? <span className={badge} data-change={node.row.badge}>{node.row.badge}</span> : null}
           <EffectBadges effects={node.effects} />
-          <MemberLocationCounts node={sources.get(node.row.selectorId)} />
+          <MemberStanding standing={node.row.standing} />
+          <MemberLocationCounts node={sources.get(node.row.selectorId)} lead={standingText(node.row.standing) !== ''} />
         </li>
       ))}
     </ul>

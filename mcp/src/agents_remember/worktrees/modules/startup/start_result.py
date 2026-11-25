@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 
+from agents_remember.worktrees.knowledge_validation import PairedCode
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.git import head_commit
 from agents_remember.worktrees.modules.guidance import (
     contract_next_args,
     contract_payload,
@@ -13,6 +16,7 @@ from agents_remember.worktrees.modules.guidance import (
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.scheduling_mode import stale_series_artifact_fact
+from agents_remember.worktrees.services import refresh_written_memory_briefs
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -45,6 +49,7 @@ def started_result(
             "Worktree task started; provider setup is running in the background — "
             "poll worktree_status until its providers block reaches a terminal state."
         )
+    briefs_problem = _started_briefs_problem(contract, state.memory)
     return WorktreeCommandResult(
         0,
         {
@@ -63,7 +68,25 @@ def started_result(
             ),
             **_start_result_facts(contract, state.code, state.memory, state.providers),
             "projectionEffects": projection_effects or [],
+            **({"briefsProblem": briefs_problem} if briefs_problem is not None else {}),
         },
+    )
+
+
+def _started_briefs_problem(contract: WorktreeContract, memory: dict[str, object]) -> str | None:
+    memory_root = contract.memory_worktree
+    if (
+        memory_root is None
+        or memory.get("worktree") != "created"
+        or memory.get("memoryFormat") != "converted"
+    ):
+        return None
+    try:
+        code_commit = head_commit(contract.code_worktree)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        return f"File briefs could not identify the started code revision: {error}"
+    return refresh_written_memory_briefs(
+        memory_root, PairedCode(contract.code_worktree, code_commit), contract.coordination_root
     )
 
 

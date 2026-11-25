@@ -204,7 +204,16 @@ def _bind_options_endpoint(config: McpRuntimeConfig):
 
 def _bind_dispatch_endpoint(config: McpRuntimeConfig):
     def endpoint(request: RoleDispatchRequest) -> JSONResponse:
-        return alias_response(request, _role_launch_dispatch_endpoint(config, request))
+        response = _role_launch_dispatch_endpoint(config, request)
+        if response.status_code < 300:
+            # A Reviewer or Curator the launcher starts gets the product's start message as one
+            # started by role_start does; the receipt of this request says whether it runs.
+            from agents_remember.cli.product_start_message import (  # noqa: PLC0415 - sends through the role tools, which import this module
+                dashboard_start_message,
+            )
+
+            dashboard_start_message(config, request)
+        return alias_response(request, response)
 
     return endpoint
 
@@ -684,6 +693,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         "execution": {},
         "preparation": {
             "enclosure": workspace.get("enclosurePreparation", "not-applicable"),
+            **({"briefsProblem": problem} if (problem := workspace.get("briefsProblem")) else {}),
             **({"firstRun": report} if (report := recall_first_run_report()) is not None else {}),
         },
         "handoverArtifact": artifact,

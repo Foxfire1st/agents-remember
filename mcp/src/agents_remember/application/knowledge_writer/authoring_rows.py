@@ -24,13 +24,12 @@ from agents_remember.application.knowledge_writer.code_anchors import (
     AnchorResolutionError,
     CodeSnapshot,
 )
+from agents_remember.application.knowledge_writer.family_effect import family_effect_refusal
 from agents_remember.application.knowledge_writer.handoff import (
     HANDLE_PREFIX,
     CoverRequest,
     RowRequest,
-    family_effect_refusal,
 )
-from agents_remember.application.knowledge_writer.history_check import REOPEN_STEP
 from agents_remember.application.knowledge_writer.memory_state import (
     EntryLocation,
     MemoryState,
@@ -52,11 +51,14 @@ from agents_remember.application.knowledge_writer.report import (
     RecordOutcome,
     RowOutcome,
 )
+from agents_remember.application.knowledge_writer.revision_stamps import (
+    closed_history_message,
+    new_history_document,
+)
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.models.knowledge.effect import EffectLabel
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.knowledge_files.history import (
-    HISTORY_SCHEMA,
     RECORD_ROW_SUBJECT_PATTERN,
     FamilyRow,
     HistoryFile,
@@ -67,7 +69,6 @@ from agents_remember.models.knowledge_files.history import (
     ReconsiderationRow,
     RecordRow,
     UnexplainedChangeRow,
-    is_closed_history,
     membership_invariant,
     membership_subject,
 )
@@ -84,7 +85,6 @@ from agents_remember.worktrees.modules.onboarding_trace import (
 if TYPE_CHECKING:
     from agents_remember.application.knowledge_writer.authoring import DecisionResolver
 
-NON_MEANING_FIELDS: Final = frozenset({"id", "schema", "origin", "revision", "admission", "status"})
 ABSENT: Final = "absent"
 
 # The record kinds a `record` history row may be about (MIK-R53 rule 8, MIK-R118, MIK-R124).
@@ -102,12 +102,6 @@ RECORD_ROW_KINDS: Final[tuple[str, ...]] = (
     "weakness",
     "dependent",
 )
-
-
-def meaning(document: Mapping[str, Any]) -> dict[str, Any]:
-    """The fields of a record that carry meaning; a change to any of them is a new revision."""
-
-    return {key: value for key, value in document.items() if key not in NON_MEANING_FIELDS}
 
 
 def _first_error(error: ValidationError) -> str:
@@ -181,26 +175,10 @@ class HistoryRowAuthoring:
         path, attempt = self.state.history_target(self.owner)
         stored = self.state.document(path)
         if stored is not None and stored.get("closed") is True:
-            base = self.state.base
-            if base is not None and is_closed_history(base.get(path)):
-                self.problem(path, "this history file is closed and frozen (MIK-R07 rule 7)")
-            else:
-                self.problem(
-                    path, f"this history file is closed and frozen (MIK-R07 rule 7){REOPEN_STEP}"
-                )
+            self.problem(path, closed_history_message(self.state, path))
             return
-        document = (
-            deep_copy(stored)
-            if stored is not None
-            else {
-                "schema": HISTORY_SCHEMA,
-                self.owner.kind: self.owner.id,
-                **({"attempt": attempt} if attempt > 1 else {}),
-                "closed": False,
-                "rows": [],
-            }
-        )
-        rows = {row["subject"]: row for row in document.get("rows") or () if isinstance(row, dict)}
+        stored_rows = (stored or {}).get("rows") or ()
+        rows = {row["subject"]: deep_copy(row) for row in stored_rows if isinstance(row, dict)}
         written: list[dict[str, Any]] = []
         for request in requests:
             row = self._row(request, rows)
@@ -208,6 +186,10 @@ class HistoryRowAuthoring:
                 rows[row["subject"]] = row
                 self.rows.append(RowOutcome(row["id"], row["subject"], row["disposition"], path))
                 written.append(row)
+        # The file is read again once the rows are built: a row that places a record names its
+        # stamped revision in this file's ``written``. The product's parts stay as they are.
+        latest = self.state.document(path)
+        document = deep_copy(latest) if latest else new_history_document(self.owner, attempt)
         document["rows"] = list(rows.values())
         self._fill_items(document, written)
         self.state.put(path, document)

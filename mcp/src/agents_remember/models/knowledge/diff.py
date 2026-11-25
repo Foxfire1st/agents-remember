@@ -175,12 +175,11 @@ DiffLimitation = Literal[
 
 # The record fields the comparison compares, in one declared order. It is the *semantic* payload of
 # a record: the statement or joint guarantee, the conditions a reader acts on, the exclusions, the
-# lifecycle the author recorded, the acceptance it cites, the authored provenance and the stored
-# payload digest. ``selection_reasons`` is deliberately absent: it says which route of the selection
-# reached a record, which is a fact about a traversal and not about the record, and reporting it as a
-# changed field would dress a traversal difference up as a content change.
+# revision's derived state (``lifecycle``), the authored provenance and the stored payload digest.
+# ``selection_reasons`` is deliberately absent: it says which route of the selection reached a
+# record, which is a fact about a traversal and not about the record, and reporting it as a changed
+# field would dress a traversal difference up as a content change.
 KNOWLEDGE_DIFF_FIELD_NAMES: tuple[str, ...] = (
-    "acceptance_ref",
     "applicability",
     "essential_conditions",
     "exclusions",

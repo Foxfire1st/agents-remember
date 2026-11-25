@@ -497,7 +497,13 @@ def _open_held_seat(batch: _DrainBatch) -> dict[str, Any]:
     except ValueError as error:
         _release_claim(batch.folder, batch.agent_id, batch.claim)
         return {"outcome": "cannot-open", "detail": str(error)}
-    opening_text = opening + "\n\n" + combined_text(messages)
+    from agents_remember.cli.product_start_message import (  # noqa: PLC0415 - sends through the role tools, which import this module
+        held_seat_opening,
+    )
+
+    # A held Reviewer or Curator gets the product's start message as it opens.
+    product = held_seat_opening(batch.config, batch.path, batch.receipt)
+    opening_text = "\n\n".join(filter(None, (opening, product, combined_text(messages))))
     call = {
         **launch_call,
         "agent": {**(launch_call.get("agent") or {}), "prompt": opening_text},

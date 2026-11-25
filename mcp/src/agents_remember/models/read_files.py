@@ -1,9 +1,10 @@
 """Response models for the ``read_ar_files`` tool (MIK-R109 rule 1).
 
 AR-owned, strict response contract: one batch of knowledge locations for
-repo-relative paths inside an AR-managed repo. A read names where a thing
-is and does not carry it: the answer holds no source text, no card text
-and no overview text.
+repo-relative paths inside an AR-managed repo. The answer names where the
+cards are and carries, per file, the short answer of its brief: the recorded
+rules with their text. It holds no source text, no
+card text and no overview text.
 
 Token fields are stamped by ``finalize_payload_tokens`` at the ``_tool_payload``
 choke point -- this module never sets them.
@@ -31,6 +32,63 @@ class NamedRecord(StrictResponseModel):
     state: str
     heading: str
     titleFallback: bool = False
+
+
+class BriefRule(StrictResponseModel):
+    """One of the file's own rules in a short answer: its name, standing and text.
+
+    ``rule`` is the statement; past the answer's bound it reads that the text is in the brief and
+    the rule is named by ID and title only.
+    """
+
+    id: str
+    title: str
+    titleRecorded: bool | None = None
+    state: str | None = None
+    writer: str | None = None
+    proof: int | None = None
+    anchors: str | None = None
+    at: list[str] | None = None
+    rule: str
+    moved: bool | None = None
+
+
+class BriefWeakness(StrictResponseModel):
+    id: str
+    at: str
+    text: str
+
+
+class BriefFamily(StrictResponseModel):
+    title: str
+    here: int
+    elsewhere: int
+
+
+class ShortBrief(StrictResponseModel):
+    """What the memory says about one file, short.
+
+    ``path`` is the brief to read with the caller's own file tool, and ``current`` whether it holds
+    the memory tree the answer was made from. ``freshness`` names a missing, older or unknown brief
+    and when it will be renewed. A whole answer carries ``rules`` with their texts and the rest.
+    A path past the answer's bound carries ``counts`` and ``leftOut``. A file at which nothing is
+    recorded carries only ``none``.
+    """
+
+    path: str | None = None
+    current: bool | None = None
+    freshness: str | None = None
+    memoryTree: str | None = None
+    rules: list[BriefRule] | None = None
+    rulesNotListed: int | None = None
+    weaknesses: list[BriefWeakness] | None = None
+    standsOnIt: list[str] | None = None
+    families: list[BriefFamily] | None = None
+    retiredLeftOut: int | None = None
+    counts: str | None = None
+    inTheFile: str | None = None
+    leftOut: str | None = None
+    none: str | None = None
 
 
 class NamedFile(StrictResponseModel):
@@ -68,6 +126,7 @@ class NamedFile(StrictResponseModel):
     routeIndexStale: bool | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None
+    brief: ShortBrief | None = None
 
 
 class ReadArFilesResponse(ToolResponse):
@@ -98,5 +157,7 @@ class ReadArFilesResponse(ToolResponse):
     routeIndexStale: bool | None = None
     routeIndexRefresh: str | None = None
     statesProblem: str | None = None
+    briefsProblem: str | None = None
+    briefsLeftOut: str | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None

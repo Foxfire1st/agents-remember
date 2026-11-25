@@ -44,7 +44,7 @@ from agents_remember.models.knowledge.repository import RepositoryIdentity
 
 _REVISION_COLUMNS = (
     "repository_id, invariant_id, revision_id, display_version, statement, applicability, "
-    "conditions, exclusions, state_at_origin, acceptance_ref, provenance, payload_digest"
+    "conditions, exclusions, state, provenance, payload_digest"
 )
 
 

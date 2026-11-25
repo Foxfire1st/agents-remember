@@ -36,6 +36,7 @@ from agents_remember.tasks.leaf_doc import (
 from agents_remember.worktrees.candidate_identity import resolve_candidate_identity
 from agents_remember.worktrees.review_history import (
     ReviewHistoryError,
+    RoundStamps,
     begin_task_review,
     record_task_review,
     review_state_field,
@@ -311,20 +312,25 @@ def candidate_identity_for_review(
     )
 
 
-def _record_task_review_bound(
+def _record_task_review_bound(  # noqa: PLR0913 -- the route binding and memory stamps are independent
     doc: TaskDocument,
     payload: dict[str, Any] | None,
-    binding: _RouteReviewBinding,
+    binding: _RouteReviewBinding | None = None,
     *,
     settings_limit: int | None = None,
     actual_candidate: str | None = None,
+    recorded_by: RoundStamps | None = None,
 ) -> TaskDocument:
     """Record review state and publish a route block for a sanctioned code addition."""
     if payload is None:
         raise TaskDocError("record_review requires a review object")
     try:
         updated = record_task_review(
-            doc, payload, settings_limit=settings_limit, actual_candidate=actual_candidate
+            doc,
+            payload,
+            settings_limit=settings_limit,
+            actual_candidate=actual_candidate,
+            stamps=recorded_by,
         )
     except ReviewHistoryError as exc:
         raise TaskDocError(f"{exc.status}: {exc}") from exc
@@ -334,6 +340,7 @@ def _record_task_review_bound(
     state = updated.reviewState
     if prior is None or state is None:
         return updated
+    assert binding is not None
     open_ids = set(state.remainingFindingIds)
     finding_ids = [item.findingId for item in state.addedFindings if item.findingId in open_ids]
     try:

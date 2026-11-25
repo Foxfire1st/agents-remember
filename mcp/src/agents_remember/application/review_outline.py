@@ -14,6 +14,7 @@ from agents_remember.memory.knowledge_index import (
     IndexMismatchError,
     KnowledgeIndex,
     Record,
+    RecordStanding,
     text_uuid,
 )
 from agents_remember.models.knowledge.review_meaning_effects import MeaningRecordKind
@@ -22,7 +23,9 @@ from agents_remember.models.knowledge.review_outline import (
     ReviewOutlineFamily,
     ReviewOutlineInvariant,
     ReviewOutlineMember,
+    ReviewOutlineWriter,
 )
+from agents_remember.models.knowledge_files.record_state import RecordState
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,8 @@ def _outline(before: KnowledgeIndex, after: KnowledgeIndex, owner: str) -> Revie
                 ((side.name, identity), record) for identity, record in held.items()
             )
         old, new = records
+        # Each row's state and writer are those of the candidate tree's index.
+        standings = after.standings(tuple(new)).value
         # Candidate order, followed by identities only the baseline holds, just as in the catalogue.
         for identity in dict.fromkeys((*new, *old)):
             record = new.get(identity) or old[identity]
@@ -85,6 +90,8 @@ def _outline(before: KnowledgeIndex, after: KnowledgeIndex, owner: str) -> Revie
                         summary=_summary(str(record.document["statement"])),
                         change=changes.intent(sides, identity).change,
                         meaning=meanings[identity],
+                        record_state=_state(standings.get(identity)),
+                        writer=_writer(standings.get(identity)),
                     )
                 )
                 continue
@@ -112,6 +119,8 @@ def _outline(before: KnowledgeIndex, after: KnowledgeIndex, owner: str) -> Revie
                     change=change,
                     members=tuple(members),
                     meaning=meanings[identity],
+                    record_state=_state(standings.get(identity)),
+                    writer=_writer(standings.get(identity)),
                 )
             )
     return ReviewOutline(
@@ -146,6 +155,21 @@ def _meaning_subjects(
                             seen.add(member)
                             subjects.append((member, "invariant"))
     return subjects
+
+
+def _state(standing: RecordStanding | None) -> RecordState | None:
+    """A row's state in the candidate tree; none for a record only the baseline holds."""
+
+    return None if standing is None else standing.state
+
+
+def _writer(standing: RecordStanding | None) -> ReviewOutlineWriter | None:
+    """Who wrote the row's revision in the candidate tree, as role and model; ``unknown`` for an
+    unstamped revision, none for a record only the baseline holds."""
+
+    if standing is None:
+        return None
+    return ReviewOutlineWriter(role=standing.writer.role, model=standing.writer.model)
 
 
 def _members(record: Record | None) -> tuple[str, ...]:

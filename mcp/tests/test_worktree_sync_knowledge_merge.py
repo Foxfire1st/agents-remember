@@ -39,6 +39,7 @@ from agents_remember.memory.conversion import crossing_port, inputs
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.conversion.convert import convert_memory
 from agents_remember.memory.conversion.inputs import memory_from_directory, write_changed
+from agents_remember.memory.knowledge_index.cache import default_cache_directory
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.knowledge_files.ids import derived_record_id
 from agents_remember.worktrees import sync_transaction
@@ -269,10 +270,15 @@ def test_two_lines_that_re_anchored_one_entry_merge_without_a_conflict(tmp_path:
     assert merged["state"] == "synced", merged
     # The guard was watching: it saw the conversion read the legacy database of the fixture.
     assert CONNECT_READ_ONLY in {event.operation for event in while_converting}
-    # The merge base still holds the old database blob; the merge neither opened a database nor
-    # wrote, copied or moved a database file beneath this test's directory. (An event elsewhere
-    # may be a thread another test left behind; the two mocks below pin that no blob was copied.)
-    assert [event.render() for event in events_beneath(tmp_path, during_the_merge)] == []
+    # The merge base still holds the old database blob. The post-sync brief writer uses the derived
+    # coordination index. Every other database event in this fixture would violate the crossing's
+    # converted-input boundary. The mocks also pin that no historical database blob was copied.
+    cache = default_cache_directory(lines.fixture.contract.coordination_root)
+    assert [
+        event.render()
+        for event in events_beneath(tmp_path, during_the_merge)
+        if not (event.allowed and all(Path(path).is_relative_to(cache) for path in event.paths))
+    ] == []
     assert merged["memory"]["plan"] == "merge"
     assert loaded == [(True, None), (True, None), (True, None)]
     database_resolution.assert_not_called()

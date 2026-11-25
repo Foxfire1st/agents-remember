@@ -1018,10 +1018,13 @@ def _call_line_dict(
     record: ToolCallRecord,
     *,
     detail_name: str | None,
-    unwritten_digest: str | None,
     dropped: int,
 ) -> dict[str, Any]:
-    """Build one log line (rule 3); the caller appends it under the budget."""
+    """Build one log line; the caller appends it under the budget.
+
+    ``resultDigest`` is the whole result's digest on every line, so a line
+    kept after its detail file is gone still identifies the answer.
+    """
     return {
         "time": _utc_stamp(),
         "tool": record.tool_name,
@@ -1036,7 +1039,7 @@ def _call_line_dict(
         "durationMs": round(record.duration_ms, 3),
         "answerTokens": record.answer_tokens,
         "resultBytes": record.result_bytes,
-        "resultDigest": unwritten_digest,
+        "resultDigest": record.result_digest,
         "guardCut": record.guard_cut,
         "detail": detail_name,
         "dropped": dropped,
@@ -1158,9 +1161,8 @@ def record_tool_call(record: ToolCallRecord) -> ToolLogOutcome:
         outcome.log_error = folder_error
         return outcome
     detail_log: str | None = None
-    unwritten_digest: str | None = None
     if record.needs_detail:
-        detail_log, detail_error, unwritten_digest = prepare_call_detail(
+        detail_log, detail_error, _digest = prepare_call_detail(
             DetailRequest(
                 log_dir=log_dir,
                 budget_bytes=budget_bytes,
@@ -1179,7 +1181,6 @@ def record_tool_call(record: ToolCallRecord) -> ToolLogOutcome:
     line = _call_line_dict(
         record,
         detail_name=(Path(detail_log).name if detail_log is not None else None),
-        unwritten_digest=unwritten_digest,
         dropped=0,
     )
     failure = append_call_line(

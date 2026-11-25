@@ -63,7 +63,6 @@ __all__ = [
 # claim's content is its role, its rationale and the source it attributes -- and the source half is
 # compared as an observation rather than as text.
 FIELD_PROJECTION: Mapping[str, str] = {
-    "acceptance_ref": "acceptance_ref",
     "applicability": "applicability",
     "essential_conditions": "essential_conditions",
     "exclusions": "exclusions",
@@ -473,8 +472,8 @@ def _changed_fields(
     """Return the record fields whose values differ, in the declared field order.
 
     A field is compared only when both sides hold the record: a record that only one snapshot holds
-    is reported by its ``coverage``, and reporting all nine of its fields as "changed" would state
-    nine differences where there is one absence (or, for a removal, one relationship).
+    is reported by its ``coverage``, and reporting all eight of its fields as "changed" would state
+    eight differences where there is one absence (or, for a removal, one relationship).
     """
 
     if not present_on_both_sides:

@@ -249,23 +249,58 @@ def _closed_source_refusal(
     selected: DirectGateSource | None,
     source: DirectGateSource,
 ) -> str | None:
-    """Require the same source namespace and rows, with only its closing flag changed."""
+    """Require the same source namespace and rows, with only its closing changed.
+
+    The closing sets the flag and, in the same write, the memory review's fact. Only that one
+    write is admitted: a source that was open, or absent so that the closing creates it, may gain
+    ``closed`` and ``review``; a file that was already closed must be byte-identical, so no later
+    write adds or changes the review fact of a closed file.
+    """
     if selected != source:
         return "the direct landing's selected history source or memory head changed; retry the gate"
     original = parse_json(source.history_bytes.decode("utf-8"))
     assert isinstance(original, dict)
-    closed = canonical_text({**original, "closed": True}).encode("utf-8")
+    selected_from = f"{source.memory_tree}:{source.history_path}"
+    if _git(memory, "rev-parse", "--verify", "--quiet", selected_from) is None:
+        # No file stood at the path when the source was selected: the closing creates it.
+        original = {**original, "closed": False}
     files = knowledge_tree_from_git(memory, memory_tree).files
-    if files.get(source.history_path) != closed:
+    if not _closing_of(original, files.get(source.history_path)):
         return (
             f"the direct landing's closed candidate changed the selected history source "
-            f"{source.history_path}; only its closing flag may change before the gate"
+            f"{source.history_path}; only its closing flag and review fact may change before "
+            "the gate"
         )
     if _open_histories(memory, memory_tree):
         return (
             "the closed direct-landing candidate contains another open leaf history; retry the gate"
         )
     return None
+
+
+def _closing_of(original: dict[str, Any], candidate: bytes | None) -> bool:
+    """Whether ``candidate`` is ``original`` closed, with a review fact only if it closed it."""
+
+    closed = canonical_text({**original, "closed": True}).encode("utf-8")
+    if candidate == closed:
+        return True
+    if original.get("closed") is True:
+        return False
+    return _beside_review_fact(candidate) == _beside_review_fact(closed)
+
+
+def _beside_review_fact(data: bytes | None) -> object:
+    """A history file's document without its review fact; ``None`` for no file or no JSON."""
+
+    if data is None:
+        return None
+    try:
+        document = parse_json(data.decode("utf-8"))
+    except (UnicodeDecodeError, CanonicalFormatError):
+        return None
+    if not isinstance(document, dict):
+        return document
+    return {key: value for key, value in document.items() if key != "review"}
 
 
 def _verdict(

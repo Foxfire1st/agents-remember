@@ -6,7 +6,9 @@ owns the executable evidence for that seal on **both** revision payloads:
 
 * the digest covers the stored cells (the seal unit test pins one field's contribution);
 * the aggregates refuse self-contradictory construction (a predecessor named twice, a revision as
-  its own predecessor, acceptance mismatches);
+  its own predecessor);
+* the seal covers no derived state: one revision reads proposed or reviewed by its tree, and its
+  seal stays the same;
 * each read node rewrites one stored cell behind a sealed row -- the only way to change sealed
   content without rewriting the row through the writer, which recomputes the seal -- then asserts
   that decoding the row refuses rather than serving content its identity no longer describes.
@@ -81,14 +83,35 @@ def test_an_invariant_revision_digest_seals_its_predecessor_set(
     assert revision_payload_digest(without_edge) != revision_payload_digest(with_edge)
 
 
+def test_a_revision_seal_covers_no_derived_state(fixture: BranchingKnowledgeFixture) -> None:
+    """One revision read proposed in one tree and reviewed in another keeps one seal.
+
+    The state is derived from the history files of the tree being read, not authored, so a review
+    fact added beside an unchanged revision must not make the same revision seal differently.
+    """
+
+    proposed = InvariantRevision(
+        repository_id=fixture.repository_id,
+        revision_id=str(uuid4()),
+        invariant_id=fixture.invariant_id,
+        display_version=BASE_DISPLAY_VERSION,
+        statement=BASE_STATEMENT,
+        applicability=ESSENTIAL_APPLICABILITY,
+        provenance=fixture.authorship,
+        payload_digest="0" * 64,
+    )
+    reviewed = proposed.model_copy(update={"state": "reviewed"})
+    assert (proposed.state, reviewed.state) == ("proposed", "reviewed")
+    assert revision_payload_digest(proposed) == revision_payload_digest(reviewed)
+
+
 def test_neither_revision_aggregate_is_built_from_a_value_that_contradicts_itself() -> None:
-    """A predecessor set or an origin state that contradicts itself is refused at construction.
+    """A predecessor set that contradicts itself is refused at construction.
 
     Both aggregates are what the reader builds from a stored row before it recomputes the seal, so
     each refusal here is a row that is never served: a predecessor named twice would seal one
-    authored set to a second digest, a revision cannot precede itself, accepted origin data names
-    the acceptance it rests on, and a proposed revision claims none. The accepted control carries a
-    predecessor and a reference, so each forgery departs from it in exactly one field.
+    authored set to a second digest, and a revision cannot precede itself. The control carries a
+    predecessor and a derived state, so each forgery departs from it in exactly one field.
     """
 
     repository_id, revision_id, predecessor = str(uuid4()), str(uuid4()), str(uuid4())
@@ -97,8 +120,7 @@ def test_neither_revision_aggregate_is_built_from_a_value_that_contradicts_itsel
         "revision_id": revision_id,
         "provenance": make_authorship(),
         "predecessors": (predecessor,),
-        "state_at_origin": "accepted",
-        "acceptance_ref": "developer:accepted",
+        "state": "reviewed",
         "payload_digest": "0" * 64,
     }
     invariant: dict[str, Any] = {
@@ -121,26 +143,12 @@ def test_neither_revision_aggregate_is_built_from_a_value_that_contradicts_itsel
             {"predecessors": (revision_id,)},
             "must not declare itself as its own predecessor",
         ),
-        "accepted origin data with no acceptance reference": (
-            {"acceptance_ref": None},
-            "accepted origin data requires a nonempty acceptance_ref",
-        ),
-        "accepted origin data with a blank acceptance reference": (
-            {"acceptance_ref": "  "},
-            "accepted origin data requires a nonempty acceptance_ref",
-        ),
-        "a proposed revision that carries an acceptance reference": (
-            {"state_at_origin": "proposed"},
-            "a proposed revision must not carry an acceptance_ref",
-        ),
+        "a state no rule derives": ({"state": "accepted"}, "Input should be"),
     }
     for aggregate, own in ((InvariantRevision, invariant), (FamilyRevision, family)):
         control = aggregate(**shared, **own)
         assert control.predecessors == (predecessor,)
-        assert (control.state_at_origin, control.acceptance_ref) == (
-            "accepted",
-            "developer:accepted",
-        )
+        assert control.state == "reviewed"
         for why, (fields, refusal) in contradictions.items():
             with pytest.raises(ValidationError, match=refusal):
                 aggregate(**{**shared, **own, **fields})
@@ -168,8 +176,8 @@ def test_an_invariant_revision_read_refuses_a_cell_rewritten_behind_its_seal(
             next(
                 tamperer.execute(
                     "SELECT repository_id, invariant_id, revision_id, display_version, statement, "
-                    "applicability, conditions, exclusions, state_at_origin, acceptance_ref, "
-                    "provenance, payload_digest FROM invariant_revision WHERE revision_id = ?",
+                    "applicability, conditions, exclusions, state, provenance, payload_digest "
+                    "FROM invariant_revision WHERE revision_id = ?",
                     (fixture.third_revision_id,),
                 )
             )
@@ -196,8 +204,7 @@ def test_a_family_revision_read_refuses_a_cell_rewritten_behind_its_seal(
             next(
                 tamperer.execute(
                     "SELECT repository_id, family_id, revision_id, display_version, joint_guarantee, "
-                    "state_at_origin, acceptance_ref, provenance, payload_digest FROM family_revision "
-                    "WHERE revision_id = ?",
+                    "state, provenance, payload_digest FROM family_revision WHERE revision_id = ?",
                     (fixture.overlapping_family.revision_id,),
                 )
             )

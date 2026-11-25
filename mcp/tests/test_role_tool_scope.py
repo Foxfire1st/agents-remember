@@ -283,8 +283,8 @@ def test_the_architect_schema_budget_holds_on_the_bound_and_unbound_server(
     _bind(monkeypatch, _binding("architect"))
     bound = _compact_bytes(_tools(create_server(config)))
 
-    assert unbound == 72_590, f"the unbound roster measured {unbound} B"
-    assert bound == 43_988, f"the bound Architect measured {bound} B"
+    assert unbound == 72_769, f"the unbound roster measured {unbound} B"
+    assert bound == 44_167, f"the bound Architect measured {bound} B"
     assert bound <= 45_000
     assert bound < unbound
 

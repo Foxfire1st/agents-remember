@@ -27,6 +27,11 @@ _PROJECTS = "Projects"
 #: The sender word of a leaf explainer: it is no AR role (it holds no receipt and starts nothing),
 #: and a message names it by this word, its leaf and its seat (MIK-R211 v5 rule 3, D607).
 EXPLAINER_SENDER = "explainer"
+#: The sender word of a message the product itself sends. No binding can name it:
+#: a role binding names an AR role and an explainer's names ``explainer``, so no agent's message
+#: claims the product's line.
+PRODUCT_SENDER = "agents-remember"
+PRODUCT_SENDER_NAME = "Agents Remember (product)"
 
 
 def _caller(config: McpRuntimeConfig, environment: Mapping[str, str] | None) -> AgentBinding:
@@ -204,8 +209,13 @@ def _explainer_identity(config: McpRuntimeConfig, binding: AgentBinding) -> str:
 
 
 def sender_line(sender: StartingAgent) -> str:
-    """The line that opens every delivered message; an explainer's also names its binding and revision."""
+    """The line that opens every delivered message; an explainer's also names its binding and revision.
 
+    The product's own message names the product and the leaf it speaks of, and no agent.
+    """
+
+    if sender.role == PRODUCT_SENDER:
+        return f"From {PRODUCT_SENDER_NAME} · {sender.subject}"
     identity = f" · {sender.identity}" if sender.identity else ""
     return f"From {sender.role} · {sender.subject}{identity} · agent {sender.agent_id}"
 

@@ -9,11 +9,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from agents_remember.kernel.memory_cache import (
-    ignore_memory_cache,
+    ignore_memory_publication,
+    memory_publication_ignore_bytes,
     prepare_memory_cache,
     refresh_memory_cache,
 )
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
+from agents_remember.models.knowledge_files.history import ReviewFact
 from agents_remember.models.memory_content_excludes import (
     MEMORY_CONTENT_EXCLUDES,
 )
@@ -66,8 +68,10 @@ from agents_remember.worktrees.queue.closeout_recovery import (
     require_admitted_tip,
     resume_external_commits,
 )
+from agents_remember.worktrees.review_fact_source import NO_PASS_SENTENCE, leaf_review_fact
 from agents_remember.worktrees.series_closeout import series_memory_closeout
-from agents_remember.worktrees.services import LeafPublication
+from agents_remember.worktrees.services import LeafPublication, refresh_written_memory_briefs
+from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 def external_closeout_commits(
@@ -94,8 +98,17 @@ def external_closeout_commits(
             locked = leaf_cutover_refusal(contract, "the closeout")
             if locked is not None:
                 raise RuntimeError(locked)
-        refresh = _refresh_external_memory(contract, args, change)
-        closing = close_owner_history(contract.memory_worktree, _owner(contract))
+        # The history file is closed with the review's fact before the derived
+        # files are renewed, so whatever they derive from the tree reads the state that holds
+        # after it. The closing is taken back when the renewal fails, as the commit's own
+        # restoring block takes it back on any later refusal.
+        review = leaf_review_fact(contract)
+        closing = close_owner_history(contract.memory_worktree, _owner(contract), review)
+        try:
+            refresh = _refresh_external_memory(contract, args, change)
+        except BaseException:
+            closing.restore()
+            raise
         memory_commit, created = _commit_memory_content(
             contract,
             args,
@@ -113,16 +126,39 @@ def external_closeout_commits(
         )
         return MemoryCloseoutOutcome(
             memory_commit=memory_commit,
+            created_memory_commit=created,
             refreshed_onboarding=refresh.onboarding,
             refreshed_entities=refresh.entities,
             refreshed_route_overviews=refresh.route_overviews,
             route_index_refresh=refresh.route_index,
             ledger_repair=cache,
+            review_note=_review_note(closing, review),
         )
     except RuntimeError as error:
         # MIK-R52 rule 9: the code commit is already published when the memory phase runs, so
         # every refusal from it says what is true.
         raise RuntimeError(_published_code_commit_detail(change.commit, str(error))) from error
+
+
+def closeout_briefs_result(
+    contract: WorktreeContract, code_commit: str, memory: MemoryCloseoutOutcome
+) -> dict[str, str]:
+    """Report any full-refresh problem after a forward leaf closeout."""
+
+    if not memory.created_memory_commit or contract.memory_worktree is None:
+        return {}
+    problem = refresh_written_memory_briefs(
+        contract.memory_worktree,
+        PairedCode(contract.code_worktree, code_commit),
+        contract.coordination_root,
+    )
+    return {"briefsProblem": problem} if problem is not None else {}
+
+
+def _review_note(closing: HistoryClosing, review: ReviewFact | None) -> str:
+    """The closeout's sentence when it closed an open history file without a review fact."""
+
+    return NO_PASS_SENTENCE if review is None and closing.written != closing.previous else ""
 
 
 def _published_code_commit_detail(code_commit: str, detail: str) -> str:
@@ -503,7 +539,7 @@ def _commit_memory_content(
 
     Every write the closeout itself makes to the memory content is on disk before that tree is
     read: the metadata refresh and the history closing (the caller's), and the ledger cache's
-    ignore rule (:func:`ignore_memory_cache`, which may add one line to ``.gitignore``). The tree
+    and briefs' ignore rules (:func:`ignore_memory_publication`). The tree
     the gate judges is therefore the tree the commit records. A working tree that
     changed while the gate ran is refused before any Git mutation (:func:`_require_judged_tree`);
     the commit is then staged from the judged tree object itself (:func:`stage_tree`) and published
@@ -538,12 +574,10 @@ def _commit_memory_content(
         admitted = observe_admitted_tip(repository, contract.memory_work_branch, side="memory")
         dirty = worktree_dirty(repository, exclude_paths=MEMORY_CONTENT_EXCLUDES)
         if dirty:
-            try:
-                ignore_memory_cache(repository)
-            finally:
-                written = ignore.read_bytes() if ignore.is_file() else None
-                if written != unignored:
-                    preparations.append(HistoryClosing(ignore, unignored, written))
+            written = memory_publication_ignore_bytes(unignored)
+            if written != unignored:
+                preparations.append(HistoryClosing(ignore, unignored, written))
+            ignore_memory_publication(repository)
         judged = _exact_memory_tree(contract, repository)
         _refuse_ungated_memory(contract, code_commit, judged)
         # The gate can take a minute: the checkout is compared with what was admitted as soon as

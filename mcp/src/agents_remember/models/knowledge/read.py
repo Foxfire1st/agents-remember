@@ -351,7 +351,6 @@ class ReadItem(KnowledgeModel):
     exclusions: tuple[str, ...] = ()
     joint_guarantee: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
     lifecycle: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-    acceptance_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     provenance: dict[str, object] | None = None
     payload_digest: str | None = Field(default=None, pattern=SHA256_PATTERN)
 

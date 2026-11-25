@@ -15,10 +15,11 @@ small read that answers it, over the same resolved pair the reviewer opens:
   before-only head, so it counts once in each. Identities are counted once whatever families they
   belong to, so a member shared by two families is not counted twice.
 * **Every successor revision counts, except one that only carries a relationship change.** A new
-  head counts once on each side whether its text, its origin state or acceptance reference changed,
-  or nothing but its version (a record-only successor is still a revision). The two exclusions the
-  count semantics name are carried as their own typed counts instead: a successor whose text and
-  record status equal the superseded head's while an invariant's realizations, or a family's members
+  head counts once on each side whether its text changed or nothing but its version (a record-only
+  successor is still a revision); its derived state is not compared, since every new revision starts
+  as proposed. The two exclusions the count semantics name are carried as their own typed counts
+  instead: a successor whose text equals the superseded head's while an invariant's realizations, or
+  a family's members
   (by canonical invariant identity), differ -- and a head that did not change at all while its
   realizations did.
 * **An identity with no single head is not guessed.** Several heads on a side (divergent successors)
@@ -75,19 +76,18 @@ from agents_remember.models.knowledge.review_intent_summary import (
 
 __all__ = ["intent_summary_of", "read_review_intent_summary", "summarize_review"]
 
-# The invariant revision fields compared between two heads: the authored statement and its record
-# status. Display version and provenance differ on every successor, so they are not compared; a
-# successor that differs in nothing else is still counted (see ``_classify``).
+# The invariant revision fields compared between two heads: the authored statement. Display version
+# and provenance differ on every successor, and the derived state starts as proposed on every new
+# revision, so none of them is compared; a successor that differs in nothing else is still counted
+# (see ``_classify``).
 _STATEMENT_FIELDS: tuple[str, ...] = (
     "statement",
     "applicability",
     "conditions",
     "exclusions",
-    "state_at_origin",
-    "acceptance_ref",
 )
-# The same for a family revision: its joint guarantee and its record status.
-_GUARANTEE_FIELDS: tuple[str, ...] = ("joint_guarantee", "state_at_origin", "acceptance_ref")
+# The same for a family revision: its joint guarantee.
+_GUARANTEE_FIELDS: tuple[str, ...] = ("joint_guarantee",)
 
 
 @dataclass(frozen=True)
@@ -396,7 +396,7 @@ def _classify(identity: str, before: _KindSide, after: _KindSide, tally: _Tally)
         # The head is unchanged, or a successor only carries a realization/membership change.
         tally.attached_only += 0 if same_attached else 1
         return
-    # A successor revision: new text or record status, or a record-only successor.
+    # A successor revision: new text, or a record-only successor.
     tally.after_only += 1
     tally.before_only += 1
 

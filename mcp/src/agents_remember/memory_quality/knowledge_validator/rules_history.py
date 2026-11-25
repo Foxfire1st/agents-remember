@@ -99,11 +99,11 @@ from agents_remember.models.knowledge_files.history import (
     InvariantRow,
     RecordRow,
     is_closed_history,
-    keeps_change_visible,
     reanchor_mismatches,
     sidecar_entry_anchors,
     unknown_subjects,
 )
+from agents_remember.models.knowledge_files.history_governing_rows import keeps_change_visible
 from agents_remember.models.knowledge_files.history_items import invalid_history_items
 from agents_remember.models.knowledge_files.shapes import Anchor
 from agents_remember.models.knowledge_files.sidecars import FileSidecar

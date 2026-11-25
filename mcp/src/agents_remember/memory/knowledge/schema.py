@@ -70,8 +70,7 @@ CANONICAL_COLUMNS: Mapping[str, tuple[str, ...]] = {
         "applicability",
         "conditions",
         "exclusions",
-        "state_at_origin",
-        "acceptance_ref",
+        "state",
         "provenance",
         "payload_digest",
     ),
@@ -82,8 +81,7 @@ CANONICAL_COLUMNS: Mapping[str, tuple[str, ...]] = {
         "revision_id",
         "display_version",
         "joint_guarantee",
-        "state_at_origin",
-        "acceptance_ref",
+        "state",
         "provenance",
         "payload_digest",
     ),
@@ -175,8 +173,7 @@ CREATE TABLE invariant_revision (
   applicability TEXT NOT NULL,
   conditions TEXT NOT NULL,
   exclusions TEXT NOT NULL,
-  state_at_origin TEXT NOT NULL,
-  acceptance_ref TEXT,
+  state TEXT NOT NULL,
   provenance TEXT NOT NULL,
   payload_digest TEXT NOT NULL,
   PRIMARY KEY (repository_id, revision_id),
@@ -204,8 +201,7 @@ CREATE TABLE family_revision (
   revision_id TEXT NOT NULL,
   display_version TEXT NOT NULL,
   joint_guarantee TEXT NOT NULL,
-  state_at_origin TEXT NOT NULL,
-  acceptance_ref TEXT,
+  state TEXT NOT NULL,
   provenance TEXT NOT NULL,
   payload_digest TEXT NOT NULL,
   PRIMARY KEY (repository_id, revision_id),
@@ -424,17 +420,20 @@ def create_schema_statements(generation: SchemaGeneration) -> tuple[str, ...]:
     return tuple(statements)
 
 
-# The schema's name and version: those the registry's last generation declared, so the files this
-# build creates and the files an earlier build created declare the same schema.
-SCHEMA_NAME = "ar-knowledge-sqlite/v9"
-SCHEMA_USER_VERSION = 9
+# The schema's name and version. v10: a revision row's authored ``state_at_origin`` and its
+# ``acceptance_ref`` gave way to ``state``, the revision's state derived from the history files of
+# the indexed tree (proposed, reviewed or consolidated). A file of v9 is an index of an earlier
+# build, refused on open; the index cache rebuilds it (its format changed with it).
+SCHEMA_NAME = "ar-knowledge-sqlite/v10"
+SCHEMA_USER_VERSION = 10
 
 
 # The structural fingerprint of the declared schema, as measured for the eight-table shape
 # (MIK-R74). It is recorded as measured data and checked against the composition below by
 # :func:`require_pinned_schema_unchanged`: a table definition that changes changes the
-# fingerprint, and that is a finding, never a re-pin.
-SCHEMA_FINGERPRINT = "4b8e3d8024215fde21c6700ab2846bdb1d7ddb350dfca2794560b67c665d34e5"
+# fingerprint, and that is a finding, never a re-pin -- unless the change comes with a new
+# ``SCHEMA_NAME`` and ``SCHEMA_USER_VERSION`` (measured again for v10).
+SCHEMA_FINGERPRINT = "98443e2df768327b6b3973ff1aa4044fe3578b0f0f1132d137696254f4a098d5"
 
 
 def _compose() -> SchemaGeneration:

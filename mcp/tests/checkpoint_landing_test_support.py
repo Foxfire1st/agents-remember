@@ -17,6 +17,7 @@ from typing import Any
 
 from agents_remember.application import worktree_tools
 from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
+from agents_remember.kernel.git_command import read_git_blob_bytes
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
 from agents_remember.kernel.memory_ledger import LedgerRow
@@ -37,6 +38,10 @@ from test_worktree_support import git
 
 def rev(repository: Path, branch: str) -> str:
     return git(repository, "rev-parse", branch)
+
+
+def committed_ignore(repository: Path, treeish: str) -> bytes:
+    return read_git_blob_bytes(repository, rev(repository, f"{treeish}:.gitignore"))
 
 
 def memory_repository(series: WorktreeContract) -> Path:
@@ -183,7 +188,12 @@ def _unlanded_series_leaf(fixture: QueueFixture, series: WorktreeContract) -> Wo
 
 
 def accumulate_master_line(
-    fixture: QueueFixture, series: WorktreeContract, scratch: Path, *, label: str
+    fixture: QueueFixture,
+    series: WorktreeContract,
+    scratch: Path,
+    *,
+    label: str,
+    ignore: bytes | None = None,
 ) -> LedgerRow:
     """Land one code/memory pair through the series leaf's own landing route.
 
@@ -199,6 +209,8 @@ def accumulate_master_line(
     assert leaf.memory_worktree is not None
     (leaf.code_worktree / f"{label}.txt").write_text(f"{label}\n", encoding="utf-8")
     (leaf.memory_worktree / f"{label}.md").write_text(f"# {label}\n", encoding="utf-8")
+    if ignore is not None:
+        (leaf.memory_worktree / ".gitignore").write_bytes(ignore)
     # The gate judges the leaf's new code file: extend its latest open history attempt
     # with the trace row, keeping every existing row; a closed history stays frozen and
     # the row goes to the leaf's next attempt file (MIK-R07 rule 7). The closeout
@@ -306,13 +318,17 @@ def commit_code_on_source_branch(series: WorktreeContract, scratch: Path, *, lab
     return git(code, "rev-parse", "HEAD")
 
 
-def advance_source_line(series: WorktreeContract, scratch: Path, *, label: str) -> LedgerRow:
+def advance_source_line(
+    series: WorktreeContract, scratch: Path, *, label: str, ignore: bytes | None = None
+) -> LedgerRow:
     """Advance the memory source independently of the master's memory work branch."""
 
     memory = memory_repository(series)
     code_commit = commit_code_on_source_branch(series, scratch, label=label)
     with branch_checkout(memory, series.memory_source_branch, scratch / f"source-{label}") as tree:
         (tree / f"{label}.md").write_text(f"# {label}\n", encoding="utf-8")
+        if ignore is not None:
+            (tree / ".gitignore").write_bytes(ignore)
         prepare_memory_cache(tree)
         git(tree, "add", "-A")
         git(

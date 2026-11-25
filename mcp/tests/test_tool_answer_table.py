@@ -234,8 +234,7 @@ class L109LargestProductionTests(unittest.TestCase):
         )
 
     def test_read_ar_files_largest_is_operation_produced(self) -> None:
-        produced, states = _produce_l109_read_ar_files_largest()
-        self.assertEqual(states, {"current": True}, states)
+        produced = _produce_l109_read_ar_files_largest()
         case = json.loads(produced)
         self.assertEqual(case["state"], "named", case)
         self.assertEqual(len(case["files"]), 20, case)

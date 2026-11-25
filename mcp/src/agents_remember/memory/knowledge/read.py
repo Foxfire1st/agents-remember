@@ -511,10 +511,7 @@ def _invariant_revision_items(
                 applicability=str(row["applicability"]),
                 essential_conditions=tuple(row["conditions"]),
                 exclusions=tuple(row["exclusions"]),
-                lifecycle=str(row["state_at_origin"]),
-                acceptance_ref=None
-                if row["acceptance_ref"] is None
-                else str(row["acceptance_ref"]),
+                lifecycle=str(row["state"]),
                 provenance=row["provenance"],
                 payload_digest=str(row["payload_digest"]),
                 selection_reasons=(SelectionReason(stage=stage, via_id=via),),
@@ -552,10 +549,7 @@ def _family_revision_items(
                 display_label=identities.get(family_id),
                 display_version=str(row["display_version"]),
                 joint_guarantee=str(row["joint_guarantee"]),
-                lifecycle=str(row["state_at_origin"]),
-                acceptance_ref=None
-                if row["acceptance_ref"] is None
-                else str(row["acceptance_ref"]),
+                lifecycle=str(row["state"]),
                 provenance=row["provenance"],
                 payload_digest=str(row["payload_digest"]),
                 selection_reasons=(SelectionReason(stage=stage, via_id=via),),

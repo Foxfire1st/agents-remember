@@ -21,6 +21,7 @@ from agents_remember.application.agent_binding import (
     AGENT_ID_VARIABLE,
     read_agent_binding,
 )
+from agents_remember.application.file_briefs.triggers import refresh_written_memory_folder
 from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
     selection_binding,
@@ -45,8 +46,12 @@ from agents_remember.cli.role_launch_receipts import _message_binding_projection
 from agents_remember.mcp.registration.role_agents import register_role_agent_tools
 from agents_remember.mcp.server import AgentsRememberMCP, _complete_fastmcp_settings
 from agents_remember.mcp.tools import role_agents as role_agent_payloads
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
+from agents_remember.models.role_agents import RoleEnvironmentPreparation
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.worktrees.knowledge_validation import PairedCode
+from agents_remember_test_support.testing.review_git_trees import commit, git
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -64,6 +69,7 @@ from paseo_role_tools_test_support import (
     binding,
     selection_of,
 )
+from pydantic import ValidationError
 from test_paseo_launch import (
     LEAF_REF,
     MASTER_REF,
@@ -315,6 +321,53 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
 
         return asyncio.run(invoke())
 
+    def test_briefs_deferral_keeps_the_first_and_reconciled_role_start_answers(self) -> None:
+        code = self.enclosures.group / "code"
+        memory = self.enclosures.group / "memory"
+        ignored = "/memory.md\n"
+        expected = "Writing briefs requires an effective /briefs/ rule in the memory's .gitignore."
+
+        def prepare_converted_memory() -> None:
+            self.record_enclosure_in_leaf()
+            for root in (code, memory):
+                git(root, "init", "-q")
+                git(root, "config", "user.name", "Fixture")
+                git(root, "config", "user.email", "fixture@example.invalid")
+            code_commit = commit(code, {"pkg/example.py": "value = 1\n"})
+            commit(
+                memory,
+                {
+                    ".gitignore": ignored,
+                    LAYOUT_MARKER_PATH: '{"schema":"ar-memory-layout/v2","conversion":"fixture"}\n',
+                },
+            )
+            advisory = refresh_written_memory_folder(
+                memory, PairedCode(code, code_commit), self.config.coordination_root
+            )
+            self.assertEqual(advisory, expected)
+            self.enclosures.start_result["briefsProblem"] = advisory
+
+        self.enclosures.on_start = prepare_converted_memory
+        self.replace(paseo_role_caller, "read_agent_binding", return_value=binding("manager"))
+        leaf = {key: ref.model_dump(mode="json") for key, ref in selection_of("worker").items()}
+        request = {"role": "worker", "request_id": str(uuid.uuid4()), **leaf}
+        _, first = self.call("role_start", request)
+        _, repeated = self.call("role_start", request)
+
+        for answer in (first, repeated):
+            self.assertTrue(answer["ok"])
+            self.assertEqual(answer["agentId"], first["agentId"])
+            self.assertIn(expected, answer["warning"])
+            whole = json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
+            self.assertEqual(whole["status"], "running")
+            self.assertEqual(whole["agentId"], first["agentId"])
+            self.assertEqual(whole["preparation"]["briefsProblem"], expected)
+        self.assertEqual(list(self.runtime.agents), [first["agentId"]])
+        self.assertEqual(len(self.enclosures.start_calls), 1)
+        self.assertFalse((memory / "briefs").exists())
+        self.assertEqual((memory / ".gitignore").read_text(encoding="utf-8"), ignored)
+        self.assertEqual(git(memory, "status", "--porcelain=v1", "--", ".gitignore"), "")
+
     def test_the_tools_are_registered_under_their_names_and_answer_in_the_envelope(self) -> None:
         async def names() -> list[str]:
             server = FastMCP("role-tools-names")
@@ -335,6 +388,9 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
             (started["ok"], whole["status"]),
             (True, "running"),
         )
+        self.assertNotIn("briefsProblem", whole["preparation"])
+        with self.assertRaisesRegex(ValidationError, "unrelated"):
+            RoleEnvironmentPreparation.model_validate({**whole["preparation"], "unrelated": True})
         created = next(p for command, p in self.runtime.calls if command == "agent-create")
         self.assertNotIn("parentAgentId", created)
         message = {"text": "hello", "agent_id": str(uuid.uuid4())}

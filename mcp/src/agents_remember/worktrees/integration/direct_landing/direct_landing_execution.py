@@ -9,6 +9,7 @@ from agents_remember.kernel.memory_cache import refresh_memory_cache
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
 from agents_remember.models.lifecycles.mutation_evidence import GitMutationEvidence
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
+from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.worktrees.integration.direct_landing.direct_landing_errors import (
     DirectLandingError,
     DirectLandingPublicationRefused,
@@ -32,6 +33,7 @@ from agents_remember.worktrees.integration.mutation_evidence import (
     snapshot_is_clean,
 )
 from agents_remember.worktrees.knowledge_gate import ClosingReceiptError
+from agents_remember.worktrees.knowledge_validation import PairedCode
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
     CommitPublicationRefusal,
@@ -43,6 +45,8 @@ from agents_remember.worktrees.modules.git import (
     require_git,
     stage_tree,
 )
+from agents_remember.worktrees.review_note import committed_review_note
+from agents_remember.worktrees.services import refresh_written_memory_briefs
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -65,7 +69,7 @@ def execute_direct_landing(
         operation_progress=runtime.progress,
         recovery_commits=record.recoveryCommits,
     )
-    memory_commit = _direct_memory_commit(
+    memory_commit, created = _direct_memory_commit(
         runtime,
         args,
         memory_repo,
@@ -79,6 +83,14 @@ def execute_direct_landing(
         repo_name=contract.repo_name,
     )
     runtime.finish(result)
+    if created:
+        problem = refresh_written_memory_briefs(
+            memory_repo,
+            PairedCode(contract.code_repo_path, operation_input.codeCommit),
+            contract.coordination_root,
+        )
+        if problem is not None:
+            result["briefsProblem"] = problem
     return result
 
 
@@ -311,7 +323,7 @@ def _direct_memory_commit(
     memory_repo: Path,
     *,
     code_commit: str,
-) -> str:
+) -> tuple[str, bool]:
     """Create the memory-content commit, attributed to the verified code commit.
 
     Direct landing is the branch-addressed closeout route, so its memory content is the
@@ -324,10 +336,10 @@ def _direct_memory_commit(
     evidence = runtime.record.mutationEvidence["memory"]
     if evidence.state == "commit-proven":
         assert evidence.commit is not None
-        return evidence.commit
+        return evidence.commit, False
     recovery = runtime.record.recoveryCommits
     if recovery is not None and recovery.memoryContentCommit:
-        return recovery.memoryContentCommit
+        return recovery.memoryContentCommit, False
     if evidence.state == "reconciled-unchanged":
         runtime.record = reset_reconciled_attempt(runtime.store, leg="memory")
         evidence = runtime.record.mutationEvidence["memory"]
@@ -349,7 +361,7 @@ def _direct_memory_commit(
                     ),
                 },
             )
-            return memory_commit
+            return memory_commit, False
         intent = begin_git_mutation(
             args,
             leg="memory",
@@ -371,7 +383,7 @@ def _direct_memory_commit(
     )
     committed = _publish_judged_tree(runtime, memory_repo, intent, message)
     prove_git_commit(args, intent, repository=memory_repo, commit=committed)
-    return _required_recovery_commit(runtime.store.read(), "memoryContentCommit")
+    return _required_recovery_commit(runtime.store.read(), "memoryContentCommit"), True
 
 
 def _publish_judged_tree(
@@ -514,8 +526,15 @@ def _direct_landing_result(
         "ok": True,
         "operation": "direct_landing",
         "state": "landed",
-        "summary": "Direct landing: code commit verified and memory content published "
-        "or reused on the series memory branch.",
+        "summary": " ".join(
+            part
+            for part in (
+                "Direct landing: code commit verified and memory content published "
+                "or reused on the series memory branch.",
+                _review_note(contract, operation_input, memory_commit),
+            )
+            if part
+        ),
         "contractPath": contract.contract_path.as_posix(),
         "codeCommit": operation_input.codeCommit,
         "candidateTree": operation_input.candidateTree,
@@ -531,3 +550,20 @@ def _direct_landing_result(
     if documents is not None:
         result["staleDocuments"] = documents
     return result
+
+
+def _review_note(
+    contract: WorktreeContract, operation_input: DirectLandingOperationInput, memory_commit: str
+) -> str:
+    """The no-pass sentence when the landed leaf's history was closed without a review fact."""
+
+    if contract.memory_repo_path is None:
+        return ""
+    owner = operation_input.leafId
+    if not owner:
+        try:
+            topology = TaskDocumentTopology(contract.coordination_root)
+            owner = topology.resolve(operation_input.leafTaskDocumentRef).document.id
+        except TaskDocumentRefError:
+            return ""
+    return committed_review_note(Path(contract.memory_repo_path), memory_commit, owner)

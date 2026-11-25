@@ -18,10 +18,15 @@ from __future__ import annotations
 
 from typing import Final
 
+# v5: ``ix_revision`` holds every revision a file of the tree names, with its writer and whether it
+# is reviewed, so the writer table is read without the history files that name earlier revisions.
+# v4: a record row carries its derived ``state`` (proposed, reviewed, consolidated; NULL when
+# retired) and the role, harness and model of its current revision's writer; ``status`` holds only
+# a lifecycle word (``retired``, a decision's status), never an old stored state word.
 # v3 (MIK-R74): history rows are keyed by (path, id), so two files may hold one row ID.
 # v2 (MIK-R25): projected revision rows carry the store's own payload seal, so an index built by v1
 # (whose seals the store's revision readers refuse) is rebuilt rather than reused.
-INDEX_FORMAT: Final = "ar-knowledge-index/v3"
+INDEX_FORMAT: Final = "ar-knowledge-index/v7"
 
 INDEX_DDL: Final[tuple[str, ...]] = (
     """
@@ -43,6 +48,10 @@ CREATE TABLE ix_record (
   path TEXT NOT NULL,
   revision INTEGER,
   status TEXT NOT NULL,
+  state TEXT,
+  writer_role TEXT,
+  writer_harness TEXT,
+  writer_model TEXT,
   document TEXT NOT NULL
 ) STRICT
 """,
@@ -92,6 +101,18 @@ CREATE TABLE ix_history_row (
   disposition TEXT NOT NULL,
   document TEXT NOT NULL,
   PRIMARY KEY (path, id)
+) STRICT
+""",
+    """
+CREATE TABLE ix_revision (
+  record TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  writer_role TEXT,
+  writer_harness TEXT,
+  writer_model TEXT,
+  seat TEXT,
+  reviewed INTEGER NOT NULL,
+  PRIMARY KEY (record, revision)
 ) STRICT
 """,
     "CREATE INDEX ix_entry_path ON ix_entry (path)",

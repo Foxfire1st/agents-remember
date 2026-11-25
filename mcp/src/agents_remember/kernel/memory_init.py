@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.memory_ignore import BRIEFS_IGNORE_TEXT, ignore_briefs
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
@@ -278,6 +279,7 @@ def initialize_memory(
         layout = "created"
         paths.append(marker.parent)
         files[marker] = LAYOUT_MARKER_TEXT
+        files[memory_root / ".gitignore"] = BRIEFS_IGNORE_TEXT
 
     created_dirs = _create_missing_dirs([memory_root], dry_run=dry_run)
     git = _git_init_result(
@@ -303,6 +305,8 @@ def initialize_memory(
 
     created_dirs.extend(_create_missing_dirs(paths[1:], dry_run=dry_run))
     created_files = _create_missing_files(files, dry_run=dry_run)
+    if layout == "created" and not dry_run:
+        ignore_briefs(memory_root)
 
     result: dict[str, Any] = {
         "ok": True,

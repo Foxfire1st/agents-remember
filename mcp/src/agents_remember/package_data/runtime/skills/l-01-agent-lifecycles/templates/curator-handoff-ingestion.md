@@ -35,6 +35,8 @@ none of them:
 
 - `scope` is required before an entry becomes a new invariant, in the shape stated in [Curator-authored semantic scope](#curator-authored-semantic-scope).
 
+- `title` is required before an entry becomes a new invariant: the rule's name, at most 80 characters on one line. See [Invariant entries](#invariant-entries).
+
 - `admission`, `status`, `invariant_id`, `supersedes` and `proofs` are described in [the writer's input sections](#the-writers-input-sections) below.
 
 The Curator authors a joint obligation as a `family` item in `records`, never as an entry key. Give it `title`, its own `guarantee` text, `members`, `routes` and `admission` with criterion `joint_guarantee` and its justification.
@@ -67,8 +69,9 @@ Before interpreting a stored record’s format, read [knowledge use](../referenc
 
 - **Records** are one JSON file each, flat per kind, named `knowledge/<kind-dir>/<ID>-<slug>.json`
   with an optional `.md` beside it. The schema is `ar-<kind>/v1`. An invariant carries `statement`,
-  `applicability`, `conditions[]`, `exclusions[]`, `supersedes[]`, `revision`, `status`, `admission`
-  and `origin`. It never lists its code locations, tests, families or decisions: each relationship
+  `applicability`, `conditions[]`, `exclusions[]`, `supersedes[]`, `revision`, `admission`, `origin`
+  and `writer`. It carries `title` when named and `status` when retired. Realizations, proofs,
+  families and decisions stand in their own records. Each relationship
   is written once, on its owner's side.
 
 - **IDs** are minted by the writer, never by a producer. The form is `<KIND>-<6 Crockford base32>`,
@@ -196,9 +199,20 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
 - `scope` (as above) gives `applicability`, `conditions` and `exclusions`. It is required for a new
   invariant.
 
+- `title` is the rule's name: at most 80 characters on one line, with no spaces before or after.
+  It is required for a new invariant; without it the writer refuses the entry and says that the
+  `title` is missing. An invariant without a title is shown by the first six words of its statement.
+  A new revision of such an invariant through `invariant_id` is taken without a title, and the
+  write's answer has a note in `notes` that the invariant has none; give it a `title` in that or a
+  later write. A title is a name and not meaning: a write that changes only the title keeps the
+  revision.
+
 - `admission` is `{criteria, justification}` and is required for a new invariant.
 
-- `status` is optional. A new record starts `proposed`.
+- `status` is only `retired`, written to retire the record; leave it out otherwise. Name no
+  state: [Leave the state to the product](../roles/curator.md#leave-the-state-to-the-product) says
+  what the product sets and which `status` words the writer refuses, also in a record's `fields`. A
+  decision keeps its own `status` words (see [Decision records](#decision-records)).
 
 - `invariant_id` names a stored invariant, or `"handoff:<entry id>"` authored by this document.
   The authoring entry runs first regardless of list order, and the attaching entry's statement
@@ -266,7 +280,7 @@ A record item is:
 - `kind` is one of `invariant`, `family`, `decision`, `incident`, `assumption`, `limitation`,
   `failure_mode`, `scenario`, `diagnostic`, `term`, `dependent` or `weakness`.
 
-- `fields` never holds `id`, `schema`, `origin` or `revision`.
+- `fields` never holds `id`, `schema`, `origin`, `revision` or `writer`.
 
 - The `entry`'s evidence is stored in the record's `origin`.
 
@@ -494,9 +508,16 @@ A same-leaf `still_rejected` refresh with no fired item restores a current base 
   exactly once.
 
 - `revision` goes up by one when a record's meaning differs from the memory base. `admission`,
-  `status` and `origin` are not meaning.
+  `status`, `origin` and `writer` are not meaning.
 
 - `origin` records the task, the leaf or wave, the list, the entry and the evidence.
+
+- `writer` is the stamp of the record's current revision: the role, harness, model, effort and
+  seat of the agent that wrote it, the task, the leaf (or wave or crossing) and the time. The
+  product takes them from the caller's launch, never from the list; a value it cannot resolve reads
+  `unknown` with the reason. The leaf's history file names every revision the leaf wrote with its
+  stamp (`written`), and closeout writes the passed memory review into that file (`review`). Write
+  none of the three.
 
 - Each history row gets its row ID and the revision of the invariant, family, membership invariant
   or record the row is about. It also gets each examined member's revision and each cover's

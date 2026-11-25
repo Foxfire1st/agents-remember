@@ -25,6 +25,7 @@ from unittest import mock
 
 import pytest
 from agents_remember.application.knowledge_worklist.leaf import recompute_leaf_worklist
+from agents_remember.worktrees.knowledge_validation import PairedCode
 from agents_remember.worktrees.modules import closeout, closeout_external, onboarding
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from test_knowledge_closeout_gate import (
@@ -253,7 +254,7 @@ def test_a_deleted_evidence_path_stops_the_preview_and_the_preflight_before_the_
     "edit", [True, False], ids=["keeps-a-changed-path", "unchanged-files-only"]
 )
 def test_a_repointed_row_is_recomputed_and_the_closeout_lands(
-    world: Gated, ports: None, edit: bool
+    world: Gated, ports: None, edit: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """L56's repair: the row is re-pointed, the closeout lands, and the tool computes the value.
 
@@ -270,7 +271,19 @@ def test_a_repointed_row_is_recomputed_and_the_closeout_lands(
     (world.memory / CATALOG).write_text(_catalog((EVIDENCE_ROW, (evidence,))), encoding="utf-8")
     assert world.gate().ok, world.gate().refusal()
 
+    refreshed: list[PairedCode] = []
+
+    def rendering_problem(memory_root: Path, pair: PairedCode, coordination_root: Path) -> str:
+        assert memory_root == world.memory
+        assert coordination_root == world.root
+        assert "/briefs/" in git(world.memory, "show", "HEAD:.gitignore").splitlines()
+        refreshed.append(pair)
+        return "source brief rendering failed"
+
+    monkeypatch.setattr(closeout_external, "refresh_written_memory_briefs", rendering_problem)
     payload = _public_closeout(world).payload
+    assert payload["briefsProblem"] == "source brief rendering failed"
+    assert refreshed == [PairedCode(world.code, payload["code_commit"])]
     committed = _committed_catalog(world, payload["memory_content_commit"])
     assert _row_fingerprint(committed) == _value_at(world, payload["code_commit"], evidence)
     assert _row_fingerprint(committed) != STALE

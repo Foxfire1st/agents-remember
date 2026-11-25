@@ -27,7 +27,9 @@ from agents_remember.kernel.memory_attribution import (
 )
 from agents_remember.kernel.memory_cache import (
     derive_memory_ledger,
+    memory_publication_ignore_bytes,
     prepare_memory_cache,
+    prepare_memory_publication,
     refresh_memory_cache,
 )
 from agents_remember.kernel.memory_init import DEFAULT_BRANCH_CONFIG_KEY
@@ -69,7 +71,10 @@ from agents_remember.worktrees.modules.landing_commit_check import (
     check_published_tree,
     restore_hook_rewritten_worktree,
 )
-from agents_remember.worktrees.services import WorktreeServicesUnboundError
+from agents_remember.worktrees.services import (
+    WorktreeServicesUnboundError,
+    refresh_written_memory_briefs,
+)
 
 
 @dataclass(frozen=True)
@@ -367,7 +372,7 @@ def _private_staging_index(repo: Path) -> Iterator[Path]:
         yield private
 
 
-def _prepare_stage_validate(context, code_source_commit: str):
+def _prepare_stage_validate(context, code_source_commit: str, *, dry_run: bool):
     """Run the whole owned prepare/stage/validate interval on a private index.
 
     Every step after the read-only entry capture — cache preparation, staging
@@ -384,10 +389,11 @@ def _prepare_stage_validate(context, code_source_commit: str):
 
     repo = context.memory_root
     entry = _capture_entry(repo)
-    prepared_ignore: bytes | None = None
+    prepared_ignore = None if dry_run else memory_publication_ignore_bytes(entry.ignore_bytes)
+    prepare = prepare_memory_cache if dry_run else prepare_memory_publication
     try:
         with _private_staging_index(repo) as private:
-            prepared_ignore = prepare_memory_cache(repo, index_path=private)
+            prepared_ignore = prepare(repo, index_path=private)
             _stage_for_commit(repo, index_path=private)
             staged_tree = _require_git_with_index(repo, ["write-tree"], private)
             refusal = _converted_tree_refusal(context, staged_tree, code_source_commit)
@@ -414,7 +420,9 @@ def _dry_run_converted_validation(context, code_source_commit: str) -> str | Non
         head = head_commit(repo)
         tree = require_git(repo, ["rev-parse", f"{head}^{{tree}}"]).strip()
         return _converted_tree_refusal(context, tree, code_source_commit)
-    entry, _staged, prepared, refusal = _prepare_stage_validate(context, code_source_commit)
+    entry, _staged, prepared, refusal = _prepare_stage_validate(
+        context, code_source_commit, dry_run=True
+    )
     _restore_file(repo, entry, prepared)
     return refusal
 
@@ -476,7 +484,9 @@ def _publish_validated_tree(repo: Path, staged_tree: str, message: str) -> str:
     return new_commit
 
 
-def _adopt_validated_converted_tree(context, code_source_commit: str, message: str) -> str:
+def _adopt_validated_converted_tree(
+    context, code_source_commit: str, message: str
+) -> tuple[str, bool]:
     """Stage the converted content, validate the staged tree, and commit exactly it.
 
     The interval stages a private index; on a refusal the prepared file is
@@ -493,8 +503,10 @@ def _adopt_validated_converted_tree(context, code_source_commit: str, message: s
         refusal = _converted_tree_refusal(context, tree, code_source_commit)
         if refusal is not None:
             raise BaselineValidationRefused(refusal)
-        return head
-    entry, staged, prepared, refusal = _prepare_stage_validate(context, code_source_commit)
+        return head, False
+    entry, staged, prepared, refusal = _prepare_stage_validate(
+        context, code_source_commit, dry_run=False
+    )
     if refusal is not None:
         _restore_file(repo, entry, prepared)
         raise BaselineValidationRefused(refusal)
@@ -505,7 +517,7 @@ def _adopt_validated_converted_tree(context, code_source_commit: str, message: s
         raise
     prepare_memory_cache(repo)
     _stage_for_commit(repo)
-    return published
+    return published, True
 
 
 def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> dict[str, object]:
@@ -550,8 +562,10 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
         code_source_commit,
     )
     # Validate the staged converted tree before publishing its attributed baseline.
-    memory_content_commit = _adopt_validated_converted_tree(context, code_source_commit, message)
-    return {
+    memory_content_commit, created = _adopt_validated_converted_tree(
+        context, code_source_commit, message
+    )
+    payload: dict[str, object] = {
         "state": "adopted-baseline",
         "memoryContentCommit": memory_content_commit,
         "ledgerCache": refresh_memory_cache(
@@ -560,6 +574,15 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
             repo_name=context.code_repository_name,
         ),
     }
+    if created:
+        problem = refresh_written_memory_briefs(
+            context.memory_root,
+            PairedCode(context.code_repository_root, code_source_commit),
+            context.coordination_root,
+        )
+        if problem is not None:
+            payload["briefsProblem"] = problem
+    return payload
 
 
 def has_adopted_baseline(repository: Path) -> bool:

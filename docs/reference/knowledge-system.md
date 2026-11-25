@@ -12,19 +12,26 @@ Paths below are relative to the selected memory root.
 | Path | Contents |
 | --- | --- |
 | `knowledge/layout.json` | The layout marker of the memory tree, schema `ar-memory-layout/v2`, with the format version. `memory_init` writes it when it creates the memory. It can also hold `dependent_links`, a lookup that the knowledge writer (the tool `knowledge_write`; see [Writes and producer lists](#writes-and-producer-lists)) derives from the dependent records. |
-| `knowledge/<kind-directory>/<ID>-<slug>.json` | One shared record with its schema, stable ID, origin, revision, status and kind-specific content. An optional Markdown file with the same stem holds explanation. |
+| `knowledge/<kind-directory>/<ID>-<slug>.json` | One shared record with its schema, stable ID, origin, revision, the [writer stamp](#state-writer-and-review) of its current revision (`writer`), a `status` where its kind has one or the record is retired, and kind-specific content. An optional Markdown file with the same stem holds explanation. |
 | `onboarding/<source path>.md` | Current file-level prose, with numbered citation markers. |
 | `onboarding/<source path>.json` | Its `ar-onboarding-file/v1` sidecar: source path, numbered references, `realizes` entries and, on test files, `proves` entries. |
 | `onboarding/<route>/overview.md` and `overview.json` | A route overview and its `ar-onboarding-route/v1` reference sidecar. The root route is `.`. |
-| `knowledge/history/<owner-id>.json` | Curator-authored `ar-history/v1` judgment rows for a task, a foundation wave or a sync. |
+| `knowledge/history/<owner-id>.json` | Curator-authored `ar-history/v1` judgment rows for a task, a foundation wave or a sync, beside the parts that only the product writes: the revisions the owner wrote (`written`) and the fact of its passed memory review (`review`). |
 | `knowledge/history/<task id>-attempt-<n>.json` | A reopened task's later [attempt](../concepts.md#attempt), starting at 2; its earlier closed files keep their bytes. |
 
 Record directories are `invariants`, `families`, `decisions`, `incidents`,
 `assumptions`, `limitations`, `failure-modes`, `scenarios`, `diagnostics`, `terms`,
-`weaknesses` and `dependents`. An invariant owns its statement and admission;
+`weaknesses` and `dependents`. An invariant owns its title, statement and admission;
 realization and proof relationships belong to file sidecars. A family owns its
 members and routes. Other record kinds own their outgoing links. Stable IDs
 survive filename-slug changes; revisions change when meaning changes.
+
+Every invariant has a title, a name of at most 80 characters on one line in its field `title`. The
+writer refuses a new invariant without a title and says that the `title` is missing. An invariant
+without a title is shown by the first six words of its statement. A new revision of such an
+invariant is written without a title, and the answer of the write has a note that the invariant has
+none. A title is a name and no part of the meaning: a write that changes only the title does not
+change the revision.
 
 The members of a [family](../concepts.md#family) are invariants (its field `members`). A file
 realizes an invariant when its sidecar holds a `realizes` entry for it, a
@@ -128,6 +135,97 @@ obligation in its place, `split` divides one into several records, `merge` joins
 into one, and `retire` ends it. The writer stores
 the label with the family's own revision and refuses a `changed` family row without it. The
 dashboard's knowledge reader shows the label, or `effect not recorded` for a row that has none.
+
+## State, writer and review
+
+A revision of a knowledge record is the record at one revision number. Every revision of an
+invariant, a family or another kind of record has one [state](../concepts.md#record-state), which
+the product derives from the history files of the same memory tree and never stores in the record:
+
+- **proposed**: an agent wrote the revision, and no review of it is recorded. A new revision starts
+  proposed, whatever the state of the revision before it.
+- **reviewed**: the history file of the task that wrote the revision holds a review fact.
+- **consolidated**: a Consolidator kept or wrote the revision, and that work was reviewed and
+  closed out.
+
+A revision written outside a task, a foundation wave or a crossing has no history file that could
+hold its review, and reads proposed. A retired record shows no state. A reopened task speaks for
+each revision through the attempt that wrote it: a revision that a later attempt wrote reads
+proposed until that attempt is closed out with a recorded pass, and a revision of an earlier attempt
+keeps its state. A new `written` row carries the revision's `contentDigest`, a SHA-256 digest
+of its meaning fields. The reader first checks eligible review facts against the record ID,
+revision and meaning in each named review tree. The record's filename may have changed. A legacy
+record that still stores `proposed` or `accepted` reads proposed with an unknown writer until
+conversion. Before stamping that revision, the conversion checks the reviewed meaning to
+distinguish its writing owner from other history claims at the same number. If multiple
+legacy owners have exact proof of the same retained meaning, the revision reads reviewed and
+counts once under the unknown writer.
+
+Two lines can write different contents under one revision number. A crossing records that fact in
+its own history even if one of the source records has no stamp or authoring row. A legacy review
+or a Consolidator's keep can keep its credit at that number when the fact's named review tree
+contains the exact revision and meaning. A fact proven to cover different content gives no
+credit. If different content shares the number, a fact without exact proof gives no credit.
+The crossing records the selected writer evidence when the retained record has no stamp and
+the two sides infer different writers. Equal record bytes take their standing from the merged
+histories. The [knowledge index](../concepts.md#knowledge-index) resolves this evidence during
+construction, so subsequent reads open neither the history files nor the reviewed Git trees.
+
+A record carries no mark of acceptance beside its state: the three states are the whole of what
+the product records about a revision's review. A review of a particular kind is described in the
+memory's publication rules.
+
+No agent names a state. `knowledge_write` refuses an entry, or the fields of a record, whose
+`status` is `proposed`, `accepted`, `reviewed` or `consolidated`, and its refusal says that the
+product sets the state. `status: retired` retires a record. A decision's `status` (`active` or
+`under_reconsideration`), a weakness's `state` (`open` or `closed`) and the derived staleness of a
+dependent are words of their own kinds and no states.
+
+**The writer stamp.** When the writer stores a revision, it stamps the revision with the role,
+harness, model, effort and seat of the caller, the task, the owner of the write (`leaf`, `wave` or
+`crossing`) and the time (`at`). Role, seat and task come from the caller's launch binding, and
+harness, model and effort from its launch receipt; the input of a tool never reaches the stamp. A
+value that the product cannot resolve reads `unknown`, and the field `unknown` gives the reason for
+each such value; the write is not refused for it. `by` says what made the stamp: `agent` for an
+agent's call of the writer, `product` for a write the product makes itself, with the operation's
+name in `operation`, and `conversion` for a stamp the product gave an existing revision without
+writing it. A second write of the same revision by the same task renews the stamp, so it names the
+last writer of that revision; a write that leaves the revision number as it was leaves the stamp as
+it is. The record carries the stamp of its current revision in `writer`. The history file of the
+owner lists every revision the owner wrote, a record it created included, as
+`{record, revision, writer}` in `written`, so the stamps of earlier revisions are read from the
+same tree. A revision that neither its record nor a history file stamps reads as written
+by `unknown`.
+
+A memory sync that merges two lines merges their records without `writer`. Each record it stores
+then keeps the stamp of the line whose record it equals, or no stamp where that line's record has
+none. A record that combines both lines' edits is a revision the product wrote. It carries the
+product's stamp with the operation `crossing-merge`: role, harness and seat `product`, model and
+effort `none`, and the later commit time of the two merged lines. The history file of the syncing
+leaf, or on a master's line its crossing file, names that revision. Two lines' different stamps
+make no conflict; only their meaning fields do.
+
+**The review fact.** When closeout closes a task's history file, the product writes into it, in the
+same write, the memory review that passed the task's change: `round`, the reference to the verdict
+(`verdictRef`), the memory tree the Reviewer passed (`tree`), the Reviewer's stamp (`reviewer`) and
+the stamp of the agent that handed the memory change to the review (`handedOverBy`). It takes them
+from the last memory review round of the task document, and only when that round passed and names a
+usable verdict reference: trimmed, printable text within the reference length, read the same way by
+the one-time state conversion: a round recorded as a block is never a pass, and a pass that a later
+round followed is no longer the task's review. The round stores the passed memory tree and the stamp
+of the agent that recorded it. `handedOverBy` is the Curator or Consolidator registered as active on
+the leaf when the passed round is recorded: the one seat whose current launch receipt names the leaf
+(its repository and path, read as the product reads a task document reference) with one of those
+roles and is neither stopped nor rejected; receipts of one seat count once. Its time is the time the
+round is recorded, since the product knows no time of a hand-over; no message decides it. Where no
+such seat is registered, or more than one is, or its receipt holds a value no stamp can hold, it
+reads unknown with the reason, and the round is recorded all the same. The stamp belongs to the
+round as it was first recorded: a record-only correction of the same round, its verdict or its
+verdict reference, renews the recorder and keeps `handedOverBy`; a changed memory needs a new round,
+which is stamped anew. The write touches only files that the product owns; the records, families and
+cards of the tree the Reviewer passed stay as they were. Where no pass is recorded, closeout writes
+no fact, its answer says in one sentence that the task's revisions stay proposed, and it goes on:
+the review fact is no gate.
 
 ## Worklist, validator and gate
 
@@ -284,7 +382,31 @@ files named by build and tree.
 MCP `knowledge_read` names attributed records and memory-file locations for a
 selected view. Open those named files with the harness's file tools; the response
 is not record text. `read_ar_files` names the cards and recorded knowledge for
-bounded source paths, including action-asking records. `knowledge_diff` reports
+bounded source paths, including action-asking records, and carries for each path the short
+answer of its brief: the file's own rules by title and standing, with their text.
+
+A brief is one Markdown file per source file at `briefs/<path>.md` under the memory root.
+Each source-file brief folder has an `INDEX.md`. A full write preserves the task-moment
+folder `briefs/_task/`, which has no index. `briefs/TREE` records the memory tree of the
+last full write.
+
+The brief holds what the file is for, the file's rules with their text, standing, proofs,
+decisions and weaknesses, the weaknesses and decisions that belong to no rule, the documents
+that stand on it, and its families, in that order. An empty part says “None.”
+
+Memory initialization, worktree start and sync, closeout, direct landing and memory baseline
+adoption refresh all briefs after a durable write to the memory folder. Task-local
+`knowledge_write` and `citation_fix` refresh briefs for the source files of changed records.
+Writers add the Git ignore line for `briefs/` only during their existing tracked preparation.
+A writer reports a skipped refresh when the ignore line is missing.
+
+`read_ar_files` computes its short answer from current memory without writing memory files.
+If the brief on disk is missing or older, the answer reports that and says the next write
+covering the file or the whole folder will renew it. If the header is unreadable, the answer
+reports unknown freshness. See [Brief](../concepts.md#brief) for where Reviewer and Curator
+start messages put the full list of touched rules.
+
+`knowledge_diff` reports
 the files' Git differences; it infers no semantic effect.
 
 The dashboard's knowledge reader selects a memory tree and presents records,

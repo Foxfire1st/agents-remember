@@ -14,20 +14,15 @@ from __future__ import annotations
 
 from pydantic import Field, field_validator, model_validator
 
-from agents_remember.models.knowledge.authorship import (
-    PROPOSED_STATE,
-    Authorship,
-    KnowledgeState,
-)
+from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.base import (
     LABEL_MAX_LENGTH,
     PROSE_MAX_LENGTH,
-    REFERENCE_MAX_LENGTH,
     SHA256_PATTERN,
     UUID_PATTERN,
     KnowledgeModel,
-    require_consistent_acceptance,
 )
+from agents_remember.models.knowledge_files.record_state import RecordState
 
 
 class InvariantDraft(KnowledgeModel):
@@ -59,7 +54,10 @@ class InvariantRevision(KnowledgeModel):
     ``predecessors`` is the declared predecessor set within the same invariant. It is stored
     sorted and unique, because it is part of the sealed payload: an unsorted or
     duplicate-bearing tuple would make the same authored set digest differently depending on
-    how the caller happened to write it.
+    how the caller happened to write it. ``state`` is the revision's derived state in the tree it
+    was read from (proposed, reviewed or consolidated,
+    :mod:`agents_remember.models.knowledge_files.record_state`); it is never authored and the seal
+    does not cover it.
     """
 
     repository_id: str = Field(pattern=UUID_PATTERN)
@@ -70,8 +68,7 @@ class InvariantRevision(KnowledgeModel):
     applicability: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
     conditions: tuple[str, ...] = ()
     exclusions: tuple[str, ...] = ()
-    state_at_origin: KnowledgeState = PROPOSED_STATE
-    acceptance_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
+    state: RecordState = "proposed"
     provenance: Authorship
     predecessors: tuple[str, ...] = ()
     payload_digest: str = Field(pattern=SHA256_PATTERN)
@@ -106,8 +103,7 @@ class InvariantRevision(KnowledgeModel):
         return value
 
     @model_validator(mode="after")
-    def _require_self_consistent_acceptance(self) -> InvariantRevision:
-        require_consistent_acceptance(self.state_at_origin, self.acceptance_ref)
+    def _require_no_self_predecessor(self) -> InvariantRevision:
         if self.revision_id in self.predecessors:
             raise ValueError("a revision must not declare itself as its own predecessor")
         return self

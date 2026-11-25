@@ -5,10 +5,17 @@
 import { render } from '@testing-library/react';
 import { expect, it } from 'vitest';
 
-import { changeSetModel, ROLE_LABEL, type ChangeSetInputs, type LocationNode } from '../changeSetOrder';
+import {
+  changeSetModel,
+  ROLE_LABEL,
+  type ChangeSetInputs,
+  type FamilyHeading,
+  type LocationNode,
+  type SubjectNode,
+} from '../changeSetOrder';
 import { l181Inputs } from '../changeSetOrder.test-utils';
 import type { ExplainerCategory, ExplainerGrade } from '../explainer/explainerApi';
-import { LocationRow } from './TreeRows';
+import { FamilyRow, LocationRow, SubjectRow } from './TreeRows';
 import * as styles from './treeStyles';
 
 const category: ExplainerCategory = {
@@ -92,4 +99,61 @@ it('keeps every changed location at three cells, graded or not', () => {
   expect(view.getAllByTestId('review-judgment-chip').length).toBeGreaterThan(0);
   // One chip, one trailing cell: a grade draws on the rows it names and moves no other row's cells.
   expect(rows.filter((row) => row.querySelector('[data-testid="review-judgment-chip"]')).length).toBe(1);
+});
+
+// A family or subject row ends with its record's state in the candidate tree, in the
+// row's own muted reason look; the writer (role and model) is its title and part of the row's name.
+const subject = (standing?: SubjectNode['row']['standing']) =>
+  ({
+    key: '-/s1',
+    row: { kind: 'invariant', id: 'INV-7K3F9Q', selectorId: 's1', title: 'INV-7K3F9Q holds', badge: 'changed', standing },
+    first: true,
+    effects: [],
+    cards: 'unread',
+    locationsKnown: false,
+    changed: [],
+    reason: 'changed',
+  }) as unknown as SubjectNode;
+
+it('ends a subject row with its state, the writer in its title and accessible name', () => {
+  const view = render(
+    <SubjectRow
+      node={subject({ record_state: 'reviewed', writer: { role: 'worker', model: 'model-b' } })}
+      nested={false}
+      current={false}
+      onSelect={() => undefined}
+    />,
+  );
+  const row = view.getByTestId('review-family-member-open');
+  expect([...row.children].map((cell) => cell.className)).toEqual([styles.caret, styles.name, styles.reasonCell]);
+  const tag = view.getByTestId('review-record-state');
+  expect(tag.className).toBe(styles.reason);
+  expect(tag.textContent).toBe('reviewed');
+  expect(tag.title).toBe('reviewed · written by worker · model-b');
+  expect(row.getAttribute('aria-label')).toContain('reviewed · written by worker · model-b');
+});
+
+it('draws a subject row with no state as before, and an unconverted one as proposed with no writer', () => {
+  const plain = render(<SubjectRow node={subject()} nested={false} current={false} onSelect={() => undefined} />);
+  const row = plain.getByTestId('review-family-member-open');
+  expect(row.lastElementChild?.className).not.toBe(styles.reasonCell);
+  expect(plain.queryByTestId('review-record-state')).toBeNull();
+  plain.unmount();
+  const old = render(
+    <SubjectRow node={subject({ record_state: 'proposed', writer: null })} nested={false} current={false} onSelect={() => undefined} />,
+  );
+  const tag = old.getByTestId('review-record-state');
+  expect([tag.textContent, tag.title]).toEqual(['proposed', 'proposed']);
+});
+
+it('ends a family row with its state beside its reason', () => {
+  const family = {
+    row: { kind: 'family', id: 'FAM-STATEW', selectorId: 'f1', title: 'State and writer', badge: 'unchanged', standing: { record_state: 'consolidated', writer: { role: 'consolidator', model: 'model-c' } } },
+    reason: '',
+  } as FamilyHeading;
+  const view = render(<FamilyRow family={family} current={false} onSelect={() => undefined} />);
+  const tag = view.getByTestId('review-record-state');
+  expect(tag.textContent).toBe('consolidated');
+  expect(tag.title).toBe('consolidated · written by consolidator · model-c');
+  expect(view.getByTestId('review-family-open').getAttribute('aria-label')).toContain('written by consolidator · model-c');
 });

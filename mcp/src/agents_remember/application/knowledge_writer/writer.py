@@ -71,6 +71,7 @@ from agents_remember.models.knowledge_files.documents import (
 from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA
 from agents_remember.models.knowledge_files.records import DependentRecord
 from agents_remember.models.knowledge_files.unexplained import FILE_ITEM_KIND, HUNK_ITEM_KIND
+from agents_remember.models.knowledge_files.writer_stamp import WriterStamp
 
 UNCONVERTED = (
     "this memory tree has no layout marker, so it is unconverted: the file writer writes converted "
@@ -118,6 +119,10 @@ class WriteRequest:
 
     When it cannot be read, use the subject's persisted worklist flag or the operation's own base.
     """
+    stamp: WriterStamp | None = None
+    """The caller's stamp, resolved once by the write's route from its launch binding and receipt,
+    never from the hand-off. Without it every revision is stamped ``unknown``
+    with the reason."""
 
 
 def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) -> WriteReport:
@@ -154,6 +159,7 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         onboarding_counted=_onboarding_counted(request.worklist),
         memory_base=request.memory_base,
         coordination_root=request.coordination_root,
+        stamp=request.stamp,
     )
     authoring.run(document)
     carried = carry_entries(state, snapshot, request.owner)
@@ -223,7 +229,7 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         )
     if refused:
         return replace(report, state="refused", problems=refused)
-    return _finish(report, state, files, request.commit)
+    return _finish(report, state, files, request)
 
 
 CROSSING_ROWS_ONLY = (
@@ -444,11 +450,11 @@ def _writer_report_note() -> str:
 
 
 def _finish(
-    report: WriteReport, state: MemoryState, files: Mapping[str, bytes], commit: bool
+    report: WriteReport, state: MemoryState, files: Mapping[str, bytes], request: WriteRequest
 ) -> WriteReport:
     """A validated operation: written in a committing run, planned (nothing written) otherwise."""
 
-    if not commit:
+    if not request.commit:
         return replace(
             report,
             state="planned",
@@ -456,7 +462,7 @@ def _finish(
             removed=tuple(path for path in state.files if path not in files),
         )
     try:
-        written, removed = state.write(files)
+        written, removed = state.write(files, request.owner)
     except OSError as error:
         recovery = (
             (

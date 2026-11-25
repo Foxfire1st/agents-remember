@@ -1,10 +1,17 @@
 """Global knowledge records: one JSON file per truth under ``knowledge/<kind-dir>/`` (MIK-R21 rule 4).
 
 Each record declares ``schema: ar-<kind>/v1`` and carries its stable ``id`` (:mod:`.ids`), its
-``origin``, a ``revision`` (an integer that increments only when meaning changes) and a ``status``.
-Invariant, family and facet records use ``proposed`` | ``accepted`` | ``retired``; a decision uses
-``active`` | ``under_reconsideration`` and leaves use by being superseded. Only invariant, family
-and decision records carry ``admission``.
+``origin`` and a ``revision`` (an integer that increments only when meaning changes). Invariant,
+family and facet records leave use by ``status: retired``; a decision's ``status`` is ``active`` |
+``under_reconsideration`` and it leaves use by being superseded. Only invariant, family and decision
+records carry ``admission``. Every record may carry ``writer``, the stamp of its current revision
+(:mod:`.writer_stamp`).
+
+**No stored state.** Whether a revision is proposed, reviewed or
+consolidated is derived by the product from the history files of the same tree, never typed into
+the record. A tree written before the one-time conversion still holds the old words ``proposed``
+and ``accepted`` in ``status``; they are read so that such a tree still parses, they mean nothing,
+and the writer never writes them (:data:`LEGACY_STATE_WORDS`).
 
 **Ownership (Doc14 §2).** A relationship is written exactly once, on its owner's side:
 
@@ -41,6 +48,7 @@ from agents_remember.models.knowledge_files.shapes import (
     IncidentId,
     InvariantAdmission,
     InvariantId,
+    InvariantTitle,
     Label,
     LegacyUnassessed,
     Link,
@@ -53,8 +61,13 @@ from agents_remember.models.knowledge_files.shapes import (
     require_unique,
 )
 from agents_remember.models.knowledge_files.sidecars import RoutePath
+from agents_remember.models.knowledge_files.writer_stamp import WriterStamp
 
-RecordStatus = Literal["proposed", "accepted", "retired"]
+RecordStatus = Literal["retired"]
+# The words an earlier format stored as a typed state. Read so that an unconverted tree parses;
+# they carry no meaning and nothing writes them (the conversion removes them).
+LEGACY_STATE_WORDS: Final = ("proposed", "accepted")
+StoredStatus = Literal["retired", "proposed", "accepted"]
 DecisionStatus = Literal["active", "under_reconsideration"]
 AlternativeStatus = Literal["chosen", "rejected", "deferred"]
 IncidentApplicability = Literal["unresolved", "resolved", "historical_only"]
@@ -88,6 +101,7 @@ class _Record(FileModel):
 
     id: RecordId
     origin: Origin
+    writer: WriterStamp | None = None
 
     @model_validator(mode="after")
     def _require_own_prefix_and_relations(self) -> _Record:
@@ -118,7 +132,7 @@ class _FacetRecord(_LinkedRecord):
     """
 
     revision: int = Field(ge=1)
-    status: RecordStatus
+    status: StoredStatus | None = None
 
 
 class InvariantRecord(_Record):
@@ -129,7 +143,10 @@ class InvariantRecord(_Record):
     schema_: Literal["ar-invariant/v1"] = Field(default="ar-invariant/v1", alias="schema")
     id: InvariantId
     revision: int = Field(ge=1)
-    status: RecordStatus
+    status: StoredStatus | None = None
+    # A name and no part of the rule's meaning. Optional: every rule written
+    # before titles existed has none and keeps none until a later write names it.
+    title: InvariantTitle | None = None
     statement: Text
     applicability: Text
     conditions: tuple[Text, ...]
@@ -153,7 +170,7 @@ class FamilyRecord(_Record):
     schema_: Literal["ar-family/v1"] = Field(default="ar-family/v1", alias="schema")
     id: FamilyId
     revision: int = Field(ge=1)
-    status: RecordStatus
+    status: StoredStatus | None = None
     title: Label
     guarantee: Text
     members: tuple[InvariantId, ...]
@@ -494,12 +511,15 @@ def record_status(record: KnowledgeRecord) -> str:
     The older kinds store ``status``; a weakness stores ``state`` (``open`` or ``closed``), and a
     dependent stores neither, because whether its document is stale is derived from what the document
     stands on and never written into the record (MIK-R124 rule 3). The empty word is that fact, not a
-    default status: a caller that needs currency must derive it.
+    default status: a caller that needs currency must derive it. An old stored state word
+    (:data:`LEGACY_STATE_WORDS`) is no lifecycle word and reads as the empty word too: whether a
+    revision is proposed, reviewed or consolidated is derived, never stored.
     """
 
     if isinstance(record, WeaknessRecord):
         return record.state
-    return getattr(record, "status", "")
+    word = getattr(record, "status", None) or ""
+    return "" if word in LEGACY_STATE_WORDS else word
 
 
 RECORD_MODELS: Final[Mapping[RecordKind, type[KnowledgeRecord]]] = {

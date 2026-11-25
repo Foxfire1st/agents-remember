@@ -138,9 +138,8 @@ ROLE_POINTER_ACTIONS = {
         (
             "reference/knowledge/use.md",
             (
-                "Before editing source, call `knowledge_read` on "
-                '`agents-remember-task` with `view="source_context"` for each '
-                "file you will edit; read"
+                "For a record you need whole, call `knowledge_read` on "
+                '`agents-remember-task` with `view="source_context"`; read'
             ),
         ),
         (
@@ -174,11 +173,7 @@ ROLE_POINTER_ACTIONS = {
     "curator": [
         (
             "reference/knowledge/use.md",
-            (
-                "Before checking code and memory, call `knowledge_read` on "
-                "`agents-remember-task` for the files or records you check; "
-                "read"
-            ),
+            ("Call `knowledge_read` on `agents-remember-task` for the records you check; read"),
         ),
         ("reference/knowledge/use.md", "Before interpreting a knowledge read, read"),
         (
@@ -260,8 +255,8 @@ ROLE_POINTER_ACTIONS = {
         (
             "reference/knowledge/use.md",
             (
-                "When inspecting changes, call `knowledge_read` on "
-                "`agents-remember-task` for each changed file; read"
+                "Call `knowledge_read` on `agents-remember-task` for the "
+                "changed files' records you need whole; read"
             ),
         ),
         ("reference/knowledge/commands.md", "Before a knowledge-system command or check, read"),
@@ -277,8 +272,8 @@ ROLE_POINTER_ACTIONS = {
         (
             "reference/knowledge/use.md",
             (
-                "Before investigating repository code, call `knowledge_read` "
-                "on `agents-remember-task` for the files involved; read"
+                "Call `knowledge_read` on `agents-remember-task` for the "
+                "records you need whole; read"
             ),
         ),
         (

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application import provider_runtime as provider_runtime_api
+from agents_remember.application.file_briefs.triggers import refresh_written_memory_folder
 from agents_remember.application.knowledge_gate import KnowledgeGate
 from agents_remember.application.knowledge_worklist import LeafWorklistRecompute
 from agents_remember.application.memory_quality.converted_base import (
@@ -28,6 +29,7 @@ from agents_remember.memory_quality.style.citations import (
 )
 from agents_remember.models.task_document import CanonicalTaskObservation
 from agents_remember.providers import provider_setup as provider_setup_api
+from agents_remember.worktrees.knowledge_validation import PairedCode
 from agents_remember.worktrees.services import (
     LeafAgentArchivePort,
     ProviderSetupRequestSpec,
@@ -213,6 +215,13 @@ class CitationGuardAdapter:
         )
 
 
+def _file_briefs_problem(
+    memory_root: Path, paired_code: PairedCode, coordination_root: Path
+) -> str | None:
+    writing = refresh_written_memory_folder(memory_root, paired_code, coordination_root)
+    return writing if isinstance(writing, str) else None
+
+
 def build_default_worktree_services(
     *, leaf_agent_archive: LeafAgentArchivePort | None = None
 ) -> WorktreeServices:
@@ -227,6 +236,7 @@ def build_default_worktree_services(
         knowledge_gate=KnowledgeGate(),
         review_artifact_cleanup=ReviewArtifactCleanup(),
         leaf_agent_archive=leaf_agent_archive,
+        file_briefs=_file_briefs_problem,
     )
 
 

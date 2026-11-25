@@ -9,12 +9,33 @@ from pydantic import Field, model_validator
 from agents_remember.models.knowledge.base import (
     LABEL_MAX_LENGTH,
     PROSE_MAX_LENGTH,
+    REFERENCE_MAX_LENGTH,
     UUID_PATTERN,
     KnowledgeModel,
 )
 from agents_remember.models.knowledge.review_meaning_effects import ReviewOutlineMeaning
+from agents_remember.models.knowledge_files.record_state import RecordState
 
 OutlineChange = Literal["added", "removed", "changed", "unchanged", "unknown"]
+
+
+class ReviewOutlineWriter(KnowledgeModel):
+    """Who wrote a record's revision in the candidate tree: role and model."""
+
+    # The writer's stamp admits labels of reference length; the outline shows what it stores.
+    role: str = Field(max_length=REFERENCE_MAX_LENGTH)
+    model: str = Field(max_length=REFERENCE_MAX_LENGTH)
+
+
+class ReviewOutlineStanding(KnowledgeModel):
+    """A record's derived state and writer in the candidate tree's index, as a row shows them.
+
+    A baseline-only row has no candidate standing. Retirement suppresses the derived state.
+    An unattributed candidate writer is projected with unknown role and model.
+    """
+
+    record_state: RecordState | None = None
+    writer: ReviewOutlineWriter | None = None
 
 
 class ReviewOutlineMember(KnowledgeModel):
@@ -26,7 +47,7 @@ class ReviewOutlineMember(KnowledgeModel):
     meaning: ReviewOutlineMeaning
 
 
-class ReviewOutlineFamily(KnowledgeModel):
+class ReviewOutlineFamily(ReviewOutlineStanding):
     selector_id: str = Field(pattern=UUID_PATTERN)
     id: str
     title: str = Field(max_length=LABEL_MAX_LENGTH)
@@ -36,7 +57,7 @@ class ReviewOutlineFamily(KnowledgeModel):
     meaning: ReviewOutlineMeaning
 
 
-class ReviewOutlineInvariant(KnowledgeModel):
+class ReviewOutlineInvariant(ReviewOutlineStanding):
     selector_id: str = Field(pattern=UUID_PATTERN)
     id: str
     summary: str = Field(max_length=120)

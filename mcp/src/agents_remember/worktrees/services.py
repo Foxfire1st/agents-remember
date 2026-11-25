@@ -27,7 +27,7 @@ from agents_remember.models.task_document import CanonicalTaskObservation
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 if TYPE_CHECKING:
-    pass
+    from agents_remember.worktrees.knowledge_validation import PairedCode
 
 
 class TerminalCommit(Protocol):
@@ -387,6 +387,19 @@ class WorktreeServices:
     review_artifact_cleanup: ReviewArtifactCleanupPort | None = None
     knowledge_gate: KnowledgeGatePort | None = None
     leaf_agent_archive: LeafAgentArchivePort | None = None
+    file_briefs: Callable[[Path, PairedCode, Path], str | None] | None = None
+
+
+def refresh_written_memory_briefs(
+    memory_root: Path, paired_code: PairedCode, coordination_root: Path
+) -> str | None:
+    """Refresh derived output after publication and return any advisory failure."""
+
+    try:
+        refresh = worktree_services().file_briefs
+    except WorktreeServicesUnboundError:
+        return None
+    return None if refresh is None else refresh(memory_root, paired_code, coordination_root)
 
 
 class LeafAgentArchivePort(Protocol):

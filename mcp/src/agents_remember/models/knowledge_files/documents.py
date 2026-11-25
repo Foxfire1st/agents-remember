@@ -8,6 +8,8 @@ Paths are memory-repository-relative POSIX strings:
 ``knowledge/history/<owner-id>.json``          a history file (schema owned by MIK-R07); a
                                                reopened leaf's later attempt is
                                                ``<owner-id>-attempt-<n>.json``
+``knowledge/history/converted-reviews.json``   the converted review facts of owners closed
+                                               before reviews were recorded
 ``knowledge/census/<census-id>/…``             census files (schemas owned by MIK-R20)
 ``onboarding/<source path>.json``              a file sidecar beside ``<source path>.md``
 ``onboarding/<route>/overview.json``           a route sidecar beside ``overview.md``
@@ -28,6 +30,10 @@ from typing import Any, Final
 
 from agents_remember.models.knowledge_files.canonical import parse_json
 from agents_remember.models.knowledge_files.census import CENSUS_MODELS, CensusDocument
+from agents_remember.models.knowledge_files.converted_reviews import (
+    CONVERTED_REVIEWS_SCHEMA,
+    ConvertedReviews,
+)
 from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA, HistoryFile
 from agents_remember.models.knowledge_files.ids import CROCKFORD_ALPHABET, RecordKind
 from agents_remember.models.knowledge_files.records import (
@@ -72,11 +78,18 @@ SCHEMA_MODELS: Final[Mapping[str, type[FileModel]]] = {
     ROUTE_SIDECAR_SCHEMA: RouteSidecar,
     LAYOUT_MARKER_SCHEMA: LayoutMarker,
     HISTORY_SCHEMA: HistoryFile,
+    CONVERTED_REVIEWS_SCHEMA: ConvertedReviews,
     **CENSUS_MODELS,
 }
 
 KnowledgeDocument = (
-    KnowledgeRecord | FileSidecar | RouteSidecar | LayoutMarker | HistoryFile | CensusDocument
+    KnowledgeRecord
+    | FileSidecar
+    | RouteSidecar
+    | LayoutMarker
+    | HistoryFile
+    | ConvertedReviews
+    | CensusDocument
 )
 
 _SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")

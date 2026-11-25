@@ -42,6 +42,7 @@ from agents_remember.worktrees.modules.args import WorktreeArgs, report_operatio
 from agents_remember.worktrees.modules.closeout_external import (
     GATE_NOT_APPLICABLE,
     candidate_gate_verdict,
+    closeout_briefs_result,
     closeout_changed_paths,
     external_closeout_commits,
     refuse_ungated_candidate,
@@ -50,9 +51,9 @@ from agents_remember.worktrees.modules.closeout_external import (
 from agents_remember.worktrees.modules.closeout_lineage import (
     heal_current_source_lineage,
 )
+from agents_remember.worktrees.modules.closeout_source_heads import validate_closeout_source_heads
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
-    branch_commit,
     commit_date,
     head_commit,
     worktree_dirty,
@@ -156,27 +157,6 @@ def _refresh_plans_have_work(
         or bool(route_overview_refresh["required"])
         or route_index_refresh["written"] > 0
     )
-
-
-def _landed_source_heads(contract, base: str, integrated: str) -> set[str]:
-    """The source heads this contract's own landing may legitimately have produced.
-
-    Both a finished integration and a checkpoint move the recorded source branch forward and
-    record the commit they moved it to, so both make that commit an expected head. Keying only
-    on ``completed`` refused a checkpointed series on its next closeout with "source branch
-    moved since task start", describing the checkpoint's own recorded landing as foreign
-    movement. A source that genuinely moved elsewhere is still refused, because it matches
-    neither head.
-    """
-
-    expected = {base}
-    if contract.integration_status in {"completed", "checkpointed"} and integrated:
-        expected.add(integrated)
-    return expected
-
-
-def _format_expected_heads(expected: set[str]) -> str:
-    return ", ".join(sorted(expected))
 
 
 @dataclass(frozen=True)
@@ -509,36 +489,6 @@ def _gate_refused_preview(contract, refusal: str) -> dict[str, object]:
     }
 
 
-def _validate_closeout_source_heads(contract) -> None:
-    current_code_source = branch_commit(contract.code_repo_path, contract.code_source_branch)
-    expected_code_heads = _landed_source_heads(
-        contract, contract.code_base_commit, contract.integrated_code_commit
-    )
-    if current_code_source not in expected_code_heads:
-        raise RuntimeError(
-            "code source branch moved since task start: "
-            f"{contract.code_source_branch} is {current_code_source}, "
-            f"expected {_format_expected_heads(expected_code_heads)}"
-        )
-    if (
-        contract.memory_mode == "external"
-        and contract.memory_repo_path is not None
-        and contract.memory_base_commit
-    ):
-        current_memory_source = branch_commit(
-            contract.memory_repo_path, contract.memory_source_branch
-        )
-        expected_memory_heads = _landed_source_heads(
-            contract, contract.memory_base_commit, contract.integrated_memory_content_commit
-        )
-        if current_memory_source not in expected_memory_heads:
-            raise RuntimeError(
-                "memory source branch moved since task start: "
-                f"{contract.memory_source_branch} is {current_memory_source}, "
-                f"expected {_format_expected_heads(expected_memory_heads)}"
-            )
-
-
 def _validate_closeout_source_state(contract, *, dry_run: bool) -> WorktreeContract:
     """Prove the full super -> master -> leaf chain, self-healing a plain fast-forward.
 
@@ -548,7 +498,7 @@ def _validate_closeout_source_state(contract, *, dry_run: bool) -> WorktreeContr
     identity the sync left on disk.
     """
     healed = heal_current_source_lineage(contract, operation="closeout", dry_run=dry_run)
-    _validate_closeout_source_heads(healed.contract)
+    validate_closeout_source_heads(healed.contract)
     return healed.contract
 
 
@@ -821,7 +771,14 @@ def _closed_result_payload(updated, facts: _CloseoutResultFacts) -> dict[str, An
         # (`260918-TSIP` `T54`).
         "contractPath": updated.contract_path.as_posix(),
         **status_payload(updated),
-        "summary": "Closeout completed; integrate the task branches back into their source branches.",
+        "summary": " ".join(
+            part
+            for part in (
+                "Closeout completed; integrate the task branches back into their source branches.",
+                memory.review_note,
+            )
+            if part
+        ),
         "code_commit": facts.code_commit,
         "memory_content_commit": memory.memory_commit,
         "refreshed_onboarding": _bounded_paths(
@@ -832,6 +789,7 @@ def _closed_result_payload(updated, facts: _CloseoutResultFacts) -> dict[str, An
         "route_index_refresh": memory.route_index_refresh,
         "integration_reopen": facts.integration_reopen,
         "closeout_gate": _closeout_gate_payload(facts.gate_guard),
+        **closeout_briefs_result(updated, facts.code_commit, memory),
     }
     repair = _memory_ledger_repair(updated, memory, operation="worktree_closeout_apply")
     if repair is not None:

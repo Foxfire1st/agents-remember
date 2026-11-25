@@ -434,6 +434,11 @@ def _crossing_setup(
 ) -> Callable[[Path], tuple[CrossingPlanView, str]]:
     """A scratch setup repeating the admitted merge plus its structural crossing."""
 
+    # The ignore merge uses the stash layer, which also calls this proof module.
+    from agents_remember.worktrees.sync_transaction_git._ignore_merge import (  # noqa: PLC0415
+        settle_generated_briefs_ignore,
+    )
+
     def run(scratch: Path) -> tuple[CrossingPlanView, str]:
         merged = run_git(scratch, ["merge", "--no-commit", "--no-edit", side.sourceCommit])
         if merged.returncode not in {0, 1} or merge_head(scratch) != side.sourceCommit:
@@ -445,6 +450,7 @@ def _crossing_setup(
             owner=owner,
         )
         apply_crossing(scratch, plan)
+        settle_generated_briefs_ignore(scratch, side.preSyncHead, side.sourceCommit)
         scratch_side = side.model_copy(update={"worktree": str(scratch)})
         history_owner = (
             open_crossing_history(scratch, plan)

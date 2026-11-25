@@ -1,9 +1,9 @@
 """The family reads: family identity and sealed family revisions.
 
 A family is a stable subject whose revision carries an authored joint guarantee about a set of
-invariant revisions. A family revision is one sealed aggregate -- the guarantee, the origin state,
-the acceptance reference and the provenance -- and every read re-derives the stored revision's
-payload seal on the way out. Text records hold no predecessor edge, so a decoded revision carries
+invariant revisions. A family revision is one sealed aggregate -- the guarantee and the provenance --
+read with its derived state, and every read re-derives the stored revision's payload seal on the
+way out. Text records hold no predecessor edge, so a decoded revision carries
 none.
 
 These functions only read. The rows come from the derived index of a memory tree
@@ -29,8 +29,8 @@ if TYPE_CHECKING:
 _FAMILY_COLUMNS = "repository_id, family_id, display_label, label_provenance"
 
 _FAMILY_REVISION_COLUMNS = (
-    "repository_id, family_id, revision_id, display_version, joint_guarantee, state_at_origin, "
-    "acceptance_ref, provenance, payload_digest"
+    "repository_id, family_id, revision_id, display_version, joint_guarantee, state, provenance, "
+    "payload_digest"
 )
 
 

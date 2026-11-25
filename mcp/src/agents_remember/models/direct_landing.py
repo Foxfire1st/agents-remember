@@ -41,6 +41,7 @@ class DirectLandingResponse(ToolResponse):
     candidatePaths: list[str] | None = Field(default=None, max_length=4096)
     codeCommitMessage: str | None = None
     ledgerCache: dict[str, Any] | None = None
+    briefsProblem: str | None = None
     dryRun: bool = False
     memory: dict[str, Any] | None = None
     staleDocuments: dict[str, Any] | None = None

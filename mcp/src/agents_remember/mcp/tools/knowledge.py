@@ -47,6 +47,7 @@ from agents_remember.application.knowledge_bootstrap_admission import (
     admit_bootstrap_context,
 )
 from agents_remember.application.knowledge_currentness import CodeTree
+from agents_remember.application.knowledge_diff_decisions import change_counts, decision_records
 from agents_remember.application.knowledge_file_diff import (
     held_paths,
     knowledge_file_diff,
@@ -56,8 +57,6 @@ from agents_remember.application.knowledge_names import (
     NameResolver,
     SelectionMovedError,
     SelectionProvenance,
-    _memory_commit,
-    _memory_dirty,
     project_knowledge_body,
 )
 from agents_remember.application.knowledge_paging import threshold_block
@@ -87,6 +86,7 @@ from agents_remember.application.knowledge_routes_report import (
     working_tree_files,
 )
 from agents_remember.application.knowledge_worklist.surface import leaf_worklist_fields
+from agents_remember.application.knowledge_write_answer import write_answer
 from agents_remember.application.knowledge_write_route import (
     BLANK_AUTHORIZATION,
     WaveTarget,
@@ -100,10 +100,20 @@ from agents_remember.application.knowledge_write_route import (
     wave_write_report,
 )
 from agents_remember.application.knowledge_writer import WriteReport
+from agents_remember.application.knowledge_writers_view import (
+    WritersRequest,
+    WriterTableRefusal,
+    writers_view,
+)
+from agents_remember.application.memory_checkout_state import (
+    memory_checkout_commit,
+    memory_checkout_dirty,
+)
 from agents_remember.application.published_intent import (
     SelectedKnowledgeDataset,
     select_knowledge_dataset,
 )
+from agents_remember.application.record_standing_answers import record_answer_standing
 from agents_remember.application.worktree_code_state import (
     CODE_STATE_COMMIT,
     CODE_STATE_WORKING_TREE,
@@ -312,6 +322,7 @@ def _record_view(
         "operation": "knowledge_read",
         "view": "record",
         "state": "view",
+        **record_answer_standing(found),
         "repositoryId": repository_id,
         "memoryRoot": memory_root.as_posix(),
         "memoryTree": {"treeKey": tree.tree_key, "indexState": tree.index_state},
@@ -319,10 +330,7 @@ def _record_view(
     }
     if isinstance(prose, dict):
         # The prose file is named, never carried: this read names where a record is.
-        answer["prose"] = {
-            "path": prose.get("path"),
-            "state": prose.get("state"),
-        }
+        answer["prose"] = {"path": prose.get("path"), "state": prose.get("state")}
     _bound_record_lists(answer)
     return answer
 
@@ -335,8 +343,11 @@ def _one_view(
     workspace_root: str | None = None,
     coordination_root: str | None = None,
 ) -> dict[str, Any]:
-    """The answer one single-record view holds: a record's truth view, or the marks' listing."""
+    """The answer one single-record view holds: a record's truth view, the marks' listing, or the
+    writers' table."""
 
+    if request.view == "writers":
+        return _writers_view(request, selected, coordination_root)
     if request.view == "record":
         return _record_view(
             request,
@@ -546,8 +557,8 @@ def _refused_read(view: str, repository_id: str, code: str, detail: str) -> dict
     }
 
 
-# MIK-R73 rule 2: the tree views, and `record`, the truth view of one record. MIK-R118 rule 6 and
-# MIK-R124 rule 7 read the two record kinds through this same tool: no tool is added.
+# The tree views; `record`, the truth view of one record; the two record kinds' listings; and
+# `writers`, the table of how each writer did. All are views of this one tool: no tool is added.
 _ADMITTED_VIEWS: Final = (
     "source_context",
     "invariant",
@@ -555,6 +566,7 @@ _ADMITTED_VIEWS: Final = (
     "record",
     "weakness",
     "dependent",
+    "writers",
 )
 
 
@@ -983,15 +995,15 @@ def _read_result(
         # The epoch brackets the selection: commit and dirtiness are read
         # before the tree opens and again after, so a move or dirty edit
         # during selection refuses instead of binding a mixed epoch.
-        before_commit = _memory_commit(Path(request.memory_root))
-        before_dirty = _memory_dirty(Path(request.memory_root))
+        before_commit = memory_checkout_commit(Path(request.memory_root))
+        before_dirty = memory_checkout_dirty(Path(request.memory_root))
         selected = _select(request.memory_root, coordination_root)
         # The epoch binds the selection: commit and dirtiness are captured
         # here, at selection time, for the projection's move validation --
         # never re-probed as provenance at projection time.
         provenance = SelectionProvenance(
-            commit=_memory_commit(Path(request.memory_root)),
-            dirty=_memory_dirty(Path(request.memory_root)),
+            commit=memory_checkout_commit(Path(request.memory_root)),
+            dirty=memory_checkout_dirty(Path(request.memory_root)),
             relative=relative_locations,
         )
         if (provenance.commit, provenance.dirty) != (before_commit, before_dirty):
@@ -999,9 +1011,9 @@ def _read_result(
             # same moved-selection refusal as the projection seam: no
             # mixed epoch is ever bound to rows.
             raise SelectionMovedError(before_commit, provenance.commit)
-        if view in ("record", "weakness", "dependent"):
-            # MIK-R73 rule 2: one record, its links with their states and its history. MIK-R118
-            # rule 6 and MIK-R124 rule 7: the same tool lists the two record kinds.
+        if view in ("record", "weakness", "dependent", "writers"):
+            # One record with its links, their states and its history; the listings of the two
+            # record kinds; and the table of how each writer did.
             return (
                 _one_view(
                     request,
@@ -1048,6 +1060,25 @@ def _read_result(
             None,
             None,
         )
+
+
+def _writers_view(
+    request: ReadToolRequest, selected: SelectedKnowledgeDataset, coordination_root: str | None
+) -> dict[str, Any]:
+    """The table of how each writer did, or its refusal (the application owns the table)."""
+
+    try:
+        return writers_view(
+            selected,
+            WritersRequest(
+                memory_root=request.memory_root,
+                repository_id=request.repository_id,
+                limit=request.limit,
+                coordination_root=coordination_root,
+            ),
+        )
+    except WriterTableRefusal as refusal:
+        return _refused_read(request.view, request.repository_id, refusal.code, refusal.detail)
 
 
 def _ordering(request: ReadToolRequest) -> str:
@@ -1215,8 +1246,8 @@ def _reported_body(
             "refusalCode": "report-unwritable",
             "refusalDetail": detail,
         }
-    counts = _change_counts(diff)
-    named = _decision_records(diff)
+    counts = change_counts(diff)
+    named = decision_records(diff)
     return {
         "ok": True,
         "state": "compared",
@@ -1230,79 +1261,6 @@ def _reported_body(
         "decisionRecordCount": len(named),
         "report": str(report_path),
     }
-
-
-def _change_counts(diff: ReviewKnowledgeTreeDiff) -> dict[str, int]:
-    """The count of changes by kind: changed files by Git status, groups by listing."""
-
-    counts = {
-        "changedFiles": diff.changed_files,
-        "records": len(diff.records),
-        "sources": len(diff.sources),
-        "history": len(diff.history),
-        "other": len(diff.other),
-    }
-    for group in (*diff.records, *diff.sources):
-        for change in group.files:
-            counts[change.status] = counts.get(change.status, 0) + 1
-    for change in (*diff.history, *diff.other):
-        counts[change.status] = counts.get(change.status, 0) + 1
-    return counts
-
-
-# A changed record asks for a decision soonest when knowledge appeared or
-# vanished (an added or deleted record file), next when a code-side claim
-# about it changed (its entries), then renames, type changes and edits.
-_DECISION_ORDER = {
-    "added": 0,
-    "deleted": 1,
-    "entries-changed": 2,
-    "renamed": 3,
-    "type-changed": 4,
-    "modified": 5,
-}
-
-
-def _group_change(statuses: set[str], has_entries: bool) -> str:
-    """The one change kind naming a record group, in decision order."""
-
-    if "added" in statuses:
-        return "added"
-    if "deleted" in statuses:
-        return "deleted"
-    if has_entries:
-        return "entries-changed"
-    if "renamed" in statuses:
-        return "renamed"
-    if "type_changed" in statuses:
-        return "type-changed"
-    return "modified"
-
-
-def _decision_records(diff: ReviewKnowledgeTreeDiff) -> list[dict[str, Any]]:
-    """Every changed record group as ID, kind, change and index path.
-
-    The path is the authoritative record path inside the memory tree, not
-    joined with the checkout: the answered absolute ``memoryRoot`` is the
-    join base, so large comparisons stay within their bound on any root
-    length (MIK-R109 rule 3).
-    """
-
-    named = []
-    for group in diff.records:
-        statuses = {change.status for change in group.files}
-        change = _group_change(statuses, bool(group.entries))
-        path = group.files[0].path if group.files else None
-        named.append(
-            {
-                "recordId": group.record_id,
-                "kind": group.kind,
-                "change": change,
-                "path": path,
-            }
-        )
-    named.sort(key=lambda entry: (_DECISION_ORDER[entry["change"]], entry["recordId"]))
-    return named
 
 
 @dataclass(frozen=True)
@@ -1814,8 +1772,8 @@ def _write_answer(request: WriteToolRequest, config: McpRuntimeConfig) -> dict[s
     contract guard, the same authorization reference, the same worklist checks and the same
     refusals. Without ``commit`` it plans and writes nothing; with it, it writes files and commits
     nothing to Git. The whole report is written as a caller-readable file (MIK-R108 rule 3) and the
-    answer holds the outcome, the counts, the problems and violations the caller must act on, and
-    the report's location.
+    answer (:mod:`agents_remember.application.knowledge_write_answer`) holds the outcome, the
+    counts, the problems, violations and notes the caller must act on, and the report's location.
 
     Every refusal is one of this function's own returns, so the module keeps one envelope site per
     handler: a refusal is a response document like any other, and the reason it refuses is the
@@ -1834,37 +1792,7 @@ def _write_answer(request: WriteToolRequest, config: McpRuntimeConfig) -> dict[s
     if isinstance(report, str):
         return _refused_write("invalid-input", report)
     document = report.to_document()
-    report_path, report_error = _write_report_path(document, config)
-    problems = [{"where": one["where"], "message": one["message"]} for one in document["problems"]]
-    violations = list(document["violations"])
-    answer = {
-        "ok": True,
-        "operation": "knowledge_write",
-        "state": document["state"],
-        "owner": document["owner"],
-        "memoryRoot": document["memoryRoot"],
-        "codeTree": document["codeTree"],
-        "authorization": document["authorization"],
-        "counts": {
-            "records": len(document["records"]),
-            "entries": len(document["entries"]),
-            "historyRows": len(document["historyRows"]),
-            "evidence": len(document["evidence"]),
-            "carried": len(document["carried"]),
-            "requirementEndpoints": len(document["requirementEndpoints"]),
-        },
-        "problems": problems[:TOOL_ANSWER_LIST_MAX],
-        "problemsTruncated": len(problems) > TOOL_ANSWER_LIST_MAX,
-        "violations": violations[:TOOL_ANSWER_LIST_MAX],
-        "violationsTruncated": len(violations) > TOOL_ANSWER_LIST_MAX,
-        "provisionalIds": document["provisionalIds"],
-        "plannedBeforeRefusal": document["plannedBeforeRefusal"],
-        "written": document["written"],
-        "removed": document["removed"],
-        "reportPath": report_path,
-        "reportError": report_error,
-    }
-    return answer
+    return write_answer(document, *_write_report_path(document, config))
 
 
 def _write_report_path(

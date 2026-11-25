@@ -49,6 +49,7 @@ from agents_remember.models.tools.tool_answer import (
     strip_envelope,
 )
 from agents_remember.worktrees.modules import cleanup as cleanup_module
+from agents_remember.worktrees.modules import kept_tool_calls as kept_module
 from agents_remember.worktrees.modules.closeout import closeout_changed_paths
 from agents_remember.worktrees.modules.git import worktree_dirty
 from agents_remember.worktrees.worktree_contract import load_contract
@@ -814,7 +815,12 @@ class ToolAnswerEnclosureTests(unittest.TestCase):
 
             services = mock.Mock()
             services.provider_lifecycle = FakeLifecycle()
-            with mock.patch.object(cleanup_module, "worktree_services", return_value=services):
+            # The fake contract names no leaf document; keeping its lines is
+            # proven on a real enclosure in test_tool_answer_table_enclosure.py.
+            with (
+                mock.patch.object(cleanup_module, "worktree_services", return_value=services),
+                mock.patch.object(kept_module, "kept_tool_calls_entry", return_value={}),
+            ):
                 directories = cleanup_module._removed_directories(
                     SimpleNamespace(worktree_group=group, kind="leaf", task_root=Path(tmp)),
                     dry_run=False,
