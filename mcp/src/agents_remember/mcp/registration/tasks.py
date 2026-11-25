@@ -18,28 +18,21 @@ from .lazy import tools
 def _register_closeout_queue_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def closeout_queue(request: CloseoutQueueRequest) -> dict[str, Any]:
-        """Inspect or rebuild one sprint's disposable waiting-only closeout projection: exact-
-        current valid-built or non-admitting invalid-empty, derived from the current task plus
-        waiting-door facts. States: valid-built, invalid-empty, blocked. Reference: docs/reference/mcp-tools.md."""
+        """Inspect or rebuild a sprint's waiting-only closeout projection. States: valid-built, invalid-empty, blocked. Docs: docs/reference/mcp-tools.md."""
         return tools.closeout_queue_payload(config, request)
 
 
 def _register_curator_coherence_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def curator_coherence(request: CuratorCoherenceRequest) -> dict[str, Any]:
-        """Prepare, publish, inspect or validate one leaf's curator-coherence authority. Publish requires semantic_requirement_revision, delivery_attempt, expected_predecessor_digest, expected_code_candidate_tree, expected_memory_candidate_tree, expected_task_topology_fingerprint, expected_task_intent, expected_attestation_sha256 and caller; supply judgments or judgments_file. The stable manifest is authoritative, never Markdown. Longer explanation: docs/tool-details.md."""
+        """Prepare, publish, inspect, or validate one leaf's curator-coherence authority. Publish requires semantic_requirement_revision, delivery_attempt, expected_predecessor_digest, expected_code_candidate_tree, expected_memory_candidate_tree, expected_task_topology_fingerprint, expected_task_intent, expected_attestation_sha256, caller, and judgments or judgments_file. Docs: docs/tool-details.md."""
         return tools.curator_coherence_payload(config, request)
 
 
 def _register_task_reopen_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def task_reopen(contract_path: str, dry_run: bool = False) -> dict[str, Any]:
-        """Reopen a COMPLETED leaf under its exact same leaf id: review, closeout and integration
-        state returns to virgin and the leaf document goes back to planning. A cleaned-up leaf
-        behind its master's tip restarts from that tip when its recorded landing is an ancestor
-        of it; a landing not on the line refuses. Afterwards edit
-        steps via task_doc, then run a normal worktree_start. States: reopened, blocked;
-        preview with dry_run. Reference: docs/reference/mcp-tools.md."""
+        """Reopen a Completed leaf under the same id, resetting review/closeout/integration state to planning. Cleaned-up leaves restart from the master tip if their recorded landing is its ancestor, else refuse. States: reopened, blocked. Docs: docs/reference/mcp-tools.md."""
         return tools.task_reopen_payload(config, contract_path, dry_run=dry_run)
 
 
@@ -54,11 +47,7 @@ def _register_task_finalizer_tools(server: FastMCP, config: McpRuntimeConfig) ->
         *,
         teardown_providers: bool = True,
     ) -> dict[str, Any]:
-        """Prove the landed edge and complete one parent-child task lifecycle edge: refuses before
-        cleanup unless every declared step is done, then reconciles the exact parent row.
-        Leaves require a master; ancestors are not completed. States: finalized,
-        would-finalize, blocked. Answers the state, what blocks
-        and the next call; preview with dry_run. Reference: docs/reference/mcp-tools.md."""
+        """Prove the landed edge, complete a task once all steps are done, and reconcile its parent row (ancestors are not completed; leaves require a master). States: finalized, would-finalize, blocked. Docs: docs/reference/mcp-tools.md."""
         return tools.lifecycle_finalize_task_payload(
             config,
             contract_path,
@@ -72,7 +61,7 @@ def _register_task_finalizer_tools(server: FastMCP, config: McpRuntimeConfig) ->
         )
 
 
-_TASK_DOC_TOOL_DESCRIPTION = """Write ar-task-document/v1 JSON and rendered markdown; read the .md as a file. Kind: subTask or master. Operations: create, replace, set_status, set_step, add_step, remove_step, skip_step, set_subtask, remove_subtask, set_section, append_decision, put_open_question, begin_review, record_review, record_route_review, author_execution_graph, attach_master, detach_master, retire_master, archive_sprint, linkage_report, set_field. Writes answer ok; dry runs answer wouldLose and diff. Packet writes name siblings in alignmentSweep. Reference: docs/reference/mcp-tools.md."""
+_TASK_DOC_TOOL_DESCRIPTION = """Write task docs (read .md as file). Kind: subTask or master. Ops: create, replace, set_status, set_field, set_step, add_step, remove_step, skip_step, set_subtask, remove_subtask, set_section, append_decision, put_open_question, begin_review, record_review, record_route_review, author_execution_graph, attach_master, detach_master, retire_master, archive_sprint, linkage_report. Packet writes add alignmentSweep. Docs: docs/reference/mcp-tools.md."""
 
 
 def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> None:

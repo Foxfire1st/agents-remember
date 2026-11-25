@@ -37,6 +37,7 @@ from agents_remember.models.tools.role_tool_scope import (
     role_tool_roster,
     tools_for_role,
 )
+from agents_remember.models.tools.tool_schema_compaction import compact_tool_schema
 from mcp.client.stdio import stdio_client
 from mcp.server.fastmcp.exceptions import ToolError
 
@@ -272,21 +273,59 @@ def test_a_read_only_mark_still_validates_a_tool_the_role_excludes(
         create_server(config)
 
 
+# (role or None for unbound, pre-compaction baseline bytes, enforced compact ceiling bytes).
+COMPACT_BYTE_BUDGETS: tuple[tuple[str | None, int, int], ...] = (
+    ("manager", 59_618, 45_000),
+    ("architect", 43_988, 34_000),
+    ("orchestrator", 43_819, 34_000),
+    ("curator", 32_736, 25_000),
+    ("reviewer", 25_655, 19_500),
+    ("investigator", 18_457, 14_500),
+    ("worker", 14_045, 11_000),
+    ("bootstrap", 9_027, 7_500),
+    (None, 72_590, 55_000),
+)
+MAX_RAW_TOOL_DESCRIPTION_CHARS = 500
+
+
+def _clear_ar_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in list(os.environ):
+        if key.startswith("AR_"):
+            monkeypatch.delenv(key, raising=False)
+
+
 def test_the_architect_schema_budget_holds_on_the_bound_and_unbound_server(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The bound Architect fits under the host's eager pack; the unbound server does not."""
+    """Every role and the unbound server stay below their baselines, ceilings, and uncompacted size."""
 
     config, _workspace = _world(tmp_path)
-    unbound = _compact_bytes(_tools(create_server(config)))
+    unbound_tools = _tools(create_server(config))
+    unbound_bytes = _compact_bytes(unbound_tools)
+    for tool in unbound_tools:
+        raw_len = len(tool.description or "")
+        assert raw_len <= MAX_RAW_TOOL_DESCRIPTION_CHARS, (
+            f"{tool.name} raw description is {raw_len} chars > {MAX_RAW_TOOL_DESCRIPTION_CHARS}"
+        )
 
-    _bind(monkeypatch, _binding("architect"))
-    bound = _compact_bytes(_tools(create_server(config)))
+    for role, baseline, ceiling in COMPACT_BYTE_BUDGETS:
+        _clear_ar_env(monkeypatch)
+        if role is None:
+            measured = unbound_bytes
+        else:
+            _bind(monkeypatch, _binding(role))
+            measured = _compact_bytes(_tools(create_server(config)))
+            assert measured < unbound_bytes, f"{role} ({measured} B) >= unbound ({unbound_bytes} B)"
+        label = role or "unbound"
+        assert measured <= ceiling, f"{label} measured {measured} B > ceiling {ceiling} B"
+        assert measured < baseline, f"{label} measured {measured} B >= baseline {baseline} B"
 
-    assert unbound == 72_769, f"the unbound roster measured {unbound} B"
-    assert bound == 44_167, f"the bound Architect measured {bound} B"
-    assert bound <= 45_000
-    assert bound < unbound
+    _clear_ar_env(monkeypatch)
+    monkeypatch.setattr(server_module, "_compact_server_tool_schemas", lambda _server: None)
+    uncompacted_bytes = _compact_bytes(_tools(create_server(config)))
+    assert unbound_bytes < uncompacted_bytes, (
+        f"compacted ({unbound_bytes} B) >= uncompacted ({uncompacted_bytes} B)"
+    )
 
 
 def test_the_bound_grant_and_the_advertised_surface_are_the_same_ordered_tuple() -> None:
@@ -412,3 +451,35 @@ def test_a_real_stdio_session_on_a_malformed_binding_serves_only_server_info(
     for sibling in siblings:
         assert sibling.isError is True
         assert any("Unknown tool" in getattr(content, "text", "") for content in sibling.content)
+
+
+def test_a_real_stdio_manager_session_lists_32_compacted_tools_and_validates_calls(
+    tmp_path: Path,
+) -> None:
+    """A bound Manager over real stdio gets all 32 compacted tools with unchanged Pydantic validation."""
+
+    root = tmp_path / "manager-world"
+    server = _stdio_server(root, _binding("manager"))
+
+    async def exercise() -> tuple[list[Any], Any, Any]:
+        async with (
+            stdio_client(server) as (reader, writer),
+            ClientSession(reader, writer) as session,
+        ):
+            await session.initialize()
+            listed = await session.list_tools()
+            bad_coherence = await session.call_tool("curator_coherence", {})
+            bad_control = await session.call_tool("worktree_operation_control", {})
+            return list(listed.tools), bad_coherence, bad_control
+
+    tools, bad_coherence, bad_control = asyncio.run(exercise())
+    names = tuple(tool.name for tool in tools)
+
+    assert len(names) == 32
+    assert names == tools_for_role("manager")
+    assert {"curator_coherence", "worktree_operation_control"} <= set(names)
+    for tool in tools:
+        assert tool.inputSchema == compact_tool_schema(tool.inputSchema)
+        assert "title" not in tool.inputSchema
+    assert bad_coherence.isError is True
+    assert bad_control.isError is True

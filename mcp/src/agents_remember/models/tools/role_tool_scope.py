@@ -8,8 +8,8 @@ order; the union of the eight role entries is the whole public roster, so no too
 and none appears twice in an entry.
 
 The table lives in ``models`` because the advertised roster is wire vocabulary: the server
-narrows itself with it and the Codex seat policy grants from it, and neither may own the other's
-copy. It imports the roster and role spelling from this package alone.
+narrows itself with it and the seat's preapproval policy grants from it, and neither may own the
+other's copy. It imports the roster and role spelling from this package alone.
 """
 
 from __future__ import annotations
