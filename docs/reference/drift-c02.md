@@ -16,8 +16,8 @@ code repository and gives it one of two states:
 
 | State | Meaning |
 | --- | --- |
-| `current` | The cited file has the recorded blob, or the cited lines or symbol still hold the recorded content. |
-| `stale` | The content differs, the symbol does not resolve to exactly one place, or the path is absent. |
+| `current` | The cited file in the paired code tree has the recorded Git blob, and the locator resolves to the recorded content. |
+| `stale` | The cited file is missing or unavailable, its Git blob differs from the recorded blob, or the locator fails to resolve to the recorded content. |
 
 ## Measuring Drift
 

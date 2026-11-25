@@ -30,6 +30,10 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from agents_remember.application.knowledge_writer.code_anchors import (
+    AnchorResolutionError,
+    CodeSnapshot,
+)
 from agents_remember.kernel.request_memo import request_memo_scope, request_owner
 from agents_remember.memory.knowledge import read_anchors
 from agents_remember.memory.knowledge.read_anchor_memo import (
@@ -144,8 +148,8 @@ def _claim(path: str, object_id: str, locator: dict[str, Any]) -> dict[str, Any]
     }
 
 
-def _symbol(name: str) -> dict[str, Any]:
-    return {"kind": "symbol", "language": "python", "qualified_name": name}
+def _symbol(name: str, *, language: str = "python") -> dict[str, Any]:
+    return {"kind": "symbol", "language": language, "qualified_name": name}
 
 
 def _claims(tree: _Tree) -> list[dict[str, Any]]:
@@ -567,3 +571,105 @@ def test_one_blob_is_parsed_per_grammar_whichever_is_asked_first(tmp_path: Path)
     }
     assert resolved(("a.py", "a.ts")) == expected
     assert resolved(("a.ts", "a.py")) == expected
+
+
+@pytest.mark.parametrize("cases_first", [False, True], ids=["ordinary-first", "test-first"])
+def test_shared_typescript_blob_is_parsed_once_per_test_file_classification(
+    tmp_path: Path, parses: list[str], cases_first: bool
+) -> None:
+    ordinary = ("example.ts", "other.ts")
+    cases = ("example.test.ts", "example.spec.ts")
+    order = (*cases, *ordinary) if cases_first else (*ordinary, *cases)
+    title = "case.with.dot"
+    body = f"const Helper = 1;\ntest('{title}', () => {{}});\n"
+    _git(tmp_path, "init", "-q")
+    for path in order:
+        (tmp_path / path).write_text(body, encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+    tree_id = _git(tmp_path, "write-tree")
+    snapshot = CodeSnapshot.of_tree(tmp_path, tree_id)
+    (blob,) = set(snapshot.blobs.values())
+    tree = _Tree(tmp_path, tree_id, dict(snapshot.blobs))
+
+    expected: dict[tuple[str, str], int | None] = {}
+    for path in order:
+        expected[path, "Helper"] = 1
+        expected[path, title] = 2 if path in cases else None
+    for (path, name), line in expected.items():
+        locator = {"kind": "symbol", "name": name}
+        if line is None:
+            with pytest.raises(AnchorResolutionError, match="does not define"):
+                snapshot.resolve(path, locator)
+            continue
+        anchor = snapshot.resolve(path, locator)
+        by_line = snapshot.resolve(path, {"kind": "line_range", "start": line, "end": line})
+        assert anchor.blob == by_line.blob == blob
+        assert anchor.content == by_line.content
+
+    parses.clear()
+    claims = [_claim(path, blob, _symbol(name, language="typescript")) for path, name in expected]
+    for line, observed in zip(expected.values(), _observe(tree, claims), strict=True):
+        if line is None:
+            assert observed["resolution"] == "recorded_blob_mismatch"
+            assert observed["resolved_ranges"] == []
+        else:
+            assert observed["resolution"] == "exact_recorded_blob"
+            assert observed["resolved_ranges"] == [
+                {"kind": "line_range", "start_line": line, "end_line": line}
+            ]
+    assert parses == [order[0], order[2]]
+
+
+def test_a_memo_hit_preserves_lean_scope_uncertainty(tmp_path: Path, parses: list[str]) -> None:
+    """The same imported token can leave a declaration inside or outside Outer."""
+
+    path = "Consumer.lean"
+    source = """\
+import Imported
+namespace Outer
+section
+  importedMark
+def before : Nat := 1
+end
+  Outer.importedMark
+def middle : Nat := 2
+"""
+    _git(tmp_path, "init", "-q")
+    (tmp_path / path).write_text(source, encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+    tree_id = _git(tmp_path, "write-tree")
+    snapshot = CodeSnapshot.of_tree(tmp_path, tree_id)
+    tree = _Tree(tmp_path, tree_id, dict(snapshot.blobs))
+    blob = tree.blobs[path]
+    assert snapshot.resolve(path, {"kind": "line_range", "start": 8, "end": 8}).blob == blob
+    for name in ("middle", "Outer.middle"):
+        with pytest.raises(
+            AnchorResolutionError, match=r"uncertain Lean scope.*line_range"
+        ) as error:
+            snapshot.resolve(path, {"kind": "symbol", "name": name})
+        assert repr(name) in str(error.value) and path in str(error.value)
+
+    parses.clear()
+    claims = [
+        _claim(path, blob, _symbol(name, language="lean"))
+        for name in ("Outer.before", "middle", "Outer.middle", "absent")
+    ]
+    claims.append(_claim(path, blob, {"kind": "line_range", "start_line": 8, "end_line": 8}))
+    first = _observe(tree, claims)
+    assert _observe(tree, claims) == first
+    assert parses == [path]
+
+    before, written, full, absent, by_line = first
+    for name, uncertain in (("middle", written), ("Outer.middle", full)):
+        assert uncertain["resolution"] == "unsupported_locator"
+        assert "unverifiable" in uncertain["detail"] and repr(name) in uncertain["detail"]
+        assert (
+            uncertain["recorded_source_identity"] == uncertain["observed_source_identity"] == blob
+        )
+        assert uncertain["resolved_ranges"] == []
+    assert absent["resolution"] == "recorded_blob_mismatch"
+    for line, resolved in ((5, before), (8, by_line)):
+        assert resolved["resolution"] == "exact_recorded_blob"
+        assert resolved["resolved_ranges"] == [
+            {"kind": "line_range", "start_line": line, "end_line": line}
+        ]

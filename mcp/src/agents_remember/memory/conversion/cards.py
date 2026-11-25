@@ -167,6 +167,7 @@ def _drop_history(
 @dataclass
 class _Rows:
     rows: list[CitationRow]
+    reader: model.CitationReader
     placeholders: int = 0
 
 
@@ -205,7 +206,7 @@ def _take_table(
                 finding=finding,
                 anchor_cell=anchor_cell.strip(),
                 source_cell=source_cell.strip(),
-                claim=cells.parse_row(row.index + 1, anchor_cell, source_cell),
+                claim=cells.parse_row(row.index + 1, anchor_cell, source_cell, reader=found.reader),
                 section=section,
             )
         )
@@ -219,7 +220,7 @@ def _section_of(index: int, source: Sequence[str], sections: Sequence[tuple[int,
     return ""
 
 
-def split_card(text: str) -> SplitCard:
+def split_card(text: str, *, reader: model.CitationReader = model.CitationReader.LIVE) -> SplitCard:
     """Take a legacy card apart; :func:`render_card` writes its converted Markdown."""
 
     body = text[:-1] if text.endswith("\n") else text
@@ -233,7 +234,7 @@ def split_card(text: str) -> SplitCard:
     metadata, residual = _replace_metadata(lines, _metadata_table(found, first_h2))
     sections = _section_ranges(headings, len(source))
     history_bytes = _drop_history(lines, source, sections)
-    taken = _Rows(rows=[])
+    taken = _Rows(rows=[], reader=reader)
     for table in found:
         columns = _citation_columns(table[0])
         if columns is not None and lines[table[0].index] != _DROP:
