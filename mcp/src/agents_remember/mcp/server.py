@@ -8,8 +8,9 @@ import json
 import time
 from contextlib import suppress
 from datetime import UTC, datetime
+from functools import partial
 from importlib import import_module
-from typing import Any
+from typing import Any, Literal, NotRequired, TypedDict
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Settings as FastMCPSettings
@@ -53,7 +54,11 @@ from .registration.explainer_surface import (
     read_explainer_binding,
     register_explainer_surface,
 )
-from .thread_workers import run_in_request_thread
+from .thread_workers import (
+    run_in_detached_request_thread,
+    run_in_request_thread,
+    track_worker_cancellation,
+)
 
 
 class AgentsRememberMCP(FastMCP):
@@ -116,7 +121,14 @@ class AgentsRememberMCP(FastMCP):
         # the completed call; a call that raises is logged here and re-raised.
         # Dispatch input refusals happen inside the context so they are
         # logged like any other raised call.
-        with definition_scope(), tool_call_context(name, arguments, config=config):
+        with (
+            definition_scope(),
+            tool_call_context(name, arguments, config=config),
+            track_worker_cancellation(
+                partial(_log_raised_tool_call, name, arguments, config, request_cancelled=True),
+                partial(_log_cancelled_wait, name, arguments, config, "worker-thread"),
+            ) as worker_cancellation,
+        ):
             launched = getattr(self, "_explainer_binding", None)
             if launched is not None and name in EXPLAINER_SURFACE:
                 # MIK-R186 @ v2 rule 3 sentences 3-4: each of the explainer's own tools checks that the
@@ -125,12 +137,14 @@ class AgentsRememberMCP(FastMCP):
                 not_this_seat = _launched_seat_refusal(launched)
                 if not_this_seat is not None:
                     return not_this_seat
+            waiting_for: Literal["build-currentness"] | None = "build-currentness"
             try:
                 reading = (
                     await asyncio.to_thread(build_currentness, config)
                     if config is not None
                     else None
                 )
+                waiting_for = None
                 with tool_build_currentness(reading):
                     if (
                         reading is not None
@@ -143,8 +157,15 @@ class AgentsRememberMCP(FastMCP):
                                 arguments
                             ).model_dump()
                             if is_stale_build_write(name, admitted):
-                                return await asyncio.to_thread(stale_build_refusal, name, reading)
+                                return await run_in_detached_request_thread(
+                                    stale_build_refusal, name, reading
+                                )
                     return await self._dispatch_tool(name, arguments)
+            except asyncio.CancelledError:
+                _log_interrupted_dispatch(
+                    name, arguments, config, waiting_for, worker_cancellation.error
+                )
+                raise
             except Exception as error:
                 _log_raised_tool_call(name, arguments, config, error)
                 raise
@@ -162,8 +183,16 @@ class AgentsRememberMCP(FastMCP):
             return await threaded.run(arguments, context=context, convert_result=True)
         if self._synchronous_write_lock is None:
             self._synchronous_write_lock = asyncio.Lock()
-        async with self._synchronous_write_lock:
+        lock = self._synchronous_write_lock
+        try:
+            await lock.acquire()
+        except asyncio.CancelledError:
+            _log_cancelled_wait(name, arguments, self._agents_remember_config, "write-lock")
+            raise
+        try:
             return await threaded.run(arguments, context=context, convert_result=True)
+        finally:
+            lock.release()
 
 
 def _nonwriting_call(tool: Any, arguments: dict[str, Any]) -> bool:
@@ -187,8 +216,62 @@ def _threaded(function: Any) -> Any:
     return execute
 
 
+type _CancelledWait = Literal["build-currentness", "write-lock", "worker-thread"]
+
+
+class _FailedToolResult(TypedDict):
+    ok: Literal[False]
+    code: Literal["raised", "cancelled"]
+    error: str
+    raisedAt: NotRequired[str]
+    requestCancelled: NotRequired[Literal[True]]
+    waitingFor: NotRequired[_CancelledWait]
+
+
+def _log_interrupted_dispatch(
+    name: str,
+    arguments: dict[str, Any],
+    config: Any | None,
+    waiting_for: Literal["build-currentness"] | None,
+    worker_error: Exception | None,
+) -> None:
+    if waiting_for is not None:
+        _log_cancelled_wait(name, arguments, config, waiting_for)
+    elif worker_error is not None:
+        _log_raised_tool_call(name, arguments, config, worker_error, request_cancelled=True)
+
+
+def _log_cancelled_wait(
+    name: str,
+    arguments: dict[str, Any],
+    config: Any | None,
+    waiting_for: _CancelledWait,
+) -> None:
+    wait = {
+        "build-currentness": "the serving build's currentness",
+        "write-lock": "the write lock",
+        "worker-thread": "a worker thread",
+    }[waiting_for]
+    _log_failed_tool_call(
+        name,
+        arguments,
+        config,
+        {
+            "ok": False,
+            "code": "cancelled",
+            "error": f"the request was cancelled before the tool ran, while waiting for {wait}.",
+            "waitingFor": waiting_for,
+        },
+    )
+
+
 def _log_raised_tool_call(
-    name: str, arguments: dict[str, Any], config: Any | None, error: Exception
+    name: str,
+    arguments: dict[str, Any],
+    config: Any | None,
+    error: Exception,
+    *,
+    request_cancelled: Literal[True] | None = None,
 ) -> None:
     """Write the log line for a call that raised (MIK-R108 rule 3).
 
@@ -197,17 +280,25 @@ def _log_raised_tool_call(
     log write itself never raises: every failure is contained.
     """
     with suppress(Exception):
-        call = current_tool_call()
-        started = call.started_perf if call is not None else 0.0
-        duration_ms = (time.perf_counter() - started) * 1000.0 if call is not None else 0.0
-        dest = resolve_log_roots(config, name)
-        whole: dict[str, Any] = {
+        whole: _FailedToolResult = {
             "ok": False,
             "code": "raised",
             "error": f"the call raised {type(error).__name__}: {error}".strip()[:500]
             or "the call raised.",
             "raisedAt": datetime.now(UTC).isoformat(),
         }
+        if request_cancelled is not None:
+            whole["requestCancelled"] = request_cancelled
+        _log_failed_tool_call(name, arguments, config, whole)
+
+
+def _log_failed_tool_call(
+    name: str, arguments: dict[str, Any], config: Any | None, whole: _FailedToolResult
+) -> None:
+    with suppress(Exception):
+        call = current_tool_call()
+        duration_ms = (time.perf_counter() - call.started_perf) * 1000.0 if call else 0.0
+        dest = resolve_log_roots(config, name)
         whole_bytes = len(
             json.dumps(whole, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
         )
@@ -218,7 +309,7 @@ def _log_raised_tool_call(
                 arguments=dict(arguments),
                 caller=read_tool_caller(),
                 ok=False,
-                code="raised",
+                code=whole["code"],
                 duration_ms=duration_ms,
                 answer_tokens=0,
                 whole_result=whole,
