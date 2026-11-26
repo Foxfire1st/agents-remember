@@ -110,6 +110,15 @@ PARSED_DIFF_OPTIONS = ("--no-color", "--no-ext-diff", *DIFF_PREFIX_OPTIONS)
 
 
 @dataclass(frozen=True)
+class GitCommandSpec:
+    """Sanctioned argv, working directory, and sanitized environment for one Git command."""
+
+    argv: tuple[str, ...]
+    work_dir: Path
+    environment: dict[str, str]
+
+
+@dataclass(frozen=True)
 class _GitRun:
     work_dir: Path
     input_text: str | None
@@ -273,6 +282,25 @@ def run_git_into(
         process, stdin_input, execution.timeout, _GIT_CANCELLATION.get(), read_cancellation()
     )
     return subprocess.CompletedProcess(argv, process.returncode, None, error_output)
+
+
+def git_command_spec(
+    repo_root: Path,
+    args: list[str],
+    options: GitRunnerOptions | None = None,
+) -> GitCommandSpec:
+    """Build sanctioned Git argv and sanitized environment without spawning a subprocess.
+
+    Callers that must own a Git child's process group and streamed log file (L29-R1)
+    still take their argv and scrubbed environment from this single owner.
+    """
+
+    execution = _git_run(options or GitRunnerOptions(), repo_root)
+    return GitCommandSpec(
+        argv=tuple(_git_argv(repo_root, args, execution.work_dir)),
+        work_dir=execution.work_dir,
+        environment=execution.environment,
+    )
 
 
 def object_input_environment(object_inputs: Path | None) -> dict[str, str]:

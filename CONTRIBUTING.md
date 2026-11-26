@@ -39,10 +39,14 @@ Three scripts folders have their own page: [scripts/pnt_sandbox](scripts/pnt_san
 
 The tools of the tool server are registered in `mcp/src/agents_remember/mcp/registration/`: one
 module for each group, each with that group's `@server.tool()` registrations. `create_server`
-walks `TOOL_REGISTRARS`. The served list is `PUBLIC_TOOLS` in
-`mcp/src/agents_remember/models/tools/public_roster.py`, and the models in
+walks `TOOL_REGISTRARS`. The public list is `PUBLIC_TOOLS` in
+`mcp/src/agents_remember/models/tools/public_roster.py`. A server started for a role serves only
+that role's part of it, `ROLE_TOOL_ALLOWLISTS` in
+`mcp/src/agents_remember/models/tools/role_tool_scope.py` (read through `tools_for_role`), plus
+the explainer's tools when the seat has the explainer; a server bound to no role serves the whole
+list, and one whose role binding cannot be read serves only `server_info`. The models in
 `mcp/src/agents_remember/models/` enforce the shapes of the answers through
-`tool_registry.TOOL_RESPONSE_MODELS`. Every tool of the served list has one row in the
+`tool_registry.TOOL_RESPONSE_MODELS`. Every tool of the public list has one row in the
 [MCP Tool Reference](docs/reference/mcp-tools.md).
 
 A tool that reads keeps the boundary that
@@ -323,7 +327,14 @@ as its argument. No hook runs a test or certification.
 Both hooks need `mcp/.venv` with Python 3.14.8 and `dashboard/node_modules`. A hook that
 misses one of them names the command that creates it and stops.
 
-The Python checks cover every Python file that Git tracks (`git ls-files '*.py'`).
+The Python checks cover every Python file that Git tracks (`git ls-files '*.py'`), using a
+256 KiB GNU `xargs` batch on Linux so the full list dispatches without splitting below that ceiling
+(falling back to native defaults elsewhere). Hook scope banners emit in one Python invocation.
+After generated-copy checks pass, the Python rail (Ruff, `ruff format --check`, Pyright with
+wrapper update notices silenced, and the test catalogs) and the dashboard rail (Panda codegen,
+ESLint with a gitignored content-hashed `dashboard/.eslintcache`, and incremental `tsc -b` with
+gitignored `*.tsbuildinfo`) run concurrently and print their buffered output in fixed order
+(Python, then dashboard); either rail failing fails the hook.
 
 The pre-push hook passes on the list of pushed refs that Git gives it, for the report only. It
 stages nothing, stashes nothing and does not claim to have checked the pushed commits.
@@ -362,7 +373,11 @@ both steps run two checks on the exact trees they publish:
    or the index, and a hook that does not end in time each refuse the landing, and no ref
    moves. The limit is 900 seconds unless
    the setting `orchestration.landing.commitCheckTimeoutSeconds` names another
-   ([Settings Reference](docs/reference/settings-json.md)).
+   ([Settings Reference](docs/reference/settings-json.md)). A continued code-side sync commit
+   (`worktree_sync` with `resolution_action: "continue"`) uses the same timeout setting and
+   process-group ownership (stopping the hook group after a 30-second grace and retaining the
+   hook log in the Git common directory), answering `sync-commit-check-failed` while keeping
+   `HEAD`, `MERGE_HEAD`, and the staged merge intact.
 
 A commit that passed carries the trailer `Commit-Check-Pass: tree=<tree> hook=<hook>`.
 `<tree>` is the Git id of the tree that the hook checked, and `<hook>` is the path of the hook

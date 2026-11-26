@@ -44,6 +44,11 @@ from agents_remember.worktrees.sync_transaction_git._base import (
     SyncKnowledgeValidationError,
     SyncMergeCommitError,
 )
+from agents_remember.worktrees.sync_transaction_git._code_merge_commit import (
+    commit_bounded_code_merge,
+    snapshot_merge_sequencer,
+    sync_merge_commit_args,
+)
 from agents_remember.worktrees.sync_transaction_git._ignore_merge import (
     settle_generated_briefs_ignore,
 )
@@ -585,11 +590,37 @@ def _validate_and_commit_memory_merge(
 
 
 def _commit_staged_merge(worktree: Path) -> None:
-    """Identify a commit-command failure separately from validation of its input and output."""
+    """Identify a commit-command failure separately from validation of its input and output.
+
+    L29-R8 Condition 2: stamps ``Commit-Check-Pass`` iff the memory repository has a runnable
+    pre-commit hook (writing no stamp when none exists) and rewinds if the hook mutates the tree.
+    """
+    expected_tree = _require_sync_git(worktree, ["write-tree"])
+    git_dir = Path(_require_sync_git(worktree, ["rev-parse", "--absolute-git-dir"]))
+    merge_msg_path = git_dir / "MERGE_MSG"
+    merge_msg_bytes = merge_msg_path.read_bytes() if merge_msg_path.is_file() else None
+    pre_head = head_commit(worktree)
+    sequencer = snapshot_merge_sequencer(git_dir)
+    commit_args, stamped = sync_merge_commit_args(
+        worktree,
+        expected_tree,
+        fallback_message="Merge synced memory branch",
+        merge_msg_bytes=merge_msg_bytes,
+    )
     try:
-        _require_sync_git(worktree, ["commit", "--no-edit"])
+        _require_sync_git(worktree, commit_args)
     except SyncGitProofError as error:
         raise SyncMergeCommitError(str(error)) from error
+    if stamped:
+        committed_tree = _require_sync_git(worktree, ["rev-parse", "--verify", "HEAD^{tree}"])
+        if committed_tree != expected_tree:
+            _require_sync_git(worktree, ["reset", "--soft", pre_head])
+            _require_sync_git(worktree, ["read-tree", expected_tree])
+            for name, payload in sequencer.items():
+                atomic_write_bytes(git_dir / name, payload)
+            raise SyncMergeCommitError(
+                "memory merge commit hook modified the staged tree; nothing was published"
+            )
 
 
 def staged_merge_repair_debt(
@@ -624,11 +655,7 @@ def continue_side_merge(side: SyncSideRecord, *, paired_code: PairedCode | None 
     if side.side == "memory":
         _remove_memory_cache_from_index(side)
         return _finish_staged_memory_merge(side, paired_code)
-    _commit_staged_merge(worktree)
-    result_head = head_commit(worktree)
-    if not exact_created_head(side, result_head):
-        raise SyncGitProofError(f"{side.side} merge commit does not have the pinned parents")
-    return result_head
+    return commit_bounded_code_merge(side)
 
 
 def validate_staged_resolution(side: SyncSideRecord) -> None:

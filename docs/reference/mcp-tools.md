@@ -281,6 +281,15 @@ the check reports it with the merge parent. When the sync had parked uncommitted
 resolution leaves some of it out, `continue` answers `sync-resolution-incomplete` with a report of
 what is missing.
 The parked copy stays, and the sync finishes only when a later `continue` finds the work resolved.
+The continued code-side merge commit runs `git commit -m ...` carrying the `Commit-Check-Pass` stamp when a runnable pre-commit hook exists and `git commit --no-edit` when none does (never `--no-verify`), in its own
+process session under `orchestration.landing.commitCheckTimeoutSeconds` (default 900 seconds),
+streaming output to a retained log under the Git common directory. If the commit check fails,
+modifies a tracked file, or reaches the time limit (ending the process group after a 30-second
+grace and stopping or naming any escaped output holders), `worktree_sync` answers
+`sync-commit-check-failed` with the hook log path, judged files, any tracked files the hook
+modified, and—on a timeout—the time limit and any surviving escaped PIDs; `HEAD`, `MERGE_HEAD`,
+and the staged merge stay intact (any hook mutation to the index is rolled back) so the caller can
+repair and run `continue`, or end the sync with `cancel`.
 
 A sync that stopped can always be ended with `resolution_action: "cancel"`. Every branch returns
 to where it stood before the sync, and the uncommitted work that the sync had parked comes back.
