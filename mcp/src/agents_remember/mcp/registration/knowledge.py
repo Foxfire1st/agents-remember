@@ -103,7 +103,7 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         staleOnly: bool = False,
         standsOn: str | None = None,
     ) -> dict[str, Any]:
-        """Read memory views: source_context, invariant, family, record, weakness, dependent, writers (per-writer revision counts and full report path). Rows name ID, kind, state, and location, never text. The `read_ar_files` short answer carries a file's rule text. recordId takes text IDs (INV-/WKN-/DPD-); repositoryRoot/codeTreeId select the code tree. Writes: `agents-remember knowledge-ingest` or `agents-remember knowledge-bootstrap`. Docs: docs/reference/mcp-tools.md."""
+        """Read memory. Views: source_context, invariant, family, record, weakness, dependent, writers (per-writer revision counts and full report path). Rows name ID, kind, state and location, never text. The `read_ar_files` short answer carries a file's rule text. recordId takes text IDs (INV-/WKN-/DPD-); repositoryRoot/codeTreeId select the code tree. Writes: `agents-remember knowledge-ingest` or `agents-remember knowledge-bootstrap`. Docs: docs/reference/mcp-tools.md."""
 
         return tools.knowledge_read_payload(
             tools.ReadToolRequest(
