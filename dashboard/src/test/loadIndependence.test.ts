@@ -9,7 +9,7 @@ import {
   ScriptTarget,
   SyntaxKind,
   type Node,
-} from 'typescript';
+} from 'typescript-compiler-api';
 
 type Finding = { line: number; pattern: string; rule: number };
 
