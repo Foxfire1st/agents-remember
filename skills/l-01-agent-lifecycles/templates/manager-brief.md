@@ -149,11 +149,11 @@ Before coordinating build and landing order, read [Let dependencies determine th
 
 An atomic block exposes no intermediate leaf to super. For a closeout retry, follow [Recover an unfinished closeout](../operations/coordination.md#recover-an-unfinished-closeout) for the apply result and retry inputs.
 
-### Retire leaf agents
+### Retire agents
 
 Cleanup: the worker/reviewer/curator agents of a leaf are archived on the host when the leaf is finalized, cleaned up or abandoned; their reports stay. Manager/orchestrator seats are excluded.
 
-Before retiring a seat you started, follow [starter retirement](../core/every-role.md#start-and-configure-role-agents) for the starter’s `retire_child` duty and the refusal for another caller.
+Before retiring or replacing a seat, follow [role scope](../core/every-role.md#start-and-configure-role-agents) for `retire_child` and replacement authority.
 
 ## The exit
 - When the master reaches its completion boundary, prepare the master-handover packet with the

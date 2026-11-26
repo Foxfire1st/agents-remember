@@ -21,7 +21,11 @@ from agents_remember.cli import paseo_launch, role_launch_receipts
 from agents_remember.cli import role_launch_archive as archive
 from agents_remember.cli import role_launch_archive_recovery as recovery
 from agents_remember.cli.paseo_bridge import DAEMON_UNREACHABLE, PaseoBridgeFailure
-from agents_remember.cli.role_launch_liveness import _reconcile_prior_execution
+from agents_remember.cli.paseo_status import AgentReading
+from agents_remember.cli.role_launch_liveness import (
+    _reconcile_prior_execution,
+    apply_execution_reading,
+)
 from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA
 from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.controlplane.held_store_layout import HeldMessage, hold_message, store_path_for
@@ -392,15 +396,22 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
 
     def test_current_history_retry_and_other_selections_preserve_every_artifact(self):
         records = [self.receipt(), self.receipt("reviewer"), self.receipt("curator", history=True)]
+        by_agent = {body["agentId"]: path for path, body in records}
         foreign = [self.receipt("manager"), self.receipt(ref={**self.ref, "path": "another.json"})]
         foreign_bytes = {path: path.read_bytes() for path, _body in foreign}
         report = self.directory.parent / "worker.md"
         artifact = self.directory.parent / "worker.handover.txt"
         report.write_text("A surviving report.")
         artifact.write_text("A surviving assignment.")
-        with patch.object(
-            archive, "bridge_call", return_value={"found": True, "archived": True}
-        ) as call:
+
+        def archive_then_refresh(_config, _command, payload, **_options):
+            path = by_agent[payload["agentId"]]
+            before = json.loads(path.read_text())
+            apply_execution_reading(path, before, AgentReading(archived=True))
+            self.assertNotIn("retiredBy", json.loads(path.read_text()))
+            return {"found": True, "archived": True}
+
+        with patch.object(archive, "bridge_call", side_effect=archive_then_refresh) as call:
             result = archive.LeafAgentArchive(self.config).archive(self.contract)
             self.assertEqual(
                 {row["agentId"] for row in result["archived"]},
@@ -412,9 +423,12 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
         self.assertEqual(foreign_bytes, {path: path.read_bytes() for path, _body in foreign})
         self.assertEqual(report.read_text(), "A surviving report.")
         self.assertEqual(artifact.read_text(), "A surviving assignment.")
-        self.assertTrue(
-            all(json.loads(path.read_text())["status"] == "running" for path, _body in records)
-        )
+        for path, _body in records:
+            with self.subTest(path=path):
+                prior = json.loads(path.read_text())
+                self.assertEqual(prior["status"], "stopped")
+                self.assertEqual(prior["retiredBy"]["caller"], "LeafAgentArchive")
+                self.assertEqual(prior["retiredBy"]["reason"], "task finished")
 
     def test_archive_preserves_the_successor_lifecycle_receipt(self):
         contract = replace(self.contract, lifecycle_id="01ARZ3NDEKTSV4RRFFQ69G5FAV")

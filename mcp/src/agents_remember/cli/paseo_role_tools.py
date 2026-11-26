@@ -400,10 +400,9 @@ def _deliver_or_hold(send: _MessageSend) -> dict[str, Any]:
     """Deliver one message, or hold it behind what waits (MIK-R100 rules 4/4a/4b)."""
 
     located = send.located
-    # MIK-R190 rule 9: the one check, before anything reaches the host. A limited
-    # recipient's message is held with the reason and the reset time, idle or not;
-    # rule 10 delivers it after that moment. The presenter's own send is the one
-    # path outside this (it holds no role seat).
+    if isinstance(send.recipient.receipt.get("retiredBy"), dict):
+        raise _archived(send.recipient.agent_id)
+    # A provider limit holds a message until reset even if the recipient is idle.
     limit = provider_limit_hold(send.config, send.recipient.agent_id)
     if limit is not None:
         return _hold_for_seat(

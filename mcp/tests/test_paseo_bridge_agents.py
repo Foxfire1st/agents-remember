@@ -226,6 +226,7 @@ export function createPaseoApi(daemon) {
               agents.get(id).archivedAt = '2026-10-02T00:59:00.000Z'
             }
             if (scenario.afterArchiveError === 'gone') agents.delete(id)
+            if (scenario.afterArchiveError === 'disconnected') daemon.state = { status: 'disconnected' }
             throw new Error(scenario.archiveError)
           }
           agents.get(id).archivedAt = '2026-10-02T01:00:00.000Z'
@@ -988,7 +989,18 @@ class AgentCommandScriptTests(unittest.TestCase):
             failure = self.failure(
                 "agent-archive", {"agentId": AGENT_ID}, agents=agents, archiveError="disk is full"
             )
-            self.assertEqual((failure.code, str(failure)), ("paseo_call_failed", "disk is full"))
+            self.assertEqual(
+                (failure.code, str(failure)), ("paseo_archive_refused", "disk is full")
+            )
+        with self.subTest("the archive fails and the connection can no longer confirm it"):
+            failure = self.failure(
+                "agent-archive",
+                {"agentId": AGENT_ID},
+                agents=agents,
+                archiveError="socket closed",
+                afterArchiveError="disconnected",
+            )
+            self.assertEqual(failure.code, "paseo_daemon_unreachable")
 
     def test_a_300_000_byte_first_message_reaches_the_client_as_data(self) -> None:
         # More than twice what one command-line argument can carry (131,072 bytes on Linux).
