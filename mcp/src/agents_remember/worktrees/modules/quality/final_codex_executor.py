@@ -69,6 +69,7 @@ from agents_remember.errors import (
     DaggerRuntimeAuthorityError,
 )
 from agents_remember.worktrees.modules.quality.dagger_authority import (
+    AUTHORITY_SCHEMA_VERSION,
     AdmittedDaggerAuthority,
     AuthorityRegistry,
     DaggerAuthoritySnapshot,
@@ -327,7 +328,7 @@ class FinalCodexExecutionEngine:
                 owner=owner,
             )
             declaration = DaggerHostDeclaration(
-                schema_version=continuation_snapshot.schema_version,  # type: ignore[arg-type]
+                schema_version=AUTHORITY_SCHEMA_VERSION,
                 endpoint=continuation_snapshot.endpoint,
                 layer_store=continuation_snapshot.layer_store,
                 engine_version=continuation_snapshot.engine_version,

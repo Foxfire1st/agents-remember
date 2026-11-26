@@ -72,7 +72,7 @@ def _contract(root: Path, code_repo: Path, memory_repo: Path | None) -> Worktree
         task_name="task-one",
         repo_name="repo-a",
         workflow_kind="light-task",
-        memory_mode="external" if memory_repo is not None else "internal",  # type: ignore[arg-type]
+        memory_mode="external" if memory_repo is not None else "disabled",
         coordination_root=root,
         task_root=root / "tasks" / "repo-a" / "leaf",
         contract_path=root

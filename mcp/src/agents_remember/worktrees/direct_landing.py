@@ -238,9 +238,10 @@ class _JudgedHistoryClosing(HistoryClosing):
     judged: GitMutationSnapshot
     ignore_before: HistoryClosing
 
-    def restore(self) -> None:
-        super().restore()
-        self.ignore_before.restore()
+    def restore(self) -> bool:
+        history_restored = super().restore()
+        ignore_restored = self.ignore_before.restore()
+        return history_restored and ignore_restored
 
 
 def direct_landing(
