@@ -20,7 +20,9 @@ from agents_remember.kernel.git_command import (
     run_git,
 )
 from agents_remember.models.knowledge_files.documents import KNOWLEDGE_ROOT, owner_history_attempt
+from agents_remember.worktrees.memory_verdict_ref import unmapped_verdict_ref_note
 from agents_remember.worktrees.review_fact_source import NO_PASS_SENTENCE
+from agents_remember.worktrees.role_reports import is_collected_report_ref
 
 _HISTORY_DIRECTORY = f"{KNOWLEDGE_ROOT}/history"
 
@@ -46,7 +48,17 @@ def committed_review_note(repository: Path, commit: str, owner: str) -> str:
         return ""
     if not isinstance(document, dict) or document.get("closed") is not True:
         return ""
-    return "" if "review" in document else NO_PASS_SENTENCE
+    return _history_review_note(document)
+
+
+def _history_review_note(document: dict[str, object]) -> str:
+    if "review" not in document:
+        return NO_PASS_SENTENCE
+    review = document["review"]
+    verdict_ref = review.get("verdictRef") if isinstance(review, dict) else None
+    if isinstance(verdict_ref, str) and verdict_ref and not is_collected_report_ref(verdict_ref):
+        return unmapped_verdict_ref_note(verdict_ref)
+    return ""
 
 
 def _git(repository: Path, args: list[str]) -> str | None:

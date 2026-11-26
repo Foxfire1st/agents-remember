@@ -34,6 +34,7 @@ from agents_remember.tasks.leaf_doc import (
     resolve_terminal_leaf_doc,
 )
 from agents_remember.worktrees.candidate_identity import resolve_candidate_identity
+from agents_remember.worktrees.memory_verdict_ref import require_bound_memory_verdict_ref
 from agents_remember.worktrees.review_history import (
     ReviewHistoryError,
     RoundStamps,
@@ -332,6 +333,14 @@ def _record_task_review_bound(  # noqa: PLR0913 -- the route binding and memory 
             actual_candidate=actual_candidate,
             stamps=recorded_by,
         )
+        if payload.get("reviewKind") == "memory":
+            require_bound_memory_verdict_ref(
+                doc.kind,
+                doc.id,
+                payload.get("verdictRef"),
+                contract=binding.contract if binding is not None else None,
+                task_root=binding.task_root if binding is not None else None,
+            )
     except ReviewHistoryError as exc:
         raise TaskDocError(f"{exc.status}: {exc}") from exc
     if payload.get("reviewKind") == "memory" or "addedFindings" not in payload:

@@ -6209,9 +6209,9 @@
         "curator/orientation": 3993,
         "curator/curation": 4536,
         "curator/recovery": 3290,
-        "reviewer/orientation": 3821,
-        "reviewer/review": 4174,
-        "reviewer/recovery": 3142,
+        "reviewer/orientation": 3839,
+        "reviewer/review": 4192,
+        "reviewer/recovery": 3160,
         "investigator/orientation": 2105,
         "investigator/recovery": 1462,
         "bootstrap/orientation": 1750,
@@ -6343,7 +6343,7 @@
       },
       "skills/l-01-agent-lifecycles/core/digest-map.json": {
         "size_words": 18879,
-        "sha256": "80daf0843259cbaef290dad1ddbc29b79db640c9802bc7e11a690c2d24b97d57"
+        "sha256": "96483b6b93dbcd1bbed5b93a7868365966b2007562c9fe14796da30e842c08c0"
       },
       "skills/l-01-agent-lifecycles/core/every-role.md": {
         "size_words": 2295,
@@ -6610,8 +6610,8 @@
         "sha256": "c5078ef91b7c3bcf80005010ab1c2c712e65574c7a386d8add857ac33934fca0"
       },
       "skills/l-01-agent-lifecycles/roles/reviewer.md": {
-        "size_words": 2869,
-        "sha256": "369d3c5cdfd03d981d99b8098a3432dc481c6baea97886a5f1dc6dfacc4437ae"
+        "size_words": 2887,
+        "sha256": "ef7cda717ecdfe82fb296960de3b680038cde27566a253dd64fef38166b9f590"
       },
       "skills/l-01-agent-lifecycles/roles/worker.md": {
         "size_words": 2332,
@@ -6682,8 +6682,8 @@
         "sha256": "67ca3513d6b2c90f7115ae52ba0d83a754595b8903a8c284e69429d07334cdab"
       },
       "skills/l-01-agent-lifecycles/templates/verdict.md": {
-        "size_words": 3660,
-        "sha256": "2811afc3e2bf80b3b9b1b681d6dfffd41f8c69ce48152f532870271e6fe476b4"
+        "size_words": 3691,
+        "sha256": "5ce515b3bf81888b46e25613d088a9fb776908820c7fbe6736a36fe40da95e52"
       }
     },
     "compiler_input_revisions": {
@@ -6748,7 +6748,7 @@
       "roles/investigator.md": "sha256:851518cf23e4a1bc25139ef2663d951ea08399d679e9815a2fc005a62949c361",
       "roles/manager.md": "sha256:3f72f28bc433ea42d80d08722465ba9dd4f892d6e1c3ea1ab6573f8d5c178b4c",
       "roles/orchestrator.md": "sha256:c5078ef91b7c3bcf80005010ab1c2c712e65574c7a386d8add857ac33934fca0",
-      "roles/reviewer.md": "sha256:369d3c5cdfd03d981d99b8098a3432dc481c6baea97886a5f1dc6dfacc4437ae",
+      "roles/reviewer.md": "sha256:ef7cda717ecdfe82fb296960de3b680038cde27566a253dd64fef38166b9f590",
       "roles/worker.md": "sha256:b99e6ae2bc61c97af708715a631f6c79cc9a522b62289874c1a9a448bbd88ed3",
       "templates/turn-report.md": "sha256:67ca3513d6b2c90f7115ae52ba0d83a754595b8903a8c284e69429d07334cdab"
     }

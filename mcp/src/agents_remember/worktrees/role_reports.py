@@ -12,7 +12,7 @@ import os
 import shutil
 import tempfile
 from collections.abc import Iterator, Mapping
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath
 from typing import Any
 
 from agents_remember.cli.role_handover_file import HANDOVER_FILE_SUFFIX
@@ -36,10 +36,37 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 ROLE_REPORT_DIRECTORY = "role-reports"
 LEGACY_ROLE_REPORT_ALIAS = "task-reports"
+COLLECTED_REPORT_DIRECTORY = "notes/reports"
+COLLECTED_REPORT_PARTS = PurePosixPath(COLLECTED_REPORT_DIRECTORY).parts
 # The locators the launches of the folders being removed published; only the aliases go.
 HANDOVER_LOCATOR_DIRECTORY = "handover-locators"
 MAX_COLLECTION_FILES = 10_000
 MAX_COLLECTION_BYTES = 2 * 1024**3
+
+
+def collected_report_ref(relative: str | PurePath) -> str:
+    """Map a path relative to ``role-reports/`` to its collected task-relative form."""
+
+    raw = relative.as_posix() if isinstance(relative, PurePath) else relative
+    cleaned = raw.strip().lstrip("/")
+    parts = PurePosixPath(cleaned).parts
+    if not parts or ".." in parts:
+        raise ValueError("collected_report_ref requires a relative path inside role-reports/")
+    return f"{COLLECTED_REPORT_DIRECTORY}/{'/'.join(parts)}"
+
+
+def is_collected_report_ref(reference: str) -> bool:
+    """Whether ``reference`` is already a task-relative ``notes/reports/<rel>`` path."""
+
+    raw = reference.strip()
+    if not raw or Path(raw).is_absolute():
+        return False
+    parts = PurePosixPath(raw).parts
+    return (
+        len(parts) > len(COLLECTED_REPORT_PARTS)
+        and parts[: len(COLLECTED_REPORT_PARTS)] == COLLECTED_REPORT_PARTS
+        and ".." not in parts
+    )
 
 
 class RoleReportCollectionError(AgentsRememberError):
@@ -299,7 +326,7 @@ def _line_measurement_citations(line: str, directory: Path, root: Path) -> Itera
 
 
 def collect_group_reports(contract: WorktreeContract, *, dry_run: bool) -> dict[str, Any]:
-    canonical = contract.task_root / "notes" / "reports"
+    canonical = contract.task_root / COLLECTED_REPORT_DIRECTORY
     result = collect_report_folder(
         contract.worktree_group / ROLE_REPORT_DIRECTORY, canonical, dry_run=dry_run
     )

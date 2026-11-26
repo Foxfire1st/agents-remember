@@ -15,6 +15,10 @@ from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.worktrees.integration.lifecycle.lifecycle_location_reservation import (
     lifecycle_location_reservation,
 )
+from agents_remember.worktrees.role_reports import (
+    COLLECTED_REPORT_DIRECTORY,
+    ROLE_REPORT_DIRECTORY,
+)
 from agents_remember.worktrees.worktree_contract import load_contract
 
 if TYPE_CHECKING:
@@ -63,9 +67,9 @@ def prepare_role_folders(
     root = Path(workspace["path"])
     if context.role not in LEAF_ROLES:
         execution = root / ".agents-remember" / "role-executions" / str(request_id)
-        local = execution / "role-reports"
+        local = execution / ROLE_REPORT_DIRECTORY
         canonical = (
-            (context.effective_task.path.parent / "notes" / "reports")
+            (context.effective_task.path.parent / COLLECTED_REPORT_DIRECTORY)
             if context.effective_task
             else root / ".agents-remember" / "reports"
         )
@@ -73,7 +77,7 @@ def prepare_role_folders(
         scratch = execution / "scratch"
     else:
         workspace["taskReportAccessRoot"] = (
-            root / "role-reports" / context.role / str(request_id)
+            root / ROLE_REPORT_DIRECTORY / context.role / str(request_id)
         ).as_posix()
         scratch = root / "scratch" / context.role / str(request_id)
     workspace["taskReportRoot"] = (

@@ -39,6 +39,7 @@ from agents_remember.worktrees.knowledge_gate import (
     parent_memory_tip,
 )
 from agents_remember.worktrees.knowledge_validation import PairedCode, memory_commit_refusal
+from agents_remember.worktrees.memory_verdict_ref import unmapped_verdict_ref_note
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
@@ -69,6 +70,7 @@ from agents_remember.worktrees.queue.closeout_recovery import (
     resume_external_commits,
 )
 from agents_remember.worktrees.review_fact_source import NO_PASS_SENTENCE, leaf_review_fact
+from agents_remember.worktrees.role_reports import is_collected_report_ref
 from agents_remember.worktrees.series_closeout import series_memory_closeout
 from agents_remember.worktrees.services import LeafPublication, refresh_written_memory_briefs
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -156,9 +158,15 @@ def closeout_briefs_result(
 
 
 def _review_note(closing: HistoryClosing, review: ReviewFact | None) -> str:
-    """The closeout's sentence when it closed an open history file without a review fact."""
+    """Closeout sentence for an open history closed without a pass or with an unmapped verdictRef."""
 
-    return NO_PASS_SENTENCE if review is None and closing.written != closing.previous else ""
+    if closing.written == closing.previous:
+        return ""
+    if review is None:
+        return NO_PASS_SENTENCE
+    if review.verdict_ref is not None and not is_collected_report_ref(review.verdict_ref):
+        return unmapped_verdict_ref_note(review.verdict_ref)
+    return ""
 
 
 def _published_code_commit_detail(code_commit: str, detail: str) -> str:

@@ -35,6 +35,7 @@ from agents_remember.tasks.document_stamp_owner import document_stamp_owner
 from agents_remember.tasks.route_review import ReviewRound, passed_memory_round, usable_verdict_ref
 from agents_remember.tasks.store import read_task_doc
 from agents_remember.tasks.writer_stamps import StampOwner
+from agents_remember.worktrees.memory_verdict_ref import collected_verdict_ref
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.review_handover import unknown_stamp
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -85,7 +86,13 @@ def owner_review_fact(
         return None
     leaf_json = TaskDocumentTopology(contract.coordination_root).path_for_ref(ref)
     root = memory_root or contract.memory_worktree or contract.memory_repo_path
-    return _review_fact(leaf_json, _closed_tree(root), now)
+    return _review_fact(
+        leaf_json,
+        _closed_tree(root),
+        now,
+        worktree_group=contract.worktree_group,
+        task_root=contract.task_root,
+    )
 
 
 @dataclass(frozen=True)
@@ -110,7 +117,14 @@ def qualifying_round(state: ReviewState | None, closed_tree: str | None) -> Revi
     return last if last.memoryTree == closed_tree else None
 
 
-def _review_fact(leaf_json: Path, closed_tree: str | None, now: Clock) -> ReviewFact | None:
+def _review_fact(
+    leaf_json: Path,
+    closed_tree: str | None,
+    now: Clock,
+    *,
+    worktree_group: Path | None = None,
+    task_root: Path | None = None,
+) -> ReviewFact | None:
     try:
         document = read_task_doc(leaf_json)
     except FileNotFoundError:
@@ -118,11 +132,18 @@ def _review_fact(leaf_json: Path, closed_tree: str | None, now: Clock) -> Review
     round_ = qualifying_round(document.memoryReviewState, closed_tree)
     if round_ is None:
         return None
+    raw_ref = usable_verdict_ref(round_.verdictRef)
+    assert raw_ref is not None
+    verdict_ref = collected_verdict_ref(
+        raw_ref,
+        worktree_group=worktree_group,
+        task_root=task_root,
+    )
     stamps = _Stamps(document_stamp_owner(leaf_json.parent, document), now())
     return ReviewFact.model_validate(
         {
             "round": round_.round,
-            "verdictRef": usable_verdict_ref(round_.verdictRef),
+            "verdictRef": verdict_ref,
             "tree": round_.memoryTree,
             "reviewer": _reviewer(round_, stamps).to_document(),
             "handedOverBy": _handed_over_by(round_, stamps.owner).to_document(),

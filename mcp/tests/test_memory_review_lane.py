@@ -130,6 +130,11 @@ def test_memory_baseline_after_code_pass_is_independent_and_persisted(tmp_path: 
     assert begun["memoryReviewState"]["round"] == 1
     assert begun["memoryReviewState"]["pending"] is True
     assert begun["reviewState"] == code
+    verdict_file = (
+        config.coordination_root / "tasks/agents-remember/review-api/notes/reports/memory-first.md"
+    )
+    verdict_file.parent.mkdir(parents=True, exist_ok=True)
+    verdict_file.write_text("# Memory verdict\n", encoding="utf-8")
     recorded = _call(
         config,
         "record_review",
@@ -137,7 +142,7 @@ def test_memory_baseline_after_code_pass_is_independent_and_persisted(tmp_path: 
             "reviewKind": "memory",
             "verdict": "block",
             "findings": [{"findingId": "M1", "description": "Memory obligation missing."}],
-            "verdictRef": "reports/memory-first.md",
+            "verdictRef": "notes/reports/memory-first.md",
         },
     )
     assert recorded["reviewState"] == code
@@ -160,7 +165,7 @@ def test_memory_baseline_after_code_pass_is_independent_and_persisted(tmp_path: 
             "round": 1,
             "kind": "memory",
             "findingsRemain": True,
-            "verdictRef": "reports/memory-first.md",
+            "verdictRef": "notes/reports/memory-first.md",
             "verdict": "block",
         }
     ]
@@ -296,23 +301,28 @@ def test_a_record_only_correction_keeps_the_hand_over_stamped_when_the_round_was
     holder = folder / "notes/reports/paseo-native-executions"
     holder.mkdir(parents=True)
     receipt = _register_curator(holder, "01KORIGINAL")
+    reports = folder / "notes/reports"
+    for name in ("a.md", "b.md"):
+        (reports / name).write_text(f"# {name}\n", encoding="utf-8")
     tree = subprocess.run(
         ["git", "-C", str(memory), "write-tree"], check=True, text=True, capture_output=True
     ).stdout.strip()
     memory_review = {"reviewKind": "memory", "verdict": "pass", "candidateTree": tree}
     _call(config, "begin_review", review={"reviewKind": "memory"})
     first = _call(
-        config, "record_review", review={**memory_review, "findings": [], "verdictRef": "a.md"}
+        config,
+        "record_review",
+        review={**memory_review, "findings": [], "verdictRef": "notes/reports/a.md"},
     )["memoryReviewState"]["recordedRounds"][0]["handedOverBy"]
     if between is not None:
         between(holder, receipt)
     if new_round:
         _call(config, "begin_review", review={"reviewKind": "memory"})
-    review = {**memory_review, "remainingFindingIds": [], "verdictRef": "b.md"}
+    review = {**memory_review, "remainingFindingIds": [], "verdictRef": "notes/reports/b.md"}
     rounds = _call(config, "record_review", review=review)["memoryReviewState"]["recordedRounds"]
 
     stored = rounds[-1]
-    assert (len(rounds), stored["verdictRef"]) == (2 if new_round else 1, "b.md")
+    assert (len(rounds), stored["verdictRef"]) == (2 if new_round else 1, "notes/reports/b.md")
     assert stored["handedOverBy"]["seat"] == seat
     if not new_round:
         assert stored["handedOverBy"] == first
@@ -341,13 +351,16 @@ def test_a_round_turned_to_block_and_back_keeps_its_hand_over_and_other_memory_n
     )
     holder.mkdir(parents=True)
     receipt = _register_curator(holder, "01KORIGINAL")
+    reports = config.coordination_root / "tasks/agents-remember/review-api/notes/reports"
+    for name in ("a.md", "b.md", "c.md", "d.md"):
+        (reports / name).write_text(f"# {name}\n", encoding="utf-8")
     tree = subprocess.run(
         ["git", "-C", str(memory), "write-tree"], check=True, text=True, capture_output=True
     ).stdout.strip()
     base = {"reviewKind": "memory", "candidateTree": tree, "remainingFindingIds": []}
     first = {"reviewKind": "memory", "candidateTree": tree, "findings": [], "verdict": "pass"}
     _call(config, "begin_review", review={"reviewKind": "memory"})
-    _call(config, "record_review", review={**first, "verdictRef": "a.md"})
+    _call(config, "record_review", review={**first, "verdictRef": "notes/reports/a.md"})
     _replace_curator(holder, receipt)
 
     def stored() -> list[tuple[str | None, str]]:
@@ -355,13 +368,25 @@ def test_a_round_turned_to_block_and_back_keeps_its_hand_over_and_other_memory_n
         assert state is not None
         return [(one.verdict, (one.handedOverBy or {})["seat"]) for one in state.recordedRounds]
 
-    _call(config, "record_review", review={**base, "verdict": "block", "verdictRef": "b.md"})
+    _call(
+        config,
+        "record_review",
+        review={**base, "verdict": "block", "verdictRef": "notes/reports/b.md"},
+    )
     assert stored() == [("block", "01KORIGINAL")]
-    _call(config, "record_review", review={**base, "verdict": "pass", "verdictRef": "c.md"})
+    _call(
+        config,
+        "record_review",
+        review={**base, "verdict": "pass", "verdictRef": "notes/reports/c.md"},
+    )
     assert stored() == [("pass", "01KORIGINAL")]
     (memory / "memory.json").write_text('{"candidate": "changed"}\n')
     with pytest.raises(TaskDocError, match="review-candidate-changed"):
-        _call(config, "record_review", review={**base, "verdict": "pass", "verdictRef": "d.md"})
+        _call(
+            config,
+            "record_review",
+            review={**base, "verdict": "pass", "verdictRef": "notes/reports/d.md"},
+        )
     assert stored() == [("pass", "01KORIGINAL")]
 
 
