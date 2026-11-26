@@ -46,6 +46,9 @@ HANDOVER_NOT_RECORDED: Final = (
 _AGENT_FIELDS: Final = ("role", "harness", "model", "effort", "seat")
 _CROSSING_TASK: Final = re.compile(r"^(?P<task>.+)-crossing-[1-9][0-9]*$")
 _STAMP_VALUE: Final = TypeAdapter(Label)
+_DURABLE_REPORT_PREFIX: Final = "notes/reports"
+_REPORT_MARKERS: Final = (("role-reports",), ("notes", "reports"))
+_WINDOWS_DRIVE: Final = re.compile(r"^[A-Za-z]:/")
 
 OwnerKind = Literal["leaf", "wave", "crossing"]
 
@@ -139,10 +142,43 @@ def review_fact(owner: Owner, passed: PassedReview, owners: TaskOwners, *, at: s
         "handedOverBy": _stamp(owner, task, task_reason, at=at, reason=HANDOVER_NOT_RECORDED),
     }
     if passed.verdict_ref is not None:
-        document["verdictRef"] = passed.verdict_ref
+        document["verdictRef"] = _durable_verdict_ref(passed.verdict_ref)
     if passed.tree is not None:
         document["tree"] = passed.tree
     return ReviewFact.model_validate(document)
+
+
+def _durable_verdict_ref(reference: str) -> str:
+    """Map a worktree or absolute report path to its durable ``notes/reports/<rel>`` copy."""
+
+    cleaned = reference.strip().replace("\\", "/")
+    parts = [part for part in cleaned.split("/") if part and part != "."]
+    if ".." in parts:
+        return cleaned
+    is_absolute = cleaned.startswith("/") or bool(_WINDOWS_DRIVE.match(cleaned))
+    tail = _report_tail(parts, absolute=is_absolute)
+    if not tail:
+        return cleaned
+    return f"{_DURABLE_REPORT_PREFIX}/{'/'.join(tail)}"
+
+
+def _report_tail(parts: list[str], *, absolute: bool) -> list[str] | None:
+    """Return path segments under ``role-reports`` or ``notes/reports``, or ``None``."""
+
+    if not absolute:
+        for marker in _REPORT_MARKERS:
+            if tuple(parts[: len(marker)]) == marker:
+                return parts[len(marker) :]
+        return None
+    best: int | None = None
+    for marker in _REPORT_MARKERS:
+        width = len(marker)
+        for index in range(len(parts) - width + 1):
+            if tuple(parts[index : index + width]) == marker:
+                end = index + width
+                if best is None or end > best:
+                    best = end
+    return None if best is None else parts[best:]
 
 
 def _stamp(
