@@ -103,10 +103,16 @@ def test_investigator_review_pointer_requires_its_declared_source(tmp_path: Path
 
     require_window(references[source].content.decode())
     instructions = accepted.result.render_instructions()
-    action = "Before reviewing an instruction shortfall named by the concern, read"
-    pointer = action + " [instruction-shortfall review]({{detail:" + source + "}})"
+    action = "| Research/shortfalls/msg |"
+    pointer = (
+        action
+        + " [research](../reference/repository-research.md), "
+        + "[shortfalls]({{detail:"
+        + source
+        + "}})"
+    )
     assert pointer in " ".join(instructions.split())
-    misplaced = instructions.replace(action, "Read", 1)
+    misplaced = instructions.replace(action, "| Other |", 1)
     with pytest.raises(AssertionError):
         assert pointer in " ".join(misplaced.split())
     declaration = compose_manifest(document)["references"]["instruction-shortfall-review"]
@@ -150,10 +156,10 @@ def test_progress_judgment_detail_reaches_all_declared_coordination_seats() -> N
     assert declaration["source"] == source
     assert declaration["step_detail"] is True and declaration["injected"] is False
     actions = {
-        "architect": "Before judging a third rejected round during direct coordination, read",
+        "architect": "| Models/sandbox (`role_start`), master, seats (`retire_child`), 3rd |",
         "manager": (
-            "Before judging repair progress at a third rejected round, an earlier coder switch "
-            "or a Reviewer replacement, read"
+            "| Seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), "
+            "switch (`worktree_closeout_*`) |"
         ),
     }
     clauses = (
@@ -191,17 +197,25 @@ def test_progress_judgment_detail_reaches_all_declared_coordination_seats() -> N
                 assert reference.content == (LIFECYCLE_ROOT / source).read_bytes()
                 assert reference.revision == compute_content_digest(reference.content)
                 assert reference.step == declaration["step"] and reference.step
-                pointer = actions[role] + " [repair-progress judgment]({{detail:" + source + "}})"
-                assert pointer in rendered, (role, operation)
+                raw_instructions = outcome.result.render_instructions()
+                row_pattern = re.compile(
+                    re.escape(actions[role])
+                    + r"[^\n]*\[3rd\]\("
+                    + re.escape("{{detail:" + source + "}}")
+                    + r"\)"
+                )
+                assert row_pattern.search(raw_instructions), (role, operation)
                 with pytest.raises(AssertionError):
-                    assert pointer in rendered.replace(actions[role], "Read", 1)
+                    assert row_pattern.search(
+                        raw_instructions.replace(actions[role], "| Other |", 1)
+                    )
                 body = " ".join(reference.content.decode().split())
                 for clause in clauses:
                     assert clause in body, (role, operation, clause)
                     with pytest.raises(AssertionError):
                         assert clause in body.replace(clause, "", 1)
             elif role == "orchestrator":
-                assert "The Manager retains its leaf finding-trail judgment." in rendered
+                assert "Managers keep leaf finding-trail judgment" in rendered
 
 
 def test_architect_measurement_detail_keeps_change_trigger_and_unknown_boundary() -> None:
@@ -227,16 +241,12 @@ def test_architect_measurement_detail_keeps_change_trigger_and_unknown_boundary(
         assert reference.content == (LIFECYCLE_ROOT / source).read_bytes()
         assert reference.revision == compute_content_digest(reference.content)
         assert reference.step == declaration["step"] and reference.step
-        pointer = (
-            "Before running or discussing a Curator measurement, read "
-            "[Curator measurement rules]({{detail:" + source + "}})"
-        )
+        action = "| Meas., advisory, flat closeout |"
+        pointer = action + " [meas]({{detail:" + source + "}})"
         rendered = " ".join(outcome.result.render_instructions().split())
         assert pointer in rendered, operation
         with pytest.raises(AssertionError):
-            assert pointer in rendered.replace(
-                "Before running or discussing a Curator measurement", "Read", 1
-            )
+            assert pointer in rendered.replace(action, "| Other |", 1)
         detail = reference.content.decode()
         for clause in (
             "receive the candidate and case-set identity through the coordinating Manager",
@@ -631,8 +641,23 @@ def test_digest_places_reject_lost_or_ambiguous_bindings() -> None:
 def test_structured_shared_digest_is_delivered_once_and_seals_each_role() -> None:
     text = (LIFECYCLE_ROOT / "core/every-role.md").read_text()
     _assert_digest_structure(text)
+    acceptance_text = (LIFECYCLE_ROOT / "core/acceptance.md").read_text()
     archive_rule = "Worker, Reviewer, Curator: At the end of each round, pack that round's bulk evidence (captures, logs, generated packages) into one archive in your report folder, with a manifest of its files and hashes, and keep loose only the archive, its manifest and the files the next step reads."
-    evidence_rule = "Worker, Reviewer: For evidence kept for later use, record one of two sets of information. Either name the stable contract it serves, its owner, the exact executable test or check that uses or verifies it, and its consumers; or name its expiry, the executable step that removes or replaces it, its owner and the effect on compatibility. Missing catalog information must be repaired even if the requirement is satisfied; complete catalog information does not itself satisfy the requirement."
+    assert acceptance_text.count(archive_rule) == 1
+    assert (
+        "For each new or retained fixture, recording, generator, shared support file or migration proof"
+        in acceptance_text
+    )
+    ceiling_rule = (
+        "Architect, Reviewer: Ceilings are `WIRE_TOKEN_CEILINGS` and "
+        "`COMPILED_CAPSULE_TOKEN_CEILINGS` in "
+        "`mcp/src/agents_remember/application/role_capsules/wire_budget.py`; "
+        "only developer sets/raises them."
+    )
+    task_code_rule = (
+        "Architect, Orchestrator, Manager, Worker, Bootstrap: "
+        "Change code only under an approved task (`task_doc`), never from chat."
+    )
     for role, entry in _shipped_parsed().roles.items():
         for operation in entry.operations:
             request = _shipped_request(role, operation)
@@ -642,11 +667,11 @@ def test_structured_shared_digest_is_delivered_once_and_seals_each_role() -> Non
             expected_shared = filter_shared_block(text, role)
             assert outcome.shared_block == expected_shared
             assert outcome.shared_block is not None
-            assert outcome.shared_block.count(archive_rule) == int(
-                role in {"worker", "reviewer", "curator"}
+            assert outcome.shared_block.count(ceiling_rule) == int(
+                role in {"architect", "reviewer"}
             ), (role, operation)
-            assert outcome.shared_block.count(evidence_rule) == int(
-                role in {"worker", "reviewer"}
+            assert outcome.shared_block.count(task_code_rule) == int(
+                role in {"architect", "orchestrator", "manager", "worker", "bootstrap"}
             ), (role, operation)
             rendered = shared_block(outcome.shared_block) + outcome.result.render_instructions()
             assert rendered.count(expected_shared) == 1
@@ -743,12 +768,13 @@ def test_git_root_scope_has_one_complete_source_and_digest_home() -> None:
     assert rule["digestPlace"] == "place-40"
     assert set(rule["audience"]) == set(document["roles"])
     place = next(p for p in document["digest"]["places"] if p["id"] == "place-40")
-    assert place["units"] == ["IN8.7"]
+    assert "IN8.7" in place["units"]
     expected = (
         "Run Git commands only against the resolved code repository root or memory root, "
         "and only when that root is a Git repository. "
         "Never run Git against the coordination root as a whole."
     )
+    expected_digest = "Run Git only in code/memory Git roots, never coordination root."
     source = (LIFECYCLE_ROOT / rule["file"]).read_text().splitlines()
     start, end = rule["lines"]
     assert "\n".join(source[start - 1 : end]) == expected, (
@@ -756,7 +782,7 @@ def test_git_root_scope_has_one_complete_source_and_digest_home() -> None:
         "the sentence changed; update the expected sentence with it."
     )
     start, end = place["lines"]
-    assert "\n".join(text.splitlines()[start - 1 : end]) == expected, (
+    assert expected_digest in "\n".join(text.splitlines()[start - 1 : end]), (
         f"Run {RENEW_COMMAND}. If this still fails after successful renewal, "
         "the sentence changed; update the expected sentence with it."
     )
@@ -785,64 +811,46 @@ def _assert_foundation_detail_at_its_action(
     assert reference.content == (LIFECYCLE_ROOT / foundation).read_bytes()
     assert reference.revision == compute_content_digest(reference.content)
     assert reference.step == step and reference.step
-    pointer = (
-        "Before a repository's first or resumed knowledge foundation, read "
-        "[repository foundation]({{detail:" + foundation + "}})"
+    action = "| Exceptions/sync |"
+    pointer = re.compile(
+        re.escape(action)
+        + r"[^\n]*\[foundation\]\("
+        + re.escape("{{detail:" + foundation + "}}")
+        + r"\)"
     )
-    assert pointer in rendered
+    assert pointer.search(rendered)
     with pytest.raises(AssertionError):
-        assert pointer in rendered.replace(
-            "Before a repository's first or resumed knowledge foundation", "Read", 1
-        )
+        assert pointer.search(rendered.replace(action, "| Other |", 1))
 
 
 def test_reviewer_complete_diff_rule_stays_inline_once() -> None:
-    """P5-07 RG-021 (round-5 look F2): the complete-diff rule's one home is the role file."""
-    inline = "Inspect every changed file, including files without invariant attribution."
+    """The complete-diff rule's one home is the Reviewer role file."""
+    inline = "inspect every changed/unattributed file"
     assert (LIFECYCLE_ROOT / "roles/reviewer.md").read_text().count(inline) == 1
     assert inline not in (LIFECYCLE_ROOT / "reference/knowledge/use.md").read_text()
 
 
-#: Each role that reads knowledge use, the operation it reads it in and its working pointers.
+#: Each role that reads knowledge use, the operation it reads it in and its row trigger + link label.
 KNOWLEDGE_USE_CONSUMERS = {
     "architect": (
         "planning",
-        (
-            "Before diagnosing, call `knowledge_read` on `agents-remember-task` for the files involved; read [knowledge use]",
-        ),
+        (("| Reqs/`task_doc`/`context_packet`/`knowledge_read` |", "[diagnose]"),),
     ),
     "worker": (
         "implementation",
-        (
-            (
-                "For a record you need whole, call `knowledge_read` on "
-                '`agents-remember-task` with `view="source_context"`; read [knowledge use]'
-            ),
-            (
-                "Before diagnosing a failing test, call `knowledge_read` on "
-                '`agents-remember-task` with `view="source_context"` for the '
-                "test file; read [knowledge use]"
-            ),
-        ),
+        (("| Knowledge/CLI |", "[use]"),),
     ),
     "reviewer": (
         "review",
-        (
-            "Call `knowledge_read` on `agents-remember-task` for the changed files' records you need whole; read [knowledge use]",
-        ),
+        (("| Baseline/knowledge |", "[use]"),),
     ),
     "investigator": (
         "orientation",
-        (
-            "Call `knowledge_read` on `agents-remember-task` for the records you need whole; read [knowledge use]",
-        ),
+        (("| Knowledge readers |", "[claims]"),),
     ),
     "curator": (
         "curation",
-        (
-            "Call `knowledge_read` on `agents-remember-task` for the records you check; read [knowledge use]",
-            "Before interpreting a knowledge read, read [knowledge-read limits]",
-        ),
+        (("| Knowledge/CLI |", "[use]"),),
     ),
 }
 
@@ -857,8 +865,6 @@ def test_inherited_step_details_reach_only_the_seats_that_use_them(tmp_path: Pat
     assert declaration["source"] == knowledge
     assert set(declaration["roles"]) == {
         "architect",
-        "orchestrator",
-        "manager",
         "worker",
         "curator",
         "reviewer",
@@ -870,8 +876,6 @@ def test_inherited_step_details_reach_only_the_seats_that_use_them(tmp_path: Pat
         "curator/repository-foundation"
     ]
     assert foundation_declaration["source"] == foundation
-    # operations/curation.md:10 (a relative link, not a capsule detail) sits in an all-roles
-    # passage, so the Manager's curation text points at it too (P5-05 first-message roles).
     assert foundation_declaration["roles"] == ["manager", "curator"]
     assert foundation_declaration["step_detail"] is True
     assert foundation_declaration["injected"] is False
@@ -887,28 +891,30 @@ def test_inherited_step_details_reach_only_the_seats_that_use_them(tmp_path: Pat
         outcome = compile_admitted_capsule(_shipped_binding(role, operation), request)
         assert outcome.ok, outcome.render_explanation()
         assert outcome.result is not None
-        rendered = " ".join(outcome.result.render_instructions().split())
+        raw_rendered = outcome.result.render_instructions()
         details = {item.source_path: item for item in outcome.result.capsule.detail_references}
         assert (knowledge in details) == (role in KNOWLEDGE_USE_CONSUMERS), role
         assert (foundation in details) == (role == "curator"), role
         if role == "curator":
             reference = details[foundation]
             _assert_foundation_detail_at_its_action(
-                reference, foundation, foundation_declaration["step"], rendered
+                reference, foundation, foundation_declaration["step"], raw_rendered
             )
         if role in KNOWLEDGE_USE_CONSUMERS:
             reference = details[knowledge]
             assert reference.content == (LIFECYCLE_ROOT / knowledge).read_bytes()
             assert reference.revision == compute_content_digest(reference.content)
             assert reference.step == declaration["step"] and reference.step
-            for action in KNOWLEDGE_USE_CONSUMERS[role][1]:
-                # The link closes or carries one section anchor (P5-14 section links).
+            for trigger, label in KNOWLEDGE_USE_CONSUMERS[role][1]:
                 pointer = re.compile(
-                    re.escape(action + "({{detail:" + knowledge + "}}") + r"(?:#[a-z0-9-]+)?\)"
+                    re.escape(trigger)
+                    + r"[^\n]*"
+                    + re.escape(label + "({{detail:" + knowledge + "}}")
+                    + r"(?:#[a-z0-9-]+)?\)"
                 )
-                assert pointer.search(rendered), (role, action)
+                assert pointer.search(raw_rendered), (role, trigger, label)
                 with pytest.raises(AssertionError):
-                    assert pointer.search(rendered.replace(action, "Read [knowledge use]", 1))
+                    assert pointer.search(raw_rendered.replace(trigger, "| Other |", 1))
             detail = details[knowledge].content.decode()
             for clause in (
                 "memoryRoot",

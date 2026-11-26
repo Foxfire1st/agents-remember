@@ -217,7 +217,7 @@ def test_link_mutations_fail_and_the_gfm_anchor_passes() -> None:
     for name, mutant in MUTANTS.items():
         assert set(_scan(SOURCE, mutant())) - baseline, name
     # In the package root, a skill:// target resolves in the package, not in the source.
-    relative = "reference/knowledge/use.md"
+    relative = "reference/refused-write.md"
     assert (PACKAGED / relative).is_file()
     added = set(_scan(PACKAGED, {relative: None})) - set(_scan(PACKAGED))
     assert any(f": {SERVED}l-01-agent-lifecycles/{relative}" in item for item in added), added

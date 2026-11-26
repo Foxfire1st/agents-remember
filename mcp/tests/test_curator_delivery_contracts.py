@@ -1,7 +1,7 @@
-"""L84's scheduled R62 rules31-37/A1/BA6 subset: real source and delivery proof.
+"""Scheduled curation delivery contracts: real source and compiled delivery proof.
 
-V8 removes mutation mandates, not source-local duties, actual audiences or step reach.
-R07v2 rules3/5 govern the separate invariant/family disposition definitions.
+Verifies source-local duties, actual audiences, step-detail reach, emitted links,
+and mutation controls across the three-tier progressive-disclosure lifecycle corpus.
 """
 
 from __future__ import annotations
@@ -31,55 +31,89 @@ from agents_remember_test_support.testing.curator_contracts import (
     CRITERIA_TRUTH,
     DISPOSITIONS,
     FACTCHECK_CRITERIA,
-    FACTCHECK_OPERATION,
-    FULL_CURATION_ACTION,
-    FULL_CURATION_CLAUSES,
-    HEALING_UNION_CLAUSES,
     KNOWLEDGE,
     OPERATION,
     PUBLICATION,
     PUBLICATION_SEMANTICS,
     ROLE,
-    ROLE_CONTINUATION,
-    ROLE_CURRENT_TRUTH,
-    ROLE_HEALING,
     SEMANTIC_TRUTH,
-    SERVING_AUTHORITY,
-    SHARED_CONTINUATION,
     WRITER,
     WRITER_IDENTITY,
-    WRITER_OPERATION,
     Delivered,
-    SectionLink,
     compile_matrix,
     expected_bound_detail,
     healing_findings,
-    linked_section,
     normalized,
     require_clauses,
     writer_findings,
 )
 from agents_remember_test_support.testing.leaf_instruction_wording import (
-    assert_action_pointer,
     assert_emitted_detail_links,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
 LIFECYCLE = ROOT / "skills/l-01-agent-lifecycles"
-DETAIL_ACTIONS = {
-    AUTHORING: ("Before editing a card or its paired notes, read", {"curator"}),
-    CARD: ("Before creating or maintaining cards or overviews, read", {"curator"}),
-    WRITER: ("Before a command-line run that decides or writes, read", {"worker", "curator"}),
-    PUBLICATION: (
-        "Before interpreting an ingest result or claiming publication, read",
-        {"curator"},
-    ),
-    AUTHORED_HISTORY: (
-        "Before updating current overview prose or answering changed-file history, read",
-        {"curator"},
-    ),
-    CHANGE_ROUTING: ("Before routing a changed file or notes item, read", {"curator"}),
+EXCEPTIONS = "reference/curator/exceptions-and-recovery.md"
+MEMORY_HANDOVER = "reference/curator/memory-handover.md"
+
+DETAIL_INDEX_ENTRIES = {
+    AUTHORING: ("Cards/style", "sentences", {"curator"}),
+    CARD: ("Cards/style", "cards", {"curator"}),
+    WRITER: ("Knowledge/CLI", "cli", {"worker", "curator"}),
+    PUBLICATION: ("Write/route", "pub", {"curator"}),
+    AUTHORED_HISTORY: ("Cards/style", "prose", {"curator"}),
+    CHANGE_ROUTING: ("Write/route", "route", {"curator"}),
+    EXCEPTIONS: ("Exceptions/sync", "exceptions", {"curator"}),
 }
+
+CURATOR_ROLE_CLAUSES = (
+    "Reconcile one leaf's intent and implementation in one fresh session, update affected memory, and deliver the coherence record.",
+    "Write `onboarding/`+`knowledge/` via one writer (`knowledge_write` or serving-build CLI `--commit`/`commit: true`; missing writer != correct-input refusal); never edit derived indexes.",
+    "Withdraw falsified claims; discoveries use `capture-candidate`, never current intent.",
+    "Fix faulty inputs on same writer, repair own/tool/coherence faults, stop after 3 failed repairs on one item and tell Manager.",
+)
+
+FULL_CHECKS_CLAUSES = (
+    "Report sidecars, overviews/indexes/entities, `git diff --check`, `knowledge_integrity_check` + full `memory_quality_check` (scoped checks never substitute; rerun until `curatorActionableCount=0` + `qualityChecklistStatus=ready-for-closeout`).",
+    "Closeout runs stale `dependent` check (see exceptions).",
+    "Non-authoring seat runs [OM-2](../criteria/onboarding-memory.md#om-2--independent-fact-check-of-curated-knowledge).",
+)
+
+HANDOVER_REPORT_CLAUSES = (
+    "Requested curation reports cover changed paths, reconciliation/repairs/answers, commands and results, writer state/IDs/paths/refusals, family coverage (updated plus unchanged with reasons; mark unexamined), worklist count and host/helper support (delegated work and how it was verified; state explicitly when none was used).",
+)
+
+CURATOR_STOPS_AND_UNFINISHED_CLAUSES = (
+    "Stop for an open permission prompt, a standing refusal outside covered-write recovery, a question about what the requirement means, or an effect outside the assigned worktree, scratch folder, and task.",
+    "If you have a parent and remain unfinished at turn end, tell that parent what and whom you await via `role_message`.",
+)
+
+SHARED_CONTINUATION_KERNEL = (
+    "Parallelize independent work (serial landing, no cap).",
+    "Never poll, watch, or timer-loop; answer wakes first.",
+    "End waits with `WAITING FOR SUBAGENTS:` or `WAITING FOR BACKGROUND:` (process, id/log, expected end), sending no parent progress `role_message`.",
+)
+
+AUTHORITY_CONTINUATION_REFERENCE = (
+    "Collect helpers and continue ordinary work.",
+    "Use the helper-wait procedure declared by your launch; otherwise preserve the harness's native collection within the turn.",
+)
+
+SERVING_AUTHORITY_CLAUSES = (
+    "Decide/write via starting server or serving-build command-line interface (CLI) against clean main (name commit);",
+    "leaf source never produces leaf memory (test on fixtures/scratch);",
+    "install nothing, disable no guard.",
+)
+
+WRITER_OPERATION_CLAUSES = (
+    "Verify writer outputs resolve in `workspace.memoryRoot`.",
+    "Keep partial/refused handovers partial.",
+)
+
+FACTCHECK_OPERATION_CLAUSES = (
+    "### Checks and gates",
+    "Non-authoring seat runs [OM-2](../criteria/onboarding-memory.md#om-2--independent-fact-check-of-curated-knowledge).",
+)
 
 
 @pytest.fixture(scope="module")
@@ -91,85 +125,117 @@ def source(path: str) -> str:
     return (LIFECYCLE / path).read_text(encoding="utf-8")
 
 
+def _assert_index_detail_pointer(
+    text: str,
+    trigger: str,
+    label: str,
+    source_path: str,
+    fragment: str = "",
+) -> None:
+    """Require one Reference-index table row linking the named detail."""
+    marker = "{{detail:" + source_path + "}}" + fragment
+    link = f"[{label}]({marker})"
+    rows = [
+        line
+        for line in text.splitlines()
+        if line.lstrip().startswith("|") and f"| {trigger} |" in line and link in line
+    ]
+    assert len(rows) == 1, (trigger, label, source_path, "missing or repeated index pointer")
+    assert text.count(marker) == 1, (source_path, "expected one detail marker")
+
+
+def _extract_section(text: str, heading: str) -> str:
+    assert text.count(heading + "\n") == 1, heading
+    level = len(heading) - len(heading.lstrip("#"))
+    body = text.split(heading + "\n", 1)[1]
+    return re.split(r"(?m)^#{1," + str(level) + r"} ", body, maxsplit=1)[0]
+
+
+def _assert_emitted_om2_link(text: str, criteria_path: Path) -> None:
+    om2_links = re.findall(r"\[OM-2\]\(([^)]+)\)", text)
+    assert len(om2_links) == 1, om2_links
+    om2_parts = urlsplit(om2_links[0])
+    assert Path(unquote(om2_parts.path)).resolve() == criteria_path.resolve()
+    assert om2_parts.fragment == "om-2--independent-fact-check-of-curated-knowledge"
+
+
 def test_curator_role_itself_retains_complete_truth_continuation_stops_and_exceptions(
     deliveries: tuple[Delivered, ...],
 ) -> None:
-    clauses = (*ROLE_CURRENT_TRUTH, *ROLE_CONTINUATION, *ROLE_HEALING)
-    require_clauses(source(ROLE), clauses, ROLE)
-
-    def require_full_checks(text: str) -> None:
-        checks = linked_section(
-            text,
-            LIFECYCLE / ROLE,
-            SectionLink(
-                LIFECYCLE / OPERATION,
-                "Run the complete curation checks",
-                FULL_CURATION_ACTION,
-                "### Run the complete curation checks",
-            ),
-        )
-        require_clauses(checks, FULL_CURATION_CLAUSES, "linked full-operation home")
-
-    require_full_checks(source(ROLE))
-    checks = linked_section(
-        source(ROLE),
-        LIFECYCLE / ROLE,
-        SectionLink(
-            LIFECYCLE / OPERATION,
-            "Run the complete curation checks",
-            FULL_CURATION_ACTION,
-            "### Run the complete curation checks",
-        ),
+    require_clauses(source(ROLE), CURATOR_ROLE_CLAUSES, ROLE)
+    _assert_index_detail_pointer(source(ROLE), "Exceptions/sync", "exceptions", EXCEPTIONS)
+    exceptions_clauses = (
+        "Report unsatisfied checks as blocked.",
+        *HANDOVER_REPORT_CLAUSES,
+        *CURATOR_STOPS_AND_UNFINISHED_CLAUSES,
     )
-    for clause in FULL_CURATION_CLAUSES:
+    require_clauses(source(EXCEPTIONS), exceptions_clauses, EXCEPTIONS)
+    for clause in CURATOR_STOPS_AND_UNFINISHED_CLAUSES:
+        reading = normalized(source(EXCEPTIONS))
+        mutant = reading.replace(normalized(clause), "", 1)
+        assert mutant != reading
+        with pytest.raises(AssertionError):
+            require_clauses(mutant, exceptions_clauses, "deleted curator stop or parent notice")
+    require_clauses(
+        source("core/every-role.md"),
+        (
+            "For correct-input refused covered writes, follow [refused-write](skill://agents-remember/skills/l-01-agent-lifecycles/reference/refused-write.md) (same tool and input class) before applying a stop.",
+            "Other refusals keep stops.",
+            *SHARED_CONTINUATION_KERNEL,
+        ),
+        "core/every-role.md",
+    )
+    require_clauses(
+        source("core/authority.md"),
+        AUTHORITY_CONTINUATION_REFERENCE,
+        "core/authority.md",
+    )
+
+    checks = _extract_section(source(OPERATION), "### Checks and gates")
+    require_clauses(checks, FULL_CHECKS_CLAUSES, "curation full checks home")
+    for clause in FULL_CHECKS_CLAUSES:
         reading = normalized(checks)
         mutant = reading.replace(normalized(clause), "", 1)
         assert mutant != reading
         with pytest.raises(AssertionError):
-            require_clauses(mutant, FULL_CURATION_CLAUSES, "deleted check obligation")
+            require_clauses(mutant, FULL_CHECKS_CLAUSES, "deleted check obligation")
+
     for mutant in (
-        source(ROLE).replace("[Run the complete curation checks]", "[missing checks]", 1),
-        source(ROLE).replace("#run-the-complete-curation-checks", "#wrong-section", 1),
-        source(ROLE).replace(
-            "../operations/curation.md#run-the-complete-curation-checks",
-            "../operations/review.md#run-the-complete-curation-checks",
-            1,
-        ),
+        source(ROLE).replace("[exceptions](", "[missing](", 1),
+        source(ROLE).replace("{{detail:" + EXCEPTIONS + "}}", "{{detail:reference/wrong.md}}", 1),
+        source(ROLE).replace("| Exceptions/sync |", "| Other |", 1),
     ):
         assert mutant != source(ROLE)
         with pytest.raises(AssertionError):
-            require_full_checks(mutant)
+            _assert_index_detail_pointer(mutant, "Exceptions/sync", "exceptions", EXCEPTIONS)
 
-    def require_handover_checks(text: str, where: object) -> None:
-        handover = text.split("## Produce the handover", 1)[1].split(
-            "## Use direct handovers within the leaf", 1
-        )[0]
-        require_clauses(
-            handover,
-            ("Exact full-operation commands and results, every failed, blocked or not-run check",),
-            (where, "Produce the handover"),
-        )
-
-    require_handover_checks(source(ROLE), ROLE)
-    require_clauses(source("core/every-role.md"), SHARED_CONTINUATION, "core/every-role.md")
     for delivery in deliveries:
         role_block = delivery.block("role")
         if delivery.role == "curator":
-            require_clauses(role_block, clauses, (delivery.role, delivery.operation, ROLE))
-            require_full_checks(role_block)
-            require_handover_checks(role_block, (delivery.role, delivery.operation, ROLE))
+            require_clauses(role_block, CURATOR_ROLE_CLAUSES, (delivery.role, delivery.operation))
+            _assert_index_detail_pointer(role_block, "Exceptions/sync", "exceptions", EXCEPTIONS)
+            exceptions_detail = next(
+                item
+                for item in delivery.result.capsule.detail_references
+                if item.source_path == EXCEPTIONS
+            )
+            require_clauses(
+                exceptions_detail.content.decode(),
+                exceptions_clauses,
+                (delivery.role, delivery.operation, EXCEPTIONS),
+            )
             assert delivery.shared_block is not None
             assert delivery.shared_block == filter_shared_block(
                 source("core/every-role.md"), delivery.role
             )
             require_clauses(
                 delivery.shared_block,
-                SHARED_CONTINUATION,
+                SHARED_CONTINUATION_KERNEL,
                 (delivery.role, delivery.operation, "admitted shared continuation"),
             )
             emitted_shared = render_shared_block(delivery.shared_block)
             assert emitted_shared.count("## What every role acts on") == 1
-            for clause in SHARED_CONTINUATION:
+            for clause in SHARED_CONTINUATION_KERNEL:
                 assert normalized(emitted_shared).count(normalized(clause)) == 1
             assert not any(
                 block.source_path == "core/every-role.md"
@@ -179,14 +245,27 @@ def test_curator_role_itself_retains_complete_truth_continuation_stops_and_excep
             assert ROLE not in {
                 block.source_path for block in delivery.result.capsule.instructions
             }, (delivery.role, delivery.operation)
-    # Operation repetition cannot substitute for a missing role-local stop above.
+
     require_clauses(
-        source("operations/orientation.md"), SERVING_AUTHORITY, "operations/orientation.md"
+        source("operations/orientation.md"),
+        SERVING_AUTHORITY_CLAUSES,
+        "operations/orientation.md",
     )
-    require_clauses(source(OPERATION), WRITER_OPERATION, OPERATION)
+    require_clauses(source(OPERATION), WRITER_OPERATION_CLAUSES, OPERATION)
+    require_clauses(
+        source("reference/refused-write.md"),
+        ("A missing tool or unadmitted capability is not a refused correct write.",),
+        "reference/refused-write.md",
+    )
     for delivery in deliveries:
         if (delivery.role, delivery.operation) == ("curator", "curation"):
-            require_clauses(delivery.block("operation"), WRITER_OPERATION, OPERATION)
+            op_block = delivery.block("operation")
+            require_clauses(op_block, WRITER_OPERATION_CLAUSES, OPERATION)
+            require_clauses(
+                _extract_section(op_block, "### Checks and gates"),
+                FULL_CHECKS_CLAUSES,
+                (delivery.role, delivery.operation, "Checks and gates"),
+            )
 
 
 def test_step_details_reach_actual_files_at_actions_over_the_complete_matrix(
@@ -196,7 +275,7 @@ def test_step_details_reach_actual_files_at_actions_over_the_complete_matrix(
     for delivery in deliveries:
         details = {item.source_path: item for item in delivery.result.capsule.detail_references}
         rendered = delivery.result.render_instructions()
-        for name, (action, carriers) in DETAIL_ACTIONS.items():
+        for name, (trigger, label, carriers) in DETAIL_INDEX_ENTRIES.items():
             # Manifest admission alone does not deliver a detail without a role pointer.
             assert (name in details) == (delivery.role in carriers), (
                 delivery.role,
@@ -211,7 +290,7 @@ def test_step_details_reach_actual_files_at_actions_over_the_complete_matrix(
             )
             if name in details:
                 assert details[name].step.strip()
-                assert_action_pointer(rendered, name, action)
+                _assert_index_detail_pointer(rendered, trigger, label, name)
                 assert details[name].content == (LIFECYCLE / name).read_bytes()
         if delivery.role == "curator":
             report = tmp_path / delivery.role / delivery.operation / "request.md"
@@ -221,7 +300,7 @@ def test_step_details_reach_actual_files_at_actions_over_the_complete_matrix(
                 {},
             )
             references = {entry["sourcePath"]: entry for entry in record["detailReferences"]}
-            for name in DETAIL_ACTIONS:
+            for name in DETAIL_INDEX_ENTRIES:
                 entry = references[name]
                 actual = Path(entry["path"])
                 assert entry["step"] == details[name].step
@@ -240,17 +319,18 @@ def test_step_details_reach_actual_files_at_actions_over_the_complete_matrix(
             assert "{{detail:" not in instructions
             with shipped_composition_corpus() as (origin, _):
                 assert (origin / OPERATION).read_bytes() == (LIFECYCLE / OPERATION).read_bytes()
-                checks = linked_section(
-                    instructions,
-                    report,
-                    SectionLink(
-                        origin / OPERATION,
-                        "Run the complete curation checks",
-                        FULL_CURATION_ACTION,
-                        "### Run the complete curation checks",
-                    ),
+                checks = _extract_section(
+                    (origin / OPERATION).read_text(encoding="utf-8"), "### Checks and gates"
                 )
-                require_clauses(checks, FULL_CURATION_CLAUSES, "actual emitted check owner")
+                require_clauses(checks, FULL_CHECKS_CLAUSES, "shipped curation checks owner")
+                if delivery.operation == "curation":
+                    emitted_checks = _extract_section(instructions, "### Checks and gates")
+                    require_clauses(
+                        emitted_checks,
+                        FULL_CHECKS_CLAUSES[:-1],
+                        "actual emitted curation check owner",
+                    )
+                    _assert_emitted_om2_link(emitted_checks, origin / CRITERIA)
 
     # Keep the oracle controls in this existing delivery test node.
     origin = tmp_path / "source" / "reference" / "detail.md"
@@ -296,8 +376,9 @@ def test_current_truth_and_all_carrier_repair_are_in_delivered_reconciliation_de
                 detail.content.decode(), AUTHORING_TRUTH, (delivery.operation, AUTHORING)
             )
             assert detail.step.strip()
-            assert_action_pointer(
-                delivery.result.render_instructions(), AUTHORING, DETAIL_ACTIONS[AUTHORING][0]
+            trigger, label, _ = DETAIL_INDEX_ENTRIES[AUTHORING]
+            _assert_index_detail_pointer(
+                delivery.result.render_instructions(), trigger, label, AUTHORING
             )
             # Procedural content remains disclosed at reconciliation, not eagerly in the capsule.
             assert "Repair the class, not just one example." not in delivery.block("role")
@@ -316,15 +397,11 @@ def test_all_invariant_definitions_and_separate_family_revision_binding_are_deli
             )
             require_clauses(detail.content.decode(), DISPOSITIONS, (delivery.operation, CARD))
             assert detail.step.strip()
-            assert_action_pointer(
-                delivery.result.render_instructions(), CARD, DETAIL_ACTIONS[CARD][0]
+            trigger, label, _ = DETAIL_INDEX_ENTRIES[CARD]
+            _assert_index_detail_pointer(
+                delivery.result.render_instructions(), trigger, label, CARD
             )
-            require_clauses(
-                delivery.block("role"),
-                ("Before creating or maintaining cards or overviews, read",),
-                (delivery.operation, "card-detail action timing"),
-            )
-            assert "{{detail:" + CARD + "}}" in delivery.block("role")
+            _assert_index_detail_pointer(delivery.block("role"), trigger, label, CARD)
 
 
 def test_healing_corpus_rejects_own_fault_only_and_blanket_debt_routing() -> None:
@@ -343,11 +420,15 @@ def test_healing_corpus_rejects_own_fault_only_and_blanket_debt_routing() -> Non
     assert not healing_findings(
         "Repair encountered memory, whoever left it; route work needing code and make no broad sweep."
     )
-    require_clauses(source(ROLE), ROLE_HEALING, ROLE)
+    _assert_index_detail_pointer(source(ROLE), "Exceptions/sync", "exceptions", EXCEPTIONS)
     require_clauses(
-        source(OPERATION),
-        ("Apply the bounded encountered-memory repair", "continue without a broad sweep"),
-        OPERATION,
+        source(EXCEPTIONS),
+        (
+            "Apply bounded encountered-memory repairs—whoever left it, beyond the quality check's findings—without a broad sweep, report every repair",
+            "Send evidenced code concerns to both Worker and Reviewer",
+            "route other cross-leaf matters through the Manager.",
+        ),
+        EXCEPTIONS,
     )
 
 
@@ -482,23 +563,8 @@ def test_authored_effect_rule_names_retiring_deleted_rows(
             assert clause in detail.content.decode(), delivery.operation
 
 
-CARD_SCOPE_FRAGMENT = "choose-card-and-overview-scope"
-
-
 def card_maintenance_links(text: str) -> tuple[str, ...]:
-    return tuple(
-        re.findall(
-            r"\[(?:card formats and citation checks|card and overview scope)\]\(([^)]+)\)", text
-        )
-    )
-
-
-def entity_catalog_links(text: str) -> tuple[str, ...]:
-    return tuple(
-        re.findall(
-            r"\[(?:Maintain the entity catalog|entity catalog maintenance)\]\(([^)]+)\)", text
-        )
-    )
+    return tuple(re.findall(r"\[cards\]\(([^)]+)\)", text))
 
 
 CURATOR_ROLE = "roles/curator.md"
@@ -519,6 +585,7 @@ def test_card_maintenance_links_resolve_from_source_and_compiled_source_origins(
     deliveries: tuple[Delivered, ...],
 ) -> None:
     expected = (
+        "## Choose card and overview scope",
         "## Keep current card content",
         "## Refresh or remove a reference",
         "For a changed target, replace its old evidence line with one citation-table row",
@@ -533,19 +600,11 @@ def test_card_maintenance_links_resolve_from_source_and_compiled_source_origins(
         "every reference, including references the validator only reports."
     )
     require_clauses(source(CHANGE_ROUTING), (deletion,), CHANGE_ROUTING)
-    # P5-18: the Curator's one card-scope and one entity-catalog pointer stand in its role
-    # file, for every Curator operation; the curation operation repeats neither.
     source_links = card_maintenance_links(source(CURATOR_ROLE))
-    source_catalog_links = entity_catalog_links(source(CURATOR_ROLE))
-    assert len(source_links) == len(source_catalog_links) == 1
+    assert len(source_links) == 1
     assert card_maintenance_links(source(OPERATION)) == ()
-    assert entity_catalog_links(source(OPERATION)) == ()
-    resolved = [_source_target(CURATOR_ROLE, t) for t in (*source_links, *source_catalog_links)]
+    resolved = [_source_target(CURATOR_ROLE, target) for target in source_links]
     assert {path.name for path, _fragment in resolved} == {Path(CARD).name}
-    assert [fragment for _path, fragment in resolved] == [
-        CARD_SCOPE_FRAGMENT,
-        "maintain-the-entity-catalog",
-    ]
     for path, _fragment in resolved:
         assert path.is_relative_to(ROOT / "skills") and path.is_file(), path
         require_clauses(path.read_text(), expected, path)
@@ -556,7 +615,6 @@ def test_card_maintenance_links_resolve_from_source_and_compiled_source_origins(
             if item.composition_root == "operation"
         )
         assert card_maintenance_links(operation_block.content) == ()
-        assert entity_catalog_links(operation_block.content) == ()
         role_block = (
             next(
                 item
@@ -567,12 +625,11 @@ def test_card_maintenance_links_resolve_from_source_and_compiled_source_origins(
             else None
         )
         links = card_maintenance_links(role_block.content) if role_block else ()
-        catalogs = entity_catalog_links(role_block.content) if role_block else ()
-        assert len(links) == len(catalogs) == (1 if delivery.role == "curator" else 0), (
+        assert len(links) == (1 if delivery.role == "curator" else 0), (
             delivery.role,
             delivery.operation,
         )
-        for target in (*links, *catalogs):
+        for target in links:
             path, _fragment = _source_target(CURATOR_ROLE, target)
             assert path.is_relative_to(ROOT / "skills") and path.is_file(), target
             require_clauses(path.read_text(), expected, (delivery.role, delivery.operation, target))
@@ -589,10 +646,8 @@ def test_card_maintenance_links_resolve_from_source_and_compiled_source_origins(
             require_clauses(
                 operation_block.content,
                 (
-                    "Create, refresh, move or remove cards within their scope",
-                    "Maintain the entity catalog, and edit an entity only for a real entity change.",
-                    "Restore memory only under the case's recorded authority and order.",
-                    "If the capsule exposes no writer and admits none, report the missing capability and the required records not written.",
+                    "3. Route notes to file/route/entity or Operational-Notes (edit entities for real changes only).",
+                    "4. Update cards/sidecars/prose; run leaf-scoped `route_index_refresh`.",
                 ),
                 OPERATION,
             )
@@ -611,15 +666,13 @@ def _require_factcheck_chain(
     assert len(card_links) == 1
     parts = urlsplit(card_links[0])
     assert not parts.scheme and not parts.netloc and not parts.query
-    assert parts.fragment == "normal-workflow"
+    assert parts.fragment == "workflow"
     assert (card_origin.parent / unquote(parts.path)).resolve() == operation_path.resolve()
     assert operation_path.is_file()
-    assert "## Normal workflow\n" in operation_text
+    assert "## Workflow\n" in operation_text
     require_clauses(card_text, CARD_FACTCHECK, card_origin)
-    require_clauses(operation_text, FACTCHECK_OPERATION, operation_path)
-    links = re.findall(
-        r"\[Independent fact-check of curated knowledge\]\(([^)]+)\)", operation_text
-    )
+    require_clauses(operation_text, FACTCHECK_OPERATION_CLAUSES, operation_path)
+    links = re.findall(r"\[OM-2\]\(([^)]+)\)", operation_text)
     assert len(links) == 1
     parts = urlsplit(links[0])
     assert not parts.scheme and not parts.netloc and not parts.query
@@ -636,6 +689,12 @@ def test_semantic_truth_counts_lines_and_independent_factcheck_keep_their_homes(
     deliveries: tuple[Delivered, ...],
     tmp_path: Path,
 ) -> None:
+    require_clauses(
+        source(MEMORY_HANDOVER),
+        ("[Review rounds](../../operations/review.md#rounds)",),
+        MEMORY_HANDOVER,
+    )
+    assert "## Rounds\n" in source("operations/review.md")
     card_text = source(CARD)
     operation_text = source(OPERATION)
     criteria_text = source(CRITERIA)
@@ -659,7 +718,7 @@ def test_semantic_truth_counts_lines_and_independent_factcheck_keep_their_homes(
     )
     for text, clauses, where in (
         (card_text, CARD_FACTCHECK, CARD),
-        (operation_text, FACTCHECK_OPERATION, OPERATION),
+        (operation_text, FACTCHECK_OPERATION_CLAUSES, OPERATION),
         (criteria_text, FACTCHECK_CRITERIA, CRITERIA),
     ):
         reading = normalized(text)
@@ -677,8 +736,8 @@ def test_semantic_truth_counts_lines_and_independent_factcheck_keep_their_homes(
         ),
         (
             card_text.replace(
-                "../operations/curation.md#normal-workflow",
-                "../operations/review.md#normal-workflow",
+                "../../operations/curation.md#workflow",
+                "../../operations/review.md#workflow",
                 1,
             ),
             operation_text,
@@ -741,41 +800,20 @@ def test_semantic_truth_counts_lines_and_independent_factcheck_keep_their_homes(
             require_clauses(
                 commands.content.decode(), CITATION_FIX_BOUNDARY, (delivery.operation, KNOWLEDGE)
             )
-            require_clauses(
-                delivery.block("role"),
-                (
-                    "Before sending a memory candidate for review or returning a memory repair, read",
-                    "Before closeout, follow the complete independent fact-check in [Obtain the independent fact-check](../operations/curation.md#obtain-the-independent-fact-check) for its checking seat, blocking-finding repairs and reruns.",
-                    "Evidence and working files belong in the task record or scratch root, never the memory worktree.",
-                    "The result is review evidence, not a new closeout gate or an intent verdict.",
-                ),
-                ROLE,
+            _assert_index_detail_pointer(
+                delivery.block("role"), "Coherence/msg", "handover", MEMORY_HANDOVER
             )
-            assert "The curation operation owns the workflow sequence." in delivery.block("role")
-            assert "{{detail:reference/curator/memory-handover.md}}" in delivery.block("role")
-            assert_action_pointer(
-                delivery.result.render_instructions(),
-                "reference/curator/memory-handover.md",
-                "Before sending a memory candidate for review or returning a memory repair, read",
+            assert delivery.shared_block is not None
+            require_clauses(
+                delivery.shared_block,
+                ("Run harness commands in supplied scratch roots only, never a worktree.",),
+                (delivery.role, delivery.operation, "scratch root boundary"),
             )
             instructions, record = compose_launch_instructions(
                 capsule_delivery_from(delivery.result),
                 str(tmp_path / delivery.role / delivery.operation / "factcheck.md"),
                 {},
             )
-            # The Curator role no longer links the curation operation (P5-14/15); the
-            # emitted curation launch itself carries the fact-check, and any emitted link
-            # to the operation must resolve to it.
-            targets = re.findall(r"\]\(([^)]*operations/curation\.md[^)]*)\)", instructions)
-            # P5-23 b3: the check must run; every Curator launch links the curation operation
-            # from its role file (fact-check, checks and authority gates).
-            assert targets, (delivery.role, delivery.operation)
-            for target in targets:
-                linked = Path(unquote(urlsplit(target).path))
-                assert linked.is_file(), target
-                require_clauses(linked.read_text(), FACTCHECK_OPERATION, target)
-            if delivery.operation == "curation":
-                require_clauses(instructions, FACTCHECK_OPERATION, (delivery.role, OPERATION))
             card_record = next(
                 item for item in record["detailReferences"] if item["sourcePath"] == CARD
             )
@@ -784,6 +822,17 @@ def test_semantic_truth_counts_lines_and_independent_factcheck_keep_their_homes(
             with shipped_composition_corpus() as (origin, _):
                 assert (origin / OPERATION).read_bytes() == (LIFECYCLE / OPERATION).read_bytes()
                 assert (origin / CRITERIA).read_bytes() == (LIFECYCLE / CRITERIA).read_bytes()
+                if delivery.operation == "curation":
+                    require_clauses(
+                        instructions,
+                        (
+                            "### Checks and gates",
+                            "Non-authoring seat runs [OM-2](",
+                            "Curation is evidence, not a gate.",
+                        ),
+                        (delivery.role, OPERATION),
+                    )
+                    _assert_emitted_om2_link(instructions, origin / CRITERIA)
                 _require_factcheck_chain(
                     (emitted_card.read_text(), emitted_card),
                     origin / OPERATION,
@@ -792,7 +841,7 @@ def test_semantic_truth_counts_lines_and_independent_factcheck_keep_their_homes(
                     (origin / CRITERIA).read_text(),
                 )
         if (delivery.role, delivery.operation) == ("curator", "curation"):
-            require_clauses(delivery.block("operation"), FACTCHECK_OPERATION, OPERATION)
+            require_clauses(delivery.block("operation"), FACTCHECK_OPERATION_CLAUSES, OPERATION)
             assert "../criteria/onboarding-memory.md" in delivery.block("operation")
 
 
@@ -812,32 +861,26 @@ def test_card_maintenance_links_resolve_from_the_actual_emitted_launch_file(
 
     def check_links(text: str) -> None:
         links = card_maintenance_links(text)
-        catalogs = entity_catalog_links(text)
-        assert len(links) == 1  # P5-18: one card-scope pointer per first message
-        assert len(catalogs) == 1
-        assert {urlsplit(link).fragment for link in links} == {CARD_SCOPE_FRAGMENT}
-        assert urlsplit(catalogs[0]).fragment == "maintain-the-entity-catalog"
-        for target in (*links, *catalogs):
-            parts = urlsplit(target)
-            assert not parts.scheme and not parts.netloc and not parts.query
-            assert Path(unquote(parts.path)) == Path(reference["path"])
-            assert (report.parent / unquote(parts.path)).resolve().is_file(), target
+        assert len(links) == 1
+        parts = urlsplit(links[0])
+        assert not parts.scheme and not parts.netloc and not parts.query
+        assert Path(unquote(parts.path)) == Path(reference["path"])
+        target_file = (report.parent / unquote(parts.path)).resolve()
+        assert target_file.is_file(), links[0]
+        target_text = target_file.read_text(encoding="utf-8")
+        assert "## Choose card and overview scope" in target_text
+        assert "## Maintain the entity catalog" in target_text
 
     actual = report.read_text(encoding="utf-8")
     check_links(actual)
     card_target = card_maintenance_links(actual)[0]
-    catalog_target = entity_catalog_links(actual)[0]
-    card_link = f"[card and overview scope]({card_target})"
+    card_link = f"[cards]({card_target})"
     assert card_link in actual
-    catalog_link = f"[entity catalog maintenance]({catalog_target})"
     for mutant in (
         actual.replace(card_link, "", 1),
-        actual.replace(card_link, "[card formats and citation checks](missing-card.md)", 1),
+        actual.replace(card_link, "[cards](missing-card.md)", 1),
         actual + "\n" + card_link,
-        actual.replace(catalog_link, "", 1),
-        actual.replace(
-            catalog_link, catalog_link.replace("#maintain-the-entity-catalog", "#wrong-section"), 1
-        ),
+        actual.replace(card_link, f"[cards]({card_target}?unexpected=1)", 1),
     ):
         assert mutant != actual
         with pytest.raises(AssertionError):
@@ -848,120 +891,95 @@ def test_failed_memory_tool_preserves_other_admitted_tools_and_dependent_stops(
     deliveries: tuple[Delivered, ...],
     tmp_path: Path,
 ) -> None:
-    role_clauses = (
-        "When one memory tool fails, continue independent work through other admitted memory tools.",
-        "Before continuing after a memory-tool failure, follow [Repair and republish]"
-        "(../operations/curation.md#repair-and-republish) for the refusal and tool-boundary rules.",
+    tool_failure_clauses = (
+        "When one memory tool fails, continue independent work through other admitted memory tools;",
+        "existing refusal stops still bind dependent work",
+        "no provider, permission, scope or tool boundary changes.",
     )
-    operation_clauses = (
-        "If one memory tool fails, continue independent work through the other admitted memory tools.",
-        "Existing refusal stops still bind dependent work.",
-        "Change no provider, permission, scope or tool boundary.",
-    )
-    carriers = [
-        (ROLE, source(ROLE), role_clauses),
-        (OPERATION, source(OPERATION), operation_clauses),
-    ]
+    require_clauses(source(EXCEPTIONS), tool_failure_clauses, EXCEPTIONS)
     for delivery in deliveries:
         identity = f"{delivery.role}/{delivery.operation}"
-        if delivery.role == "curator":
-            carriers.append((f"{identity}:role", delivery.block("role"), role_clauses))
-        if (delivery.role, delivery.operation) == ("curator", "curation"):
-            carriers.append(
-                (f"{identity}:operation", delivery.block("operation"), operation_clauses)
-            )
         report = tmp_path / delivery.role / delivery.operation / "launch.md"
-        instructions, _ = compose_launch_instructions(
+        instructions, record = compose_launch_instructions(
             capsule_delivery_from(delivery.result),
             str(report),
             {},
         )
         report.write_text(instructions, encoding="utf-8")
-        emitted = normalized(report.read_text(encoding="utf-8"))
+        emitted = report.read_text(encoding="utf-8")
+        references = {entry["sourcePath"]: entry for entry in record["detailReferences"]}
         if delivery.role == "curator":
-            links = re.findall(r"\[Repair and republish\]\(([^)]+)\)", emitted)
-            assert len(links) == 1, (identity, links)
-            target, fragment = links[0].rsplit("#", 1)
-            assert fragment == "repair-and-republish"
-            reached = Path(target)
-            with shipped_composition_corpus() as (origin, _):
-                assert reached.resolve() == (origin / OPERATION).resolve()
-                assert reached.read_bytes() == (LIFECYCLE / OPERATION).read_bytes()
-            repair = (
-                reached.read_text(encoding="utf-8")
-                .split("### Repair and republish", 1)[1]
-                .split("## Authority gates", 1)[0]
+            _assert_index_detail_pointer(
+                delivery.block("role"), "Exceptions/sync", "exceptions", EXCEPTIONS
             )
-            require_clauses(repair, operation_clauses, (identity, "reached repair home"))
-            for clause in operation_clauses:
-                mutant = repair.replace(clause, "", 1)
-                assert mutant != repair
+            links = re.findall(r"\[exceptions\]\(([^)]+)\)", emitted)
+            assert len(links) == 1, (identity, links)
+            reached = Path(unquote(urlsplit(links[0]).path))
+            assert reached == Path(references[EXCEPTIONS]["path"])
+            assert reached.is_file(), reached
+            body = reached.read_text(encoding="utf-8")
+            require_clauses(body, tool_failure_clauses, (identity, "reached exceptions home"))
+            for clause in tool_failure_clauses:
+                mutant = body.replace(clause, "", 1)
+                assert mutant != body
                 with pytest.raises(AssertionError):
-                    require_clauses(mutant, operation_clauses, identity)
-        for clauses, expected in (
-            (role_clauses, int(delivery.role == "curator")),
-            (
-                operation_clauses,
-                int((delivery.role, delivery.operation) == ("curator", "curation")),
-            ),
-        ):
-            observed = emitted.count(normalized(clauses[0]))
-            assert observed == expected, (identity, clauses[0], observed, expected)
-            if expected == 0:
-                assert normalized(clauses[0]) not in normalized(delivery.block("role")), identity
-                assert normalized(clauses[0]) not in normalized(delivery.block("operation")), (
-                    identity
-                )
-    missing = [
-        (carrier, clause)
-        for carrier, text, clauses in carriers
-        for clause in clauses
-        if normalized(clause) not in normalized(text)
-    ]
-    assert not missing, missing
+                    require_clauses(mutant, tool_failure_clauses, identity)
+        else:
+            assert EXCEPTIONS not in references, identity
+            assert normalized(tool_failure_clauses[0]) not in normalized(delivery.block("role")), (
+                identity
+            )
+            assert normalized(tool_failure_clauses[0]) not in normalized(
+                delivery.block("operation")
+            ), identity
 
 
 def test_encountered_memory_healing_has_one_complete_role_home_and_delivery(
     deliveries: tuple[Delivered, ...],
     tmp_path: Path,
 ) -> None:
+    healing_clauses = (
+        "Apply bounded encountered-memory repairs",
+        "whoever left it",
+        "beyond the quality check's findings",
+        "without a broad sweep",
+        "report every repair",
+    )
     findings = []
 
-    def check_carrier(identity: str, text: str, expected: int) -> None:
-        paragraphs = [
-            paragraph
-            for paragraph in re.split(r"\n\s*\n", text)
-            if "repair wrong or missing memory" in normalized(paragraph).casefold()
+    def check_detail(identity: str, text: str) -> None:
+        bullets = [
+            line
+            for line in text.splitlines()
+            if "encountered-memory repairs" in normalized(line).casefold()
         ]
-        if len(paragraphs) != expected:
-            findings.append((identity, "healing-paragraph-count", len(paragraphs), expected))
-        if expected:
-            for paragraph in paragraphs:
-                for clause in HEALING_UNION_CLAUSES:
-                    if normalized(clause) not in normalized(paragraph):
-                        findings.append((identity, "missing-union-clause", clause))
+        if len(bullets) != 1:
+            findings.append((identity, "healing-bullet-count", len(bullets), 1))
+            return
+        for clause in healing_clauses:
+            if normalized(clause) not in normalized(bullets[0]):
+                findings.append((identity, "missing-healing-clause", clause))
 
-    role_source = source(ROLE)
-    stage = role_source.split("## Repair and finish the stage", 1)[1].split(
-        "## Report findings to their owners", 1
-    )[0]
-    check_carrier(ROLE, role_source, 1)
-    check_carrier(f"{ROLE}:Repair and finish the stage", stage, 1)
+    check_detail(EXCEPTIONS, source(EXCEPTIONS))
     for delivery in deliveries:
         identity = f"{delivery.role}/{delivery.operation}"
-        expected = int(delivery.role == "curator")
-        check_carrier(f"{identity}:role", delivery.block("role"), expected)
-        check_carrier(
-            f"{identity}:all-compiled-blocks",
-            "\n\n".join(block.content for block in delivery.result.capsule.instructions),
-            expected,
-        )
         report = tmp_path / delivery.role / delivery.operation / "launch.md"
-        instructions, _ = compose_launch_instructions(
+        instructions, record = compose_launch_instructions(
             capsule_delivery_from(delivery.result),
             str(report),
             {},
         )
         report.write_text(instructions, encoding="utf-8")
-        check_carrier(f"{identity}:emitted", report.read_text(encoding="utf-8"), expected)
+        references = {entry["sourcePath"]: entry for entry in record["detailReferences"]}
+        if delivery.role == "curator":
+            _assert_index_detail_pointer(
+                delivery.block("role"), "Exceptions/sync", "exceptions", EXCEPTIONS
+            )
+            emitted_path = Path(references[EXCEPTIONS]["path"])
+            check_detail(f"{identity}:emitted", emitted_path.read_text(encoding="utf-8"))
+        else:
+            if EXCEPTIONS in references:
+                findings.append((identity, "unexpected-exceptions-detail"))
+            if "encountered-memory repairs" in normalized(instructions).casefold():
+                findings.append((identity, "unexpected-healing-text"))
     assert not findings, findings

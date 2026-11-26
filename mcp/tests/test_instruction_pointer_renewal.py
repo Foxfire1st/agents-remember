@@ -76,10 +76,10 @@ def test_fresh_command_refuses_dangling_policy_even_after_wording_was_pruned(
             ROOT / relative, tmp_path / relative, ignore=shutil.ignore_patterns("__pycache__")
         )
     folder = tmp_path / LIFECYCLE
-    identity = "every-role-before-proposing-an-input-limit-or-a-new-guard-370ccadee2"
+    identity = "refused-write-for-correct-input-refused-covered-writes-1817b416bd"
     policy = folder / "pointer-actions.json"
     document = json.loads(policy.read_text())
-    del document["actionSources"]["core/every-role.md"][identity]
+    del document["actionSources"]["reference/refused-write.md"][identity]
     policy.write_text(json.dumps(document))
     derived = folder / "pointer-actions-derived.json"
     document = json.loads(derived.read_text())

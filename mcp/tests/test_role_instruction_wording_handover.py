@@ -448,9 +448,16 @@ class HandoverTextWordingTests(unittest.TestCase):
                 projected = json.loads(
                     prompt.split("AR owner assignment and canonical task handover:\n", 1)[1]
                 )["host"]
-                self.assertEqual(projected["parent"], handover["host"]["parent"])
-                self.assertEqual(projected["parent"]["agentId"], parent.agent_id)
-                self.assertEqual(projected["parent"]["returnAddress"], expected_return)
+                self.assertEqual(handover["host"]["parent"]["returnAddress"], expected_return)
+                self.assertEqual(
+                    projected["parent"],
+                    {
+                        "agentId": parent.agent_id,
+                        "role": "orchestrator",
+                        "task": "SPRINT",
+                        "returnAddress": {"role": "orchestrator"},
+                    },
+                )
                 self.assertNotIn("ownerRelation", projected)
                 relation = handover["host"]["ownerRelation"]
                 self.assertIn("Send Architect matters and developer questions", relation)
@@ -472,19 +479,20 @@ class HandoverTextWordingTests(unittest.TestCase):
             ("a leaf role started by an agent", "worker", parent),
         ):
             with self.subTest(label):
-                prompt, handover = self.compiled(role, started_by)
+                prepared = self.prepared(role, started_by)
+                prompt, handover = prepared["prompt"], prepared["handover"]
                 self.assertIn(REPORT_DIRECTORY, prompt)
                 self.assertEqual(forbidden_in(prompt), [])
                 self.assertEqual(forbidden_in(json.dumps(handover, ensure_ascii=False)), [])
-                # The first message carries the reader arguments; the rest of the reader context
-                # is in the complete hand-over file the message names (MIK-R193 rule 1).
+                # The first message carries collapsed shared reader arguments; the rest of the
+                # reader context and the complete handover JSON stay in the companion file.
                 projection = json.loads(
                     prompt.split("AR owner assignment and canonical task handover:\n", 1)[1]
                 )
                 reader = handover["arMcpContext"]
                 reader_arguments = reader["readerArguments"]
                 expected = (
-                    {"readerArguments": reader_arguments}
+                    {"readerArguments": {"shared": reader_arguments["context_packet"]}}
                     if reader_arguments is not None
                     else {
                         key: reader[key]
@@ -493,8 +501,9 @@ class HandoverTextWordingTests(unittest.TestCase):
                     }
                 )
                 self.assertEqual(projection["arMcpContext"], expected)
+                self.assertNotIn("handoverFile", projection)
                 self.assertEqual(
-                    projection["handoverFile"]["path"],
+                    prepared["handoverFile"]["path"],
                     handover["taskReportPath"].rsplit(".", 1)[0] + ".handover.json",
                 )
 
@@ -530,23 +539,21 @@ class HandoverTextWordingTests(unittest.TestCase):
         host = handover["host"]
         self.assertEqual((host["name"], host["arToolServer"]), ("Paseo", TOOL_SERVER))
         self.assertIn(
-            f"Use {TOOL_SERVER} (agents_remember_task):",
+            f"Use {TOOL_SERVER} (agents_remember_task:",
             host["arMcpUsage"],
         )
         for said in (
-            f"Use {TOOL_SERVER} (agents_remember_task): "
-            "direct mcp__agents_remember_task__server_info or "
-            "mcp__agents_remember_task search/script; "
-            "ignore proxies without it, other install.",
-            f"Never use {OTHER_INSTALLATION} or any other AR tool server name: "
-            "it belongs to another installation with the same tool names.",
-            f"Retry once after start/resume if {TOOL_SERVER} is missing.",
-            "Exact arMcpContext.readerArguments; read_ar_files takes path strings "
-            "(compact=status/brief, fuller=rules). Read source via file tool.",
-            "Before edits, open memory briefs/<path in the repository>.md; "
-            "folders INDEX.md, briefs/_task/ none; no card/brief: no recorded rule, "
-            "weakness, decision or standing document.",
-            "Missing schema task_context: stop/report; never drop/substitute root.",
+            f"Use {TOOL_SERVER} (agents_remember_task: "
+            "mcp__agents_remember_task__server_info or "
+            "mcp__agents_remember_task search/script); "
+            "ignore unlisted proxies.",
+            f"Never use {OTHER_INSTALLATION} or other AR servers.",
+            f"Retry once if {TOOL_SERVER} is missing.",
+            "Pass arMcpContext.readerArguments.shared; read_ar_files=path strings; "
+            "source via file tool.",
+            "Pre-edit: open memory briefs/<repo-path>.md (INDEX.md; "
+            "briefs/_task/ none; absent=none).",
+            "No task_context: stop/report; never drop/substitute root.",
         ):
             with self.subTest(said=said):
                 self.assertIn(said, host["arMcpUsage"])
@@ -556,7 +563,7 @@ class HandoverTextWordingTests(unittest.TestCase):
         # again as a field of the handover.
         self.assertEqual(prompt.count(host["arMcpUsage"]), 1)
         self.assertLess(
-            prompt.index(f"AR tools, before your first tool call: {host['arMcpUsage']}"),
+            prompt.index(f"AR tools: {host['arMcpUsage']}"),
             prompt.index("AR owner assignment and canonical task handover:"),
         )
         self.assertEqual(
@@ -606,9 +613,7 @@ class HandoverTextWordingTests(unittest.TestCase):
         )
         self.assertIn("taskless role has no task document", handover["ownerHandover"])
         self.assertTrue(
-            prompt.startswith(
-                "AR ROLE BRIEF: The following effective instructions and canonical handover"
-            )
+            prompt.startswith("AR ROLE BRIEF: Effective instructions and canonical handover")
         )
         self.assertIn("\n\n## Launch Context\n\nStarted by: the dashboard launcher.\n\n", prompt)
         self.assertEqual(handover["schema"], "ar-role-handover/v1")
@@ -623,9 +628,7 @@ class HandoverTextWordingTests(unittest.TestCase):
         self.assertEqual(manual["host"]["developerQuestionRoute"], {"mode": "own-chat"})
         self.assertIn("It has no parent agent and needs none", manual["host"]["ownerRelation"])
         self.assertTrue(
-            manual_prompt.startswith(
-                "AR ROLE BRIEF: The following effective instructions and canonical handover"
-            )
+            manual_prompt.startswith("AR ROLE BRIEF: Effective instructions and canonical handover")
         )
         self.assertIn(
             "\n\n## Launch Context\n\nStarted by: the dashboard launcher.\n\n",
@@ -659,9 +662,7 @@ class HandoverTextWordingTests(unittest.TestCase):
         )
         self.assertNotIn("addressed to its agent id", started["host"]["ownerRelation"])
         self.assertTrue(
-            prompt.startswith(
-                "AR ROLE BRIEF: The following effective instructions and canonical handover"
-            )
+            prompt.startswith("AR ROLE BRIEF: Effective instructions and canonical handover")
         )
         static_prefix, launch_tail = prompt.split("\n\n## Launch Context\n\n", 1)
         self.assertNotIn("Started by:", static_prefix)

@@ -74,13 +74,14 @@ from test_worktree_support import open_external_contract_fixture
 def _check_projection(
     projection: dict[str, Any], prepared: dict[str, Any], *, kept: tuple[str, ...]
 ) -> None:
-    """The projection holds only the permitted fields and names the complete hand-over.
+    """The projection holds only the permitted fields while the full handover stays in JSON.
 
     ``kept`` names the optional fields this seat's own selection makes present.
     """
 
-    assert set(projection) - {PROJECTION_FILE_FIELD} == set(projection) & set(PROJECTION_FIELDS)
-    assert projection[PROJECTION_FILE_FIELD]["path"] == (
+    assert PROJECTION_FILE_FIELD not in projection
+    assert set(projection) <= set(PROJECTION_FIELDS)
+    assert prepared["handoverFile"]["path"] == (
         Path(prepared["taskReportPath"]).with_suffix(".handover.json").as_posix()
     )
     for absent in (
@@ -97,6 +98,21 @@ def _check_projection(
     assert "developerQuestionRoute" in projection["host"]
     for name in ("documents", "leafSeats"):
         assert (name in projection) is (name in kept)
+    if "documents" in kept:
+        doc = projection["documents"][0]
+        assert set(doc) == {
+            "id",
+            "kind",
+            "repo_id",
+            "task_name",
+            "slug",
+            "renderedReadPath",
+            "jsonPath",
+            "contentDigest",
+        }
+    if "leafSeats" in kept:
+        assert projection["leafSeats"] == {"roles": ["worker", "reviewer", "curator"]}
+        assert "roleMessageArguments" in prepared["handover"]["leafSeats"]
 
 
 def _projection(prepared: dict[str, Any]) -> dict[str, Any]:
@@ -380,8 +396,7 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
                         "direct mcp__agents_remember_task__server_info or "
                         "mcp__agents_remember_task search/script; "
                         "ignore proxies without it, other install.",
-                        "Never use agents-remember or any other AR tool server name: "
-                        "it belongs to another installation with the same tool names.",
+                        "Never use agents-remember or another AR server (different install).",
                         "Retry once after start/resume if agents-remember-task is missing.",
                     ):
                         self.assertIn(sentence, handover["host"]["arMcpUsage"])
@@ -554,7 +569,7 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
         )
         self.assertTrue(
             prepared["prompt"].startswith(
-                "AR ROLE BRIEF: The following effective instructions and canonical handover"
+                "AR ROLE BRIEF: Effective instructions and canonical handover"
             )
         )
         self.assertIn(

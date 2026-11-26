@@ -6,6 +6,8 @@ This file gives Managers, Architects and Orchestrators acting within their assig
 
 In the same turn as each start, role handover and landing, update the master document's parts changed by that act: its status note, counts, order state and **In work now** section. Include the task, stage, agents and time since that state began. Leave product-mirrored stage fields with their existing owner; do not write a contradictory second status.
 
+At each status read, compare the master page with the Manager's last handover, renew lagging parts and tell the Manager. Identify stalls from task progress: fifteen minutes without an active turn, or a ready task left unstarted.
+
 ## Finish documentation before master completion
 
 Before completing a master, check that its documentation task has changed or confirmed every document made stale by the master's tasks. Do not report the master complete while that documentation remains stale.

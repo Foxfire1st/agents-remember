@@ -13,6 +13,10 @@ from pathlib import Path
 
 from agents_remember.application.role_launch_context import LEAF_ROLES
 from agents_remember.cli import role_held_messages, role_launch_routes
+from agents_remember.cli.role_handover_projection import (
+    PROJECTION_FILE_FIELD,
+    project_handover,
+)
 from agents_remember.cli.role_held_messages import HeldMessage
 from role_first_message_support import (
     FIXTURE_HARNESSES,
@@ -59,7 +63,8 @@ class FirstMessageMatrixTests(FirstMessageMatrixBase):
             "host.developerQuestions",
         ):
             self.assertEqual(_unreachable(f"`{file_only}`", projection, handover), [])
-        # An indexed path through the projected documents list: reachable in the projection.
+        # Indexed paths through documents[0]: projected fields and file-only fields are reachable.
+        self.assertEqual(_unreachable("`documents[0].renderedReadPath`", projection, handover), [])
         self.assertEqual(_unreachable("`documents[0].taskDocReadArgs`", projection, handover), [])
         # A file-only root with a part the object does not have, and a projected root likewise.
         for name in (
@@ -187,6 +192,138 @@ class FirstMessageMatrixTests(FirstMessageMatrixBase):
                     self.release(self.receipt(request))
                     built += 1
         self.assertEqual(built, len(LEAF_ROLES) * len(FIXTURE_HARNESSES))
+
+    def test_projection_deduplication_and_opt_in_handover_file_edge_cases(self) -> None:
+        """Unit checks for slim projection deduplication branches and opt-in handoverFile."""
+
+        sprint_ref = {"repository": "repo", "path": "sprint/task.json"}
+        master_ref = {"repository": "repo", "path": "master/task.json"}
+        leaf_ref = {"repository": "repo", "path": "master/leaf.json"}
+        other_ref = {"repository": "repo", "path": "other/leaf.json"}
+        rendered = "/work/task-documents/master/leaf.md"
+        base: dict[str, object] = {
+            "schema": "ar-role-handover/v1",
+            "selection": {
+                "role": "worker",
+                "sprintDocumentRef": None,
+                "masterDocumentRef": master_ref,
+                "taskDocumentRef": leaf_ref,
+            },
+            "documents": [
+                {
+                    "taskDocumentRef": leaf_ref,
+                    "canonicalTaskPath": "repo/master/leaf.json",
+                    "renderedReadPath": rendered,
+                    "taskDocReadArgs": {
+                        "repo_id": "repo",
+                        "task_name": "master",
+                        "slug": "leaf",
+                        "json_path": "/coord/master/leaf.json",
+                        "rendered_path": "/coord/master/leaf.md",
+                    },
+                    "documentIdentity": {
+                        "id": "L1",
+                        "slug": "leaf",
+                        "kind": "subTask",
+                        "title": "Leaf title",
+                        "repositoryId": "repo",
+                    },
+                    "contentDigest": "a" * 64,
+                }
+            ],
+            "taskDocumentFiles": {
+                "paths": [rendered],
+                "state": "inside-working-folder",
+                "copies": [rendered],
+                "missingCopies": [],
+            },
+            "workspace": {
+                "path": "/work",
+                "codeRoot": "/work/code",
+                "memoryRoot": "/work/memory",
+                "taskReportRoot": "/coord/notes/reports",
+                "taskReportAccessRoot": "/work/role-reports",
+                "contractPath": "/coord/contract.md",
+            },
+            "arMcpContext": {
+                "readerArguments": {
+                    "context_packet": {"repo_id": "repo"},
+                    "read_ar_files": {"repo_id": "repo"},
+                }
+            },
+            "host": {
+                "developerQuestionRoute": {"mode": "parent", "agentId": "mgr-1"},
+                "parent": {
+                    "agentId": "mgr-1",
+                    "role": "manager",
+                    "task": "MASTER",
+                    "sprintDocumentRef": sprint_ref,
+                    "masterDocumentRef": master_ref,
+                    "taskDocumentRef": None,
+                    "returnAddress": {
+                        "role": "manager",
+                        "sprint_document_ref": sprint_ref,
+                        "master_document_ref": master_ref,
+                    },
+                },
+            },
+            "leafSeats": {
+                "roles": ["worker", "reviewer", "curator"],
+                "roleMessageArguments": {"reviewer": {"role": "reviewer"}},
+            },
+        }
+        hf = {"path": "/work/report.handover.json", "sha256": "b" * 64}
+
+        slim = project_handover(base, handover_file=hf, bound_document=leaf_ref)
+        self.assertNotIn(PROJECTION_FILE_FIELD, slim)
+        self.assertNotIn("sprintDocumentRef", slim["selection"])
+        self.assertNotIn("taskDocumentRef", slim["documents"][0])
+        self.assertNotIn("taskDocumentFiles", slim)
+        self.assertEqual(slim["arMcpContext"], {"readerArguments": {"shared": {"repo_id": "repo"}}})
+        self.assertEqual(
+            slim["host"]["parent"],
+            {
+                "agentId": "mgr-1",
+                "role": "manager",
+                "task": "MASTER",
+                "sprintDocumentRef": sprint_ref,
+                "returnAddress": {"role": "manager", "sprint_document_ref": sprint_ref},
+            },
+        )
+        self.assertEqual(slim["leafSeats"], {"roles": ["worker", "reviewer", "curator"]})
+
+        # Opt-in handoverFile when explicitly requested and non-None.
+        with_file = project_handover(
+            base, handover_file=hf, bound_document=leaf_ref, omit_handover_file_field=False
+        )
+        self.assertEqual(with_file[PROJECTION_FILE_FIELD], hf)
+        without_file = project_handover(
+            base, handover_file=None, bound_document=leaf_ref, omit_handover_file_field=False
+        )
+        self.assertNotIn(PROJECTION_FILE_FIELD, without_file)
+
+        # Distinct readerArguments stay per-tool; distinct document ref stays on documents[0].
+        divergent = {
+            **base,
+            "documents": [{**base["documents"][0], "taskDocumentRef": other_ref}],  # type: ignore[index]
+            "arMcpContext": {
+                "readerArguments": {
+                    "context_packet": {"repo_id": "repo"},
+                    "read_ar_files": {"repo_id": "repo", "extra": True},
+                }
+            },
+        }
+        projected_divergent = project_handover(
+            divergent, handover_file=hf, bound_document=other_ref
+        )
+        self.assertEqual(projected_divergent["documents"][0]["taskDocumentRef"], other_ref)
+        self.assertEqual(
+            projected_divergent["arMcpContext"]["readerArguments"],
+            {
+                "context_packet": {"repo_id": "repo"},
+                "read_ar_files": {"repo_id": "repo", "extra": True},
+            },
+        )
 
 
 if __name__ == "__main__":

@@ -62,17 +62,17 @@ def test_collaboration_reference_rejects_unpointed_audience_and_outbound_step(
     ]
     with pytest.raises(AssertionError):
         _assert_collaboration_reference_matches_pointers(source_root, changed)
-    # Moving the inbound first-message pointer into the method itself leaves an outbound
+    # Moving the inbound detail pointer into the method itself leaves an outbound
     # self-reference, which cannot satisfy the callers' action contract.
     root = tmp_path / "l-01"
     shutil.copytree(source_root, root)
-    every_role = root / "core/every-role.md"
-    body = every_role.read_text()
-    pointer = next(line for line in body.splitlines() if "[collaboration method](" in line)
-    every_role.write_text(body.replace(pointer + "\n", "", 1))
+    authoring = root / "reference/tasks/document-authoring.md"
+    body = authoring.read_text()
+    pointer = next(line for line in body.splitlines() if "[the collaboration method](" in line)
+    authoring.write_text(body.replace(pointer + "\n", "", 1))
     own = root / "reference/tasks/collaboration-method.md"
-    own.write_text(own.read_text() + "\n" + pointer.split(": ", 1)[1] + "\n")
-    assert every_role.read_text() != body
+    own.write_text(own.read_text() + "\n" + pointer + "\n")
+    assert authoring.read_text() != body
     with pytest.raises(AssertionError):
         _assert_collaboration_reference_matches_pointers(root, document)
 

@@ -113,35 +113,27 @@ _PREFIXED_TOOL_SERVER = f"mcp__{_UNDERSCORED_TOOL_SERVER}"
 _PREFIXED_TOOL_EXAMPLE = f"{_PREFIXED_TOOL_SERVER}__server_info"
 # Where a launched agent finds AR tools (plain text before the capsule and host.arMcpUsage).
 _AR_TOOL_SERVER_USAGE_HEAD = (
-    f"Use {TOOL_SERVER_NAME} ({_UNDERSCORED_TOOL_SERVER}): "
-    f"direct {_PREFIXED_TOOL_EXAMPLE} or {_PREFIXED_TOOL_SERVER} search/script; "
-    "ignore proxies without it, other install. "
+    f"Use {TOOL_SERVER_NAME} ({_UNDERSCORED_TOOL_SERVER}: "
+    f"{_PREFIXED_TOOL_EXAMPLE} or {_PREFIXED_TOOL_SERVER} search/script); "
+    "ignore unlisted proxies. "
 )
-_AR_OTHER_SERVER_CHOICE = (
-    f"Never use {OTHER_INSTALLATION_TOOL_SERVER} or any other AR tool server name: "
-    "it belongs to another installation with the same tool names. "
-)
+_AR_OTHER_SERVER_CHOICE = f"Never use {OTHER_INSTALLATION_TOOL_SERVER} or other AR servers. "
 BRIEFS_SENTENCES = (
-    "Before edits, open memory briefs/<path in the repository>.md; "
-    "folders INDEX.md, briefs/_task/ none; no card/brief: no recorded rule, "
-    "weakness, decision or standing document."
+    "Pre-edit: open memory briefs/<repo-path>.md (INDEX.md; briefs/_task/ none; absent=none)."
 )
 _AR_TOOL_SERVER_USAGE_TAIL = (
-    f"Retry once after start/resume if {TOOL_SERVER_NAME} is missing. "
-    "Exact arMcpContext.readerArguments; read_ar_files takes path strings "
-    "(compact=status/brief, fuller=rules). Read source via file tool. "
-    f"{BRIEFS_SENTENCES} Missing schema task_context: stop/report; never drop/substitute root."
+    f"Retry once if {TOOL_SERVER_NAME} is missing. "
+    "Pass arMcpContext.readerArguments.shared; read_ar_files=path strings; "
+    f"source via file tool. {BRIEFS_SENTENCES} "
+    "No task_context: stop/report; never drop/substitute root."
 )
-# MIK-R193 rule 11: the one constant every role's first message carries. Another role's work is
-# a role_start, never a helper; a harness without sub-agents is one of the named exceptions.
+# One constant every role's first message carries. Another role's work uses role_start,
+# never a helper; a harness without sub-agents is one of the named serial exceptions.
 SPLIT_WORK_DIRECTION = (
-    "Inside your own assignment, split independent work across helpers (your harness's "
-    "sub-agents) from the start, where your harness has them; helpers have no cap. Another "
-    f"role's work goes to {ROLE_START_TOOL}, never to a helper. Working through independent parts "
-    "in series is the exception and names its reason: a gate, a shared-file one-writer "
-    "dependency, a ruling, or a harness without sub-agents. You stay the single writer of your "
-    "stage's records and verify every helper's part. Your report says how you split the work, "
-    "or why it could not be split."
+    "Split independent work via helpers (no cap); "
+    f"other roles: {ROLE_START_TOOL}. Name serial reason "
+    "(gate/single-writer/ruling/no helpers); 1 writer, "
+    "verify & report split."
 )
 _AR_TOOL_SERVER_USAGE = (
     f"{_AR_TOOL_SERVER_USAGE_HEAD}{_AR_OTHER_SERVER_CHOICE}{_AR_TOOL_SERVER_USAGE_TAIL}"
@@ -367,8 +359,7 @@ def _task_document_read_metadata(
         and "never keep a blanket ban on writing it by hand" in shared_block
     )
     suffix = (
-        ". Use task_doc first; the owner's next publication refreshes renders/projections "
-        "and rendered copies are never parsed back."
+        ". Use task_doc; renders not parsed back."
         if has_shared_recovery
         else ". Use task_doc first. A correct-input refusal of a covered write (task_doc edits (including an admitted task retirement or folder movement), knowledge_write, citation_fix, citation_note_revision and curator_coherence publication) follows the same-tool/input-class ladder in skills/l-01-agent-lifecycles/reference/refused-write.md before applying a stop. If no admitted route works, record the refusal, tell the owner, then make that write openly by hand and log it; never keep a blanket ban on writing it by hand. The owner's next publication refreshes renders/projections; rendered copies are never parsed back. Read/check/validation/sync refusals, starts, other product guards and commit gates retain stops."
     )

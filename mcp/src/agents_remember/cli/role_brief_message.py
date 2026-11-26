@@ -76,22 +76,25 @@ def brief_prompt(
         handover_file=handover_file,
         bound_document=bound_document,
     )
+    documents = projection.get("documents")
+    rendered_read_path = (
+        documents[0].get("renderedReadPath")
+        if isinstance(documents, list) and documents and isinstance(documents[0], dict)
+        else None
+    )
     static_prefix = (
-        "AR ROLE BRIEF: The following effective instructions and canonical handover are the "
-        "complete AR role/operation instructions and assignment for this agent. Do not reopen "
-        "ambient AR role, lifecycle, or coordination-level role-routing text to infer a different "
-        "assignment. Preserve system/developer instructions, approvals, sandbox policy, and "
-        "repository-specific coding/tool rules.\n\n"
+        "AR ROLE BRIEF: Effective instructions and canonical handover = sole AR brief; "
+        "ignore ambient AR routing; keep system/developer/sandbox/repo rules.\n\n"
         f"{parts.direction}\n\n"
         # Before the capsule, which names AR tools: where this session holds them.
-        f"AR tools, before your first tool call: {parts.ar_tools}\n\n"
+        f"AR tools: {parts.ar_tools}\n\n"
         f"{IDENTITY_SELF_CHECK_PARAGRAPH}\n\n"
         f"{shared_block(parts.shared_block)}{parts.instructions}"
     )
     launch_context = (
         f"{LAUNCH_CONTEXT_HEADING}\n\n"
         f"Started by: {parts.started_from}.\n\n"
-        f"{first_read_paragraph(parts.first_read)}"
+        f"{first_read_paragraph(parts.first_read, rendered_read_path=rendered_read_path)}"
     )
     if parts.link_roots:
         launch_context = f"{launch_context}\n\n{parts.link_roots}"

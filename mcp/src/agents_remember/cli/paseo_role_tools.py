@@ -40,6 +40,9 @@ from pydantic import ValidationError
 from agents_remember.application.agent_binding import (
     AgentBinding,
 )
+from agents_remember.application.role_capsules.refusal_references import (
+    with_refusal_reference,
+)
 from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
 )
@@ -546,7 +549,10 @@ def _hold_for_seat(  # noqa: PLR0913 -- each fact of the wait rides the take, pe
             "recipient-busy",
             f"Agent {send.recipient.agent_id} already holds {MAX_HELD_PER_RECIPIENT} messages: "
             f"{full}",
-            "Wait for a delivery or withdraw a waiting message; none was dropped.",
+            with_refusal_reference(
+                "Wait for a delivery or withdraw a waiting message; none was dropped.",
+                "role-message-held-store-full",
+            ),
             recipientAgentId=send.recipient.agent_id,
         ) from full
     except ValueError as error:
@@ -794,6 +800,10 @@ def _refusal_answer(
     """The refusal answer, with the sender's terminal lines when its recipient is gone."""
 
     result = refused.payload()
+    if refused.refusal == "recipient-archived" and isinstance(result.get("nextAction"), str):
+        result["nextAction"] = with_refusal_reference(
+            result["nextAction"], "role-message-recipient-archived"
+        )
     if sender is not None and refused.refusal in {"recipient-archived", "recipient-not-found"}:
         result.update(_held_readback(_refusal_receipt_path(config, call, refused), sender.agent_id))
     return result
@@ -857,7 +867,10 @@ def _held_refusal(error: HeldSeatClosed) -> _Refused:
     return _Refused(
         "recipient-archived",
         str(error),
-        "Address the current role execution.",
+        with_refusal_reference(
+            "Address the current role execution.",
+            "role-message-recipient-archived",
+        ),
         recipientAgentId=error.agent_id,
     )
 

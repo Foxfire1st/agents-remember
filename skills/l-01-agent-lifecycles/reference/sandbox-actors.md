@@ -26,3 +26,7 @@ Keep credentials out of a sandbox-local harness home. Run model turns through th
 
 Before sandbox actors start, prove their tool-server binding with a stub. Count the host's agents before and after the first `role_start` on `agents-remember-task`.
 
+## Keep working files in the handover's scratch roots
+
+Write agent-authored temporary files, experiments and working copies only in the real `workspace.scratchRoot` named by the handover, outside code, memory and task folders. Use the real `workspace.outsideScratchRoot` for work that must live outside the projects home (especially a sandbox root) and for one short `TMPDIR` when a tool refuses the scratch path. Keep `XDG_CONFIG_HOME` inside `workspace.scratchRoot`, and never remove that root or `workspace.outsideScratchRoot` (the product deletes them with the enclosure). A brief does not substitute another scratch path. Product/tooling temporary files, test-runner temporary files and explicitly admitted repository sandboxes follow their own owners. Write reports and evidence in the handover's local report folder; the product copies them to canonical notes before removal.
+

@@ -31,4 +31,4 @@ An empty first-pass issue list is a valid terminating baseline.
 
 ## Select focused tests
 
-Select focused tests by [the review-stage rule](../operations/review.md#select-focused-tests), which also names the fix-verification case. For the authority behind full suites and a requirement's final checks, follow [Inspect and verify the candidate](../roles/reviewer.md#inspect-and-verify-the-candidate).
+Select focused tests by [the review-stage rule](../operations/review.md#focused-tests-and-handover), which also names the fix-verification case. For the authority behind full suites and a requirement's final checks, follow [Bind the seam and catalogs](../roles/reviewer.md#bind-the-seam-and-catalogs).

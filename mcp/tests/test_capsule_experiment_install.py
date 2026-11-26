@@ -49,7 +49,7 @@ from agents_remember.serving.projections.snapshots import read_tool_reports
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 CANONICAL_SKILLS = REPOSITORY_ROOT / "skills"
 
-CORPUS_FINGERPRINT = "Bootstrap sets up one repository during a new user's first hour and reports what actually happened."
+CORPUS_FINGERPRINT = "Set up one repo during a new user's first hour and report what happened."
 """A canonical block identity: the opening statement of ``roles/bootstrap.md``.
 
 The seat's own first obligation-bearing sentence, and the selector has to be **unique in the

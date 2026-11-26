@@ -48,10 +48,10 @@ from agents_remember.application.role_capsules.sources import (
     admit_capsule_sources,
 )
 from agents_remember.application.role_capsules.wire_budget import (
-    PHASE_1_HELD_APPENDIX_ALLOWANCE,
-    PHASE_1_LAUNCH_APPENDIX_ALLOWANCE,
-    PHASE_1_WIRE_TOKEN_CEILINGS,
+    COMPILED_CAPSULE_TOKEN_CEILINGS,
+    WIRE_TOKEN_CEILINGS,
     evaluate_wire_token_ceilings,
+    measure_compiled_capsule_tokens,
     measure_wire_tokens,
 )
 from agents_remember.cli.paseo_role_tools import start_leaf_set
@@ -229,13 +229,14 @@ def _saved_receipt(
 
 
 def test_filter_shared_block_32_admitted_pairs_and_digest_map() -> None:
-    """All 32 admitted role/operation pairs match digest-map audiences and lines 119-121."""
+    """All 32 admitted role/operation pairs match digest-map audiences and role aliases."""
     parsed = adm._shipped_parsed()
     raw = (adm.LIFECYCLE_ROOT / "core/every-role.md").read_text(encoding="utf-8")
     raw_lines = raw.splitlines()
     digest_map = load_digest_map(adm.LIFECYCLE_ROOT / "core/digest-map.json")
     pairs = [(r, op) for r, e in parsed.roles.items() for op in e.operations]
     assert len(pairs) == 32
+    restricted_checked = False
     for role, op in pairs:
         out = compile_admitted_capsule(
             adm._shipped_binding(role, op), adm._shipped_request(role, op)
@@ -246,12 +247,12 @@ def test_filter_shared_block_32_admitted_pairs_and_digest_map() -> None:
             for clause in place["clauses"]:
                 s, e = clause["lines"]
                 line_txt = "\n".join(raw_lines[s - 1 : e])
-                assert (line_txt in out.shared_block) == (role in clause["audience"])
-    l119, l120, l121 = raw_lines[118], raw_lines[119], raw_lines[120]
-    w, r, i = (filter_shared_block(raw, x) for x in ("worker", "reviewer", "investigator"))
-    assert l119 not in w and l120 in w and l121 in w
-    assert all(x in r for x in (l119, l120, l121)) and all(x not in i for x in (l119, l120, l121))
-    assert filter_shared_block(raw, "system-specialist") == i
+                audience = clause["audience"]
+                assert (line_txt in out.shared_block) == (role in audience)
+                if 0 < len(audience) < len(parsed.roles):
+                    restricted_checked = True
+    assert restricted_checked
+    assert filter_shared_block(raw, "system-specialist") == filter_shared_block(raw, "investigator")
     assert filter_shared_block(raw, None) == raw
 
 
@@ -265,7 +266,12 @@ def test_filter_shared_block_seal_launcher_absent_source_and_markdown_edges(tmp_
     mut_srcs = tuple(
         replace(
             s,
-            content=(b := s.content.replace(b"Architect: Present", b"Architect: Always")),
+            content=(
+                b := s.content.replace(
+                    b"Architect, Investigator: Disclose",
+                    b"Architect, Investigator: Always disclose",
+                )
+            ),
             revision=cap_types.compute_content_digest(b),
         )
         if s.path == "core/every-role.md"
@@ -305,16 +311,115 @@ def test_filter_shared_block_seal_launcher_absent_source_and_markdown_edges(tmp_
 
     sample = (
         "# Shared\n\nNote: universal.\n\n## Architect Only\n\n### Nested\n\nArchitect: only.\n\n"
-        "## Mixed\n\nWorker: fence.\n```md\n## Fake\nArchitect: in fence.\n```\n\n"
+        "## Mixed\n\nReviewer: rev-only.\nWorker, Reviewer: shared-leaf.\nWorker: fence.\n"
+        "```md\n## Fake\nArchitect: in fence.\n```\n\n"
         "~~~txt\nReviewer: tilde.\n~~~\n\nArchitect: dropped.\n"
     )
     w_out = filter_shared_block(sample, "worker")
-    assert all(x not in w_out for x in ("## Architect Only", "### Nested", "Architect: dropped."))
+    r_out = filter_shared_block(sample, "reviewer")
+    assert all(
+        x not in w_out
+        for x in ("## Architect Only", "### Nested", "Architect: dropped.", "Reviewer: rev-only.")
+    )
     assert all(
         x in w_out
-        for x in ("Note: universal.", "## Fake", "Architect: in fence.", "Reviewer: tilde.")
+        for x in (
+            "Note: universal.",
+            "Worker, Reviewer: shared-leaf.",
+            "## Fake",
+            "Architect: in fence.",
+            "Reviewer: tilde.",
+        )
     )
+    assert "Reviewer: rev-only." in r_out and "Worker, Reviewer: shared-leaf." in r_out
     assert filter_shared_block("# Only\n\n## Sec\n\nArchitect: sole.\n", "worker") == ""
+
+
+def _compile_all_34_matrix_capsules() -> dict[str, cap_types.CapsuleCompilationResult]:
+    parsed = adm._shipped_parsed()
+    compiled: dict[str, cap_types.CapsuleCompilationResult] = {}
+    for role in parsed.role_order:
+        for op in parsed.operations:
+            if role not in parsed.operations[op].applies_to_roles:
+                continue
+            out = compile_admitted_capsule(
+                adm._shipped_binding(role, op), adm._shipped_request(role, op)
+            )
+            assert out.ok and out.result is not None
+            compiled[f"{role}/{op}"] = out.result
+    for op in parsed.launcher.operations:
+        l_bind = cap_types.CapsuleBinding(
+            operation=op,
+            admitted=cap_types.CapsuleAdmittedFacts(
+                task_reference="agents-remember/tasks/demo/task.json",
+                task_document_digest=cap_types.compute_content_digest(b'{"id": "demo"}'),
+                seat=cap_types.CapsuleLauncherSeat(
+                    routing_condition=parsed.launcher.routing_condition
+                ),
+                repository_id="agents-remember",
+                work_branch="ar/fixture",
+            ),
+        )
+        l_req = CapsuleAdmissionRequest(
+            root=adm.LIFECYCLE_ROOT,
+            manifest=adm.MANIFEST_RELATIVE,
+            core=tuple(parsed.core[n].source for n in parsed.launcher.core),
+            operation=(parsed.operations[op].source,),
+            skill=tuple(e.source for e in parsed.skills.values()),
+        )
+        out = compile_admitted_capsule(l_bind, l_req)
+        assert out.ok and out.result is not None
+        compiled[f"launcher/{op}"] = out.result
+    return compiled
+
+
+def test_compiled_capsule_token_ceilings_all_34_matrix_keys() -> None:
+    """All 34 compiled matrix keys (32 role x op + 2 launcher) pass compiled token ceilings."""
+    every_role = (adm.LIFECYCLE_ROOT / "core/every-role.md").read_text(encoding="utf-8")
+    measurements = {
+        key: measure_compiled_capsule_tokens(
+            result, corpus_root=adm.LIFECYCLE_ROOT, every_role=every_role
+        )
+        for key, result in _compile_all_34_matrix_capsules().items()
+    }
+    assert len(measurements) == 34
+    assert set(measurements) == set(COMPILED_CAPSULE_TOKEN_CEILINGS)
+    assert evaluate_wire_token_ceilings(measurements, COMPILED_CAPSULE_TOKEN_CEILINGS) == []
+
+
+def test_wire_and_compiled_ceilings_reject_overages_and_match_launch_links(tmp_path: Path) -> None:
+    """Ceiling evaluators fail closed at ceiling + 1 and compiled tokens match launch binding."""
+    for table in (WIRE_TOKEN_CEILINGS, COMPILED_CAPSULE_TOKEN_CEILINGS):
+        assert evaluate_wire_token_ceilings(dict(table), table) == []
+        key, ceiling = next(iter(table.items()))
+        failures = evaluate_wire_token_ceilings({key: ceiling + 1}, table)
+        assert len(failures) == 1
+        assert all(part in failures[0] for part in (key, str(ceiling + 1), str(ceiling)))
+        unknown = evaluate_wire_token_ceilings({"unknown/op": 1}, table)
+        assert len(unknown) == 1 and "unknown/op" in unknown[0]
+
+    every_role = (adm.LIFECYCLE_ROOT / "core/every-role.md").read_text(encoding="utf-8")
+    out = compile_admitted_capsule(
+        adm._shipped_binding("worker", "implementation"),
+        adm._shipped_request("worker", "implementation"),
+    )
+    assert out.ok and out.result is not None and out.shared_block is not None
+    delivery = delivery_mod.capsule_delivery_from(out.result)
+    bound_inst, _rec = det_mod.compose_launch_instructions(
+        delivery,
+        (tmp_path / "parity" / "req.md").as_posix(),
+        {},
+        compact_links=True,
+        corpus_root=adm.LIFECYCLE_ROOT,
+    )
+    bound_shared = link_mod.compact_skill_uri_links(out.shared_block)
+    expected_tokens = measure_wire_tokens(f"{bound_shared}\n\n{bound_inst}")
+    assert (
+        measure_compiled_capsule_tokens(
+            out.result, corpus_root=adm.LIFECYCLE_ROOT, every_role=every_role
+        )
+        == expected_tokens
+    )
 
 
 # -- Durable corpus root, compact links, nested details, canonical report exclusion --------
@@ -662,7 +767,7 @@ class WireTokenBudgetMatrixTests(fms.FirstMessageMatrixBase):
         )
 
     def test_eight_default_pairs_pass_wire_token_ceilings_and_send_links(self) -> None:
-        """All 8 default launch pairs pass Phase 1 ceilings, link checks, and slim projection."""
+        """All 8 default launch pairs pass wire-token ceilings, link checks, and slim projection."""
         harness = fms.FIXTURE_HARNESSES[0]
         measurements: dict[str, int] = {}
         for role, op in prep_mod.ROLE_START_OPERATIONS.items():
@@ -697,7 +802,7 @@ class WireTokenBudgetMatrixTests(fms.FirstMessageMatrixBase):
                 self.assertNotIn("refused-write.md", ctx)
                 measurements[key] = _wire_tokens(prompt, self.root, [str(req.request_id)])
 
-        self.assertEqual(set(measurements), set(PHASE_1_WIRE_TOKEN_CEILINGS))
+        self.assertEqual(set(measurements), set(WIRE_TOKEN_CEILINGS))
         self.assertEqual(evaluate_wire_token_ceilings(measurements), [])
 
         # Repeated measurement across fresh request IDs must be strictly deterministic (0 variance).
@@ -712,52 +817,50 @@ class WireTokenBudgetMatrixTests(fms.FirstMessageMatrixBase):
             self.assertEqual(repeat_tokens, measurements[key], key)
 
     def test_held_openings_and_bounded_appendices_stay_capped(self) -> None:
-        """Held inline/offloaded and worker launch appendices pass explicit ceilings; overages fail.
-
-        Ordinary-Latin prose batches are checked against the base pair ceiling plus
-        ``PHASE_1_HELD_APPENDIX_ALLOWANCE`` or ``PHASE_1_LAUNCH_APPENDIX_ALLOWANCE``.
-        Pathological multi-byte Unicode-density payloads (e.g., 4,000 ``Ω`` characters) are
-        bounded by Rule 5's Unicode character limit rather than ordinary-Latin token allowances.
-        """
+        """Held prefixes pass WIRE_TOKEN_CEILINGS; caller appendices follow 1,000-char offload."""
         harness = fms.FIXTURE_HARNESSES[0]
         prose_unit = (
             "Verify bounded launch context delivery and keep wire tokens within phase ceilings. "
         )
         for role in ("reviewer", "curator"):
             key = f"{role}/{prep_mod.ROLE_START_OPERATIONS[role]}"
-            held_ceiling = PHASE_1_WIRE_TOKEN_CEILINGS[key] + PHASE_1_HELD_APPENDIX_ALLOWANCE
             for case_name, body, expect_offload in (
                 ("inline-under-limit", prose_unit * 11, False),
                 ("offloaded-over-limit", prose_unit * 50, True),
             ):
                 self._clear_role_receipts(role)
-                req, rp, rec, _, _, _ = self._held_seat(
+                req, rp, rec, batch, _digest, sidecar = self._held_seat(
                     role, harness, (("From manager · leaf · agent s-1", "s-1", body),)
+                )
+                prefix_tok = _wire_tokens(
+                    rec["heldOpeningPrompt"], self.root, [str(req.request_id)]
+                )
+                self.assertEqual(
+                    evaluate_wire_token_ceilings({key: prefix_tok}),
+                    [],
+                    f"{case_name}: {key} prefix measured={prefix_tok} ceiling={WIRE_TOKEN_CEILINGS[key]}",
                 )
                 self.assertEqual(held_mod.drain_held(self.config, rp, rec)["outcome"], "opened")
                 prompt = self._last_prompt()
                 self.release(self.receipt(req))
+                self.assertTrue(prompt.startswith(rec["heldOpeningPrompt"] + "\n\n"))
                 self.assertNotIn("Successor start:", prompt)
                 self.assertEqual("Held opening messages file:" in prompt, expect_offload)
-                if not expect_offload:
+                if expect_offload:
+                    self.assertEqual(sidecar.read_text(encoding="utf-8"), batch)
+                else:
                     self.assertIn(body, prompt)
-                tok = _wire_tokens(prompt, self.root, [str(req.request_id)])
-                failures = evaluate_wire_token_ceilings({key: tok}, {key: held_ceiling})
-                self.assertEqual(
-                    failures, [], f"{case_name}: {key} measured={tok} ceiling={held_ceiling}"
-                )
 
-        _req_b, first_w = self.start("worker", harness)
+        req_b, first_w = self.start("worker", harness)
+        base_prompt_w = self.sent_prompt(req_b)
         self.release(first_w)
         self._enable_acp_provider(harness)
         req_w = self.request("worker", harness, stepUp="Stronger model needed.")
-        routes_mod._start_execution(
-            self.config,
-            req_w,
-            opening_message="From manager · direct\n" + (prose_unit * 125),
-        )
+        long_opening = "From manager · direct\n" + (prose_unit * 125)
+        routes_mod._start_execution(self.config, req_w, opening_message=long_opening)
+        rec_w = self.receipt(req_w)
         prompt_w = self.sent_prompt(req_w)
-        self.release(self.receipt(req_w))
+        self.release(rec_w)
         for marker in (
             "Successor start:",
             "Step-up:",
@@ -765,35 +868,28 @@ class WireTokenBudgetMatrixTests(fms.FirstMessageMatrixBase):
             acp_mod.ACP_WAIT_INSTRUCTION,
         ):
             self.assertIn(marker, prompt_w)
-        worker_key = "worker/implementation"
-        launch_ceiling = PHASE_1_WIRE_TOKEN_CEILINGS[worker_key] + PHASE_1_LAUNCH_APPENDIX_ALLOWANCE
-        tok_w = _wire_tokens(prompt_w, self.root, [str(req_w.request_id)])
-        worker_failures = evaluate_wire_token_ceilings(
-            {worker_key: tok_w}, {worker_key: launch_ceiling}
-        )
         self.assertEqual(
-            worker_failures,
-            [],
-            f"worker-launch-appendix: {worker_key} measured={tok_w} ceiling={launch_ceiling}",
+            Path(rec_w["openingMessageArtifact"]["canonicalPath"]).read_text(encoding="utf-8"),
+            long_opening,
         )
 
-        # Negative over-ceiling test: an over-budget prompt must be rejected with key/total/ceiling.
+        # Negative over-ceiling test against WIRE_TOKEN_CEILINGS.
+        worker_key = "worker/implementation"
+        base_tok = _wire_tokens(base_prompt_w, self.root, [str(req_b.request_id)])
         over_tok = _wire_tokens(
-            prompt_w + ("\n" + prose_unit * 60), self.root, [str(req_w.request_id)]
+            base_prompt_w + ("\n" + prose_unit * 200), self.root, [str(req_b.request_id)]
         )
-        self.assertGreater(over_tok, launch_ceiling)
-        over_failures = evaluate_wire_token_ceilings(
-            {worker_key: over_tok}, {worker_key: launch_ceiling}
-        )
+        self.assertGreater(over_tok, WIRE_TOKEN_CEILINGS[worker_key])
+        over_failures = evaluate_wire_token_ceilings({worker_key: over_tok})
         self.assertEqual(len(over_failures), 1)
-        for expected in (worker_key, str(over_tok), str(launch_ceiling)):
+        for expected in (worker_key, str(over_tok), str(WIRE_TOKEN_CEILINGS[worker_key])):
             self.assertIn(expected, over_failures[0])
         self.assertEqual(
-            len(evaluate_wire_token_ceilings({worker_key: tok_w}, {worker_key: tok_w - 1})),
+            len(evaluate_wire_token_ceilings({worker_key: base_tok}, {worker_key: base_tok - 1})),
             1,
         )
 
-        # Pathological multi-byte Unicode-density payload is bounded by Rule 5's character limit.
+        # Multi-byte Unicode payload is bounded by the 1,000-character offload limit.
         unicode_emitted, unicode_offloaded = offload_mod.format_bounded_appendix(
             "Ω" * 4_000,
             limit=1_000,
@@ -807,7 +903,7 @@ class WireTokenBudgetMatrixTests(fms.FirstMessageMatrixBase):
         harness = fms.FIXTURE_HARNESSES[0]
         note_text = "## Launch Context\n\nAuthor note inside static prefix."
         _set_orchestration(notes=note_text)
-        s_a, s_b = self.starter("orchestrator"), self.starter("manager")
+        s_a, s_b = self.starter("architect"), self.starter("architect")
         for role in prep_mod.ROLE_START_OPERATIONS:
             with self.subTest(role=role):
                 prompts: list[str] = []

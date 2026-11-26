@@ -56,8 +56,8 @@ def _assert_one_receipt_contract(held_text: str, refusal_text: str) -> None:
         for section in re.split(r"(?m)^#{1,6} .+$", refusal_text)
         if refusal_contracts[0] in section
     )
-    assert "never resend it" in held_contracts[0].casefold()
-    assert "Withdraw a superseded held message with `withdraw_held_message_id`." in held_home
+    assert "never resend" in held_contracts[0].casefold()
+    assert "withdraw via `withdraw_held_message_id`" in held_home
     for clause in (
         "Record the handover as pending",
         "continue independent work",
@@ -98,10 +98,9 @@ def test_receipt_contract_has_one_home_even_when_repeated_in_other_words() -> No
     assert reference.step.strip()
     rendered = outcome.result.render_instructions()
     marker = "{{detail:reference/message-handover.md}}"
-    action = "Before sending a handover, read"
-    assert (
-        sum(action in paragraph and marker in paragraph for paragraph in rendered.split("\n\n"))
-        == 1
+    assert rendered.count(marker) == 1
+    assert any(
+        "Msg/sync/repairs" in line and f"[msg]({marker})" in line for line in rendered.splitlines()
     )
     held_text = outcome.shared_block
     text = reference.content.decode()
@@ -119,5 +118,9 @@ def test_receipt_contract_has_one_home_even_when_repeated_in_other_words() -> No
             _assert_one_receipt_contract(held_text, text + "\n\n" + duplicate)
         with pytest.raises(AssertionError, match="multiple semantic homes"):
             _assert_one_receipt_contract(held_text + "\n\n" + duplicate, text)
-    assert "Withdraw a superseded held message with `withdraw_held_message_id`." in held_text
+    assert "withdraw via `withdraw_held_message_id`" in held_text
+    assert (
+        "Withdraw a superseded held message with `withdraw_held_message_id`."
+        in (root / "core/authority.md").read_text()
+    )
     assert "A receipt or turn-end does not establish semantic acceptance." in text

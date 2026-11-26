@@ -32,3 +32,7 @@ A leaf workspace links that folder as `messages`.
 ### Receipt scope
 
 The active enclosure holds its own receipts. Otherwise, receipts use the configured `transcriptRoot`. Before claiming that no message was sent, search the complete applicable message folder and receipt scope.
+
+## Continue through steps and waves in one turn
+
+Work step to step and wave to wave in one turn, collecting helpers' results. End only at the verdict/handover, a named wait or a nearly full context. Continue admitted repairs, checks and handover steps within your assignment without waiting for a new Manager go; an Investigator ends at its report, when no independent work remains, or at nearly full context.

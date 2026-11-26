@@ -35,6 +35,7 @@ from agents_remember.models.role_capsules.types import (
 )
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember_test_support.testing.capsule_wording import (
+    MESSAGE_OPERATION_ROUTES,
     assert_git_comparison_scope,
     autonomy_surface,
     clause_mutations,
@@ -110,119 +111,84 @@ class InstructionFileWordingTests(unittest.TestCase):
                 "roles/manager.md",
                 "Start leaf agents and preserve their work",
                 (
-                    "Check packet dependencies before starting a leaf and before integrating it; the product does not perform that check.",
+                    "Check packet deps before starting/integrating "
+                    "(the product does not perform that check);",
                 ),
             ),
             (
-                "roles/manager.md",
-                "Decide gates and keep the master current",
+                "operations/closeout.md",
+                "Repair a gate refusal through its owner",
                 (
-                    "Before responding to gate findings from closeout preview or any landing route, read [Repair a gate refusal through its owner](../operations/closeout.md#repair-a-gate-refusal-through-its-owner)",
-                ),
-            ),
-            (
-                "roles/manager.md",
-                "Make decisions within your authority",
-                (
-                    "sandbox or scratch instruments that change no product source",
-                    "One rerun on the same operands after infrastructure failure",
-                    "A second infrastructure failure of the same kind, with the attempts",
+                    "Send `knowledge-gate-refused` (closeout/integration) or "
+                    "`direct-landing-knowledge-gate-refused` (direct landing) findings to Curator "
+                    "for repair, then retry the owning route;",
+                    "bypass no gate.",
                 ),
             ),
             (
                 "roles/manager.md",
                 "Make decisions within your authority",
                 (
-                    "a small item that has cost about an hour, or a second repair round or freeze, with the hours and a proposal",
+                    "scratch tools",
+                    "1 infra rerun on same operands",
+                    "2nd same-kind infra failure",
                 ),
+            ),
+            (
+                "roles/manager.md",
+                "Make decisions within your authority",
+                ("small item costing ~1h or 2nd repair round/freeze (hours + proposal)",),
             ),
             (
                 "roles/orchestrator.md",
                 "Communicate with the Architect",
+                ("small item costing ~1 hour or 2nd repair round/freeze (with hours & proposal)",),
+            ),
+            (
+                "reference/worker/sync-and-repairs.md",
+                "Repair limits, costly small repairs, and record-only repairs",
                 (
-                    "a small item that has cost about an hour, or a second repair round or freeze; include its hours and a proposal",
+                    "When the same check or finding still fails after three of the Worker's repairs, stop repairing.",
+                    "When one small item costs about an hour, a second repair round or a second freeze, tell the Manager immediately with the hours and a proposal",
                 ),
             ),
             (
-                "roles/worker.md",
-                "Repair findings and failed checks",
+                "core/authority.md",
+                "Hand over work and wait for messages",
                 (
-                    "When the same check or finding still fails after three of your repairs, stop repairing",
-                    "When one small item costs about an hour, a second repair round or a second freeze, follow [Report a costly small repair](../operations/implementation.md#report-a-costly-small-repair)",
+                    "Collect helpers and continue ordinary work.",
+                    "end a turn that waits for your helpers with `WAITING FOR SUBAGENTS:`",
+                    "a turn that waits for a process you started with `WAITING FOR BACKGROUND:`",
                 ),
             ),
             (
-                "roles/worker.md",
-                "Stop conditions and stage completion",
+                "core/every-role.md",
+                "Parallel work and waiting",
                 (
-                    "Work step to step and wave to wave in one turn, collecting helper results",
-                    "End only at your handover, a named wait or a nearly full context",
-                    "handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of the frozen candidate",
-                ),
-            ),
-            (
-                "roles/reviewer.md",
-                "Organise and continue the assigned work",
-                (
-                    "Work step to step and wave to wave in one turn, collecting helpers' results",
-                    "End only at the verdict, a named wait or nearly full context",
-                ),
-            ),
-            (
-                "roles/curator.md",
-                "Repair and finish the stage",
-                (
-                    "Work from step to step and wave to wave in one turn, collecting helpers' results",
-                    "End only at the handover, a named wait or a nearly full context",
-                ),
-            ),
-            (
-                "roles/investigator.md",
-                "Read and investigate",
-                (
-                    "Work step to step, wave to wave, in one turn",
-                    "While a developer answer is pending, continue independent work. End the turn at your report, when no independent work remains, or at nearly full context",
-                ),
-            ),
-            (
-                "roles/investigator.md",
-                "Organise and continue the work",
-                (
-                    "Collect helpers and continue ordinary work",
-                    "For helper collection and continuation, follow [Parallel work and waiting](../core/every-role.md#parallel-work-and-waiting).",
+                    "End waits with `WAITING FOR SUBAGENTS:` or `WAITING FOR BACKGROUND:` (process, id/log, expected end), sending no parent progress `role_message`.",
+                    "Continue ended child turns with unfinished work and no valid wait/stop.",
                 ),
             ),
         )
         for source, heading, clauses in (*checks, *RELOCATED_WORKING_STEPS):
             with self.subTest(source=source, heading=heading):
                 _step_controls(source, heading, clauses)
+        self.assertIn(
+            "stop after 3 failed repairs on one item and tell Manager",
+            role_text("worker"),
+        )
+        self.assertIn(
+            "Pass `system/coding-guidelines.md` handover checks on a clean freeze copy",
+            " ".join(read(LIFECYCLE / "operations/implementation.md").split()),
+        )
         for role in ("worker", "reviewer", "curator", "investigator"):
             self.assertNotIn("Hermes: their files", role_text(role))
 
-        for role, heading, trigger in (
-            (
-                "architect",
-                "Questions received from children",
-                "Before answering a child's question or returning the developer's answer",
-            ),
-            (
-                "manager",
-                "Report through the assigned recipient",
-                "Before handling a child's question or returning the developer's answer",
-            ),
-            (
-                "orchestrator",
-                "Questions received from children",
-                "Before handling a child's question or the developer's answer to it",
-            ),
-        ):
+        for role in ("architect", "manager", "orchestrator"):
             _step_controls(
                 f"roles/{role}.md",
-                heading,
-                (
-                    trigger,
-                    "{{detail:reference/coordination/shared/child-questions.md}}",
-                ),
+                "Reference index",
+                ("[child]({{detail:reference/coordination/shared/child-questions.md}})",),
             )
         _step_controls(
             "reference/coordination/shared/child-questions.md",
@@ -249,48 +215,32 @@ class InstructionFileWordingTests(unittest.TestCase):
         )
         _step_controls(
             "roles/orchestrator.md",
-            "Verify and hand over",
+            "Verify, boundaries, and result contract",
             (
-                "A review of the sprint plan (plan review) or of the completed sprint\N{RIGHT SINGLE QUOTATION MARK}s handover (super-exit review) has no startable Reviewer seat.",
-                "Bring either review to the Architect, who takes it to the developer",
+                "Plan-review and super-exit have no startable Reviewer seat -> bring to Architect for developer with sprint-level Reviewer idea.",
             ),
         )
 
     def test_freeze_report_and_receiver_keep_candidate_and_check_identity(self) -> None:
         checks = (
             (
-                "operations/implementation.md",
-                "Outputs",
+                "reference/worker/sync-and-repairs.md",
+                "Focused test selection and freeze report details",
                 (
-                    "relevant checks not run and why",
-                    "files it exercises are byte-identical",
-                    "For each rerun, name the changed file that required it",
-                    "Before each freeze",
-                    "handover checks on a clean copy of the frozen candidate",
-                    "the copy's tree and its result",
-                    "Repair failures before freezing",
-                    "are the work of a round",
+                    "byte-identical carry-overs",
+                    "rerun causes",
+                    "per-finding repair entries (ID, files/lines, before/after test)",
+                    "../../templates/turn-report.md",
                 ),
             ),
             (
                 "roles/worker.md",
-                "Report and freeze the candidate",
-                (
-                    "Carry the leaf's journal records and their attempt identifiers in the handover",
-                    "Before writing the freeze report",
-                    "{{detail:templates/turn-report.md}}",
-                    "run `handoff-check` against that freeze with the serving build's interpreter, identified through `server_info` on `agents-remember-task`",
-                    "Name the result in the message",
-                ),
+                "Reference index",
+                ("[report]({{detail:templates/turn-report.md}}#shape)",),
             ),
             (
-                "roles/reviewer.md",
-                "Confirm the assignment before inspection",
-                ("Require passing coding-guidelines handover results bound to that tree",),
-            ),
-            (
-                "roles/reviewer.md",
-                "Bind the seam and catalogs",
+                "reference/review/non-leaf-seams-and-catalogs.md",
+                "Review seams and criteria catalogs",
                 (
                     "never the hosting leaf's enclosure candidate",
                     "| atomic-master integration review | the canonical master | master's acceptance leaf |",
@@ -303,34 +253,45 @@ class InstructionFileWordingTests(unittest.TestCase):
         for source, heading, clauses in checks:
             with self.subTest(source=source):
                 _step_controls(source, heading, clauses)
+        implementation = " ".join(read(LIFECYCLE / "operations/implementation.md").split())
+        for clause in (
+            "Pass `system/coding-guidelines.md` handover checks on a clean freeze copy (record check/tree/result; fix first).",
+            "Regenerate Curator list per freeze + `handoff-check` (`server_info`).",
+        ):
+            self.assertIn(clause, implementation)
+        worker = read(LIFECYCLE / "roles/worker.md")
+        self.assertIn(
+            "<!-- ar:gives freeze-handoff to reviewer: freeze-report, candidate-identity, attempt-records -->",
+            worker,
+        )
+        reviewer = role_text("reviewer")
+        self.assertIn(
+            'exact candidate (no branch/"latest") + clean-copy checks (withhold PASS until passing)',
+            reviewer,
+        )
+        turn_report = " ".join(read(LIFECYCLE / "templates/turn-report.md").split())
+        self.assertIn("Explicitly list any relevant test or check not run and why.", turn_report)
 
     def test_design_guidelines_are_obligations_at_each_ui_input_step(self) -> None:
-        checks = (
-            (
-                "roles/worker.md",
-                "Establish the assignment",
-                (
-                    "`system/design-guidelines.md` under `workspace.memoryRoot`",
-                    "where it exists",
-                    "before the first interface edit and follow it",
-                ),
-            ),
-            (
-                "roles/reviewer.md",
-                "Confirm the assignment before inspection",
-                (
-                    "`system/design-guidelines.md`",
-                    "under `workspace.memoryRoot`",
-                    "where it exists. Review the interface as it directs",
-                ),
-            ),
+        _step_controls(
+            "core/invariants.md",
+            "Keep each instruction on its owning surface",
+            ("Design rules belong in the repository's `system/design-guidelines.md`.",),
         )
-        for source, heading, clauses in checks:
-            with self.subTest(source=source):
-                _step_controls(source, heading, clauses)
         worker = read(LIFECYCLE / "roles/worker.md")
+        self.assertIn(
+            "Follow `workspace.memoryRoot` `system/{coding,design,skill-writing}-guidelines.md`",
+            worker,
+        )
         self.assertLess(
-            worker.index("system/design-guidelines.md"), worker.index("## Report and freeze")
+            worker.index("system/{coding,design,skill-writing}-guidelines.md"),
+            worker.index("<!-- ar:gives freeze-handoff"),
+        )
+        reviewer = read(LIFECYCLE / "roles/reviewer.md")
+        self.assertIn("`system/tools.md` + `system/design-guidelines.md` + guidelines.", reviewer)
+        self.assertLess(
+            reviewer.index("`system/tools.md` + `system/design-guidelines.md` + guidelines."),
+            reviewer.index("## Bind the seam and catalogs"),
         )
         for role in ("worker", "reviewer"):
             for copied_method in ("DESIGN.md", "TREATMENT.md", "TECHNIQUES.md"):
@@ -339,22 +300,16 @@ class InstructionFileWordingTests(unittest.TestCase):
     def test_investigator_scope_report_and_authority_are_explicit(self) -> None:
         investigator = role_text("investigator")
         for clause in (
-            "Investigate one concern of any kind",
-            "without a task reference, on a sprint, a standalone master, or both",
-            "its first `role_message` on `agents-remember-task` supplies the concern",
-            "ask that parent once and wait; do not invent either",
-            "Without a parent, use the developer's request",
-            "Run checks in your scratch folder or in a sandbox built with the repository's sandbox tooling.",
-            "Write one concise report at the path in your handover.",
-            "tell it that the report is written and name its path",
-            "Write the report before changing system state, and follow the Boundaries below before remediation.",
-            "You may change system state only on an explicit order from the developer or from the parent named in your assignment.",
-            "Edit no file in a code checkout or a leaf's enclosure.",
-            "Make no commit and run no closeout or integration.",
-            "Change nothing in the memory repository: no onboarding card, knowledge record or history row.",
-            "Change no task document or task status.",
-            "If a starter orders code or memory changes, decline",
-            "Start no role.",
+            "Examine one scoped concern and write an evidence-based report.",
+            "Start in Projects (taskless), sprint, standalone master, or both—never a leaf",
+            "Parent's first `role_message` supplies concern (ask once if missing, wait); parentless asks developer in own chat.",
+            "Run checks in scratch/repo sandbox;",
+            "write one report at handover path",
+            "send path to parent's role with its task references via `role_message` (parentless: own chat).",
+            "Write the report before authorized system remediation.",
+            "Change system state only on explicit developer/parent order outside code checkouts, enclosures, memory repos and task docs.",
+            "Edit no code/leaf/memory/task file; no commit/closeout/integration/role start.",
+            "Decline edit orders, cite boundaries, report to owner.",
         ):
             with self.subTest(clause=clause):
                 self.assertIn(clause, investigator)
@@ -379,10 +334,9 @@ class InstructionFileWordingTests(unittest.TestCase):
         )
         router = read(LIFECYCLE / "SKILL.md")
         self.assertNotIn("system-specialist", router)
-        orientation = read(LIFECYCLE / "operations/orientation.md")
         self.assertIn(
-            "An Investigator uses its parent's first message for the concern",
-            orientation,
+            "An Investigator takes any scoped concern from its parent's first message",
+            router,
         )
 
     def test_retired_investigator_wording_is_detected_when_reinserted(self) -> None:
@@ -421,31 +375,38 @@ class InstructionFileWordingTests(unittest.TestCase):
     def test_direct_closeout_keeps_the_architect_and_its_existing_gates(self) -> None:
         architect = role_text("architect")
         kept = (
-            "When no Manager or Orchestrator owns closeout, you may coordinate the "
-            "existing paired closeout (`worktree_closeout_preview` and "
-            "`worktree_closeout_apply` on `agents-remember-task`) only under the "
-            "already-delegated authority of [Authorized "
-            "Closeout](../operations/closeout.md), after independent review and "
-            "required curation evidence exist."
+            "Perform no landing step except flat-mode direct paired closeout "
+            "(`worktree_closeout_preview`, `worktree_closeout_apply`) under "
+            "developer-chosen direct coordination with independent review and "
+            "curation evidence."
         )
         self.assertIn(kept, architect)
         self.assertIn(
-            "Flat mode here means only the developer-chosen direct-coordination exception.",
+            "[flat]({{detail:reference/coordination/shared/closeout-recovery.md}}#flat-mode-direct-paired-closeout)",
             architect,
+        )
+        flat_detail = " ".join(
+            read(LIFECYCLE / "reference/coordination/shared/closeout-recovery.md").split()
+        )
+        self.assertIn(
+            "Flat mode means only the developer-chosen direct-coordination exception where neither a Manager nor an Orchestrator owns closeout.",
+            flat_detail,
+        )
+        self.assertIn(
+            "the owning Architect may coordinate the paired closeout (`worktree_closeout_preview` and `worktree_closeout_apply`) only with the developer's explicit commit approval for that closeout, or with authority the developer delegated for the series and recorded in the task document, after independent review and required curation evidence exist.",
+            flat_detail,
         )
         closeout = " ".join(read(LIFECYCLE / "operations/closeout.md").split())
         self.assertIn(
-            "In a flat run with neither Manager nor Orchestrator, the owning Architect may coordinate the same transaction only with the developer's explicit commit approval for that closeout, or with authority the developer delegated for the series and recorded in the task document.",
+            "flat-mode Architect direct closeout follows [flat-mode closeout](../reference/coordination/shared/closeout-recovery.md#flat-mode-direct-paired-closeout).",
             closeout,
         )
         self.assertIn(
-            "a clean preview returns `would-closeout`, `commit-approval-pending` and "
-            "`request_commit_approval`.",
+            "clean preview returns `would-closeout`, `commit-approval-pending`, `request_commit_approval`;",
             closeout,
         )
         self.assertIn(
-            "use the standing leaf authority as the `intent_note` for `worktree_closeout_apply`, "
-            "with the previewed messages for enabled legs",
+            "pass standing leaf authority as `intent_note` to `worktree_closeout_apply` with previewed leg messages.",
             closeout,
         )
         self.assertNotIn(kept, [row.statement for row in RETIRED_CURATION_STATEMENTS])
@@ -465,8 +426,8 @@ class InstructionFileWordingTests(unittest.TestCase):
                     self.assertNotIn("one level deep", surface)
                     self.assertNotIn("must fan out", surface)
                     self.assertNotIn("Sub-agents for read/search only", surface)
-        self.assertIn("A Worker starts no role", role_text("worker"))
-        self.assertIn("Keep exactly one Curator writer", role_text("curator"))
+        self.assertIn("No role starts", role_text("worker"))
+        self.assertIn("One Curator writer lane (no helper writers)", role_text("curator"))
 
     def test_leaf_roles_and_operations_deliver_their_own_positive_obligations(
         self,
@@ -513,14 +474,10 @@ class InstructionFileWordingTests(unittest.TestCase):
                 detail_path = root / detail_source
                 manifest_path = root / "composition-manifest.json"
                 original_role = role_path.read_text()
-                trigger = {
-                    "worker": "Before sending a handover",
-                    "reviewer": "Before handing over work",
-                    "curator": "Before sending a message",
-                }[role]
+                trigger = "[msg]("
                 self.assertIn(trigger, original_role)
                 original_operation = operation_path.read_text()
-                selected_operation_route = "Before responding to a full-store refusal, read [Handle a full-store refusal](../reference/message-handover.md#handle-a-full-store-refusal) for the pending handover, single retry and second-refusal report."
+                selected_operation_route = MESSAGE_OPERATION_ROUTES[role]
                 original_detail = detail_path.read_text()
                 original_manifest = manifest_path.read_text()
                 for source in (f"roles/{role}.md", f"operations/{operation}.md"):
@@ -629,14 +586,11 @@ class InstructionFileWordingTests(unittest.TestCase):
                     CANONICAL / LIFECYCLE, source, name, Path(directory) / "report.md"
                 )
                 worker = original_worker.replace(
-                    "Use a product-supplied agent identifier only whole and unchanged",
-                    "Use only the whole, unchanged agent ID supplied by the product",
+                    "Use the agent IDs these tools return",
+                    "Use only the agent IDs these tools return",
                 )
                 with self.subTest(obligation=name):
-                    if (
-                        "Use a product-supplied agent identifier only whole and unchanged"
-                        in original_worker
-                    ):
+                    if "Use the agent IDs these tools return" in original_worker:
                         self.assertNotEqual(worker, original_worker)
                     self.assertEqual(missing_clauses(worker, {name: alternatives}), [])
 
@@ -681,6 +635,7 @@ class InstructionFileWordingTests(unittest.TestCase):
     def test_every_passage_that_names_an_ar_tool_names_the_task_tool_server(
         self,
     ) -> None:
+        wrong_server = re.compile(r"\b(?:on|via)\s+`agents-remember`(?!-task)")
         naming = 0
         for relative in instruction_files():
             for passage in re.split(r"\n\s*\n", read(relative)):
@@ -689,9 +644,26 @@ class InstructionFileWordingTests(unittest.TestCase):
                     continue
                 naming += 1
                 with self.subTest(file=relative.as_posix(), tools=tools):
-                    self.assertIn(f"`{TOOL_SERVER}`", passage)
+                    self.assertIsNone(wrong_server.search(passage))
         # The rule is checked on real passages, not satisfied by finding none.
         self.assertGreaterEqual(naming, 20)
+        self.assertIsNotNone(wrong_server.search("Call `role_message` on `agents-remember`."))
+        for source, expected in (
+            (
+                LIFECYCLE / "core/every-role.md",
+                f"Call AR tools only on `{TOOL_SERVER}`, never `agents-remember`.",
+            ),
+            (
+                LIFECYCLE / "operations/orientation.md",
+                f"Call Agents Remember (AR) tools only via `{TOOL_SERVER}` (`agents_remember_task`); ignore unlisted proxies, never call `agents-remember`.",
+            ),
+            (
+                LIFECYCLE / "SKILL.md",
+                f"Call every AR tool on the tool server named `{TOOL_SERVER}`",
+            ),
+        ):
+            with self.subTest(source=source.as_posix()):
+                self.assertIn(expected, " ".join(read(source).split()))
 
     def test_the_router_names_the_host_the_two_tools_and_the_only_tool_server(
         self,
@@ -733,17 +705,9 @@ class InstructionFileWordingTests(unittest.TestCase):
     def test_the_orientation_says_where_the_tools_are_and_what_a_reply_is(self) -> None:
         orientation = " ".join(read(LIFECYCLE / "operations" / "orientation.md").split())
         for sentence in (
-            "A parent agent is optional. A role started from the dashboard has none and needs none; the developer reads and answers in its own chat.",
-            "Call Agents Remember (AR) tools only on the tool server named `agents-remember-task`.",
-            "Find its tools by that server name, spelled `agents-remember-task` or `agents_remember_task`, in either place your harness provides them:",
-            "declared tools with that prefix",
-            "the harness's own instructions for its tool search or script tool",
-            "A tool that lists or proxies tool servers is not the way to AR tools unless it lists `agents-remember-task` itself.",
-            "Do not search for or describe AR tools through it otherwise.",
-            'Its "server not found" answer speaks only for that tool.',
-            "Do not connect to, list, describe or call a server named `agents-remember` or any of its tools: it belongs to another installation.",
-            "A message from another agent begins with a `From` line.",
-            "Your reply in that turn reaches the sender only when it waits on its own call; otherwise send the reply through `role_message` on `agents-remember-task`.",
+            "dashboard roles need no parent.",
+            "Call Agents Remember (AR) tools only via `agents-remember-task` (`agents_remember_task`); ignore unlisted proxies, never call `agents-remember`.",
+            "Peer messages start with `From`; turn replies reach waiting senders only, else `role_message`.",
         ):
             with self.subTest(sentence=sentence):
                 self.assertIn(sentence, orientation)
@@ -754,101 +718,77 @@ class InstructionFileWordingTests(unittest.TestCase):
             "Wait a few seconds and look once more before reporting it missing.", orientation
         )
         self.assertIn(
-            "Retry once after start/resume if agents-remember-task is missing.",
+            "Retry once if agents-remember-task is missing.",
             _AR_TOOL_SERVER_USAGE_TAIL,
         )
 
     def test_each_role_is_told_how_to_reach_agents_and_the_developer(self) -> None:
         orientation = " ".join(read(LIFECYCLE / "operations" / "orientation.md").split())
-        pointer = "Developer questions and relayed answers follow `operations/orientation.md`"
-        referral_pattern = r"(?:`(?:\.\./)?operations/orientation\.md`|\]\(\.\./operations/orientation\.md(?:#ask-for-a-developer-decision)?\))"
+        referral_pattern = r"\]\(\.\./operations/orientation\.md#ask-for-a-developer-decision\)"
         manifest = json.loads(read(LIFECYCLE / "composition-manifest.json"))
         for role in LAUNCHER_ROLES:
             with self.subTest(role=role):
                 text = role_text(role)
-                if pointer in text or re.search(referral_pattern, text):
-                    # One-home referral: the tokens live in the referenced question home.
-                    if "#ask-for-a-developer-decision" in text:
-                        for wrong_step in (
-                            "#formal-permissions",
-                            "#honor-harness-permission-decisions",
-                        ):
-                            mutant = text.replace("#ask-for-a-developer-decision", wrong_step)
-                            self.assertNotEqual(mutant, text)
-                            self.assertNotRegex(mutant, referral_pattern)
+                if re.search(referral_pattern, text):
+                    for wrong_step in (
+                        "#formal-permissions",
+                        "#honor-harness-permission-decisions",
+                    ):
+                        mutant = text.replace("#ask-for-a-developer-decision", wrong_step)
+                        self.assertNotEqual(mutant, text)
+                        self.assertNotRegex(mutant, referral_pattern)
                     self.assertIn("`role_message`", orientation)
                     self.assertIn("in your own chat", orientation)
                 else:
-                    self.assertIn("`role_message`", text)
-                    self.assertIn("in your own chat", text)
+                    if role != "bootstrap":
+                        self.assertIn("`role_message`", text)
+                    self.assertIn("own chat", text)
                 if role in STARTERS:
                     self.assertIn("`role_start`", text)
                 else:
                     self.assertNotIn("role_start", manifest["roles"][role]["tools"])
                     assert_nonstarter_role_boundary(role, text, _step_controls)
-        for role in set(LAUNCHER_ROLES) - {"architect"}:
-            with self.subTest(role=role, told="a role without a parent needs none"):
-                text = role_text(role)
-                original = (
-                    r"started from the dashboard,? (?:it )?"
-                    r"(has no parent|has none|needs no parent|have no parent|need none)"
-                )
-                equivalent = {
-                    "reviewer": "A dashboard-started Reviewer has and needs no parent.",
-                    "curator": "A dashboard-started Curator needs no parent.",
-                    "bootstrap": "a setup role started from the dashboard, with no task document, brief or parent.",
-                }
-                self.assertTrue(
-                    re.search(original, text)
-                    or equivalent.get(role, "NO MATCHING ROLE CLAUSE") in text
-                )
+        self.assertIn("dashboard roles need no parent.", orientation)
+        self.assertIn("Dashboard Orchestrators have no parent", role_text("orchestrator"))
+        self.assertIn("dashboard Managers have no parent", role_text("manager"))
+        self.assertIn("parentless asks developer in own chat", role_text("investigator"))
+        self.assertIn(
+            "dashboard-started free agent with no task doc, brief, or parent;",
+            role_text("bootstrap"),
+        )
         coordination = " ".join(read(LIFECYCLE / "operations" / "coordination.md").split())
         for sentence in (
-            "| Architect | Investigator, Orchestrator, Manager, Worker, Reviewer and Curator |",
-            "| Orchestrator | Manager, Worker, Reviewer, Curator and Investigator under its own sprint |",
-            "| Manager | Worker, Reviewer, Curator and Investigator under its own master |",
-            "for same-identifier reconciliation and refusal reporting",
-            "A message to a recipient already in a turn may be held until that turn ends. If the host delivers it into the running turn, that turn may be cancelled. If the host has not delivered it, the answer names `held` and its reason.",
-            "A dashboard-started role works directly with the developer and needs no parent.",
-            # What the message tool answers, as its own description says it.
-            "A role address never means you yourself.",
-            "If the host has not delivered it, the answer names `held` and its reason.",
-            "A closed session is resumed first. An archived or missing agent is refused and left as it is.",
-            (
-                "The host is never sent a message for a recipient at a permission prompt: "
-                "doing so would answer that permission with a denial."
-            ),
-            (
-                "Before acting on a denied or unanswered harness request, read "
-                "[Honor harness permission decisions](orientation.md#honor-harness-permission-decisions) "
-                "for the waiting, denial and non-bypass rules."
-            ),
-            "a pending permission, including for a wait on a held message",
-            "a timeout while the message remains delivered",
-            "notice that its turn failed or was cancelled",
-            "`accepted` without text when the host cannot identify which turn took the message; read the reply later.",
-            "A message delivered during a running turn may receive that turn's own text; `detail` identifies this case.",
-            "Do not wait on an agent that may be waiting on you. Two mutually waiting agents remain stopped until a wait expires.",
+            "Architect: all 6; Orchestrator: all except Orchestrator, sprint; Manager: Worker/Reviewer/Curator/Investigator, master",
+            "reconcile uncertain starts via same request ID.",
+            "role != self; invent no IDs",
+            "active turns may `held` or cancel (never into permission prompts);",
+            "archived seats refuse (use successor).",
+            "`wait` returns text, failure/cancel, `permission-pending`, timeout, or `accepted`; never mutually wait.",
         ):
             with self.subTest(sentence=sentence):
                 self.assertIn(sentence, coordination)
+        closeout_recovery = " ".join(
+            read(
+                LIFECYCLE / "reference" / "coordination" / "shared" / "closeout-recovery.md"
+            ).split()
+        )
+        self.assertIn(
+            "Before acting on a denied or unanswered harness request, read "
+            "[Honor harness permission decisions](../../../operations/orientation.md#honor-harness-permission-decisions) "
+            "for the waiting, denial and non-bypass rules.",
+            closeout_recovery,
+        )
         assert_message_handover_delivery(ROLES)
         architect = " ".join(role_text("architect").split())
         for sentence in (
-            (
-                "Before handing work to a waiting seat, read [message handovers and "
-                "receipts]({{detail:reference/message-handover.md}}) for the sender "
-                "and payload rules of `role_message` on `agents-remember-task`, "
-                "full-store refusals, and where filed messages and receipts are kept."
-            ),
-            "its final text, a failed or cancelled turn, a pending permission, or a timeout. An `accepted` result without text means that the reply must be read later.",
-            "Do not wait on an agent that may be waiting on you.",
+            "[msgs]({{detail:reference/message-handover.md}})",
+            "ask developer in own chat; never mutually wait.",
         ):
             with self.subTest(role="architect", sentence=sentence[:40]):
                 self.assertIn(sentence, architect)
 
     def test_a_clean_sync_keeps_the_review_and_a_repair_stays_visible(self) -> None:
-        """MIK-R170 rules 9, 11, 12 and 13 reach the worker, manager and reviewer capsules."""
+        """Clean sync preserves review without a new round and repairs stay visible."""
 
         manifest_bytes = (CANONICAL / LIFECYCLE / "composition-manifest.json").read_bytes()
         manifest = json.loads(manifest_bytes)
@@ -878,50 +818,20 @@ class InstructionFileWordingTests(unittest.TestCase):
             assert outcome.result is not None
             return " ".join(outcome.result.render_instructions().split())
 
-        worker_clean_sync = (
-            "When no path changed on both sides, rerun focused tests and report the code "
-            "and memory pair to the Manager. The tools derive mechanical checks again. For a "
-            "changed pair, the Manager gets the Curator\u2019s refreshed read before routine closeout."
-        )
         required = {
             ("worker", "implementation"): [
-                # Rule 9: a clean sync keeps the review and opens no round.
-                worker_clean_sync,
-                "Send no new freeze to the Reviewer and begin no round.",
-                # Rule 12: the repair goes ahead of any plan or approval.
-                "no plan, account, census or approval goes ahead of the repair",
-                "the Manager gives no go-ahead for it",
-                # Rule 13: the repair is visible in the freeze.
-                "For every repaired finding, record its identifier",
-                "the test that fails before the repair and passes after it",
+                "[sync]({{detail:reference/worker/sync-and-repairs.md}})",
+                "Repair sealed own-file findings directly; return freeze to same Reviewer.",
+                "per-finding repairs",
             ],
             ("manager", "coordination"): [
-                # Rule 11: a precedent is settled where it falls.
-                "Matters covered by an earlier ruling of the same kind",
-                "record the ruling you apply",
-                "A case reservation covers only what it names",
-                # Rule 9: the Manager decides from the closeout preview, not a new round.
-                (
-                    "Before deciding closeout after a leaf sync, read [Synchronize the "
-                    "leaf](../operations/implementation.md#synchronize-the-leaf) for the "
-                    "Worker's focused rerun, your `worktree_closeout_preview` on "
-                    "`agents-remember-task`, the no-new-freeze condition and the "
-                    "same-Reviewer repair path."
-                ),
-                # Rule 12: the Manager gives no go-ahead for a repair.
-                "needs no plan, account or go-ahead from you",
+                "precedent-covered matters (read & record rulings; case reservations cover named items only; Manager decisions stay yours)",
+                "[sync]({{detail:reference/worker/sync-and-repairs.md}}#synchronize-the-leaf)",
+                "Workers repair sealed findings immediately.",
             ],
             ("reviewer", "review"): [
-                # Rule 13: each finding is checked against its entry, with no round counted.
-                "Compare every finding with its entry in the Worker's freeze report",
-                "without counting a round",
-                # A changed pair needs fresh curation evidence while the review carries.
-                (
-                    "For a cleanly synced leaf, expect no new freeze and open no round. "
-                    "The Worker reruns focused tests. Before routine closeout, the Manager "
-                    "gets the Curator\u2019s read for a changed pair. If paths overlap or tests fail, "
-                    "review exactly the repair."
-                ),
+                "return reports missing per-finding entries without counting a round.",
+                "Clean syncs open no round; review overlap/test-failure repairs only.",
             ],
         }
         for (role, operation), clauses in required.items():
@@ -932,32 +842,32 @@ class InstructionFileWordingTests(unittest.TestCase):
             with self.subTest(role=role, told="no cleanly synced freeze is re-sent"):
                 self.assertNotIn("send the new freeze directly to the Reviewer", text)
                 self.assertNotIn("hand the new freeze to the Reviewer", text)
-        operation = " ".join(read(LIFECYCLE / "operations/implementation.md").split())
         _step_controls(
-            "operations/implementation.md",
-            "Boundaries",
+            "reference/worker/sync-and-repairs.md",
+            "Synchronize the leaf",
             (
-                worker_clean_sync,
-                "Send no new freeze to the Reviewer and begin no round",
-                "Request no Reviewer confirmation or receipt",
-                "When a path changed on both sides or a focused test fails, repair exactly that and send the same Reviewer one look at the repair",
+                "The Worker reruns focused tests and reports the updated code and memory pair to the Manager.",
+                "Product tools derive mechanical checks again.",
+                "When clean sync changes the code or memory pair, the Manager obtains the Curator's refreshed dependent-document read before routine closeout.",
+                "Send no new freeze to the Reviewer, open no review round, and request no Reviewer confirmation or receipt.",
+                "When a path changed on both sides or a focused test fails after sync, the Worker repairs exactly that conflict or failure and sends the same Reviewer one look at the repair.",
             ),
         )
-        self.assertIn("Send no new freeze to the Reviewer and begin no round", operation)
-        self.assertNotIn("hand the new freeze to the Reviewer", operation)
+        _step_controls(
+            "reference/worker/sync-and-repairs.md",
+            "Focused test selection and freeze report details",
+            ("per-finding repair entries (ID, files/lines, before/after test)",),
+        )
+        sync_detail = " ".join(read(LIFECYCLE / "reference/worker/sync-and-repairs.md").split())
+        self.assertNotIn("hand the new freeze to the Reviewer", sync_detail)
 
     def test_the_capsules_send_a_return_and_never_point_at_the_agent_chat(self) -> None:
-        """MIK-R172 rule 1: what is handed over, and awaited, travels by `role_message`.
-
-        The four stage-owning capsules carry the sending rule and the statement that a
-        file hands itself over to nobody; no capsule of a launcher role still names the
-        agent's own chat as the place of an answer or a report.
-        """
+        """What is handed over and awaited travels by `role_message`, never only chat."""
 
         manifest_bytes = (CANONICAL / LIFECYCLE / "composition-manifest.json").read_bytes()
         manifest = json.loads(manifest_bytes)
 
-        def capsule(role: str, operation: str) -> str:
+        def capsule(role: str, operation: str) -> tuple[str, str]:
             binding = CapsuleBinding(
                 operation=operation,  # type: ignore[arg-type]
                 admitted=CapsuleAdmittedFacts(
@@ -980,24 +890,29 @@ class InstructionFileWordingTests(unittest.TestCase):
             )
             self.assertTrue(outcome.ok, outcome.render_explanation())
             assert outcome.result is not None
-            return " ".join(outcome.result.render_instructions().split())
+            assert outcome.shared_block is not None
+            return (
+                " ".join(outcome.result.render_instructions().split()),
+                " ".join(outcome.shared_block.split()),
+            )
 
         stage_sentence = {
-            ("worker", "implementation"): (
-                "send that parent what you await and from whom, using `role_message`"
-            ),
+            (
+                "worker",
+                "implementation",
+            ): "Send Reviewer report path (no pasted text), head/hash + next stretch via `role_message`.",
             (
                 "manager",
                 "coordination",
-            ): "When ending blocked outside your authority, notify your reporting recipient. While a child works, record its seat and awaited stage in your end line and status file. Send no message for this wait. Follow the shared helper waits.",
+            ): "While a child works or awaiting an already-sent developer question, record wait locally in end line and status file without sending a second wait message.",
             (
                 "reviewer",
                 "review",
-            ): "tell that parent what and whom you await with `role_message`",
+            ): "Send verdict path directly to Worker via `role_message`",
             (
                 "curator",
                 "curation",
-            ): "report what you await and from whom to that parent with `role_message`",
+            ): "Send memory candidate to Reviewer via `role_message`",
         }
         banned = (
             "in your own chat, is what the sender receives",
@@ -1008,8 +923,6 @@ class InstructionFileWordingTests(unittest.TestCase):
             "says in its last line what it waits for",
             "needs no second model-authored completion post",
         )
-        # MIK-R172 rule 1 in the doctrine home: the artifact does not hand itself over,
-        # and the sender hands it to the waiting agent (R62 rule44).
         acceptance = " ".join(
             (CANONICAL / LIFECYCLE / "core" / "acceptance.md").read_text(encoding="utf-8").split()
         )
@@ -1021,14 +934,15 @@ class InstructionFileWordingTests(unittest.TestCase):
         )
         self.assertNotIn("needs no second model-authored completion post", acceptance)
         for (role, operation), clause in stage_sentence.items():
-            text = capsule(role, operation)
+            text, shared = capsule(role, operation)
             with self.subTest(role=role, told="the stage uses its assigned reporting route"):
                 self.assertIn(clause, text)
-                self.assertIn("agents-remember-task", text)
+                self.assertIn("agents-remember-task", shared)
             with self.subTest(role=role, told="a chat reply reaches a sender only on its wait"):
+                orient_text, _ = capsule(role, "orientation")
                 self.assertIn(
-                    "Your reply in that turn reaches the sender only when it waits on its own call",
-                    capsule(role, "orientation"),
+                    "turn replies reach waiting senders only, else `role_message`.",
+                    orient_text,
                 )
         for role in ("worker", "reviewer", "curator", "manager"):
             for operation in (
@@ -1042,22 +956,28 @@ class InstructionFileWordingTests(unittest.TestCase):
                     "applies_to_roles", []
                 ):
                     continue
-                text = capsule(role, operation)
+                text, _ = capsule(role, operation)
                 for phrase in banned:
                     with self.subTest(role=role, operation=operation, phrase=phrase):
                         self.assertNotIn(phrase, text)
 
     def test_the_workers_report_names_its_agent_id(self) -> None:
-        # The sender identity belongs to the implementation report, including the no-message case.
+        # The sender identity and gap reporting belong to implementation + freeze report details.
         implementation = " ".join(read(LIFECYCLE / "operations" / "implementation.md").split())
+        self.assertIn("record check/tree/result", implementation)
+        sync_detail = " ".join(
+            read(LIFECYCLE / "reference" / "worker" / "sync-and-repairs.md").split()
+        )
         for clause in (
-            "exact checks and results",
-            "relevant checks not run and why",
-            'your agent identifier as the `senderLine` of `role_message` on `agents-remember-task` names it, or "agent ID not known" if you sent no message',
-            "open limitations",
+            "record the `role_message` `senderLine` ID",
+            "byte-identical carry-overs",
+            "rerun causes",
+            "name any gaps",
         ):
             with self.subTest(clause=clause):
-                self.assertIn(clause, implementation)
+                self.assertIn(clause, sync_detail)
+        turn_report = " ".join(read(LIFECYCLE / "templates" / "turn-report.md").split())
+        self.assertIn("Explicitly list any relevant test or check not run and why.", turn_report)
 
 
 if __name__ == "__main__":

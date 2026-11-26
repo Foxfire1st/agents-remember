@@ -1,49 +1,28 @@
 <!-- ar:roles all -->
 # Operation — Recovery
 
-Use this operation to resume role execution after interruption or uncertainty. Its task and worktree recovery instructions apply only to task-bound roles. Recovery restores execution; it does not establish acceptance or publication.
-
-Bootstrap recovers in its own chat, using only its own permitted tools. The launcher has no role binding and sends no message through `role_message` on `agents-remember-task`.
+Resume execution after interruption or uncertainty (restores execution, never acceptance or publication). Task/worktree recovery applies only to task-bound roles; Bootstrap recovers in own chat; launcher sends no `role_message`.
 
 ## Restore the saved assignment
 
-Restore the same role, task, agent identifiers and report from the handover artifact and durable records. Reload the handover artifact when the assignment is no longer in context. Inspect current AR state before acting. Do not repeat a completed action or create a second owner because context was shortened.
-
-For task-bound work, also recover the exact saved request identifier, recipient and candidate references. Use Agents Remember (AR) task and worktree tools on `agents-remember-task` only for their canonical data and paired workspace facts.
+Restore role, task, agent IDs, request ID, recipient, candidate refs, and report from the handover artifact and durable records; inspect Agents Remember (AR) state via AR tools before acting; never repeat completed work or create a second owner after compaction.
 
 <!-- ar:roles architect,orchestrator,manager -->
-## Reconcile an uncertain start or message
-
-An interrupted or uncertain start or message does not authorize a new owner. Before reconciling that start, read [Start one canonical role assignment](coordination.md#start-one-canonical-role-assignment) for the same-request-identifier procedure of `role_start` on `agents-remember-task`.
-
-If message delivery is unknown, ask about it with a new `role_message` on `agents-remember-task` to the same agent. Do not replace that agent. If the outcome stays unknown, preserve it as unknown and report the identifiers.
-
+Reconcile uncertain `role_start` with the same request ID ([start role](coordination.md#start-one-canonical-role-assignment)); query unknown message delivery with a new `role_message` to the same agent (preserve unknown outcomes with IDs).
 <!-- ar:roles worker,curator,investigator,reviewer -->
-## Ask about an uncertain start or message
-
-A Worker, Curator, Reviewer or Investigator starts no role. If you are unsure whether a start or message happened, ask again with a new message to the same agent, or ask your starter. Never create a new owner. If the outcome stays unknown, preserve it as unknown and report the identifiers.
-
+You start no role; query the same agent or starter on uncertain starts/messages without creating a new owner (preserve unknown outcomes with IDs).
 <!-- ar:roles architect,orchestrator,manager,worker,curator,investigator,reviewer -->
-Before restoring an existing AR leaf, read [Start one canonical role assignment](coordination.md#start-one-canonical-role-assignment) for the admitted code, memory and contract pair and the paired-enclosure boundary.
-
+Preserve the leaf's admitted code/memory/contract pair ([start role](coordination.md#start-one-canonical-role-assignment)).
 <!-- ar:roles all -->
-## Preserve authority while recovering
 
-Do not create an alternate transport, background poller, private store or second owner. Report a refusal's real prerequisite. Report a missing semantic fact with its exact task or requirement field and return it to its owner.
-
-Resuming an agent restores execution, not AR acceptance or Git publication.
+Create no alternate transport, poller, private store, or second owner; report refusal prerequisites or missing fields to their owner.
 
 ## Recover after synchronization
 
-After a clean synchronization, the reviewed result stands. Before recovering after that sync, read [Synchronize the leaf](implementation.md#synchronize-the-leaf) for the Worker's focused rerun, Manager closeout preview and same-Reviewer repair procedure.
+After clean sync, the reviewed result stands; follow [Synchronize the leaf](../reference/worker/sync-and-repairs.md#synchronize-the-leaf).
 
 <!-- ar:roles curator -->
-## Bind curation to the serving build
-
-Before resuming a memory decision or write, read [Bind curation to the serving build](orientation.md#bind-curation-to-the-serving-build) for the starting-server authority, development reference and fixture-only boundary.
-
+Follow [serving-build binding](orientation.md#bind-curation-to-the-serving-build) before resuming memory writes.
 <!-- ar:roles architect,orchestrator,manager,worker,curator,investigator,reviewer -->
-## Resume message handovers
-
-Before responding to a full-store refusal, read [Handle a full-store refusal](../reference/message-handover.md#handle-a-full-store-refusal) for the pending handover, single retry and second-refusal report.
+On full-store refusal: [full-store](../reference/message-handover.md#handle-a-full-store-refusal).
 <!-- ar:roles all -->

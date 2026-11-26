@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agents_remember.application.role_capsules.refusal_references import with_refusal_reference
 from agents_remember.models.tools.tool_answer import TOOL_ANSWER_LIST_MAX
 
 
@@ -28,6 +29,10 @@ def write_answer(
     )
     violations, violations_cut = _cut(list(document["violations"]))
     notes, notes_cut = _cut(list(document["notes"]))
+    if document["state"] == "refused":
+        pointer = with_refusal_reference("", "knowledge-write-refused")
+        if pointer and pointer not in notes:
+            notes = [*notes, pointer]
     return {
         "ok": True,
         "operation": "knowledge_write",

@@ -3,25 +3,15 @@
 from __future__ import annotations
 
 import re
-from hashlib import sha256
 from pathlib import Path
 
 import pytest
-from agents_remember.application.role_capsules.shared_block import filter_shared_block
-from agents_remember.application.skill_resources.provider import shipped_composition_corpus
-from agents_remember.cli.role_brief_message import shared_block
 from agents_remember.cli.role_instruction_details import compose_launch_instructions
 from agents_remember.models.role_capsules.types import CapsuleCompilationResult
 from agents_remember.serving.capsule_delivery import capsule_delivery_from
 from agents_remember_test_support.testing.capsule_audience_fixtures import (
-    GROUPED_DETAIL_CLAUSES,
-    INLINE_RULE_CLAUSES,
-    REMOVED_SHORT_RULE_ACTIONS,
-    ROLE_POINTER_QUALIFICATIONS,
-    SHARED_SHORT_RULE_CLAUSES,
+    CURATOR_MESSAGE_CONTENT,
 )
-from agents_remember_test_support.testing.digest_map import load_digest_map
-from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from agents_remember_test_support.testing.leaf_instruction_wording import assert_action_pointer
 from agents_remember_test_support.testing.manifest_step_derivation import (
     sentence_start,
@@ -34,108 +24,448 @@ from agents_remember_test_support.testing.pointer_renewal_cases import (
 )
 from agents_remember_test_support.testing.pointer_uniqueness import duplicate_pointers
 from test_l84_capsule_delivery_proofs import (
+    _assert_index_detail_pointer,
     _compiled,
     _compiled_outcome,
-    _emitted_instruction_detail,
     _linked_instruction_source,
     _shipped_parsed,
 )
-from test_role_capsule_audiences import (
-    OPERATION_POINTER_ACTIONS,
-    ROLE_POINTER_ACTIONS,
-    _assert_curator_message_detail,
-)
 
-# Complete current reference population, including methods performed by the Architect.
+# Complete current reference population delivered via role Reference indexes.
 ROLE_DETAILS = {
     "architect": [
-        "reference/coordination/shared/child-questions.md",
         "reference/coordination/shared/requirement-design.md",
-        "reference/coordination/architect/curator-measurement.md",
-        "reference/coordination/architect/developer-decisions.md",
+        "reference/tasks/document-authoring.md",
+        "reference/knowledge/commands.md",
+        "reference/knowledge/use.md",
         "reference/coordination/architect/models-and-settings.md",
+        "reference/sandbox-actors.md",
+        "reference/coordination/shared/master-state.md",
+        "reference/coordination/shared/seat-recovery.md",
+        "reference/coordination/shared/third-rejected-round.md",
         "reference/coordination/architect/process-decisions.md",
         "reference/coordination/architect/claim-verification.md",
-        "reference/coordination/shared/master-state.md",
-        "reference/coordination/shared/third-rejected-round.md",
-        "reference/coordination/shared/seat-recovery.md",
-        "reference/sandbox-actors.md",
-        "reference/knowledge/commands.md",
-        "reference/knowledge/use.md",
+        "reference/coordination/architect/developer-decisions.md",
+        "reference/coordination/shared/child-questions.md",
         "reference/message-handover.md",
-        "reference/tasks/document-authoring.md",
+        "reference/coordination/architect/curator-measurement.md",
+        "reference/review/advisory-reviews.md",
+        "reference/coordination/shared/closeout-recovery.md",
     ],
     "orchestrator": [
-        "reference/coordination/shared/child-questions.md",
-        "reference/coordination/shared/master-state.md",
         "reference/coordination/shared/seat-recovery.md",
-        "reference/sandbox-actors.md",
+        "reference/coordination/shared/master-state.md",
+        "reference/tasks/document-authoring.md",
+        "reference/coordination/shared/closeout-recovery.md",
         "reference/knowledge/commands.md",
         "reference/message-handover.md",
-        "reference/tasks/document-authoring.md",
+        "reference/sandbox-actors.md",
+        "reference/coordination/shared/child-questions.md",
     ],
     "manager": [
-        "reference/coordination/shared/child-questions.md",
-        "reference/coordination/shared/master-state.md",
-        "reference/refused-write.md",
-        "reference/coordination/shared/third-rejected-round.md",
         "reference/coordination/shared/seat-recovery.md",
-        "reference/sandbox-actors.md",
+        "reference/coordination/shared/third-rejected-round.md",
+        "reference/worker/sync-and-repairs.md",
+        "reference/coordination/shared/closeout-recovery.md",
+        "reference/coordination/shared/master-state.md",
+        "reference/tasks/document-authoring.md",
+        "reference/refused-write.md",
         "reference/knowledge/commands.md",
         "reference/message-handover.md",
-        "reference/tasks/document-authoring.md",
+        "reference/sandbox-actors.md",
+        "reference/coordination/shared/child-questions.md",
     ],
     "worker": [
-        "reference/sandbox-actors.md",
-        "reference/knowledge/serving-build.md",
-        "reference/knowledge/commands.md",
         "reference/knowledge/use.md",
-        "reference/message-handover.md",
+        "reference/knowledge/commands.md",
+        "reference/knowledge/serving-build.md",
         "reference/tasks/document-authoring.md",
-        "reference/writing/visual-explainers.md",
         "templates/turn-report.md",
+        "reference/writing/visual-explainers.md",
+        "reference/message-handover.md",
+        "reference/worker/sync-and-repairs.md",
+        "reference/sandbox-actors.md",
     ],
     "curator": [
-        "reference/sandbox-actors.md",
-        "reference/curator/card-formats-and-citations.md",
-        "reference/curator/card-sentence-decisions.md",
-        "reference/curator/change-routing.md",
-        "reference/curator/coherence-judgments.md",
-        "reference/curator/current-prose-and-history.md",
-        "reference/curator/encountered-records.md",
-        "reference/curator/family-obligations.md",
-        "reference/curator/governing-sources.md",
-        "reference/curator/memory-handover.md",
+        "reference/knowledge/use.md",
+        "reference/knowledge/commands.md",
+        "reference/knowledge/serving-build.md",
+        "reference/curator/intent-reconciliation.md",
+        "reference/curator/worklist.md",
         "reference/curator/knowledge-ingest.md",
         "reference/curator/publication-report.md",
-        "reference/curator/intent-reconciliation.md",
-        "reference/curator/repository-foundation.md",
-        "reference/knowledge/serving-build.md",
-        "reference/curator/worklist.md",
-        "reference/knowledge/commands.md",
-        "reference/knowledge/use.md",
-        "reference/message-handover.md",
+        "reference/curator/family-obligations.md",
+        "reference/curator/change-routing.md",
+        "reference/curator/encountered-records.md",
+        "reference/curator/current-prose-and-history.md",
+        "reference/curator/card-sentence-decisions.md",
+        "reference/curator/card-formats-and-citations.md",
+        "reference/curator/governing-sources.md",
         "reference/writing/technical-english-profile.md",
+        "reference/curator/coherence-judgments.md",
+        "reference/curator/memory-handover.md",
+        "reference/message-handover.md",
+        "reference/curator/exceptions-and-recovery.md",
+        "reference/curator/repository-foundation.md",
+        "reference/worker/sync-and-repairs.md",
+        "reference/sandbox-actors.md",
     ],
     "reviewer": [
-        "reference/sandbox-actors.md",
-        "reference/knowledge/commands.md",
-        "reference/knowledge/use.md",
-        "reference/message-handover.md",
+        "reference/review/non-leaf-seams-and-catalogs.md",
+        "reference/review/rounds-and-late-findings.md",
         "reference/review-baseline.md",
+        "reference/knowledge/use.md",
+        "reference/knowledge/commands.md",
+        "reference/message-handover.md",
+        "reference/sandbox-actors.md",
     ],
     "investigator": [
-        "reference/sandbox-actors.md",
-        "reference/instruction-shortfall-review.md",
         "reference/knowledge/commands.md",
         "reference/knowledge/use.md",
+        "reference/instruction-shortfall-review.md",
+        "reference/sandbox-actors.md",
         "reference/message-handover.md",
     ],
     "bootstrap": [
         "reference/bootstrap/foundation-state.md",
-        "reference/sandbox-actors.md",
         "reference/knowledge/commands.md",
+        "reference/sandbox-actors.md",
     ],
+}
+
+OPERATION_DETAILS = {
+    "bootstrap/bootstrap": [
+        "reference/bootstrap/failure-states.md",
+    ],
+    "architect/review": [
+        "reference/review/advisory-reviews.md",
+    ],
+}
+
+# (source, trigger_cell, link_label, fragment) for every role's Reference index rows.
+ROLE_INDEX_POINTERS: dict[str, list[tuple[str, str, str, str]]] = {
+    "architect": [
+        (
+            "reference/coordination/shared/requirement-design.md",
+            "Reqs/`task_doc`/`context_packet`/`knowledge_read`",
+            "design",
+            "",
+        ),
+        (
+            "reference/tasks/document-authoring.md",
+            "Reqs/`task_doc`/`context_packet`/`knowledge_read`",
+            "authoring",
+            "",
+        ),
+        (
+            "reference/knowledge/commands.md",
+            "Reqs/`task_doc`/`context_packet`/`knowledge_read`",
+            "cmds",
+            "",
+        ),
+        (
+            "reference/knowledge/use.md",
+            "Reqs/`task_doc`/`context_packet`/`knowledge_read`",
+            "diagnose",
+            "#architect-diagnose-before-proposing-a-repair",
+        ),
+        (
+            "reference/coordination/architect/models-and-settings.md",
+            "Models/sandbox (`role_start`), master, seats (`retire_child`), 3rd",
+            "models",
+            "",
+        ),
+        (
+            "reference/sandbox-actors.md",
+            "Models/sandbox (`role_start`), master, seats (`retire_child`), 3rd",
+            "sandbox",
+            "",
+        ),
+        (
+            "reference/coordination/shared/master-state.md",
+            "Models/sandbox (`role_start`), master, seats (`retire_child`), 3rd",
+            "master",
+            "",
+        ),
+        (
+            "reference/coordination/shared/seat-recovery.md",
+            "Models/sandbox (`role_start`), master, seats (`retire_child`), 3rd",
+            "seats",
+            "",
+        ),
+        (
+            "reference/coordination/shared/third-rejected-round.md",
+            "Models/sandbox (`role_start`), master, seats (`retire_child`), 3rd",
+            "3rd",
+            "",
+        ),
+        (
+            "reference/coordination/architect/process-decisions.md",
+            "Process, claims, dev/child Qs, `role_message`",
+            "process",
+            "",
+        ),
+        (
+            "reference/coordination/architect/claim-verification.md",
+            "Process, claims, dev/child Qs, `role_message`",
+            "claims",
+            "",
+        ),
+        (
+            "reference/coordination/architect/developer-decisions.md",
+            "Process, claims, dev/child Qs, `role_message`",
+            "dev",
+            "",
+        ),
+        (
+            "reference/coordination/shared/child-questions.md",
+            "Process, claims, dev/child Qs, `role_message`",
+            "child",
+            "",
+        ),
+        (
+            "reference/message-handover.md",
+            "Process, claims, dev/child Qs, `role_message`",
+            "msgs",
+            "",
+        ),
+        (
+            "reference/coordination/architect/curator-measurement.md",
+            "Meas., advisory, flat closeout",
+            "meas",
+            "",
+        ),
+        (
+            "reference/review/advisory-reviews.md",
+            "Meas., advisory, flat closeout",
+            "advisory",
+            "",
+        ),
+        (
+            "reference/coordination/shared/closeout-recovery.md",
+            "Meas., advisory, flat closeout",
+            "flat",
+            "#flat-mode-direct-paired-closeout",
+        ),
+    ],
+    "orchestrator": [
+        (
+            "reference/coordination/shared/seat-recovery.md",
+            "Manager brief, stages (`role_start`), hand-off, seats (`retire_child`), master/decisions (`task_doc`), closeout",
+            "seats",
+            "",
+        ),
+        (
+            "reference/coordination/shared/master-state.md",
+            "Manager brief, stages (`role_start`), hand-off, seats (`retire_child`), master/decisions (`task_doc`), closeout",
+            "master",
+            "",
+        ),
+        (
+            "reference/tasks/document-authoring.md",
+            "Manager brief, stages (`role_start`), hand-off, seats (`retire_child`), master/decisions (`task_doc`), closeout",
+            "decisions",
+            "#preserve-decisions-and-approved-intent",
+        ),
+        (
+            "reference/coordination/shared/closeout-recovery.md",
+            "Manager brief, stages (`role_start`), hand-off, seats (`retire_child`), master/decisions (`task_doc`), closeout",
+            "recovery",
+            "#recover-an-unfinished-closeout",
+        ),
+        (
+            "reference/knowledge/commands.md",
+            "`knowledge_read`/`context_packet`, `role_message`, sandbox, child Qs",
+            "cmds",
+            "",
+        ),
+        (
+            "reference/message-handover.md",
+            "`knowledge_read`/`context_packet`, `role_message`, sandbox, child Qs",
+            "msgs",
+            "",
+        ),
+        (
+            "reference/sandbox-actors.md",
+            "`knowledge_read`/`context_packet`, `role_message`, sandbox, child Qs",
+            "sandbox",
+            "",
+        ),
+        (
+            "reference/coordination/shared/child-questions.md",
+            "`knowledge_read`/`context_packet`, `role_message`, sandbox, child Qs",
+            "child",
+            "",
+        ),
+    ],
+    "manager": [
+        (
+            "reference/coordination/shared/seat-recovery.md",
+            "Seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), switch (`worktree_closeout_*`)",
+            "seats",
+            "",
+        ),
+        (
+            "reference/coordination/shared/third-rejected-round.md",
+            "Seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), switch (`worktree_closeout_*`)",
+            "3rd",
+            "",
+        ),
+        (
+            "reference/worker/sync-and-repairs.md",
+            "Seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), switch (`worktree_closeout_*`)",
+            "sync",
+            "#synchronize-the-leaf",
+        ),
+        (
+            "reference/coordination/shared/closeout-recovery.md",
+            "Seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), switch (`worktree_closeout_*`)",
+            "switch",
+            "#orchestrator-recipient-switch-and-closeout-notices",
+        ),
+        (
+            "reference/coordination/shared/master-state.md",
+            "Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child",
+            "master",
+            "",
+        ),
+        (
+            "reference/tasks/document-authoring.md",
+            "Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child",
+            "authoring",
+            "",
+        ),
+        (
+            "reference/refused-write.md",
+            "Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child",
+            "retire",
+            "#apply-the-procedure-to-a-task-document-or-folder",
+        ),
+        (
+            "reference/knowledge/commands.md",
+            "Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child",
+            "cmds",
+            "",
+        ),
+        (
+            "reference/message-handover.md",
+            "Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child",
+            "msgs",
+            "",
+        ),
+        (
+            "reference/sandbox-actors.md",
+            "Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child",
+            "sandbox",
+            "",
+        ),
+        (
+            "reference/coordination/shared/child-questions.md",
+            "Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child",
+            "child",
+            "",
+        ),
+    ],
+    "worker": [
+        ("reference/knowledge/use.md", "Knowledge/CLI", "use", ""),
+        ("reference/knowledge/commands.md", "Knowledge/CLI", "cmds", ""),
+        ("reference/knowledge/serving-build.md", "Knowledge/CLI", "cli", ""),
+        ("reference/tasks/document-authoring.md", "Task/report/list", "task", ""),
+        ("templates/turn-report.md", "Task/report/list", "report", "#shape"),
+        ("reference/writing/visual-explainers.md", "Task/report/list", "explainer", ""),
+        ("reference/message-handover.md", "Msg/sync/repairs", "msg", ""),
+        ("reference/worker/sync-and-repairs.md", "Msg/sync/repairs", "sync", ""),
+        ("reference/sandbox-actors.md", "Sandbox/ask", "sandbox", ""),
+    ],
+    "curator": [
+        ("reference/knowledge/use.md", "Knowledge/CLI", "use", ""),
+        ("reference/knowledge/commands.md", "Knowledge/CLI", "cmds", ""),
+        ("reference/knowledge/serving-build.md", "Knowledge/CLI", "cli", ""),
+        ("reference/curator/intent-reconciliation.md", "Intake/worklist", "reconcile", ""),
+        ("reference/curator/worklist.md", "Intake/worklist", "worklist", ""),
+        ("reference/curator/knowledge-ingest.md", "Write/route", "ingest", ""),
+        ("reference/curator/publication-report.md", "Write/route", "pub", ""),
+        ("reference/curator/family-obligations.md", "Write/route", "families", ""),
+        ("reference/curator/change-routing.md", "Write/route", "route", ""),
+        ("reference/curator/encountered-records.md", "Write/route", "encountered", ""),
+        ("reference/curator/current-prose-and-history.md", "Cards/style", "prose", ""),
+        ("reference/curator/card-sentence-decisions.md", "Cards/style", "sentences", ""),
+        ("reference/curator/card-formats-and-citations.md", "Cards/style", "cards", ""),
+        ("reference/curator/governing-sources.md", "Cards/style", "governing", ""),
+        ("reference/writing/technical-english-profile.md", "Cards/style", "style", ""),
+        ("reference/curator/coherence-judgments.md", "Coherence/msg", "coherence", ""),
+        ("reference/curator/memory-handover.md", "Coherence/msg", "handover", ""),
+        ("reference/message-handover.md", "Coherence/msg", "msg", ""),
+        ("reference/curator/exceptions-and-recovery.md", "Exceptions/sync", "exceptions", ""),
+        ("reference/curator/repository-foundation.md", "Exceptions/sync", "foundation", ""),
+        (
+            "reference/worker/sync-and-repairs.md",
+            "Exceptions/sync",
+            "sync",
+            "#synchronize-the-leaf",
+        ),
+        ("reference/sandbox-actors.md", "Exceptions/sync", "sandbox", ""),
+    ],
+    "reviewer": [
+        ("reference/review/non-leaf-seams-and-catalogs.md", "Non-leaf/rounds", "non-leaf", ""),
+        ("reference/review/rounds-and-late-findings.md", "Non-leaf/rounds", "rounds", ""),
+        ("reference/review-baseline.md", "Baseline/knowledge", "baseline", ""),
+        ("reference/knowledge/use.md", "Baseline/knowledge", "use", ""),
+        ("reference/knowledge/commands.md", "Baseline/knowledge", "cmds", ""),
+        ("reference/message-handover.md", "Templates & msg", "msg", ""),
+        ("reference/sandbox-actors.md", "Sandbox/ask", "sandbox", ""),
+    ],
+    "investigator": [
+        ("reference/knowledge/commands.md", "Knowledge readers", "cmds", ""),
+        (
+            "reference/knowledge/use.md",
+            "Knowledge readers",
+            "claims",
+            "#investigator-distinguish-claims-observations-and-hypotheses",
+        ),
+        ("reference/instruction-shortfall-review.md", "Research/shortfalls/msg", "shortfalls", ""),
+        ("reference/sandbox-actors.md", "Research/shortfalls/msg", "sandbox", ""),
+        (
+            "reference/message-handover.md",
+            "Research/shortfalls/msg",
+            "msgs",
+            "#send-a-message-that-names-the-files",
+        ),
+    ],
+    "bootstrap": [
+        (
+            "reference/bootstrap/foundation-state.md",
+            "Report, `memory_init`, cmds",
+            "foundation",
+            "#read-the-state",
+        ),
+        ("reference/knowledge/commands.md", "Report, `memory_init`, cmds", "cmds", ""),
+        ("reference/sandbox-actors.md", "Settings, sandbox", "sandbox", ""),
+    ],
+}
+
+# Operation-level prose detail pointers: (role, operation) -> [(source, action_prefix)].
+OPERATION_PROSE_POINTERS: dict[tuple[str, str], list[tuple[str, str]]] = {
+    ("bootstrap", "bootstrap"): [
+        (
+            "reference/bootstrap/failure-states.md",
+            "When hitting unfamiliar states "
+            "(`memory_init`/`memory_baseline_status`/`user_settings_init`/"
+            "`server_info`/`context_packet`/`runtime_install`), read",
+        ),
+    ],
+    ("architect", "review"): [
+        (
+            "reference/review/advisory-reviews.md",
+            "Before commissioning/routing advisory reviews via `role_start`, read",
+        ),
+    ],
+}
+
+# Distinct-action exceptions explicitly admitted in pointer-actions.json where both a role
+# Reference index and an operation prose step point to the same detail file for distinct acts.
+ADMITTED_ROLE_AND_OPERATION_DETAILS: dict[tuple[str, str], frozenset[str]] = {
+    ("architect", "review"): frozenset({"reference/review/advisory-reviews.md"}),
 }
 
 
@@ -151,29 +481,20 @@ def test_pointer_wording_renewal_preserves_admission_policy(tmp_path: Path) -> N
     assert_pointer_changes_do_not_learn_admissions(tmp_path)
 
 
-OPERATION_DETAILS = {
-    "bootstrap/bootstrap": [
-        "reference/bootstrap/failure-states.md",
-    ],
-}
+def _assert_moved_action_pointer(text: str, pointer: str) -> None:
+    assert text.count(pointer) == 1, pointer
 
 
 def _assert_coordination_start_owner(
     result: CapsuleCompilationResult, role: str, report_path: Path
 ) -> None:
     """Direct start pointers retain the complete stage and first-intake owner."""
-    # The text that leads into each role's one first-intake link (round 6: the Architect's and
-    # the Orchestrator's start pointers each name it inside their single start sentence).
     action, label = {
-        "manager": ("Before starting and coordinating the leaf, read", "leaf-stage coordination"),
-        "architect": (
-            "for the permitted starters of `role_start` and",
-            "Start leaf stages and deliver the first intake",
+        "manager": (
+            "Check packet deps before starting/integrating (the product does not perform that check); follow",
+            "leaf stages",
         ),
-        "orchestrator": (
-            "for the selection and start rules of `role_start` on `agents-remember-task`,",
-            "the first intake",
-        ),
+        "orchestrator": ("[Manager](../templates/manager-brief.md),", "stages"),
     }[role]
     pointer = action + (
         f" [{label}](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake)"
@@ -187,51 +508,45 @@ def _assert_coordination_start_owner(
         capsule_delivery_from(result), str(report_path), {}
     )
     assert record["baselineDigest"] == result.capsule.semantic_digest
+    if role == "orchestrator":
+        matches = re.findall(r"\[Manager\]\([^)\n]+templates/manager-brief\.md\),", instructions)
+        assert len(matches) == 1
+        emitted_action = matches[0]
+    else:
+        emitted_action = action
     owner = _linked_instruction_source(
         instructions,
-        action,
+        emitted_action,
         "operations/coordination.md",
         "start-leaf-stages-and-deliver-the-first-intake",
         "Start leaf stages and deliver the first intake",
     )
     for clause in (
-        "The Manager calls `role_start` on `agents-remember-task` once per stage: Worker first, "
-        "Reviewer at the freeze, and Curator when curation begins. Start only the Worker at build. "
-        "The Worker's freeze notice and the Reviewer's code-`PASS` notice go to the Manager first.",
-        "Complete this start and first-intake procedure before the seat's first inspection.",
-        "After the individual `role_start` on `agents-remember-task`, send the leaf Reviewer's "
-        "complete first intake as your first "
-        "`role_message` to its returned agent identifier. Use the assigned review mode and review "
-        "purpose and resolved `system/tools.md`. The requirement set includes "
-        "identifiers, versions, packets and the durable [approval record]"
-        "(../core/every-role.md#requirements-and-limits). The Reviewer inspects nothing before "
-        "its intake.",
+        "The Manager calls `role_start` once per stage: Worker first, Reviewer at the freeze, "
+        "and Curator when curation begins. Start only the Worker at build. The Worker's freeze "
+        "notice and the Reviewer's code-`PASS` notice go to the Manager first.",
+        "Send intake before inspection (mode, task/purpose, seam, req set, tools; "
+        "candidate/attempts at freeze/exit).",
+        "After `role_start`, send Reviewer's intake via `role_message` (mode, purpose, "
+        "`system/tools.md`, req IDs/versions/packets, approval record); it inspects nothing earlier.",
     ):
         assert clause in owner
         with pytest.raises(AssertionError):
             assert clause in owner.replace(clause, "", 1)
     for mutant in (
-        instructions.replace(action, "", 1),
-        instructions + "\n" + next(line for line in instructions.splitlines() if action in line),
+        instructions.replace(emitted_action, "", 1),
+        instructions
+        + "\n"
+        + next(line for line in instructions.splitlines() if emitted_action in line),
     ):
         with pytest.raises(AssertionError):
             _linked_instruction_source(
                 mutant,
-                action,
+                emitted_action,
                 "operations/coordination.md",
                 "start-leaf-stages-and-deliver-the-first-intake",
                 "Start leaf stages and deliver the first intake",
             )
-
-
-def _assert_named_detail_action(text: str, role: str, source: str, action: str) -> None:
-    assert_action_pointer(text, source, action)
-    fragment, _suffix = ROLE_POINTER_QUALIFICATIONS.get((role, source, action), ("", ""))
-    if fragment:
-        marker = "{{detail:" + source + "}}" + fragment + ")"
-        paragraphs = [part for part in text.split("\n\n") if action in part and marker in part]
-        assert len(paragraphs) == 1, (role, source, action, fragment)
-        assert paragraphs[0].count(marker) == 1
 
 
 def _detail_pointer_sentences(rendered: str, source: str) -> int:
@@ -244,11 +559,26 @@ def _detail_pointer_sentences(rendered: str, source: str) -> int:
 
 
 def _assert_lists_disjoint(
-    role_list: list[tuple[str, str]], operation_list: list[tuple[str, str]]
+    role_list: list[tuple[str, str]],
+    operation_list: list[tuple[str, str]],
+    allowed: frozenset[str] = frozenset(),
 ) -> None:
-    """P5-18: a detail pointed to from the role file is not pointed to again by the operation."""
-    shared = {source for source, _ in role_list} & {source for source, _ in operation_list}
+    """A detail pointed to from the role file is not pointed to again by the operation."""
+    shared = (
+        {source for source, _ in role_list} & {source for source, _ in operation_list}
+    ) - allowed
     assert not shared, sorted(shared)
+
+
+def _assert_curator_message_detail_local(role_block: str, step: str, content: str) -> None:
+    assert step.strip()
+    _assert_index_detail_pointer(
+        role_block, "reference/message-handover.md", "Coherence/msg", "msg", ""
+    )
+    assert "curator-message-details.md" not in role_block
+    for clause in CURATOR_MESSAGE_CONTENT:
+        assert content.count(clause) == 1, clause
+        assert clause not in role_block, clause
 
 
 def _first_message_units(role: str, operation: str) -> list[tuple[str, str]]:
@@ -262,16 +592,17 @@ def _first_message_units(role: str, operation: str) -> list[tuple[str, str]]:
 
 
 MH_SECTION = "../reference/message-handover.md#send-a-message-that-names-the-files"
-#: (role, operation, source, sentence): duplicates removed in rounds 4 to 6, re-added. They
-#: cover a whole-file link plus a section link (C3-C5), sentences without a Before/When/For
-#: opener (C7-C9), two sections reached for one action (R2) and the pairs named in round 5.
+#: (role, operation, source, sentence): duplicates re-added to current first messages. They
+#: cover whole-file plus section links, table-row plus prose links, non-Before/When/For openers,
+#: and cross-file repeats.
 RESTORED_DUPLICATES = (
     (
         "architect",
         "planning",
         "operations/planning.md",
-        "Before releasing a new or revised packet, follow the [Cross-packet alignment sweep]"
-        "(#cross-packet-alignment-sweep), including its amendment-approval rule.",
+        "Before authoring a requirement, read [requirement design]"
+        "(../reference/coordination/shared/requirement-design.md"
+        "#plan-a-topic-merge-or-propose-a-split) for merges and splits.",
     ),
     (
         "curator",
@@ -300,37 +631,9 @@ RESTORED_DUPLICATES = (
     (
         "curator",
         "curation",
-        "roles/curator.md",
-        "Reject structurally blocked intake under [required curation inputs]"
-        "(../operations/curation.md#required-inputs).",
-    ),
-    (
-        "curator",
-        "curation",
-        "operations/curation.md",
-        "Repair stale assigned or encountered memory under [Repair and finish the stage]"
-        "(../roles/curator.md#repair-and-finish-the-stage), including pre-existing staleness.",
-    ),
-    (
-        "curator",
-        "curation",
-        "operations/curation.md",
-        "Apply the bounded encountered-memory repair in [Repair and finish the stage]"
-        "(../roles/curator.md#repair-and-finish-the-stage).",
-    ),
-    (
-        "curator",
-        "curation",
         "operations/curation.md",
         "Before routing a notes item, read [change routing](../reference/curator/"
         "change-routing.md) for its home.",
-    ),
-    (
-        "reviewer",
-        "review",
-        "operations/review.md",
-        "Before acting on a relayed answer, read [Recognize a relayed developer answer]"
-        "(orientation.md#recognize-a-relayed-developer-answer) for its source.",
     ),
     (
         "bootstrap",
@@ -368,36 +671,6 @@ RESTORED_DUPLICATES = (
         f"files]({MH_SECTION}) for its payload and file rules.",
     ),
     (
-        "reviewer",
-        "review",
-        "roles/reviewer.md",
-        "The two sanctioned routes for adding findings after sealing are defined in [review "
-        "boundaries](../operations/review.md#boundaries).",
-    ),
-    (
-        "reviewer",
-        "review",
-        "operations/review.md",
-        "Beyond the limit, the Manager follows [the extra-round approval procedure]"
-        "(../roles/manager.md#make-decisions-within-your-authority). The Manager retains gate "
-        "acceptance; extra-round approval follows [the Manager's procedure]"
-        "(../roles/manager.md#make-decisions-within-your-authority).",
-    ),
-    (
-        "manager",
-        "orientation",
-        "operations/orientation.md",
-        "Before resuming after compaction or reconnect, read [Restore the saved assignment]"
-        "(recovery.md#restore-the-saved-assignment) for exact references.",
-    ),
-    (
-        "worker",
-        "implementation",
-        "operations/implementation.md",
-        "The freeze report carries one entry per repaired finding, as [Write the report]"
-        "(#write-the-report) requires.",
-    ),
-    (
         "architect",
         "planning",
         "operations/planning.md",
@@ -412,7 +685,6 @@ RESTORED_DUPLICATES = (
         "(../reference/curator/memory-handover.md#identify-the-reviewed-trees) for the "
         "Reviewer's comparison.",
     ),
-    # Another role's listed wording re-added in this role (round-6 orchestrator.md:24).
     (
         "orchestrator",
         "coordination",
@@ -421,21 +693,25 @@ RESTORED_DUPLICATES = (
         "deliver the first intake](../operations/coordination.md#start-leaf-stages-and-deliver-"
         "the-first-intake) for stage timing and intake fields.",
     ),
-    # A second action inside another action's sentence (round-6 reviewer.md:75).
+    (
+        "worker",
+        "implementation",
+        "roles/worker.md",
+        "Before asking a developer question, read [Ask for a developer decision]"
+        "(../operations/orientation.md#ask-for-a-developer-decision) for the route.",
+    ),
     (
         "reviewer",
         "review",
         "roles/reviewer.md",
-        "Write and record the verdict, then follow [the leaf verdict handover]"
-        "(../operations/review.md#receive-the-intake-and-hand-over-the-leaf-verdict) for the "
-        "code-PASS notice, and [review boundaries](../operations/review.md#boundaries) for the "
-        "separate memory lane.",
+        "Inspect non-leaf criteria under [non-leaf seams]"
+        "(../reference/review/non-leaf-seams-and-catalogs.md).",
     ),
 )
 
 
 def test_every_native_first_message_has_one_pointer_per_action() -> None:
-    """P5-18: one pointer per action per first message, keyed by target file, every link."""
+    """One pointer per action per first message, keyed by target file, every link."""
     assert_pointer_wording_is_current()
     manifest = _shipped_parsed()
     checked = set()
@@ -455,7 +731,7 @@ def test_every_native_first_message_has_one_pointer_per_action() -> None:
             ],
             [("reference/curator/change-routing.md", "Before routing a notes item, read")],
         )
-    # Each removed duplicate, re-added to its first message, fails.
+    # Each restored duplicate, re-added to its first message, fails.
     for role, operation, source, added in RESTORED_DUPLICATES:
         units = _first_message_units(role, operation)
         assert any(unit_source == source for unit_source, _ in units), (role, operation, source)
@@ -463,27 +739,33 @@ def test_every_native_first_message_has_one_pointer_per_action() -> None:
         assert duplicate_pointers(mutant), (role, operation, added)
     # A second link into one file inside another action's sentence, in place, fails.
     units = _first_message_units("reviewer", "review")
-    kept = "Curator start; the memory lane stays separate."
+    kept = "[code-seam](../criteria/code-seam.md),"
     restored = (
-        "Curator start, and [review boundaries](../operations/review.md#boundaries) for the "
-        "separate memory lane."
+        "[code-seam](../criteria/code-seam.md) and [code-seam again](../criteria/code-seam.md#top),"
     )
     assert sum(text.count(kept) for _, text in units) == 1
     mutant = [(s, t.replace(kept, restored)) for s, t in units]
     assert any("one sentence links it twice" in p for p in duplicate_pointers(mutant))
-    # Two wordings of one role-level action in one message fail even when both are listed.
+    # An unlisted second wording of a detail pointer fails, and a listed wording from
+    # another source fails with a foreign-source diagnosis.
     units = _first_message_units("worker", "implementation")
-    added = (
+    unlisted = (
         "Before sending a message, read [message handovers and receipts]"
         "({{detail:reference/message-handover.md}}) for the payload fields."
     )
-    mutant = [(s, t + "\n\n" + added if s == "roles/worker.md" else t) for s, t in units]
-    assert any("two wordings" in problem for problem in duplicate_pointers(mutant))
+    mutant = [(s, t + "\n\n" + unlisted if s == "roles/worker.md" else t) for s, t in units]
+    assert any("unlisted repeat" in problem for problem in duplicate_pointers(mutant))
+    foreign = (
+        "On full-store refusal: "
+        "[full-store]({{detail:reference/message-handover.md}}#handle-a-full-store-refusal)."
+    )
+    mutant = [(s, t + "\n\n" + foreign if s == "roles/worker.md" else t) for s, t in units]
+    assert any(
+        "listed action from another source" in problem for problem in duplicate_pointers(mutant)
+    )
 
 
-FULL_STORE_POINTER = (
-    "Before responding to a full-store refusal, read [Handle a full-store refusal]("
-)
+FULL_STORE_POINTER = "On full-store refusal: [full-store](../reference/message-handover.md#handle-a-full-store-refusal)."
 
 
 def test_every_required_detail_has_one_pointer_in_all_real_compiles(tmp_path: Path):
@@ -499,28 +781,37 @@ def test_every_required_detail_has_one_pointer_in_all_real_compiles(tmp_path: Pa
             )
             assert {item.source_path for item in details} == expected, (role, operation)
             assert set(re.findall(r"\{\{detail:([^}]+)\}\}", rendered)) == expected
+            role_entries = ROLE_INDEX_POINTERS[role]
+            op_entries = OPERATION_PROSE_POINTERS.get((role, operation), [])
             _assert_lists_disjoint(
-                ROLE_POINTER_ACTIONS[role], OPERATION_POINTER_ACTIONS[operation][role]
+                [(source, trigger) for source, trigger, _label, _frag in role_entries],
+                op_entries,
+                ADMITTED_ROLE_AND_OPERATION_DETAILS.get((role, operation), frozenset()),
             )
-            actions = [*ROLE_POINTER_ACTIONS[role], *OPERATION_POINTER_ACTIONS[operation][role]]
             for detail in details:
                 assert detail.content and detail.step.strip()
-                required = [action for source, action in actions if source == detail.source_path]
-                assert required
-                assert _detail_pointer_sentences(rendered, detail.source_path) == len(required)
-                for action in required:
-                    _assert_named_detail_action(rendered, role, detail.source_path, action)
-                    fragment, _suffix = ROLE_POINTER_QUALIFICATIONS.get(
-                        (role, detail.source_path, action), ("", "")
-                    )
+                role_matches = [item for item in role_entries if item[0] == detail.source_path]
+                op_matches = [item for item in op_entries if item[0] == detail.source_path]
+                assert role_matches or op_matches
+                assert _detail_pointer_sentences(rendered, detail.source_path) == (
+                    len(role_matches) + len(op_matches)
+                )
+                for source, trigger, label, fragment in role_matches:
+                    _assert_index_detail_pointer(rendered, source, trigger, label, fragment)
                     if fragment:
-                        marker = "{{detail:" + detail.source_path + "}}" + fragment + ")"
+                        marker = "{{detail:" + source + "}}" + fragment + ")"
                         mutant = rendered.replace(
                             marker, marker.replace(fragment, "#wrong-section"), 1
                         )
                         assert mutant != rendered
                         with pytest.raises(AssertionError):
-                            _assert_named_detail_action(mutant, role, detail.source_path, action)
+                            _assert_index_detail_pointer(mutant, source, trigger, label, fragment)
+                for source, action in op_matches:
+                    assert_action_pointer(rendered, source, action)
+                    mutant = rendered.replace(action, "Read during intake", 1)
+                    assert mutant != rendered
+                    with pytest.raises(AssertionError):
+                        assert_action_pointer(mutant, source, action)
             role_block = next(
                 unit.block.content
                 for unit in result.capsule.instruction_units
@@ -529,24 +820,25 @@ def test_every_required_detail_has_one_pointer_in_all_real_compiles(tmp_path: Pa
             assert ("{{detail:reference/message-handover.md}}" in role_block) == (
                 role != "bootstrap"
             )
-            # P5-18 (Architect look 2): one full-store pointer per first message, from the
-            # operation; role files carry none. Bootstrap has no message handover.
-            assert rendered.count(FULL_STORE_POINTER) == (role != "bootstrap"), (role, operation)
-            assert "full-store refusal, read" not in role_block, role
+            # Recovery carries the one full-store refusal pointer for non-bootstrap roles;
+            # role files carry none.
+            assert rendered.count(FULL_STORE_POINTER) == (
+                operation == "recovery" and role != "bootstrap"
+            ), (role, operation)
+            assert "handle-a-full-store-refusal" not in role_block, role
             if role == "curator":
                 message = next(
                     detail
                     for detail in details
                     if detail.source_path == "reference/message-handover.md"
                 )
-                _assert_curator_message_detail(
+                _assert_curator_message_detail_local(
                     role_block,
-                    "{{detail:reference/message-handover.md}}",
                     message.step,
                     message.content.decode(),
                 )
                 assert "reference/curator-message-details.md" not in expected
-            if role in {"architect", "orchestrator", "manager"}:
+            if role in {"orchestrator", "manager"}:
                 _assert_coordination_start_owner(result, role, tmp_path / f"{role}-{operation}.md")
             checked.add((role, operation))
     assert checked == {
@@ -564,618 +856,3 @@ def test_every_required_detail_has_one_pointer_in_all_real_compiles(tmp_path: Pa
         "investigator",
         "bootstrap",
     }
-
-
-MOVED_ACTION_POINTERS = {
-    "curator": (
-        "reference/knowledge/use.md",
-        (
-            "Call `knowledge_read` on `agents-remember-task` for the records you check; read",
-            "Before interpreting a knowledge read, read",
-        ),
-    ),
-    "manager": (
-        "reference/tasks/document-authoring.md",
-        (
-            "Before editing, skipping or previewing task-document fields, or using `task_doc "
-            "append_decision`, read",
-        ),
-    ),
-    "orchestrator": (
-        "reference/tasks/document-authoring.md",
-        ("Before using `task_doc append_decision`, read",),
-    ),
-    "worker": (
-        "reference/tasks/document-authoring.md",
-        ("Before editing, skipping or previewing task-document fields, read",),
-    ),
-}
-SETTINGS_AUTHORITY_POINTER = "Before relying on storage or path eligibility, cross-repository allowances, or serving-build metadata, read [settings authority](skill://agents-remember/skills/l-01-agent-lifecycles/reference/knowledge/use.md#read-the-source-that-owns-a-setting) for `server_info` and the other sources that govern those facts."
-
-
-def _assert_moved_action_pointer(text: str, pointer: str) -> None:
-    assert text.count(pointer) == 1, pointer
-
-
-def test_moved_piece_pointers_reach_each_required_compile_and_reject_removal() -> None:
-    manifest = _shipped_parsed()
-    root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
-    shared = (root / "core/every-role.md").read_text()
-    checked = set()
-    for role, metadata in manifest.roles.items():
-        for operation in metadata.operations:
-            outcome = _compiled_outcome(role, operation)
-            assert outcome.result is not None
-            result = outcome.result
-            assert outcome.shared_block is not None
-            expected_shared = filter_shared_block(shared, role)
-            assert outcome.shared_block == expected_shared
-            assert shared_block(outcome.shared_block).count(expected_shared) == 1
-            rendered = result.render_instructions()
-            source = next(
-                record for record in result.manifest.sources if record.path == "core/every-role.md"
-            )
-            assert source.revision == "sha256:" + sha256(shared.encode()).hexdigest()
-            # The shared body is delivered separately, not injected into render_instructions.
-            _assert_moved_action_pointer(outcome.shared_block, SETTINGS_AUTHORITY_POINTER)
-            with pytest.raises(AssertionError):
-                _assert_moved_action_pointer(
-                    outcome.shared_block.replace(SETTINGS_AUTHORITY_POINTER, "", 1),
-                    SETTINGS_AUTHORITY_POINTER,
-                )
-            if role in MOVED_ACTION_POINTERS:
-                target, actions = MOVED_ACTION_POINTERS[role]
-                for action in actions:
-                    assert_action_pointer(rendered, target, action)
-                    pointer = next(line for line in rendered.splitlines() if action in line)
-                    if role == "manager":
-                        detail = next(
-                            item
-                            for item in result.capsule.detail_references
-                            if item.source_path == "reference/tasks/document-authoring.md"
-                        )
-                        assert detail.content == (root / detail.source_path).read_bytes()
-                        assert "codeExamplesNote" in detail.content.decode()
-                    with pytest.raises(AssertionError):
-                        assert_action_pointer(rendered.replace(pointer, "", 1), target, action)
-                    with pytest.raises(AssertionError):
-                        assert_action_pointer(rendered + "\n" + pointer, target, action)
-            checked.add((role, operation))
-    assert checked == {
-        (role, operation)
-        for operation, entry in manifest.operations.items()
-        for role in entry.applies_to_roles
-    }
-    assert {role for role, _ in checked} == {
-        "architect",
-        "orchestrator",
-        "manager",
-        "worker",
-        "curator",
-        "reviewer",
-        "investigator",
-        "bootstrap",
-    }
-
-
-LEAF_EVIDENCE_POINTER = (
-    "Before creating a leaf through `task_doc`, read [retained-evidence lifecycle]"
-    "(../../core/acceptance.md#record-how-retained-evidence-will-be-maintained) for the "
-    "contract or expiry information its handoff must record for each new or retained "
-    "fixture, recording, generator, shared support file or migration proof."
-)
-LEAF_AUTHORING_POINTERS = {
-    "architect": "Before authoring a task document or requirement packet, read"
-}
-
-
-@pytest.mark.parametrize("role", ["architect"])
-def test_leaf_creation_reaches_retained_evidence_lifecycle_and_rejects_removal(role: str) -> None:
-    root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
-    authoring = (root / "reference/tasks/document-authoring.md").read_bytes()
-    acceptance = (root / "core/acceptance.md").read_text()
-    section = acceptance.split("## Record how retained evidence will be maintained\n", 1)[1]
-    for clause in (
-        "For each new or retained fixture, recording, generator, shared support file or "
-        "migration proof, the handoff records one of these sets:",
-        "1. Registered stable contract identity, real owner, executable evidence node "
-        "and exact consumers.",
-        "2. Expiry date, executable replacement or removal event, owner and compatibility "
-        "consequence.",
-        "Missing or contradictory catalog metadata requires implementation work.",
-        "A satisfied requirement cannot waive missing lifecycle metadata for durable evidence.",
-    ):
-        assert clause in section
-    checked = set()
-    for operation in _shipped_parsed().roles[role].operations:
-        result = _compiled(role, operation)
-        rendered = result.render_instructions()
-        action = LEAF_AUTHORING_POINTERS[role]
-        assert_action_pointer(rendered, "reference/tasks/document-authoring.md", action)
-        pointer = next(line for line in rendered.splitlines() if action in line)
-        detail = next(
-            item
-            for item in result.capsule.detail_references
-            if item.source_path == "reference/tasks/document-authoring.md"
-        )
-        assert detail.content == authoring
-        assert detail.revision == "sha256:" + sha256(authoring).hexdigest()
-        assert detail.step.strip()
-        delivered = detail.content.decode()
-        _assert_moved_action_pointer(delivered, LEAF_EVIDENCE_POINTER)
-        for mutant in (rendered.replace(pointer, "", 1), rendered + "\n" + pointer):
-            assert mutant != rendered
-            with pytest.raises(AssertionError):
-                assert_action_pointer(mutant, "reference/tasks/document-authoring.md", action)
-        for text, required in ((delivered, LEAF_EVIDENCE_POINTER),):
-            with pytest.raises(AssertionError):
-                _assert_moved_action_pointer(text.replace(required, "", 1), required)
-            with pytest.raises(AssertionError):
-                _assert_moved_action_pointer(text + "\n" + required, required)
-        checked.add(operation)
-    assert checked == set(_shipped_parsed().roles[role].operations)
-
-
-ARCHITECT_ACTION_READS = (
-    (
-        "r29-architect",
-        "Before diagnosing, call `knowledge_read` on `agents-remember-task` for the files involved; read",
-        "knowledge/use",
-    ),
-    ("0:0", "Take closeout trees by filename", "core/every-role"),
-    (
-        "20:2",
-        "Before recovering idle, unfinished, stopped or unavailable-provider work, read",
-        "coordination/shared/seat-recovery",
-    ),
-    (
-        "21:0",
-        "Before updating the master after a start, handover or landing, read",
-        "coordination/shared/master-state",
-    ),
-    (
-        "40:3",
-        "Before recovering idle, unfinished, stopped or unavailable-provider work, read",
-        "coordination/shared/seat-recovery",
-    ),
-    ("10:0", "If your harness offers helpers (sub-agents)", "core/every-role"),
-    (
-        "43:2",
-        "Before selecting a seat model and its authorized settings, read",
-        "coordination/architect/models-and-settings",
-    ),
-    (
-        "51:0",
-        "Before selecting a seat model and its authorized settings, read",
-        "coordination/architect/models-and-settings",
-    ),
-    ("40:0", "Identify stalls from task progress.", "roles/architect"),
-)
-
-
-ARCHITECT_ACTION_CLAUSES = {
-    "r29-architect": "When diagnosing a failure before proposing a repair task, use attributed invariants, "
-    "families, sibling code and proofs alongside code reads to form and check the cause. Carry "
-    "the evidence and remaining gaps into the packet and Prepared context.",
-    "0:0": "Take closeout trees by filename from the highest-numbered memory PASS and landing-check verdict, "
-    "never from a message.",
-    "20:2": "When every agent of a leaf is idle, read each agent's last lines. If a turn ended silently while "
-    "helpers or a process it started still run, tell that seat to collect its results and finish. A valid "
-    "declared helper or background wait (`WAITING FOR SUBAGENTS:` or `WAITING FOR BACKGROUND:`) remains a "
-    "wait until its next undeclared end.",
-    "21:0": "In the same turn as each start, role handover and landing, update the master document's parts "
-    "changed by that act: its status note, counts, order state and **In work now** section. Include the "
-    "task, stage, agents and time since that state began. Leave product-mirrored stage fields with "
-    "their existing owner; do not write a contradictory second status.",
-    "40:3": "Check report senders\u2019 turns. Send continuations immediately for ended turns with unfinished authorized work and no valid wait or stop. A Manager\u2019s end line naming the working child and awaited stage declares a named wait.",
-    "10:0": "If your harness offers helpers (sub-agents), they run on your own seat's model unless the developer names another.",
-    "40:0": "Identify stalls from task progress. These include fifteen minutes without an active turn, or a "
-    "ready task left unstarted.",
-    "43:2": "When a model the developer names is missing from a list, look it up online and check the harness's "
-    "and host's versions before you ask him about another.",
-    "51:0": "The developer may name role sets: complete role settings for different situations, for example one "
-    "for when a provider is available and a cheaper one for when it is not. The Architect may switch between "
-    "the sets he has named on its own, for example when a provider is out, and keeps the earlier "
-    "settings bytes. Any other change to his settings needs his word for that case.",
-}
-
-
-def _assert_architect_action_read(text: str, action: str, detail: str) -> None:
-    marker = "{{detail:reference/" + detail + ".md}}"
-    matching = [line for line in text.splitlines() if action in line]
-    assert len(matching) == 1, "missing or duplicate action cue"
-    assert marker in matching[0], "action cue lost its delivered detail"
-    assert "read [" in matching[0], "action cue lost its read instruction"
-
-
-@pytest.mark.parametrize(("scenario_id", "action", "detail"), ARCHITECT_ACTION_READS)
-def test_architect_named_action_reads_and_pointer_removal(scenario_id, action, detail) -> None:
-    for operation in _shipped_parsed().roles["architect"].operations:
-        result = _compiled("architect", operation)
-        text = result.render_instructions()
-        if scenario_id in {"0:0", "10:0"}:
-            outcome = _compiled_outcome("architect", operation)
-            assert outcome.result is not None
-            assert outcome.shared_block is not None
-            clause = ARCHITECT_ACTION_CLAUSES[scenario_id]
-            _assert_moved_action_pointer(outcome.shared_block, clause)
-            for mutant in (
-                outcome.shared_block.replace(clause, "", 1),
-                outcome.shared_block + "\n" + clause,
-            ):
-                with pytest.raises(AssertionError):
-                    _assert_moved_action_pointer(mutant, clause)
-            if scenario_id == "0:0":
-                assert "Before selecting closeout trees, read" not in text
-            continue
-        if scenario_id == "40:3":
-            outcome = _compiled_outcome("architect", operation)
-            assert outcome.result is not None
-            assert outcome.shared_block is not None
-            _assert_architect_action_read(text, action, detail)
-            clause = ARCHITECT_ACTION_CLAUSES[scenario_id]
-            _assert_moved_action_pointer(outcome.shared_block, clause)
-            for mutant in (
-                outcome.shared_block.replace(clause, "", 1),
-                outcome.shared_block + "\n" + clause,
-            ):
-                with pytest.raises(AssertionError):
-                    _assert_moved_action_pointer(mutant, clause)
-            continue
-        if scenario_id == "40:0":
-            role_body = next(
-                unit.block.content
-                for unit in result.capsule.instruction_units
-                if unit.block.source_path == "roles/architect.md"
-            )
-            clause = ARCHITECT_ACTION_CLAUSES[scenario_id]
-            _assert_moved_action_pointer(role_body, clause)
-            for mutant in (role_body.replace(clause, "", 1), role_body + "\n" + clause):
-                with pytest.raises(AssertionError):
-                    _assert_moved_action_pointer(mutant, clause)
-            continue
-        _assert_architect_action_read(text, action, detail)
-        delivered = next(
-            item
-            for item in result.capsule.detail_references
-            if item.source_path == "reference/" + detail + ".md"
-        )
-        assert delivered.content, scenario_id
-        clause = ARCHITECT_ACTION_CLAUSES[scenario_id]
-        content = delivered.content.decode()
-        assert clause in content
-        mutant = content.replace(clause, "", 1)
-        assert mutant != content
-        with pytest.raises(AssertionError):
-            assert clause in mutant
-        marker = "{{detail:reference/" + detail + ".md}}"
-        (action_line,) = (line for line in text.splitlines() if action in line)
-        without_target = text.replace(action_line, action_line.replace(marker, "", 1), 1)
-        assert without_target != text
-        for mutant in (text.replace(action, "", 1), without_target):
-            with pytest.raises(AssertionError):
-                _assert_architect_action_read(mutant, action, detail)
-
-
-@pytest.mark.parametrize(
-    ("trigger", "heading"),
-    [
-        (
-            "Before a new task starts, write its task document with one major step per role: build, review, curation, knowledge check and landing.",
-            "Give each role a major step in new tasks",
-        ),
-        (
-            "An existing task gains a step only when the developer slots new scope into it.",
-            "Preserve existing task structure",
-        ),
-    ],
-)
-def test_architect_task_layout_reaches_its_existing_section(trigger, heading) -> None:
-    source = "reference/coordination/shared/requirement-design.md"
-    action = "Before authoring or amending a requirement and its task structure, read"
-    for operation in _shipped_parsed().roles["architect"].operations:
-        result = _compiled("architect", operation)
-        text = result.render_instructions()
-        assert_action_pointer(text, source, action)
-        delivered = next(
-            item for item in result.capsule.detail_references if item.source_path == source
-        )
-        content = delivered.content.decode()
-        assert "## " + heading + "\n" in content
-        assert trigger in content
-        for mutant in (
-            text.replace(action, "", 1),
-            text.replace("{{detail:" + source + "}}", "", 1),
-        ):
-            assert mutant != text
-            with pytest.raises(AssertionError):
-                assert_action_pointer(mutant, source, action)
-        mutant = content.replace(trigger, "", 1)
-        assert mutant != content
-        with pytest.raises(AssertionError):
-            assert trigger in mutant
-
-
-def _assert_shared_retirement_boundary(paragraph: str) -> None:
-    for clause in (
-        "including an admitted task retirement or folder movement",
-        "same tool and input class before applying a stop",
-        "Read, check, validation and sync refusals, starts, other product guards "
-        "and commit gates retain their stops.",
-    ):
-        assert clause in paragraph
-
-
-def _assert_retirement_permission_stop(result: CapsuleCompilationResult, report_path: Path) -> None:
-    """The emitted refusal procedure reaches the complete permission-stop owner."""
-    _instructions, detail = _emitted_instruction_detail(
-        result, "reference/refused-write.md", report_path
-    )
-    for clause in (
-        "An admitted `task_doc` retirement or folder movement is included.",
-        "A missing tool or unadmitted capability is not a refused correct write.",
-        "never a Git commit or another transaction step",
-    ):
-        assert clause in detail
-    action = "Before acting on a denied or unanswered harness request, read"
-    owner = _linked_instruction_source(
-        detail,
-        action,
-        "operations/orientation.md",
-        "honor-harness-permission-decisions",
-        "Honor harness permission decisions",
-    )
-    for mutant in (
-        detail.replace(action, "", 1),
-        detail + "\n" + next(line for line in detail.splitlines() if action in line),
-        detail.replace("#honor-harness-permission-decisions", "#formal-permissions", 1),
-    ):
-        with pytest.raises(AssertionError):
-            _linked_instruction_source(
-                mutant,
-                action,
-                "operations/orientation.md",
-                "honor-harness-permission-decisions",
-                "Honor harness permission decisions",
-            )
-    _assert_permission_owner_section(owner)
-
-
-def _assert_served_retirement_permission_stop(paragraph: str) -> None:
-    """Without a capsule detail, the shared skill:// link serves the same complete owner."""
-    uri = "skill://agents-remember/skills/l-01-agent-lifecycles/reference/refused-write.md"
-    assert paragraph.count("](" + uri + ")") == 1, "shared paragraph must link the served file"
-    action = "Before acting on a denied or unanswered harness request, read"
-    with shipped_composition_corpus() as (root, _manifest):
-        detail = (root / "reference/refused-write.md").read_text()
-        owner = (root / "operations/orientation.md").read_text()
-    for clause in (
-        "An admitted `task_doc` retirement or folder movement is included.",
-        "A missing tool or unadmitted capability is not a refused correct write.",
-        "never a Git commit or another transaction step",
-    ):
-        assert clause in detail
-    link = (
-        action + " [Honor harness permission decisions]"
-        "(../operations/orientation.md#honor-harness-permission-decisions)"
-    )
-    assert detail.count(link) == 1
-    _assert_permission_owner_section(owner)
-
-
-def _assert_permission_owner_section(owner: str) -> None:
-    section = owner.split("## Honor harness permission decisions\n", 1)[1].split("\n## ", 1)[0]
-    clauses = (
-        "When the harness asks to allow a tool call and the request is denied or unanswered, "
-        "the agent does not reach the same effect by another tool, another command, a sub-agent "
-        "or a later turn.",
-        "At an open request it waits.",
-        "After a denial it goes on without that effect and names it in its report.",
-    )
-    for clause in clauses:
-        assert clause in section
-        with pytest.raises(AssertionError):
-            assert clause in section.replace(clause, "", 1)
-    for facet in (
-        "denied or unanswered",
-        "another tool",
-        "another command",
-        "a sub-agent",
-        "a later turn",
-        "it waits",
-        "names it in its report",
-    ):
-        damaged = section.replace(facet, "", 1)
-        assert damaged != section
-        with pytest.raises(AssertionError):
-            assert all(clause in damaged for clause in clauses)
-
-
-RETIREMENT_DETAIL_ROLES = frozenset({"manager"})
-
-
-@pytest.mark.parametrize("role", ["architect", "orchestrator", "manager", "worker"])
-def test_retirement_shared_source_and_delivered_detail_preserve_stops(role, tmp_path: Path) -> None:
-    root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
-    shared = (root / "core/every-role.md").read_text()
-    paragraph = next(
-        line for line in shared.splitlines() if "correct-input refusal of a covered write" in line
-    )
-    _assert_shared_retirement_boundary(paragraph)
-    for clause in (
-        "including an admitted task retirement or folder movement",
-        "same tool and input class before applying a stop",
-        "Read, check, validation and sync refusals",
-    ):
-        with pytest.raises(AssertionError):
-            _assert_shared_retirement_boundary(paragraph.replace(clause, "", 1))
-    operations = {
-        "architect": "orientation",
-        "orchestrator": "coordination",
-        "manager": "coordination",
-        "worker": "implementation",
-    }
-    for operation in (operations[role],):
-        outcome = _compiled_outcome(role, operation)
-        assert outcome.result is not None
-        expected_shared = filter_shared_block(shared, role)
-        assert outcome.shared_block == expected_shared
-        assert shared_block(outcome.shared_block).count(expected_shared) == 1
-        result = outcome.result
-        assert outcome.shared_block is not None
-        _assert_shared_retirement_boundary(
-            next(
-                line
-                for line in outcome.shared_block.splitlines()
-                if "correct-input refusal of a covered write" in line
-            )
-        )
-        # P5-18: only the Manager's retirement pointer delivers the detail; the other
-        # roles reach the same owner through the shared paragraph's served link. Both
-        # paths are checked explicitly; neither is skipped.
-        delivered = any(
-            item.source_path == "reference/refused-write.md"
-            for item in result.capsule.detail_references
-        )
-        assert delivered == (role in RETIREMENT_DETAIL_ROLES), role
-        if delivered:
-            _assert_retirement_permission_stop(result, tmp_path / f"{role}-retirement.md")
-        else:
-            _assert_served_retirement_permission_stop(paragraph)
-
-
-def _assert_inline_rule_section(body: str, heading: str, clauses: tuple[str, ...]) -> None:
-    assert body.count(heading + "\n") == 1
-    section = body.split(heading + "\n", 1)[1]
-    level = len(heading.split(maxsplit=1)[0])
-    section = re.split(r"\n#{2," + str(level) + r"} ", section, maxsplit=1)[0]
-    for clause in clauses:
-        assert section.count(clause) == 1, clause
-
-
-def test_v13_inline_rules_reach_their_actual_owning_sections_and_reject_deletion() -> None:
-    manifest = _shipped_parsed()
-    checked = set()
-    seen = set()
-    for role, metadata in manifest.roles.items():
-        for operation in metadata.operations:
-            outcome = _compiled_outcome(role, operation)
-            assert outcome.result is not None
-            result = outcome.result
-            role_body = next(
-                unit.block.content
-                for unit in result.capsule.instruction_units
-                if unit.block.source_path == f"roles/{role}.md"
-            )
-            for retired, owner, heading, clauses in INLINE_RULE_CLAUSES:
-                assert retired not in {d.source_path for d in result.capsule.detail_references}
-                assert "{{detail:" + retired + "}}" not in result.render_instructions()
-                if owner not in {"core/every-role.md", f"roles/{role}.md"}:
-                    continue
-                body = outcome.shared_block if owner == "core/every-role.md" else role_body
-                assert body is not None
-                _assert_inline_rule_section(body, heading, clauses)
-                for clause in clauses:
-                    for mutant in (
-                        body.replace(clause, "", 1),
-                        body.replace(clause, clause * 2, 1),
-                    ):
-                        assert mutant != body
-                        with pytest.raises(AssertionError):
-                            _assert_inline_rule_section(mutant, heading, clauses)
-                seen.add(retired)
-            checked.add((role, operation))
-    assert checked == {
-        (role, operation)
-        for operation, entry in manifest.operations.items()
-        for role in entry.applies_to_roles
-    }
-    assert seen == {retired for retired, _owner, _heading, _clauses in INLINE_RULE_CLAUSES}
-
-
-def _assert_short_shared_rule(body: str, line: str) -> None:
-    assert body.count(line) == 1
-
-
-def test_short_rules_use_shared_delivery_and_reject_removed_step_reads() -> None:
-    root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
-    shared = (root / "core/every-role.md").read_text()
-    units = {item["id"]: item for item in load_digest_map(root / "core/digest-map.json")["units"]}
-    checked = set()
-    for role, metadata in _shipped_parsed().roles.items():
-        for operation in metadata.operations:
-            outcome = _compiled_outcome(role, operation)
-            assert outcome.result is not None
-            assert outcome.shared_block is not None
-            expected_shared = filter_shared_block(shared, role)
-            assert outcome.shared_block == expected_shared
-            assert shared_block(outcome.shared_block).count(expected_shared) == 1
-            source = next(
-                record
-                for record in outcome.result.manifest.sources
-                if record.path == "core/every-role.md"
-            )
-            assert source.revision == "sha256:" + sha256(shared.encode()).hexdigest()
-            for unit_id, owner, line, roles, clauses in SHARED_SHORT_RULE_CLAUSES:
-                unit = units[unit_id]
-                assert unit["file"] == owner
-                assert set(roles) <= set(unit["audience"])
-                assert unit["disposition"] == "digest"
-                assert unit["digestPlace"]
-                start, end = unit["lines"]
-                core = "\n".join((root / owner).read_text().splitlines()[start - 1 : end])
-                assert sha256(core.encode()).hexdigest() == unit["sha256"], f"Run {RENEW_COMMAND}"
-                for clause in clauses:
-                    assert clause in core
-                if role in roles:
-                    _assert_short_shared_rule(outcome.shared_block, line)
-                    for mutant in (
-                        outcome.shared_block.replace(line, "", 1),
-                        outcome.shared_block + "\n" + line,
-                    ):
-                        with pytest.raises(AssertionError):
-                            _assert_short_shared_rule(mutant, line)
-                else:
-                    assert line not in outcome.shared_block
-            rendered = outcome.result.render_instructions()
-            for actor, _source, action in REMOVED_SHORT_RULE_ACTIONS:
-                if actor == role:
-                    assert action not in rendered
-            assert "#handle-held-delivery" not in rendered
-            assert "#notify-the-seat-waiting-on-a-completed-step" not in rendered
-            checked.add((role, operation))
-    assert checked == {
-        (role, operation)
-        for operation, entry in _shipped_parsed().operations.items()
-        for role in entry.applies_to_roles
-    }
-
-
-@pytest.mark.parametrize("case", GROUPED_DETAIL_CLAUSES)
-def test_grouped_action_reads_the_whole_delivered_owner(
-    case: tuple[str, str, str, str, tuple[str, ...]], tmp_path: Path
-) -> None:
-    role, source, action, suffix, clauses = case
-    for operation in _shipped_parsed().roles[role].operations:
-        result = _compiled(role, operation)
-        rendered = result.render_instructions()
-        assert_action_pointer(rendered, source, action)
-        marker = "{{detail:" + source + "}}"
-        paragraph = next(part for part in rendered.split("\n\n") if action in part)
-        assert paragraph.count(marker + ")" + suffix) == 1
-        assert marker + "#" not in paragraph
-        for mutant in (
-            rendered.replace(action, "", 1),
-            rendered.replace(marker + ")", marker + "#wrong-section)", 1),
-        ):
-            assert mutant != rendered
-            with pytest.raises(AssertionError):
-                changed = next(part for part in mutant.split("\n\n") if marker in part)
-                assert action in changed and marker + ")" + suffix in changed
-        _instructions, delivered = _emitted_instruction_detail(
-            result, source, tmp_path / f"{role}-{operation}.md"
-        )
-        for clause in clauses:
-            assert clause in delivered
-            with pytest.raises(AssertionError):
-                assert clause in delivered.replace(clause, "", 1)

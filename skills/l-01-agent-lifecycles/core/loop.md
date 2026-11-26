@@ -43,7 +43,7 @@ The final checks are no round and do not count under the limit. A failed final c
 
 ## Preserve the original list through convergence
 
-Every fix-verification round must shrink the open list or honestly retain it with fixed/unfixed dispositions. At the settings limit, or when another round is needed, request authorization as [Verify repaired findings at the round limit](../operations/review.md#verify-repaired-findings-at-the-round-limit) states.
+Every fix-verification round must shrink the open list or honestly retain it with fixed/unfixed dispositions. At the settings limit, or when another round is needed, request authorization as [Verify repaired findings at the round limit](../reference/review/rounds-and-late-findings.md#verify-repaired-findings-at-the-round-limit) states.
 
 Verifying repaired items is an ordinary fix-verification round. If the rounds are used up and the only remaining items were raised earlier and then repaired, the same Reviewer verifies exactly those items in the next round. This is not an exception to the authorization rule.
 

@@ -85,7 +85,7 @@ there. For evidence outside the paired code tree, supply a bare, whitespace-free
 
 When both `Anchor` and `Source` are empty or “n/a”, the row becomes prose, not a reference. Use that form only when there is no evidence to cite; it does not establish a checked claim.
 
-Check every changed claim, count and prose line reference against code. A prose line reference must lie inside its citation anchor. Passing structural checks and authentic anchors do not prove the prose true. Before completing the independent fact-check, follow [the curation fact-check procedure](../../operations/curation.md#normal-workflow) for its scope, evidence and completion.
+Check every changed claim, count and prose line reference against code. A prose line reference must lie inside its citation anchor. Passing structural checks and authentic anchors do not prove the prose true. Before completing the independent fact-check, follow [the curation fact-check procedure](../../operations/curation.md#workflow) for its scope, evidence and completion.
 
 ## Run the named citation batch
 

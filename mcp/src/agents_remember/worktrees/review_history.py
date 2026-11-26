@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from agents_remember.kernel._agentic_settings_core import DEFAULT_LOOP_MAX_ROUNDS
+from agents_remember.models.role_capsules.refusal_references import with_refusal_reference
 from agents_remember.tasks import (
     AddedFinding,
     AddedFindingRound,
@@ -28,6 +29,12 @@ class ReviewHistoryError(ValueError):
 
     def __init__(self, status: str, detail: str) -> None:
         self.status = status
+        if status in {"review-admission-invalid", "review-budget-exhausted"}:
+            detail = with_refusal_reference(detail, "review-admission-invalid")
+        elif status == "review-candidate-invalid":
+            detail = with_refusal_reference(detail, "review-candidate-invalid")
+        elif status == "review-kind-invalid":
+            detail = with_refusal_reference(detail, "review-kind-invalid")
         super().__init__(detail)
 
 

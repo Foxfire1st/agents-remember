@@ -45,7 +45,7 @@ For additions after sealing, follow the three routes and round authority in the 
 
 ## Mandatory Requirement Adjudication Block (repeat once per stable ID + version in every variant)
 
-Use this authoring block for [the independent-review record](../roles/reviewer.md#write-the-review-artifacts). The verdict links the resulting leaf-journal anchor rather than duplicating the appended record. Before inspecting the canonical packet, read [the approval-record definition](../core/every-role.md#requirements-and-limits) for the approved manifest entry, its content hash and the corpus hash.
+Use this authoring block for [the independent-review record](../roles/reviewer.md#bind-the-seam-and-catalogs). The verdict links the resulting leaf-journal anchor rather than duplicating the appended record. Before inspecting the canonical packet, read [the approval-record definition](../core/every-role.md#requirements-and-limits) for the approved manifest entry, its content hash and the corpus hash.
 
 ```md
 ### <stable requirement ID> @ <version> — <exact requirement label>
@@ -143,9 +143,9 @@ Failure class: `<one of the five classes defined by [Append the independent revi
 - verdictRef: `notes/reports/<leaf-id>-route-review-verdict.md`
 - routes: `<one {route, verdict, evidenceRef} row per table row>`
 
-Before recording an ordinary code round, read [Record code review rounds](../operations/review.md#record-code-review-rounds) for the recording owner and operations.
+Before recording an ordinary code round, read [Rounds](../operations/review.md#rounds) for the recording owner and operations.
 
-Before handing over the leaf verdict, read [Receive the intake and hand over the leaf verdict](../operations/review.md#receive-the-intake-and-hand-over-the-leaf-verdict) for the Manager notices, direct peer handovers and separate memory lane.
+Before handing over the leaf verdict, read [Focused tests and handover](../operations/review.md#focused-tests-and-handover) for the Manager notices, direct peer handovers and separate memory lane.
 ```
 
 ## Atomic-Master Integration Route-Review Variant
