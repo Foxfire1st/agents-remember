@@ -1,7 +1,10 @@
 #!/usr/bin/env sh
 # Fast pre-commit tier: check the STAGED content — the thing the commit will
-# actually contain — with deterministic lint/type/generated-copy checks. Under
-# half a minute on a warm checkout. Full quality and test operations are explicit
+# actually contain — with deterministic lint/type/generated-copy checks.
+# Measured on a clean checkout at moderate load (load1 ~3-4): ~134 s cold and
+# ~134 s warm (Pyright ~123 s dominates; the concurrent dashboard rail drops
+# from ~71 s cold to ~4 s warm and overlaps Pyright; peak combined RSS ~3.75 GiB
+# cold, ~3.60 GiB warm). Full quality and test operations are explicit
 # developer-requested workflows, not automatic test runs.
 #
 # Every landing route of the product runs this hook on the tree it publishes

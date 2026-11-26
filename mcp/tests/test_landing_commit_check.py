@@ -413,6 +413,84 @@ class RouteCoverageTests(unittest.TestCase):
             with self.assertRaises(LandingCommitCheckRefusal):
                 _require_landing_commit_check(repo, candidate, side="code")
 
+    def _init_dashboard_repo(self, repo: Path, lock_content: str) -> None:
+        _init(repo)
+        (repo / ".gitignore").write_text("dashboard/node_modules/\n", encoding="utf-8")
+        (repo / "dashboard").mkdir()
+        (repo / "dashboard" / "package.json").write_text('{"name":"dash"}\n', encoding="utf-8")
+        (repo / "dashboard" / "package-lock.json").write_text(lock_content, encoding="utf-8")
+        _git(repo, "add", ".gitignore", "dashboard/package.json", "dashboard/package-lock.json")
+        _git(repo, "commit", "--no-verify", "-m", "add dashboard files")
+
+    def test_r8_temp_checkout_borrows_matching_node_modules_and_refuses_when_missing(
+        self,
+    ) -> None:
+        """L29-R8 (iii): matching lockfile symlinks & unlinks node_modules; missing refuses."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "primary"
+            self._init_dashboard_repo(repo, '{"lockfileVersion": 3, "rev": 1}\n')
+            marker = Path(tmp) / "hook-saw-modules.txt"
+            _hook(
+                repo,
+                "#!/bin/sh\n"
+                "test -d dashboard/node_modules && test -f dashboard/node_modules/sentinel.txt\n"
+                f"echo ok > {marker.as_posix()}\n",
+            )
+            tree = _stage(repo, "code.txt", "change\n")
+            candidate = _git(repo, "commit-tree", tree, "-p", "HEAD", "-m", "unstamped")
+
+            with self.assertRaises(LandingCommitCheckRefusal) as missing_refused:
+                _require_landing_commit_check(repo, candidate, side="code")
+            self.assertEqual(missing_refused.exception.reason, "unrunnable")
+            self.assertIn("dashboard/node_modules", str(missing_refused.exception))
+            self.assertFalse(marker.exists(), "missing node_modules must refuse before spawn")
+
+            (repo / "dashboard" / "node_modules").mkdir()
+            (repo / "dashboard" / "node_modules" / "sentinel.txt").write_text("ok\n")
+            _require_landing_commit_check(repo, candidate, side="code")
+            self.assertTrue(marker.exists())
+
+            linked = Path(tmp) / "linked"
+            _git(repo, "worktree", "add", "--detach", linked.as_posix(), candidate)
+            try:
+                run_landing_commit_check(linked, tree=tree)
+                borrowed = linked / "dashboard" / "node_modules"
+                self.assertFalse(borrowed.exists() or borrowed.is_symlink())
+            finally:
+                _git(repo, "worktree", "remove", "--force", linked.as_posix())
+
+    def test_r8_temp_checkout_refuses_pre_spawn_on_lockfile_mismatch_or_absence(self) -> None:
+        """L29-R8 (iv): differing or missing lockfile refuses pre-spawn with no leftover link."""
+
+        for case in ("differing", "missing"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp) / "primary"
+                self._init_dashboard_repo(repo, '{"lockfileVersion": 3, "rev": 1}\n')
+                (repo / "dashboard" / "node_modules").mkdir()
+                spawned = Path(tmp) / "spawned.txt"
+                _hook(repo, f"#!/bin/sh\ntouch {spawned.as_posix()}\nexit 0\n")
+
+                linked = Path(tmp) / "linked"
+                _git(repo, "worktree", "add", "--detach", linked.as_posix(), "HEAD")
+                try:
+                    lock = linked / "dashboard" / "package-lock.json"
+                    if case == "differing":
+                        lock.write_text('{"lockfileVersion": 3, "rev": 2}\n', encoding="utf-8")
+                        _git(linked, "add", "dashboard/package-lock.json")
+                    else:
+                        _git(linked, "rm", "-q", "dashboard/package-lock.json")
+                    cand_tree = _git(linked, "write-tree")
+                    with self.assertRaises(LandingCommitCheckRefusal) as refused:
+                        run_landing_commit_check(linked, tree=cand_tree)
+                    self.assertEqual(refused.exception.reason, "unrunnable")
+                    self.assertIn("package-lock.json", str(refused.exception))
+                    self.assertFalse(spawned.exists(), "must refuse before spawning hook")
+                    borrowed = linked / "dashboard" / "node_modules"
+                    self.assertFalse(borrowed.exists() or borrowed.is_symlink())
+                finally:
+                    _git(repo, "worktree", "remove", "--force", linked.as_posix())
+
 
 class AnswerAndTextTests(unittest.TestCase):
     def test_the_answer_stays_small_with_output_in_the_log(self) -> None:
