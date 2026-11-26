@@ -273,7 +273,7 @@ names the checkouts; move each of them to another branch and repeat the call.
 A sync that stopped on a conflict continues with `resolution_action: "continue"` after the
 resolution is staged. `validate_staged_resolution` calls `_staged_merge_findings` to run
 `git diff --cached --check` against each pinned merge parent and match findings by path, staged
-line and diagnosis. See [`worktrees/sync_transaction_git/_merge.py`](../../mcp/src/agents_remember/worktrees/sync_transaction_git/_merge.py).
+line and diagnosis. See [`worktrees/sync_transaction_git/_merge.py`](https://github.com/Foxfire1st/agents-remember/blob/main/mcp/src/agents_remember/worktrees/sync_transaction_git/_merge.py).
 The staged check reports whitespace errors and conflict markers on lines that differ from both
 merge parents. It checks every staged content file, including files that merged without conflict.
 If a Git diagnostic cannot be assigned to one of the changed paths,

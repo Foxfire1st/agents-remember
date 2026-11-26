@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -392,6 +392,25 @@ def _workspace_path(receipt: Mapping[str, Any] | None) -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
+@contextlib.contextmanager
+def _filing_seat_lock(ref: HeldSeatRef | None) -> Iterator[None]:
+    """Hold one seat receipt lock across filing; turn lock-setup IO errors into a named refusal."""
+    if ref is None:
+        yield
+        return
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(open_held_store(ref))
+        except OSError as error:
+            raise _Refused(
+                "message-file-failed",
+                f"The role execution receipt folder cannot be created or locked at "
+                f"{ref.receipt_path.parent}: {error} Nothing was delivered.",
+                "Resolve the reason named in detail, then send the message again.",
+            ) from error
+        yield
+
+
 def _file_message(
     config: McpRuntimeConfig,
     call: RoleMessageCall,
@@ -419,9 +438,9 @@ def _file_message(
     recipient_task = _recipient_subject(config, recipient)
     stem = utc_stem(sender.role, sender.agent_id, recipient_role, recipient.agent_id, when=when)
     sender_ref, recipient_ref = seats
-    with open_held_store(sender_ref) if sender_ref else contextlib.nullcontext():
+    with _filing_seat_lock(sender_ref):
         sender_warning = _ensure_sender_link(config, parties)
-    with open_held_store(recipient_ref) if recipient_ref else contextlib.nullcontext():
+    with _filing_seat_lock(recipient_ref):
         attachments = _prepare_attachments(call, parties, scope, stem)
         recipient_warning = _ensure_recipient_link(config, parties)
         path, digest, _payload = _store_message(
