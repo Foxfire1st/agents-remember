@@ -22,7 +22,6 @@ from agents_remember.benchmarks.runner_modules.mcp_registration import *  # noqa
 from agents_remember.benchmarks.runner_modules.models import *  # noqa: F403
 from agents_remember.benchmarks.runner_modules.roots import *  # noqa: F403
 from agents_remember.benchmarks.runner_modules.services import *  # noqa: F403
-from agents_remember.providers import provider_setup  # noqa: F401
 
 
 def prepare_repo(repository, repo_root, dry_run, force_clone=False):

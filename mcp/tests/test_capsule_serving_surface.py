@@ -195,7 +195,6 @@ def _live_settings(root: Path) -> Path:
                 "coordinationRoot": str(root / "coord"),
                 "workspaceRoot": str(root / "workspace"),
                 "repositories": {REPOSITORY: {}},
-                "providers": {},
             }
         ),
         encoding="utf-8",

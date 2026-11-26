@@ -1,11 +1,3 @@
-// The Tasks view's worktree spine after the search providers left the projection (MIK-R199 rule 1).
-//
-// The spine used to carry two engine lanes — `code → CGC` and `memory → GrepAI` — fed by a
-// provider lookup keyed on the enclosure's worktree group, plus a "no isolated engine recorded"
-// placeholder for the (common) enclosure that had none. All of it is gone: the lanes are the two
-// checkouts, and the facts beside them are the enclosure's own. These assertions are the
-// failing-before half of that removal — they name the lane labels that must never come back and
-// the checkout/task facts that must survive it.
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
@@ -23,9 +15,6 @@ const OWNER = enclosure({
   codeWorktreeExists: true,
   memoryWorktreeExists: false,
 });
-
-// The engine vocabulary the lanes used to print. None of it may reach the surface again.
-const RETIRED_LANE_WORDS = ['CGC', 'GrepAI', 'codegraphcontext', 'grepai', 'no isolated engine'];
 
 // Wording that would assert a creation history the projection cannot support. `exists === false`
 // only says the path is not there now; a checkout that was cleaned up answers it identically.
@@ -49,9 +38,6 @@ describe('the worktree spine carries checkouts, not engines', () => {
     expect(memory.textContent).toContain('memory checkout');
     expect(memory.textContent).toContain('ar-agents-remember');
     expect(memory.textContent).toContain('worktree absent · pending cleanup');
-    for (const word of RETIRED_LANE_WORDS) {
-      expect(spine.textContent, word).not.toContain(word);
-    }
   });
 
   // The projection cannot distinguish these two histories: both answer false for the existence
@@ -130,8 +116,5 @@ describe('the worktree spine carries checkouts, not engines', () => {
     expect(spine.textContent).toContain(OWNER.worktreeGroup);
     expect(spine.textContent).toContain(OWNER.repoName);
     expect(view.container.textContent).toContain('Legacy leaf');
-    for (const word of RETIRED_LANE_WORDS) {
-      expect(view.container.textContent, word).not.toContain(word);
-    }
   });
 });

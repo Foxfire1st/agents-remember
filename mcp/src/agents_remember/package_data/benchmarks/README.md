@@ -26,16 +26,6 @@ python -m agents_remember.benchmarks.runner run case agents-remember-drift-workf
 For source-package debugging, run the package module from a checkout where
 `agents-remember/mcp/src` is on `PYTHONPATH`.
 
-## Provider setup in benchmarks (MIK-R112 F02)
-
-Benchmark commands run providerless: the retired codegraphcontext/grepai
-providers never count as enabled, so `prepare` performs no provider install,
-seed, watcher start or status and returns empty results, which the runner
-treats as a successful no-provider setup. The memory comparison above
-(source-only vs memory-enabled environments) is unaffected — it never
-depended on provider backends. The explicitly required old-watcher stop is a
-separate install-time mechanism and is unchanged.
-
 Benchmark preparation registers the package MCP server in the memory-enabled workspace.
 Its `skill://index.json` resource lists the skills served from that installed package;
 selected skill and supporting-file URIs read those package bytes. Preparation creates

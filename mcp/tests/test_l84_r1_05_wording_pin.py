@@ -176,9 +176,7 @@ def test_audit_map_ownership_faults_name_the_authored_decision(tmp_path: Path, f
     document = load_digest_map(LIFECYCLE / "core/digest-map.json")
     text = (LIFECYCLE / "core/every-role.md").read_text()
     if fault == "unmapped source line":
-        sources = {
-            row["file"] for row in document["units"] if row["disposition"] != "retired (D699, D700)"
-        }
+        sources = {row["file"] for row in document["units"] if "retiredBinding" not in row}
         for source in sources:
             target = tmp_path / source
             target.parent.mkdir(parents=True, exist_ok=True)

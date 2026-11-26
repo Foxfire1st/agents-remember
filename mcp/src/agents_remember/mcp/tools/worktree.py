@@ -202,7 +202,6 @@ def worktree_cleanup_payload(
     contract_path: str,
     *,
     dry_run: bool = False,
-    teardown_providers: bool = True,
 ) -> dict[str, Any]:
     return _tool_payload(
         "worktree_cleanup",
@@ -210,7 +209,6 @@ def worktree_cleanup_payload(
             config,
             contract_path=contract_path,
             dry_run=dry_run,
-            teardown_providers=teardown_providers,
         ),
     )
 

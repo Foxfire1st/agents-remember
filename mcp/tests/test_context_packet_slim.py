@@ -114,8 +114,9 @@ class ContextPacketSlimTests(unittest.TestCase):
             config = write_and_load_config(root)
             full = build_context_packet(config, ContextPacketRequest(repo_id="agents-remember"))
             self.assertEqual(full["contextPacketVersion"], 2, full)
-            for key in ("repo", "paths", "memory", "worktree", "providers", "drift"):
+            for key in ("repo", "paths", "memory", "worktree", "drift"):
                 self.assertIn(key, full, full)
+            self.assertNotIn("providers", full, full)
 
     def test_a_partial_index_is_an_action_line(self) -> None:
         full: dict[str, Any] = {

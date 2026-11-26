@@ -1,7 +1,7 @@
 import { css } from "../../styled-system/css";
 
-// Cyan charge rising bottom-up INSIDE an outline (note 08 progress grammar). Reused by the detail
-// panel (task-step progress) and the engine room (provider seed progress).
+// Cyan charge rising bottom-up INSIDE an outline (note 08 progress grammar), used by the detail
+// panel for task-step progress.
 const fillBox = css({
   position: "relative",
   width: "2.2rem",

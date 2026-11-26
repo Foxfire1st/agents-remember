@@ -392,7 +392,7 @@ def unmeasured_header(result: DiffCoverage) -> str:
     """Name the changed Python the coverage run does not measure.
 
     ``--cov`` is aimed at the tracked top-level packages, which is the shipped code; the
-    suite itself, ``scripts/`` and the provider images are outside it. Their changed
+    suite itself and ``scripts/`` are outside it. Their changed
     lines cannot be scored, so they are listed on every run instead of being dropped --
     an unscored file that nobody prints is indistinguishable from a covered one.
     """

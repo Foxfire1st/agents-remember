@@ -8,6 +8,8 @@ its end (rule 2). Before the fix the branch reached the shared tail with
 ``kept_line`` unbound and Python raised ``UnboundLocalError``.
 """
 
+import hashlib
+import json
 import sys
 from contextlib import nullcontext
 from dataclasses import replace
@@ -19,15 +21,19 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.application import worktree_tools
+from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_services import build_default_worktree_services
+from agents_remember.mcp.tools.worktree import worktree_status_payload
 from agents_remember.memory_quality.style.citations.source_index_cache import (
     TerminalNamespaceGuard,
 )
 from agents_remember.models.lifecycles.enclosure import (
+    TerminalEnclosureArchive,
     TerminalWorktreeCleanupArguments,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_enclosure_terminal import (
     terminal_cleanup_contract_authority,
+    validate_terminal_proof,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     inspect_lifecycle_operation_locator,
@@ -119,10 +125,14 @@ def test_repeated_cleanup_with_archive_ready_finishes(tmp_path: Path) -> None:
     archive = terminal_archive_required_result(
         load_contract(contract_path),
         operation="worktree_cleanup",
-        arguments=TerminalWorktreeCleanupArguments(teardown_providers=True),
+        arguments=TerminalWorktreeCleanupArguments(),
         dry_run=False,
     )
     assert archive.returncode == 0, archive.payload
+    raw_new_archive = json.loads(
+        Path(str(archive.payload["archivePath"])).read_text(encoding="utf-8")
+    )
+    assert raw_new_archive["cleanupArguments"] == {}
 
     # Before the fix this raised UnboundLocalError: `kept_line`. Per
     # L129-THE-GATE-IS-NOT-JUDGED-AGAIN-RULING the gate is not judged again: the
@@ -186,10 +196,14 @@ def _integrated_archive_ready_leaf(tmp_path: Path) -> WorktreeContract:
     archive = terminal_archive_required_result(
         load_contract(contract_path),
         operation="worktree_cleanup",
-        arguments=TerminalWorktreeCleanupArguments(teardown_providers=True),
+        arguments=TerminalWorktreeCleanupArguments(),
         dry_run=False,
     )
     assert archive.returncode == 0, archive.payload
+    raw_new_archive = json.loads(
+        Path(str(archive.payload["archivePath"])).read_text(encoding="utf-8")
+    )
+    assert raw_new_archive["cleanupArguments"] == {}
     contract = load_contract(contract_path)
     locator = inspect_lifecycle_operation_locator(
         contract.coordination_root, contract.contract_path
@@ -268,4 +282,78 @@ def test_repeated_cleanup_with_branches_already_gone_finishes(
     result = cleanup_module.cleanup_result(WorktreeArgs(contract_path=contract_path, approved=True))
 
     assert result.returncode == 0, result.payload
+    _assert_cleanup_completed(contract_path)
+
+
+def test_pre_removal_cleanup_archive_with_teardown_providers_validates_and_retries_cleanly(
+    tmp_path: Path, bound_services
+) -> None:
+    """Stored pre-removal cleanup archives carrying teardown_providers stay valid and resumable."""
+
+    fixture = _authority_fixture(tmp_path, external_memory=True)
+    closed = _closed_external_leaf_worktrees(fixture, tmp_path, publish_closeout_evidence=True)
+    config = _public_config(tmp_path, closed)
+    applied = worktree_tools.worktree_integrate_tool(
+        config,
+        contract_path=closed.contract_path.as_posix(),
+        strategy="ff-only",
+        dry_run=False,
+    )
+    assert applied["state"] == "integrated", applied
+
+    contract_path = closed.contract_path
+    contract = load_contract(contract_path)
+    observation = inspect_lifecycle_operation_locator(
+        contract.coordination_root, contract.contract_path
+    )
+    if observation.locator is None and observation.state != "terminal-archived":
+        publish_test_enclosure(contract, contract_path.read_text(encoding="utf-8"))
+
+    # Write a genuine pre-removal archive carrying {"teardown_providers": true} and its real
+    # SHA-256 cleanupRequestId computed over {"teardown_providers":true}.
+    archive_result = terminal_archive_required_result(
+        load_contract(contract_path),
+        operation="worktree_cleanup",
+        arguments=TerminalWorktreeCleanupArguments(teardown_providers=True),
+        dry_run=False,
+    )
+    assert archive_result.returncode == 0, archive_result.payload
+    archive_path = Path(str(archive_result.payload["archivePath"]))
+    raw_bytes = archive_path.read_bytes()
+    raw_json = json.loads(raw_bytes.decode("utf-8"))
+    assert raw_json["cleanupArguments"] == {"teardown_providers": True}
+    expected_request_id = hashlib.sha256(
+        (
+            f"{raw_json['locator']['publicationRequestId']}\n"
+            "worktree_cleanup\n"
+            '{"teardown_providers":true}\n'
+            f"{raw_json['contractSha256']}\n"
+        ).encode()
+    ).hexdigest()
+    assert raw_json["cleanupRequestId"] == expected_request_id
+
+    parsed = TerminalEnclosureArchive.model_validate_json(raw_bytes)
+    assert isinstance(parsed.cleanupArguments, TerminalWorktreeCleanupArguments)
+    assert parsed.cleanupArguments.teardown_providers is True
+
+    locator = inspect_lifecycle_operation_locator(
+        contract.coordination_root, contract.contract_path
+    ).locator
+    assert locator is not None
+    proven = validate_terminal_proof(contract.coordination_root, contract.contract_path, locator)
+    assert proven == parsed
+
+    status = worktree_status_payload(
+        config,
+        TaskRef(repo_id=contract.repo_name, contract_path=contract_path.as_posix()),
+    )
+    assert status["state"] == "terminal-archive-ready", status
+    assert status["nextTool"] == "worktree_cleanup", status
+    assert "teardown_providers" not in status["nextArgs"], status["nextArgs"]
+
+    retried = cleanup_module.cleanup_result(
+        WorktreeArgs(contract_path=contract_path, approved=True)
+    )
+    assert retried.returncode == 0, retried.payload
+    assert retried.payload.get("state") != "terminal-archive-request-conflict", retried.payload
     _assert_cleanup_completed(contract_path)

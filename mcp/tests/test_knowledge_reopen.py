@@ -179,11 +179,8 @@ def world(tmp_path: Path) -> _Continued:
 
 @pytest.fixture
 def ports() -> Iterator[None]:
-    providers = mock.Mock()
-    providers.setup_status.return_value = {}
     bind_worktree_services(
         WorktreeServices(
-            provider_lifecycle=providers,
             memory_quality=cast(Any, None),
             citation_guard=cast(Any, None),
             knowledge_validation=GitKnowledgeValidation(base_converter=GitBaseConverter()),

@@ -30,8 +30,6 @@ Architect, Orchestrator, Manager: Use the harness, model and effort from setting
 
 Architect, Orchestrator, Manager: After a start with overrides, immediately check and set the role agent's features. Record the product defect rather than removing the overrides.
 
-Architect, Orchestrator, Manager, Worker, Investigator, Reviewer, Curator: During provider degradation, continue valid native reads and report blockers. Start no providers. Leave state changes to the owning Worker under explicit authorization.
-
 Architect, Orchestrator, Manager: Use `retire_child` on other seats. Architects cover all scopes. Managers cover their master and leaves. Orchestrators cover their sprint, masters and leaves.
 
 ## Questions, decisions and scope

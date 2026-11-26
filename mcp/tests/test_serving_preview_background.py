@@ -36,7 +36,6 @@ from typing import Any, cast
 from unittest import mock
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.providers.metrics import ProviderMetricsStore
 from agents_remember.serving import _app_lifespan as serving
 from agents_remember.serving._app_common import _ServingRuntime
 from agents_remember.serving.stream_shutdown import StreamShutdown
@@ -50,9 +49,8 @@ LIVE_LOOPS = (
     "leaf-archive-recovery",
     "warmup-watch",
     "workspace-river-compaction",
-    "metrics",
 )
-"""The five loops only the live dashboard may own, in the order the startup notice names them."""
+"""The four loops only the live dashboard may own, in the order the startup notice names them."""
 
 KEPT_BACKGROUND = ("projection", "move-watch", "heap-diag", "malloc-trim")
 """What a preview still runs: serving, the review-tree projection, and the gated diagnostics."""
@@ -164,7 +162,6 @@ class PreviewLifespanTests(unittest.IsolatedAsyncioTestCase):
         )
         replacements: dict[str, Any] = {
             "compact_workspace_river": mock.Mock(),
-            "_metrics_loop": _recorder("metrics"),
             "_leaf_archive_recovery_loop": _recorder("leaf-archive-recovery"),
             "_held_delivery_loop": _recorder("held-delivery"),
             "_workspace_river_compaction_loop": _recorder("workspace-river-compaction"),
@@ -183,7 +180,7 @@ class PreviewLifespanTests(unittest.IsolatedAsyncioTestCase):
                 stack.enter_context(mock.patch.object(serving, name, replacement))
             stack.enter_context(mock.patch.object(serving, "logger", log))
             stack.enter_context(mock.patch.object(asyncio, "create_task", record_task))
-            lifespan = serving._serving_lifespan(runtime, cast(ProviderMetricsStore, mock.Mock()))
+            lifespan = serving._serving_lifespan(runtime)
             async with lifespan(FastAPI()):
                 # Let every created task take its first step and park there.
                 for _ in range(3):
@@ -210,7 +207,6 @@ class PreviewLifespanTests(unittest.IsolatedAsyncioTestCase):
                     self._observed(created),
                     [
                         "projection",
-                        "metrics",
                         "leaf-archive-recovery",
                         "held-delivery",
                         "workspace-river-compaction",
@@ -228,7 +224,7 @@ class PreviewLifespanTests(unittest.IsolatedAsyncioTestCase):
                 created, patches = await self._run_lifespan(heap=True, malloc=True)
                 observed = self._observed(created)
                 self.assertEqual(observed, ["projection", "move-watch", "heap-diag", "malloc-trim"])
-                # The five live owners are absent at the level the lifespan acts on: no task at all.
+                # The four live owners are absent at the level the lifespan acts on: no task at all.
                 self.assertEqual([name for name in created if name in LIVE_LOOPS], [])
                 # The operator sees one line naming the switch and exactly what was skipped.
                 patches["log"].warning.assert_called_once_with(
@@ -236,7 +232,7 @@ class PreviewLifespanTests(unittest.IsolatedAsyncioTestCase):
                     PREVIEW_ENV,
                     value,
                     "held-delivery, leaf-archive-recovery, warmup-watch, "
-                    "workspace-river-compaction, metrics",
+                    "workspace-river-compaction",
                 )
 
     async def test_heap_and_malloc_diagnostics_are_gated_exactly_as_before(self) -> None:

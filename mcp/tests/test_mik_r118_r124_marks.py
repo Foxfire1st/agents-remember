@@ -704,7 +704,6 @@ def _gate_repository(root: Path, *, weakness_at_base: bool) -> tuple:
 def _bound_services():
     bind_worktree_services(
         WorktreeServices(
-            provider_lifecycle=cast(Any, None),
             memory_quality=cast(Any, None),
             citation_guard=cast(Any, None),
             knowledge_validation=GitKnowledgeValidation(base_converter=GitBaseConverter()),
@@ -1791,7 +1790,6 @@ def _registered_server(world):
                 "coordinationRoot": (root / "coord").as_posix(),
                 "workspaceRoot": workspace.as_posix(),
                 "repositories": {"repo": {"path": world.code.as_posix()}},
-                "providers": {},
             }
         ),
         encoding="utf-8",

@@ -573,36 +573,6 @@ describe('projection contract fixture', () => {
     expect(served.analytics).toBeTypeOf('object');
   });
 
-  it('carries no provider surface at all', () => {
-    // The search providers (CGC over code, GrepAI over memory) left the served projection, and
-    // the sample follows: a payload that still carried them would describe a server older than
-    // the removal. `in` rather than a typed read on purpose — the mirror no longer declares these
-    // keys, so a typed read could not be written and an untyped one is exactly the claim.
-    expect('providers' in served).toBe(false);
-    expect('setupProgress' in served.analytics).toBe(false);
-    expect('setupSummaries' in served.analytics).toBe(false);
-    for (const item of served.analytics.attentionQueue) {
-      expect(['provider-down', 'failed-setup']).not.toContain(item.kind);
-      expect('providerId' in item).toBe(false);
-    }
-    const retiredProcessKeys = [
-      'providers',
-      'setupState',
-      'currentPhase',
-      'completedPhases',
-      'failedPhases',
-      'heartbeatAgeSeconds',
-      'seedFallback',
-      'retryArgs',
-    ];
-    for (const process of served.analytics.engineProcesses) {
-      for (const key of retiredProcessKeys) expect(key in process, key).toBe(false);
-      for (const edge of process.edges) {
-        expect(['cgc-seed', 'grepai-clone']).not.toContain(edge.kind);
-      }
-    }
-  });
-
   it('carries identity and status once per task entry, with reader content separate', () => {
     expect(served.tasks.length).toBeGreaterThan(0);
     for (const entry of served.tasks) {

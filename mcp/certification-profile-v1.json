@@ -82,14 +82,12 @@
       },
       "generatedScopes": [
         "mcp/src/agents_remember/package_data/benchmarks",
-        "mcp/src/agents_remember/package_data/runtime/providers",
         "mcp/src/agents_remember/package_data/runtime/system"
       ],
       "inputId": "generated-runtime",
       "schemaVersion": "generated-candidate-input/v1",
       "sourceScopes": [
         "benchmarks",
-        "providers",
         "scripts/sync-runtime.py",
         "system"
       ]
@@ -111,7 +109,7 @@
       ]
     }
   ],
-  "profileDigest": "eb72aa5cbd0fddfcf1da2fc22e8ed737cd72b6e73bebab8a006a771dfd9d4fc9",
+  "profileDigest": "66f06916c41c8c13033a92e1e7e851c2c5cd044c9ca534ce3d5d24ecf4309b9b",
   "profileId": "agents-remember-certification",
   "publishedArtifacts": [
     {

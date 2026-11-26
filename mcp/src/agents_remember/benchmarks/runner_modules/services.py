@@ -14,10 +14,6 @@ from agents_remember.benchmarks.runner_modules.execution import (
 from agents_remember.benchmarks.runner_modules.manifest import (
     load_cases,
     select_cases,
-    selected_provider_ids,
-)
-from agents_remember.benchmarks.runner_modules.mcp_registration import (
-    disarm_stale_benchmark_registrations,
 )
 from agents_remember.benchmarks.runner_modules.models import (
     BenchmarkCase,
@@ -42,11 +38,8 @@ def prepare_benchmarks(request: BenchmarkPrepareRequest) -> dict[str, Any]:
     cases = select_cases(load_cases(benchmarks_root), request.target, request.case_id)
 
     def run_prepare() -> None:
-        # Review B3: stale workspace registrations are the one authority file the
-        # fleet kill-switch cannot reach — every touch of the benchmarks sweeps them.
-        disarm_stale_benchmark_registrations(benchmarks_root, request.allowed_provider_ids)
         for case in cases:
-            prepare_case(preparation, case, provider_ids=selected_provider_ids(case))
+            prepare_case(preparation, case)
 
     _, messages = _capture_messages(run_prepare)
     return {
@@ -86,8 +79,8 @@ def run_selected_cases(
     benchmarks_root: Path,
     cases: list[BenchmarkCase],
 ) -> list[Path]:
+    del benchmarks_root
     output_roots: list[Path] = []
-    disarm_stale_benchmark_registrations(benchmarks_root, request.allowed_provider_ids)
     for case in cases:
         output_roots.append(run_case(request, case))
     return output_roots

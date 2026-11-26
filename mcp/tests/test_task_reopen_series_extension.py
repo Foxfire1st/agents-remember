@@ -174,7 +174,7 @@ class _World:
                 worktree_name=LEAF_SLUG,
                 leaf_id=LEAF,
             ),
-            execution=StartExecution(dry_run=dry_run, skip_provider_setup=True),
+            execution=StartExecution(dry_run=dry_run),
         )
 
     def master_rows(self) -> list[tuple[str, str, str]]:
@@ -584,7 +584,6 @@ class SeriesExtensionRouteTests(unittest.TestCase):
                 master_doc_path=world.master_path.as_posix(),
                 subtask_number=LEAF,
             ),
-            teardown_providers=False,
         )
         self.assertTrue(finalized["ok"], finalized.get("summary"))
         self.assertEqual(world.master_rows(), [(LEAF, f"{LEAF_SLUG}.md", "Completed")])

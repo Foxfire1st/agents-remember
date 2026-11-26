@@ -1,1 +1,1 @@
-"""Worktree-start contract, provider, leaf-ref, and result collaborators."""
+"""Worktree-start contract, leaf-ref, and result collaborators."""

@@ -4,9 +4,6 @@ from pathlib import Path
 
 from agents_remember.models.benchmarks import CODEX_BENCHMARK_SANDBOX
 
-PROVIDER_ASSET_DIRS = (Path("requirements"), Path("patches"))
-BENCHMARK_PROVIDER_IDS = ("grepai-memory", "codegraphcontext-code")
-
 # Token fields Codex reports in the single `turn.completed` event's `usage`
 # object. They are cumulative totals for the turn; runs sum them across turns.
 USAGE_TOKEN_KEYS = (

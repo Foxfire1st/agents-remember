@@ -5,25 +5,6 @@ from __future__ import annotations
 import pytest
 from agents_remember.kernel.primitives.gate_policy import coerce_decision_role
 from agents_remember.kernel.primitives.gate_vocab import coerce_gate_kind
-from agents_remember.kernel.primitives.identity import stable_provider_id
-
-
-@pytest.fixture
-def provider_id_examples() -> tuple[str, str]:
-    """Existing provider-id edge inputs, isolated from provider integration tests."""
-
-    return ("TensorFlow++ Repo", "   ")
-
-
-def _normalized_provider_ids(values: tuple[str, str]) -> tuple[str, str]:
-    first, second = values
-    return stable_provider_id(first), stable_provider_id(second)
-
-
-def test_stable_provider_id_never_returns_empty(
-    provider_id_examples: tuple[str, str],
-) -> None:
-    assert _normalized_provider_ids(provider_id_examples) == ("tensorflow-repo", "repo")
 
 
 def test_known_gate_kind_passes_through() -> None:

@@ -62,9 +62,7 @@ def _abandon_with_guard(
                     raise RuntimeError("abandon lost terminal archive authority before mutation")
                 current = terminal.archived_contract
             plan_task_stage(current, "abandoned")
-            prepared = prepare_terminal_group(
-                current, dry_run=args.dry_run, teardown_providers=True
-            )
+            prepared = prepare_terminal_group(current, dry_run=args.dry_run)
             if prepared.blockers:
                 result = WorktreeCommandResult(
                     2,

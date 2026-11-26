@@ -2,7 +2,6 @@ import type { EngineProcessNode } from '../../types/projection';
 import type { EngineRoomModel } from './engineRoomTypes';
 
 const PHASE_ORDER: Record<string, number> = {
-  'provider-setup': 0,
   'worktree-started': 1,
   'sync-needed': 2,
   'closeout-pending': 3,

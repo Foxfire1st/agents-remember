@@ -15,7 +15,6 @@ class RuntimeInstallResponse(FlexibleToolResponse):
     dryRun: bool | None = None
     coordinationRoot: str | None = None
     includeBenchmarks: bool | None = None
-    installProviderDeps: bool | None = None
     summary: dict[str, Any] | None = None
     host: dict[str, Any] | None = None
     runningServers: list[RunningServerPayload] = Field(default_factory=list)
@@ -24,8 +23,8 @@ class RuntimeInstallResponse(FlexibleToolResponse):
     reportPath: str | None = Field(
         default=None,
         description=(
-            "Temp report file with the full install detail (provider watcher "
-            "rebind runs, compose renders, command transcripts); the inline "
-            "payload keeps counts and a compact rebind digest."
+            "Temp report file with the full install detail (host provisioning, "
+            "dashboard state, removed-store inventory); the inline payload keeps "
+            "counts and a compact summary."
         ),
     )

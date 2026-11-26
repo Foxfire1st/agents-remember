@@ -14,14 +14,12 @@ import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import anyio
 from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.application.next_step import next_step_for
-from agents_remember.application.provider_runtime import setup_progress_path
 from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
 from agents_remember.kernel.primitives.drift_snapshot import drift_snapshot_path
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
@@ -351,7 +349,6 @@ class WorkflowWorld:
                     "coordinationRoot": self.coord.as_posix(),
                     "workspaceRoot": self.root.as_posix(),
                     "repositories": {REPO: {}},
-                    "providers": {},
                 }
             ),
             encoding="utf-8",
@@ -473,7 +470,6 @@ class WorkflowWorld:
                 "leaf_id": leaf_id,
                 "parent_task": task_name,
                 "workflow_kind": "light-task",
-                "skip_provider_setup": True,
             },
         )
 
@@ -572,7 +568,6 @@ class WorkflowChainObservation:
         # walk follows, and the contract as the real closeout apply leaves it (`T109`).
         self.cleanup_pending_guidance: dict[str, Any] = {}
         self.contract_after_closeout: WorktreeContract | None = None
-        self.retry_provider_setup_state = ""
         self._walk()
 
     # -- the walk -----------------------------------------------------------------------------
@@ -800,7 +795,6 @@ class WorkflowChainObservation:
         self.terminal_cleanup = load_contract(self.world.contract).cleanup
 
         self._sibling_arrangement()
-        self._retry_provider_setup_arrangement()
         self._stale_base_arrangement()
         self._probe_operational_triples()
 
@@ -919,79 +913,6 @@ class WorkflowChainObservation:
                 continue
             self.operational_triples.append(
                 self._call_recommendation(f"hop {index} {hop.tool}", tool, hop.top_next_args)
-            )
-
-    def _retry_provider_setup_arrangement(self) -> None:
-        """The SECOND producer of the same recommendation: `_retry_provider_setup_result`.
-
-        `worktree_start(retry_provider_setup=True)` answers `blocked` with "poll worktree_status
-        instead of retrying" and its own operational triple. It is not a hop of the walk, so it is
-        driven here in the *same* disposable world against the sibling's still-live contract -- the
-        coordination root has to be the one the runtime is configured with (a second world's
-        contract path is refused as outside it: `contract_path must stay inside coordination_root`),
-        the producer's `setup_running` arm needs a contract that is not yet closed, and this leaf's
-        own contract is already terminal by the time the arrangements run. It happens **before** the
-        stale-base arrangement advances the source branch, because the producer's retry path is
-        reached only while the leaf's lineage is current.
-
-        The lifecycle is handed back first because `worktree_start` refuses any start while this
-        session's lifecycle is bound (`T90`: the only thing that blocks a start is the calling
-        session's own binding). Nothing after this arrangement needs an active lifecycle.
-        """
-
-        stale_contract = self.sibling_contract
-        assert stale_contract is not None
-        world = self.world
-
-        contract = load_contract(stale_contract)
-        progress = setup_progress_path(contract.worktree_group)
-        progress.parent.mkdir(parents=True, exist_ok=True)
-        now = datetime.now(UTC).isoformat()
-        progress.write_text(
-            json.dumps(
-                {
-                    "schema": "ar-provider-setup-progress/v1",
-                    "repoName": contract.repo_name,
-                    "taskName": contract.task_name,
-                    "worktreeGroup": contract.worktree_group.as_posix(),
-                    "state": "running",
-                    "startedAt": now,
-                    "updatedAt": now,
-                    "currentPhase": None,
-                    "completedPhases": [],
-                    "seedFallback": None,
-                }
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        try:
-            kind, payload = world.call(
-                "worktree_start",
-                {
-                    "repo_id": REPO,
-                    "task_name": SIBLING_MASTER,
-                    "worktree_name": SIBLING_WORKTREE,
-                    "leaf_id": LEAF_ID,
-                    "parent_task": SIBLING_MASTER,
-                    "workflow_kind": "light-task",
-                    "retry_provider_setup": True,
-                    "skip_provider_setup": True,
-                },
-            )
-        finally:
-            progress.unlink(missing_ok=True)
-        payload = payload or {}
-        self.retry_provider_setup_state = str(payload.get("state") or kind)
-        tool = payload.get("nextTool")
-        if isinstance(tool, str):
-            raw = payload.get("nextArgs")
-            self.operational_triples.append(
-                self._call_recommendation(
-                    "worktree_start retry-provider-setup",
-                    tool,
-                    dict(raw) if isinstance(raw, dict) else {},
-                )
             )
 
     # -- the populations a case asserts over ----------------------------------------------------

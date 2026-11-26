@@ -107,7 +107,6 @@ class PreviewFixture:
                     "coordinationRoot": self.coord.as_posix(),
                     "workspaceRoot": root.as_posix(),
                     "repositories": {REPO: {"path": self.code.as_posix()}},
-                    "providers": {},
                 }
             ),
             encoding="utf-8",
@@ -137,7 +136,6 @@ class PreviewFixture:
             "worktree_name": "fresh-preview-l1",
             "leaf_id": LEAF,
             "memory_mode": "external",
-            "skip_provider_setup": True,
             "dry_run": True,
         }
         if commanded:
@@ -213,7 +211,6 @@ class PreviewFixture:
             worktree_name="fresh-preview-l1",
             parent_task="sprint" if self.source == "super" else None,
             memory_mode="external",
-            skip_provider_setup=True,
             dry_run=True,
         )
         plan = build_start_contract(resolve_context(args), args)
@@ -588,7 +585,7 @@ def test_invalid_public_leaf_source_base_and_protected_ref_stay_refused_without_
                 )
                 assert payload["nextTool"] == "worktree_start"
                 assert payload["nextArgs"]["dry_run"] is dry_run
-                assert payload["nextArgs"]["skip_provider_setup"] is True
+                assert "skip_provider_setup" not in payload["nextArgs"]
                 field = "source_branch" if "source_branch" in arguments else "parent_task"
                 expected = f"ar/{MASTER}" if field == "source_branch" else "sprint"
                 assert payload["nextArgs"][field] == expected

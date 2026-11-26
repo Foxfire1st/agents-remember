@@ -21,7 +21,6 @@ from agents_remember.kernel.primitives.runtime_config import (
     load_config,
     load_paseo_runtime_settings,
 )
-from agents_remember.providers.settings import lifecycle_settings_from_config
 from test_worktree_support import init_repo
 
 
@@ -38,13 +37,8 @@ def settings_payload(root: Path) -> dict:
         "coordinationRoot": str(coordination_root),
         "workspaceRoot": str(workspace_root),
         "repositories": {"agents-remember": {}},
-        "providers": {
-            "codegraphcontext-code": {},
-            "grepai-memory": {},
-        },
         "timeoutCaps": {
             "toolSeconds": 30,
-            "providerSetupSeconds": 1800,
         },
         "benchmarksEnabled": True,
     }
@@ -229,11 +223,9 @@ class McpConfigTests(unittest.TestCase):
             config = load_config(path)
 
             self.assertEqual(config.allowed_repo_ids, ("agents-remember",))
-            self.assertEqual(
-                config.allowed_provider_ids,
-                ("codegraphcontext-code", "grepai-memory"),
-            )
-            self.assertEqual(config.timeout_caps["toolSeconds"], 30)
+            self.assertEqual(config.timeout_caps, {"toolSeconds": 30})
+            self.assertEqual(config.unused_settings_keys, ())
+            self.assertFalse(hasattr(config, "providers"))
             self.assertEqual(
                 config.transcript_root,
                 root / "ar-coordination" / "logs" / "mcp",
@@ -245,35 +237,38 @@ class McpConfigTests(unittest.TestCase):
             memory_root = config.repositories["agents-remember"].memory_root
             assert memory_root is not None
             self.assertEqual(memory_root.name, "ar-agents-remember")
-            self.assertEqual(config.providers["grepai-memory"].scope, "workspace")
-            self.assertEqual(config.providers["grepai-memory"].instance_id, "workspace")
+
+    def test_legacy_provider_settings_load_cleanly_and_report_unused_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / ".codex" / "mcp" / "settings.json"
+            payload = settings_payload(root)
+            payload["providers"] = {
+                "codegraphcontext-code": {},
+                "grepai-memory": {},
+            }
+            payload["providerDegradation"] = {"enabled": True, "threshold": 3}
+            payload["timeoutCaps"] = {"providerSetupSeconds": 1800, "toolSeconds": 30}
+            write_json(path, payload)
+
+            config = load_config(path)
+
+            self.assertEqual(config.timeout_caps, {"toolSeconds": 30})
             self.assertEqual(
-                config.providers["grepai-memory"].log_root,
-                root
-                / "ar-coordination"
-                / "logs"
-                / "providers"
-                / "grepai"
-                / config.providers["grepai-memory"].instance_id,
-            )
-            self.assertEqual(
-                config.providers["codegraphcontext-code"].runtime_root,
-                root
-                / "ar-coordination"
-                / "providers"
-                / "runners"
-                / "codegraphcontext"
-                / config.providers["codegraphcontext-code"].instance_id,
+                config.unused_settings_keys,
+                (
+                    "providers.codegraphcontext-code",
+                    "providers.grepai-memory",
+                    "providerDegradation.enabled",
+                    "providerDegradation.threshold",
+                    "timeoutCaps.providerSetupSeconds",
+                ),
             )
 
-            lifecycle_settings = lifecycle_settings_from_config()
-            providers = lifecycle_settings["contextProviders"]["providers"]
-            # MIK-R112 F02: generated lifecycle settings emit no retired
-            # provider blocks, however the legacy authority above still parses
-            # both keys (config.providers assertions stand). Readers treat both
-            # as never-enabled, so no product install/start/watch can follow.
-            self.assertEqual(providers, {})
-            self.assertFalse(lifecycle_settings["contextProviders"]["enabled"])
+            empty_payload = settings_payload(root)
+            empty_payload["providers"] = {}
+            write_json(path, empty_payload)
+            self.assertEqual(load_config(path).unused_settings_keys, ("providers",))
 
     def test_a_retired_harness_skill_root_is_tolerated_and_unread(self) -> None:
         """MIK-R196 rule 7: the installed-copy root left the configuration contract.

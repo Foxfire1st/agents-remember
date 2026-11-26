@@ -19,7 +19,7 @@ class StrictResponseModel(BaseModel):
 
 
 class FlexibleResponseModel(BaseModel):
-    """Base class for intentionally provider-native diagnostic payloads."""
+    """Base class for intentionally flexible diagnostic payloads."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -105,7 +105,7 @@ class FlexibleResponseEnvelope(FlexibleResponseModel):
     # Same answer-carried lifecycle next move as the strict envelope (MIK-R108).
     next: dict[str, Any] | None = None
     # Same tool-log detail location and writer failure as the strict envelope: a
-    # tolerated-drift surface tolerates the PROVIDER's fields, not ours.
+    # tolerated-drift surface tolerates upstream producer fields, not ours.
     log: str | None = None
     logError: str | None = None
     buildCurrentness: BuildCurrentnessPayload | None = None

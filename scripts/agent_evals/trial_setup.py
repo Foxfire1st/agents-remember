@@ -273,7 +273,6 @@ def provision_batch(
         "workspaceRoot": str(control / "projects"),
         "transcriptRoot": str(control / "tool-logs"),
         "repositories": {},
-        "providers": {},
         "dashboard": {"autoStart": False, "port": _free_port()},
         "paseoRuntime": {
             "installPrefix": str(control / "paseo-prefix"),

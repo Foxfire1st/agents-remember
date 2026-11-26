@@ -53,8 +53,7 @@ def harness_settings_payload(root: Path) -> dict:
         "coordinationRoot": str(root / "ar-coordination"),
         "workspaceRoot": str(root / "workspace"),
         "repositories": {"repo-a": {}},
-        "providers": {},
-        "timeoutCaps": {"toolSeconds": 30, "providerSetupSeconds": 60},
+        "timeoutCaps": {"toolSeconds": 30},
         "benchmarksEnabled": False,
     }
 

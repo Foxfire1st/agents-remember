@@ -32,7 +32,6 @@ def _result(
     """One terminal result whose only non-empty collection is the drift snapshot."""
 
     return TerminalResult(
-        providers={"state": "torn-down"},
         worktrees={},
         branches={},
         directories={},

@@ -81,10 +81,6 @@ def _admission_error(info: Any, expect: dict[str, Any]) -> str | None:
             return f"the tool server reports {key}={reported!r}, expected {expect[key]!r}"
     if info.get("allowedRepoIds") != expect["allowedRepoIds"]:
         return f"the tool server admits repositories {info.get('allowedRepoIds')!r}"
-    # The providers the settings file still configures; ``server_info`` names them under the one
-    # field it sends for them, and a sandbox configures none.
-    if info.get("unusedProviderKeys"):
-        return f"the tool server has providers configured: {info.get('unusedProviderKeys')!r}"
     expected_package = expect.get("packageRoot")
     actual_package = (info.get("servingBuild") or {}).get("packageRoot")
     if expected_package is not None and actual_package != expected_package:

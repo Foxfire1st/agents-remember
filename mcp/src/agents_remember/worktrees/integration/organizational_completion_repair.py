@@ -8,7 +8,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
+from agents_remember.models.lifecycles.door import (
+    CloseoutDoorGeneration,
+    DoorPublicationEvidence,
+)
 from agents_remember.models.lifecycles.operation import (
     IntegrationOperationAuthority,
     LifecycleOperationRecord,
@@ -18,6 +21,8 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees.integration.closeout.door import (
     live_closeout_door,
+    prepare_door_publication,
+    publish_door_intent,
     successor_waiting_door,
 )
 from agents_remember.worktrees.integration.integration_branch_authority import integration_targets
@@ -93,7 +98,13 @@ def _publication_failure(value: object) -> dict[str, object]:
 class OrganizationalRepairState:
     """Pure exact accepted/reset/third contract classification."""
 
-    state: Literal["not-applicable", "accepted", "reset", "developer-decision"]
+    state: Literal[
+        "not-applicable",
+        "accepted",
+        "reset",
+        "reset-door-pending",
+        "developer-decision",
+    ]
     expected: dict[str, object]
     observed: dict[str, object]
 
@@ -127,6 +138,7 @@ def _classify_organizational_repair_evidence(
     contract: WorktreeContract,
     evidence: OrganizationalCompletionRepairEvidence,
 ) -> OrganizationalRepairState:
+    door_disposition = _live_door_disposition(contract)
     expected: dict[str, object] = {
         "acceptedContractSha256": evidence.acceptedContractSha256,
         "resetContractSha256": evidence.resetContractSha256,
@@ -135,13 +147,13 @@ def _classify_organizational_repair_evidence(
         "contractSha256": _contract_sha256(contract),
         "closeoutStatus": contract.closeout_status,
         "integrationStatus": contract.integration_status,
-        "doorDisposition": _live_door_disposition(contract),
+        "doorDisposition": door_disposition,
     }
     live_sha = observed["contractSha256"]
     if live_sha == evidence.acceptedContractSha256:
-        state: Literal["accepted", "reset", "developer-decision"] = "accepted"
+        state: Literal["accepted", "reset", "reset-door-pending", "developer-decision"] = "accepted"
     elif live_sha == evidence.resetContractSha256:
-        state = "reset"
+        state = "reset-door-pending" if door_disposition == "claimed" else "reset"
     else:
         state = "developer-decision"
     return OrganizationalRepairState(state, expected, observed)
@@ -226,6 +238,9 @@ def prepare_organizational_completion_repair(
         )
     if classification.state == "reset":
         return contract
+    if classification.state == "reset-door-pending":
+        _complete_pending_repair_door(contract=contract, evidence=evidence, record=record)
+        return load_contract(contract.contract_path)
     authority = _require_operation_identity(contract, record)
     expected_commits = (
         authority.codeCandidateCommit,
@@ -358,9 +373,90 @@ def _publish_reset(
     if _reset_already_published(classification, evidence=evidence, observed=current):
         return
     _require_sources_unmoved(current)
+    if classification.state == "reset-door-pending":
+        _publish_repair_door(current, evidence=evidence, record=record)
+        return
+    door = _successor_repair_door(live_closeout_door(current), record)
+    door_intent = prepare_door_publication(current, door) if door is not None else None
     _write_reset_contract(contract, reset, evidence)
     observed = load_contract(contract.contract_path)
     _require_published_reset(observed, evidence)
+    if door_intent is not None:
+        _write_repair_door(observed, door_intent, evidence=evidence)
+
+
+def _complete_pending_repair_door(
+    *,
+    contract: WorktreeContract,
+    evidence: OrganizationalCompletionRepairEvidence,
+    record: LifecycleOperationRecord,
+) -> None:
+    current = load_contract(contract.contract_path)
+    require_unchanged_integration_refs(record)
+    classification = _classify_organizational_repair_evidence(current, evidence)
+    if _reset_already_published(classification, evidence=evidence, observed=current):
+        return
+    if classification.state != "reset-door-pending":
+        raise OrganizationalRepairPublicationError(
+            "organizational-completion-contract-conflict",
+            "the contract is neither the accepted failed generation nor its exact reset",
+            evidence=evidence,
+            observed=current,
+            next_action="developer-decision",
+        )
+    _require_sources_unmoved(current)
+    _publish_repair_door(current, evidence=evidence, record=record)
+
+
+def _publish_repair_door(
+    contract: WorktreeContract,
+    *,
+    evidence: OrganizationalCompletionRepairEvidence,
+    record: LifecycleOperationRecord,
+) -> None:
+    door = _successor_repair_door(live_closeout_door(contract), record)
+    if door is None:
+        return
+    door_intent = prepare_door_publication(contract, door)
+    _write_repair_door(contract, door_intent, evidence=evidence)
+
+
+def _write_repair_door(
+    observed: WorktreeContract,
+    door_intent: DoorPublicationEvidence,
+    *,
+    evidence: OrganizationalCompletionRepairEvidence,
+) -> None:
+    try:
+        publish_door_intent(observed.contract_path, door_intent)
+    except (OSError, RuntimeError) as exc:
+        reloaded = load_contract(observed.contract_path)
+        if live_closeout_door(reloaded) == door_intent.generation:
+            return
+        raise OrganizationalRepairPublicationError(
+            "organizational-completion-door-publication-interrupted",
+            "the reset contract was written but the successor closeout door could not be "
+            "published; retry to publish the waiting door",
+            evidence=evidence,
+            observed=reloaded,
+            next_action="cancel",
+            publication_failure=public_failure_evidence(
+                stage="organizational-reset-door-publication",
+                side="door",
+                name=observed.contract_path.name,
+                error_type=type(exc).__name__,
+                observed={"doorDisposition": _live_door_disposition(reloaded)},
+            ),
+        ) from exc
+    reloaded = load_contract(observed.contract_path)
+    if live_closeout_door(reloaded) != door_intent.generation:
+        raise OrganizationalRepairPublicationError(
+            "organizational-completion-door-conflict",
+            "the published successor closeout door did not match the intended waiting generation",
+            evidence=evidence,
+            observed=reloaded,
+            next_action="developer-decision",
+        )
 
 
 def _reset_already_published(
@@ -621,7 +717,7 @@ def _quality_repair_contract(
     repair_record: LifecycleOperationRecord,
 ) -> WorktreeContract:
     _require_reopenable_contract(contract, expected_commits)
-    door = _successor_repair_door(live_closeout_door(contract), repair_record)
+    _successor_repair_door(live_closeout_door(contract), repair_record)
     return amend_contract(
         replace(
             contract,
@@ -633,7 +729,6 @@ def _quality_repair_contract(
             integrated_code_commit="",
             integrated_memory_content_commit="",
             memory_state="",
-            closeout_door=door,
         ),
         ContractCells(
             human_review_status="pending-review",

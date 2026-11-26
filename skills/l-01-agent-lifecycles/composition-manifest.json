@@ -141,7 +141,7 @@
     },
     "lifecycle-frame": {
       "source": "core/lifecycle-frame.md",
-      "purpose": "The minimal lifecycle frame: task worktree records, the landing chain's lifecycle, the trust checkpoint, provider-degradation handling."
+      "purpose": "The minimal lifecycle frame: task worktree records, the landing chain's lifecycle, the trust checkpoint."
     },
     "loop": {
       "source": "core/loop.md",
@@ -499,7 +499,7 @@
       "skills": [
         "l-01-agent-lifecycles"
       ],
-      "seat": "Projects investigator for one scoped concern, taskless or selected on a sprint/master; reports before authorized provider/system remediation.",
+      "seat": "Projects investigator for one scoped concern, taskless or selected on a sprint/master; reports before authorized system remediation.",
       "core": [
         "authority",
         "invariants",

@@ -51,18 +51,16 @@ class TaskBases:
 
 @dataclass(frozen=True)
 class StartExecution:
-    """How a task start and its background provider setup execute."""
+    """How a task start executes."""
 
     dry_run: bool = False
-    skip_provider_setup: bool = False
-    retry_provider_setup: bool = False
 
 
 DEFAULT_TASK_BASES = TaskBases()
 """Repo-default branches, repo-default memory topology, no recovery choice made."""
 
 DEFAULT_START_EXECUTION = StartExecution()
-"""A real start with background provider setup launched normally."""
+"""A real start."""
 
 
 @dataclass(frozen=True)

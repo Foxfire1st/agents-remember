@@ -300,7 +300,6 @@ def _start_args(fixture: SimpleNamespace, *, dry_run: bool = False) -> WorktreeA
         worktree_name=LEAF_SLUG,
         leaf_id=LEAF_ID,
         parent_task=MASTER_NAME,
-        skip_provider_setup=True,
         dry_run=dry_run,
     )
 

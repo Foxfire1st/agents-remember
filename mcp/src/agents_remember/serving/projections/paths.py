@@ -20,8 +20,7 @@ if TYPE_CHECKING:
 
 # The drift snapshot (slice 3b, b1): the memory_quality drift run persists what it
 # already computes as a durable JSON snapshot here, and the reducer reads it cheaply
-# with a staleness age -- the same pattern the provider ``current.json`` snapshot uses
-# (no git in the read edge). The schema + dir live here, the one leaf both the
+# with a staleness age (no git in the read edge). The schema + dir live here, the one leaf both the
 # producer and the reader import, so the on-disk contract never drifts between them.
 DRIFT_SNAPSHOT_SCHEMA = "ar-drift-snapshot/v1"
 

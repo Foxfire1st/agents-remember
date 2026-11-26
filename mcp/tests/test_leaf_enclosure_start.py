@@ -92,7 +92,7 @@ class LeafEnclosureStartCommandTests(unittest.TestCase):
         def start_tool(config: Any, identity: TaskIdentity, **options: Any) -> dict[str, Any]:
             order.append("worktree start")
             self.assertEqual((config, identity), (self.loaded, IDENTITY))
-            self.assertEqual(options, {"execution": StartExecution(skip_provider_setup=True)})
+            self.assertEqual(options, {"execution": StartExecution()})
             print("a line the worktree start prints")
             if isinstance(start, BaseException):
                 raise start

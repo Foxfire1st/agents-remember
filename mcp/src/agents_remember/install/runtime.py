@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import filecmp
-import json
 import os
 import shlex
 import shutil
@@ -33,12 +32,6 @@ from agents_remember.install.experiment import (
     source_identity,
 )
 from agents_remember.install.mcp_settings import copy_mcp_settings
-from agents_remember.install.provider_watchers import (
-    ProviderWatcherRebind,
-    ProviderWatcherRebindReport,
-    provider_watcher_lifecycle_ok,
-    stop_provider_watchers_before_refresh,
-)
 from agents_remember.install.removed_stores import removed_part_stores, removed_part_stores_report
 from agents_remember.kernel.agentic_settings import (
     AgenticSettingsError,
@@ -47,37 +40,16 @@ from agents_remember.kernel.agentic_settings import (
     user_agentic_settings_path,
 )
 from agents_remember.kernel.primitives.gate_vocab import STORED_GATE_WAY_OUT
-from agents_remember.kernel.primitives.runtime_config import (
-    DEFAULT_PROVIDER_SETUP_SECONDS,
-    McpRuntimeConfig,
-)
-from agents_remember.providers.settings import lifecycle_settings_from_config
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
 IGNORED_COPY_NAMES = {"__pycache__"}
 IGNORED_COPY_SUFFIXES = {".pyc", ".pyo"}
 BENCHMARKS_GITIGNORE_ENTRY = "benchmarks/"
 BENCHMARK_SOURCE_IGNORE_PATHS = {Path("workspaces"), Path("user-runs")}
 MAX_REMOVE_ATTEMPTS = 6
-PROVIDER_DEPENDENCY_PATHS = {
-    Path("runners"),
-}
-PROVIDER_DATA_PATHS = {
-    Path("data"),
-}
-PROVIDER_USER_DIRS = (
+RUNTIME_LOG_DIRS = (
     "logs",
     "logs/mcp",
-    "logs/providers",
-    "logs/providers/codegraphcontext",
-    "logs/providers/grepai",
-    "logs/providers/setup",
-    "logs/providers/status",
-    "providers/data",
-    "providers/data/codegraphcontext",
-    "providers/data/grepai",
-    "providers/runners",
-    "providers/runners/codegraphcontext",
-    "providers/runners/grepai",
 )
 
 
@@ -100,28 +72,11 @@ class RuntimeTreeSync:
 
 
 @dataclass(frozen=True)
-class ProviderDependencyInstall:
-    """The provider-dependency step of a runtime install.
-
-    Whether the step runs at all, the live provider settings it installs
-    against, the budget each provider install gets, and whether it may reuse
-    caches. The watcher rebind is derived from the same object because it is
-    the same step's stop/start cycle.
-    """
-
-    settings: dict[str, Any]
-    timeout: int
-    enabled: bool = True
-    no_cache: bool = False
-
-
-@dataclass(frozen=True)
 class RuntimeInstallRequest:
     """What one runtime install is asked to do.
 
-    ``provider_deps_timeout`` and ``source_root`` stay unset for MCP callers:
-    the timeout then falls back to the config's provider setup cap and the
-    source to the packaged runtime tree.
+    ``source_root`` stays unset for MCP callers so the source defaults to the
+    packaged runtime tree.
 
     ``experiment`` is this one run's experiment selection, and it is the *only*
     place an experiment is selected. It is not persisted, not read from a
@@ -133,9 +88,6 @@ class RuntimeInstallRequest:
 
     dry_run: bool = False
     include_benchmarks: bool = False
-    install_provider_deps: bool = True
-    no_cache: bool = False
-    provider_deps_timeout: int | None = None
     source_root: Path | None = None
     experiment: str | None = None
     reconcile_shared_held_stores: bool = False
@@ -173,11 +125,7 @@ class InstallSummary:
     unchanged_files: int = 0
     replaced_links: int = 0
     removed_paths: int = 0
-    dependency_runs: int = 0
-    provider_watcher_rebind: ProviderWatcherRebindReport | None = None
     experiment: ExperimentInstall | None = None
-    leftover_provider_folders: list[dict[str, Any]] = field(default_factory=list)
-    unused_provider_keys: list[str] = field(default_factory=list)
     removed_part_stores: list[dict[str, Any]] = field(default_factory=list)
 
     def report(self) -> str:
@@ -186,17 +134,8 @@ class InstallSummary:
             f"copied_files={self.copied_files} "
             f"unchanged_files={self.unchanged_files} "
             f"replaced_links={self.replaced_links} "
-            f"removed_paths={self.removed_paths} "
-            f"dependency_runs={self.dependency_runs}"
+            f"removed_paths={self.removed_paths}"
         )
-        if self.leftover_provider_folders:
-            total = sum(item["bytes"] for item in self.leftover_provider_folders)
-            names = ", ".join(
-                f"{item['path']} ({item['bytes']} bytes)" for item in self.leftover_provider_folders
-            )
-            base += f" leftover_provider_folders=[{names}] leftover_provider_bytes={total}"
-        if self.unused_provider_keys:
-            base += f" unused_provider_keys=[{', '.join(self.unused_provider_keys)}]"
         stores = [item for item in self.removed_part_stores if not item["gateLog"]]
         gate_logs = [item for item in self.removed_part_stores if item["gateLog"]]
         if stores:
@@ -206,36 +145,6 @@ class InstallSummary:
             names = ", ".join(f"{item['path']} ({item['bytes']} bytes)" for item in gate_logs)
             base += f" stored_gate_logs=[{names}] ({STORED_GATE_WAY_OUT})"
         return base
-
-    def provider_watcher_report(self) -> dict[str, Any] | None:
-        if self.provider_watcher_rebind is None:
-            return None
-        return self.provider_watcher_rebind.payload()
-
-
-def _tree_bytes(root: Path) -> int:
-    total = 0
-    for dirpath, _dirnames, filenames in os.walk(root):
-        for name in filenames:
-            try:
-                total += (Path(dirpath) / name).stat().st_size
-            except OSError:
-                continue
-    return total
-
-
-def leftover_provider_folders(coordination_root: Path) -> list[dict[str, Any]]:
-    """Provider runtime folders the install preserves, with sizes (MIK-R112 rule 3).
-
-    The install never deletes these; only the explicit ``providers-remove``
-    command does. Reporting them here is the leftover notice.
-    """
-    found: list[dict[str, Any]] = []
-    for dirname in ("runners", "data", "logs", "_venvs", "_bin"):
-        path = coordination_root / "providers" / dirname
-        if path.is_dir() and not path.is_symlink():
-            found.append({"path": path.as_posix(), "bytes": _tree_bytes(path)})
-    return found
 
 
 def ensure_dir(path: Path, summary: InstallSummary, dry_run: bool) -> None:
@@ -430,7 +339,7 @@ def _remove_with_retry(path: Path, target: Path) -> None:
         except PermissionError as error:
             if attempt == MAX_REMOVE_ATTEMPTS - 1:
                 raise RuntimeError(
-                    f"cannot remove {path}; a provider process, editor, "
+                    f"cannot remove {path}; another process, editor, "
                     "or file explorer may still be using it"
                 ) from error
             time.sleep(0.5)
@@ -519,9 +428,6 @@ def ensure_gitignore_entry(path: Path, entry: str, summary: InstallSummary, dry_
 
 def require_runtime_tree(runtime_root: Path) -> None:
     required = [
-        runtime_root / "providers",
-        runtime_root / "providers" / "requirements" / "codegraphcontext.txt",
-        runtime_root / "providers" / "requirements" / "grepai.txt",
         runtime_root / "skills",
     ]
     missing = [path for path in required if not path.exists()]
@@ -567,26 +473,6 @@ def install_benchmarks(
     )
     prune_tree(sync, summary, dry_run)
     copy_tree(sync, summary, dry_run)
-
-
-def enabled_provider_names(settings: dict[str, Any]) -> list[str]:
-    """The enabled provider key names, reported once as unused (MIK-R112).
-
-    Enabled keys no longer drive installation; the install result carries
-    them here so an older installation's keys are visible exactly once
-    instead of acting. Legacy settings still parse.
-    """
-    context_providers = settings.get("contextProviders")
-    if not isinstance(context_providers, dict) or context_providers.get("enabled") is not True:
-        return []
-    providers = context_providers.get("providers")
-    if not isinstance(providers, dict):
-        return []
-    return sorted(
-        provider_id
-        for provider_id, provider in providers.items()
-        if isinstance(provider, dict) and provider.get("enabled") is True
-    )
 
 
 def resolve_experiment_install(
@@ -636,7 +522,7 @@ def resolve_experiment_install(
 
 @dataclass(frozen=True)
 class RuntimeInstallScope:
-    """Everything one install run needs, so both entry points stay five-argument calls.
+    """Everything one install run needs, so both entry points stay small calls.
 
     ``experiment`` is what separates the two: absent is the unmodified installation,
     present is the experimental one. Nothing else in the scope differs, so the two
@@ -646,7 +532,6 @@ class RuntimeInstallScope:
     source_root: Path
     coordination_root: Path
     dry_run: bool
-    provider_deps: ProviderDependencyInstall
     include_benchmarks: bool = False
     experiment: ExperimentSelection | None = None
 
@@ -656,7 +541,6 @@ def install_runtime(
     coordination_root: Path,
     dry_run: bool,
     *,
-    provider_deps: ProviderDependencyInstall,
     include_benchmarks: bool = False,
 ) -> InstallSummary:
     """The unmodified installation. No experiment is selected, so none is consulted."""
@@ -666,7 +550,6 @@ def install_runtime(
             source_root=source_root,
             coordination_root=coordination_root,
             dry_run=dry_run,
-            provider_deps=provider_deps,
             include_benchmarks=include_benchmarks,
         )
     )
@@ -706,37 +589,13 @@ def _capsule_cutover(
 
 def _install_assets(
     scope: RuntimeInstallScope,
-    runtime_root: Path,
     summary: InstallSummary,
 ) -> None:
-    """Write provider assets, retire startup files, and prepare user dirs and extras.
-
-    Split out of :func:`_install_runtime` so the refusal gate and the watcher
-    recovery each stay readable; the two are the parts whose order matters.
-    """
+    """Record retired stores, retire startup files, and prepare user dirs and extras."""
 
     source_root = scope.source_root
     coordination_root = scope.coordination_root
     dry_run = scope.dry_run
-    install_provider_deps = scope.provider_deps.enabled
-    # Provider runtime scaffolding is disposable during a full reinstall. A
-    # dependency-skipped copy preserves live provider runner state so
-    # script/docs-only updates do not interrupt Docker-owned watchers. Host
-    # provider binaries and venvs are not managed runtime contracts.
-    # Durable provider data and logs are user-owned coordinator state and must
-    # not be removed by either install mode.
-    providers_sync = RuntimeTreeSync(
-        source_root=runtime_root / "providers",
-        destination_root=coordination_root / "providers",
-        preserve=frozenset(
-            PROVIDER_DATA_PATHS
-            if install_provider_deps
-            else PROVIDER_DEPENDENCY_PATHS | PROVIDER_DATA_PATHS
-        ),
-    )
-    prune_tree(providers_sync, summary, dry_run)
-    copy_tree(providers_sync, summary, dry_run)
-    summary.leftover_provider_folders = leftover_provider_folders(coordination_root)
     summary.removed_part_stores = removed_part_stores(coordination_root)
 
     _capsule_cutover(coordination_root, summary, dry_run)
@@ -747,7 +606,7 @@ def _install_assets(
         "worktrees",
         "notes",
         "temp",
-        *PROVIDER_USER_DIRS,
+        *RUNTIME_LOG_DIRS,
     ):
         ensure_dir(coordination_root / user_owned, summary, dry_run)
 
@@ -755,11 +614,6 @@ def _install_assets(
 
     if scope.include_benchmarks:
         install_benchmarks(source_root, coordination_root, summary, dry_run)
-
-    # MIK-R112 removed the provider dependency install: enabled provider keys
-    # no longer drive installation. They are reported once as unused by the
-    # install result (see InstallSummary.unused_provider_keys); the legacy
-    # settings still parse so older installations keep loading.
 
 
 def _install_runtime(scope: RuntimeInstallScope) -> InstallSummary:
@@ -782,7 +636,6 @@ def _install_runtime(scope: RuntimeInstallScope) -> InstallSummary:
             "selected mode is preserved."
         )
 
-    provider_settings = scope.provider_deps.settings
     summary = InstallSummary()
     if record is not None:
         summary.experiment = ExperimentInstall(
@@ -808,29 +661,8 @@ def _install_runtime(scope: RuntimeInstallScope) -> InstallSummary:
     prune_tree(docs_sync, summary, dry_run)
     copy_tree(docs_sync, summary, dry_run)
     remove_path(coordination_root / "scripts", summary, dry_run)
-    rebind: ProviderWatcherRebind | None = None
 
-    # MIK-R112: the required old-watcher stop is attempted independently of the
-    # dependency-install knobs. Enabled provider keys are reported once as
-    # unused; they drive nothing. A failed stop is recorded in the rebind
-    # report and the install continues.
-    rebind = ProviderWatcherRebind(
-        coordination_root=coordination_root,
-        settings=provider_settings,
-        dry_run=dry_run,
-        timeout=scope.provider_deps.timeout,
-    )
-    summary.provider_watcher_rebind = rebind.report
-    summary.unused_provider_keys = enabled_provider_names(provider_settings)
-    stop_result = stop_provider_watchers_before_refresh(rebind)
-    if not provider_watcher_lifecycle_ok(stop_result):
-        summary.provider_watcher_rebind.messages.append(
-            "Provider watcher stop failed before runtime provider refresh; "
-            "the install continued without watcher recovery. Failed stop: "
-            f"{json.dumps(stop_result)}"
-        )
-
-    _install_assets(scope, runtime_root, summary)
+    _install_assets(scope, summary)
 
     return summary
 
@@ -846,17 +678,6 @@ def install_runtime_from_config(
     # ``selectionSource``. The selection is never read from a settings file and never written back
     # to one, so an install carries no global switch.
     selection = resolve_experiment_selection(requested=request.experiment)
-    # Containment R1 (260707-HFX-L1): the watcher rebind's stop→start cycle is a
-    # launch path — derive its settings from the LIVE on-disk authority, never the
-    # boot snapshot. An empty (or unreadable: fail-closed) live map disables the
-    # rebind while the runtime install itself proceeds.
-    provider_deps = ProviderDependencyInstall(
-        settings=lifecycle_settings_from_config(),
-        timeout=request.provider_deps_timeout
-        or config.timeout_caps.get("providerSetupSeconds", DEFAULT_PROVIDER_SETUP_SECONDS),
-        enabled=request.install_provider_deps,
-        no_cache=request.no_cache,
-    )
     with (
         packaged_source_root()
         if request.source_root is None
@@ -866,7 +687,6 @@ def install_runtime_from_config(
             source_root=source_root,
             coordination_root=config.coordination_root,
             dry_run=dry_run,
-            provider_deps=provider_deps,
             include_benchmarks=include_benchmarks,
             experiment=selection,
         )
@@ -879,7 +699,6 @@ def install_runtime_from_config(
                 scope.source_root,
                 scope.coordination_root,
                 scope.dry_run,
-                provider_deps=scope.provider_deps,
                 include_benchmarks=scope.include_benchmarks,
             )
         )
@@ -887,23 +706,19 @@ def install_runtime_from_config(
     ensure_gitignore_entry(
         config.workspace_root / ".gitignore", ".agents-remember/role-executions/", summary, dry_run
     )
-    ok = summary.provider_watcher_rebind is None or summary.provider_watcher_rebind.ok is not False
     payload = {
-        "ok": ok,
+        "ok": True,
         "operation": "runtime_install",
         "mcpSettings": copy_mcp_settings(config.workspace_root, dry_run=dry_run),
         "dryRun": dry_run,
         "coordinationRoot": config.coordination_root.as_posix(),
         "includeBenchmarks": include_benchmarks,
-        "installProviderDeps": request.install_provider_deps,
         "summary": {
             "createdDirs": summary.created_dirs,
             "copiedFiles": summary.copied_files,
             "unchangedFiles": summary.unchanged_files,
             "replacedLinks": summary.replaced_links,
             "removedPaths": summary.removed_paths,
-            "dependencyRuns": summary.dependency_runs,
-            "unusedProviderKeys": summary.unused_provider_keys,
         },
     }
     # MIK-R113 rule 5: the install names the stores of removed parts it found, once, and
@@ -919,12 +734,4 @@ def install_runtime_from_config(
             "delivery": delivery.payload(),
             "record": None,
         }
-    provider_watcher_report = summary.provider_watcher_report()
-    if provider_watcher_report is not None:
-        payload["providerWatcherRebind"] = provider_watcher_report
-    if summary.provider_watcher_rebind is not None:
-        if summary.provider_watcher_rebind.recovery_actions:
-            payload["recoveryActions"] = summary.provider_watcher_rebind.recovery_actions
-        if summary.provider_watcher_rebind.messages:
-            payload["messages"] = summary.provider_watcher_rebind.messages
     return payload

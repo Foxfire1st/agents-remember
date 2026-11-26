@@ -238,7 +238,7 @@ export const phaseChip = cva({
     borderWidth: "1px",
     borderStyle: "solid",
     letterSpacing: "0.03em",
-    whiteSpace: "nowrap", // never wrap the phase ("provider-setup") in the stack-item head row
+    whiteSpace: "nowrap", // never wrap the phase ("worktree-started") in the stack-item head row
     flexShrink: "0",
   },
   variants: {

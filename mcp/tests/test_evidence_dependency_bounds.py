@@ -15,7 +15,6 @@ from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
-from unittest import mock
 
 import pytest
 from agents_remember.application.knowledge_gate import KnowledgeGate
@@ -81,11 +80,8 @@ DIGEST = "ab" * 32
 
 @pytest.fixture
 def ports() -> Any:
-    providers = mock.Mock()
-    providers.setup_status.return_value = {}
     bind_worktree_services(
         WorktreeServices(
-            provider_lifecycle=providers,
             memory_quality=cast(Any, None),
             citation_guard=cast(Any, None),
             knowledge_validation=GitKnowledgeValidation(base_converter=GitBaseConverter()),

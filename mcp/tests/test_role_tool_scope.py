@@ -368,7 +368,6 @@ def _settings_world(root: Path) -> Path:
                         "memoryRoot": str(root / "coordination" / "memory"),
                     }
                 },
-                "providers": {},
             }
         ),
         encoding="utf-8",

@@ -203,13 +203,9 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
 
 def _register_reclamation_command_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
-    def worktree_cleanup(
-        *, contract_path: str, dry_run: bool = False, teardown_providers: bool = True
-    ) -> dict[str, Any]:
-        """After integration, archive lifecycle evidence and remove worktrees, merged branches, reports, and enclosure. States: cleanup-completed, already-clean, would-cleanup, blocked, provider-setup-running. Docs: docs/reference/mcp-tools.md."""
-        return tools.worktree_cleanup_payload(
-            config, contract_path, dry_run=dry_run, teardown_providers=teardown_providers
-        )
+    def worktree_cleanup(*, contract_path: str, dry_run: bool = False) -> dict[str, Any]:
+        """After integration, archive lifecycle evidence and remove worktrees, merged branches, reports, and enclosure. States: cleanup-completed, already-clean, would-cleanup, blocked. Docs: docs/reference/mcp-tools.md."""
+        return tools.worktree_cleanup_payload(config, contract_path, dry_run=dry_run)
 
     @server.tool()
     def worktree_abandon(

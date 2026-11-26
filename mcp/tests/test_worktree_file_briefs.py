@@ -37,7 +37,7 @@ def _start(world: PreviewFixture, *, dry_run: bool) -> dict[str, object]:
             repo_id=REPO, task_name=MASTER, worktree_name="fresh-preview-l1", leaf_id=LEAF
         ),
         bases=TaskBases(memory_mode="external"),
-        execution=StartExecution(dry_run=dry_run, skip_provider_setup=True),
+        execution=StartExecution(dry_run=dry_run),
     )
 
 

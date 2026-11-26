@@ -83,12 +83,6 @@ const SANCTIONED_WIRE_SITES: Record<string, SanctionedSite> = {
     reason:
       'the sanctioned narrowing: the PARAMETER type did the structural check, and this only puts back the literal types `resolveJsonModule` erased',
   },
-  // ── the retirement probes ──────────────────────────────────────────────────
-  'src/panels/detail-panel/legacyProviderSnapshot.test.tsx :: WorkspaceProjection + providers': {
-    count: 1,
-    reason:
-      'the deliberate inverse: a payload the CURRENT contract cannot express (providers[], setupProgress, setupSummaries) is handed to the store to prove nothing reads it — the assertion is that no provider surface survives, so the impossible shape IS the fixture',
-  },
   // ── compiler suppressions ──────────────────────────────────────────────────
   'src/test/contract.test.ts :: @ts-expect-error': {
     count: 1,

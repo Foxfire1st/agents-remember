@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from agents_remember.errors import CuratorCoherenceError
 from agents_remember.kernel.git_command import run_git
@@ -17,7 +17,6 @@ from agents_remember.worktrees.integration.closeout.curator_coherence import (
 )
 from agents_remember.worktrees.modules.git import branch_commit, is_ancestor, worktree_dirty
 from agents_remember.worktrees.modules.landing import landing_refs
-from agents_remember.worktrees.services import worktree_services
 from agents_remember.worktrees.source_lineage import source_lineage_for_contract
 from agents_remember.worktrees.task_document_copies import stale_copy_line
 from agents_remember.worktrees.worktree_contract import (
@@ -41,7 +40,6 @@ from agents_remember.worktrees.worktree_contract import (
 RecoveryOperation = Literal[
     "request_commit_approval",
     "choose_memory_recovery",
-    "choose_provider_setup_recovery",
     "choose_stale_base_recovery",
     "choose_memory_sync_recovery",
     "sync_source_lineage",
@@ -120,7 +118,6 @@ class WorktreeStatusFacts(TypedDict):
     # reader substituted for (`worktree_contract._vocabulary_cell`). Absent is the normal
     # shape -- 213 of 213 contracts on disk -- so the key is the exception report, not a flag.
     unknown_contract_cells: NotRequired[list[str]]
-    providers: NotRequired[dict[str, Any]]
     freshness: NotRequired[dict[str, object]]
     source_lineage: NotRequired[dict[str, object]]
     landing: NotRequired[list[dict[str, object]]]
@@ -265,7 +262,7 @@ def _reclaimed_phase(contract: WorktreeContract) -> LifecycleGuidance | None:
     if contract.cleanup == "abandoned":
         return {
             "phase": "abandoned",
-            "summary": "Worktree abandoned — provider stack reclaimed; no further action.",
+            "summary": "Worktree abandoned — worktrees reclaimed; no further action.",
             **next_guidance("done"),
         }
     return None
@@ -514,9 +511,6 @@ def _status_payload_with_landing(
     copies_line = stale_copy_line(contract.coordination_root, contract.worktree_group)
     if copies_line is not None:
         facts["task_document_copies"] = copies_line
-    providers = worktree_services().provider_lifecycle.setup_status(contract)
-    if providers is not None:
-        facts["providers"] = providers
     freshness = base_freshness(contract)
     if freshness is not None:
         facts["freshness"] = freshness

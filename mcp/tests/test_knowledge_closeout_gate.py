@@ -854,13 +854,9 @@ def test_the_gate_runs_the_validator_and_its_history_row_rule(world: Gated) -> N
 @pytest.fixture
 def ports() -> Any:
 
-    providers = mock.Mock()
-    providers.setup_status.return_value = {}
-
     def bind(*, gate: bool = True) -> None:
         bind_worktree_services(
             WorktreeServices(
-                provider_lifecycle=providers,
                 memory_quality=cast(Any, None),
                 citation_guard=cast(Any, None),
                 knowledge_validation=GitKnowledgeValidation(base_converter=GitBaseConverter()),

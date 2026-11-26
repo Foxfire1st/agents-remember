@@ -27,10 +27,8 @@ directions** to what the run derived.
 recommendation through the phase state machine only, so the *same* operation being recommended
 uncallably by the `worktree_start` response's own `nextTool`/`nextArgs` was invisible to it: the
 mutation that repaired that channel left the module green. A recommendation channel a case does not
-call is a channel the case cannot see, so the walk now probes **both** producers of the same
-recommendation -- each hop's own triple, and the `worktree_start` retry-provider-setup response,
-driven in its own disposable world because the start guard needs the session's lifecycle handed back
-first -- and the callability pin is asserted over the union.
+call is a channel the case cannot see, so the walk probes each hop's own operational triple
+and asserts the callability pin over all observed probes.
 
 **Two guidance channels, two authorities** (measured, and the reason the address check has two
 arms). A worktree response can carry:
@@ -230,10 +228,9 @@ class WorkflowChainTests(unittest.TestCase):
         """The population of the case above, asserted so that it cannot silently shrink.
 
         A pin is only as wide as the population it is asserted over, so this case states the
-        population: every hop carrying a `nextTool`/`nextArgs` triple has exactly one probe, each
-        probe called the tool and the arguments its own response published, and the second producer
-        of the same recommendation (`worktree_start`'s retry-provider-setup answer) was driven too
-        rather than cited. An arm that stops probing a channel reds here.
+        population: every hop carrying a `nextTool`/`nextArgs` triple has exactly one probe and each
+        probe called the tool and the arguments its own response published. An arm that stops probing
+        a channel reds here.
         """
 
         probes = self.observation.operational_triples
@@ -244,16 +241,6 @@ class WorkflowChainTests(unittest.TestCase):
         }
         observed = {call.source for call in probes if call.source.startswith("hop ")}
         self.assertEqual(observed, expected, "a hop's operational triple was never called")
-        self.assertIn(
-            "worktree_start retry-provider-setup",
-            {call.source for call in probes},
-            "the retry-provider-setup response's own triple was not driven",
-        )
-        self.assertEqual(
-            self.observation.retry_provider_setup_state,
-            "blocked",
-            "the retry-provider-setup response did not reach the arm that recommends worktree_status",
-        )
         # Every probe must have called exactly what its response published: same shape as the
         # walk's own as-given call, one per triple, in walk order.
         by_source = {call.source: call for call in probes}
@@ -269,7 +256,6 @@ class WorkflowChainTests(unittest.TestCase):
             self.assertNotEqual(
                 call.arm, "raised", f"{call.source} lost its envelope when called as published"
             )
-        self.assertNotEqual(by_source["worktree_start retry-provider-setup"].arm, "raised")
         # And the negative fact, stated rather than left implicit: the operations that publish no
         # operational triple at all are the two terminal `lifecycle_finalize_task` calls, which are
         # exactly the ones the lifecycle overlay is authoritative for.

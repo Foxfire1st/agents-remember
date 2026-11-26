@@ -101,7 +101,7 @@ def read_engine_process_facts(
     per-tick :class:`ContractSnapshot` when the projection passes one; a standalone call
     builds a local snapshot), but enriches each with the status-guidance facts the
     structural ``EnclosureNode`` omits (the code/memory branches, base commits, worktree
-    paths, existence/dirty flags, base freshness, and provider-boot status).
+    paths, existence/dirty flags, and base freshness).
     ``contract_payload`` and ``lifecycle_guidance`` are pure; only ``status_payload``
     touches git, and it is best-effort so a contract pointing at absent or fake worktrees
     degrades to ``status=None`` (rendered as missing/derived) instead of crashing the

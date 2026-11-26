@@ -276,7 +276,6 @@ class WorktreeSupport1(WorktreeSupportTests):
                     leaf_id="15_leaf",
                     workflow_kind="light-task",
                     memory_mode="external",
-                    skip_provider_setup=True,
                     lifecycle_id="LC-LEAF",
                 )
             )
@@ -370,7 +369,6 @@ class WorktreeSupport1(WorktreeSupportTests):
                 worktree_manager.WorktreeArgs(
                     contract_path=leaf_contract.contract_path,
                     approved=True,
-                    teardown_providers=False,
                 )
             )
             self.assertEqual(abandoned.returncode, 0, abandoned.payload)

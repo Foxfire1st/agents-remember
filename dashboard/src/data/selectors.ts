@@ -27,30 +27,18 @@ let cachedQueueSource: readonly AttentionItem[] | null = null;
 let cachedSuppressedSource: Record<string, true> | null = null;
 let cachedVisibleQueue: readonly AttentionItem[] = EMPTY_QUEUE;
 
-// The two attention kinds the server retired with the search providers: nothing publishes them,
-// so nothing can dismiss them. A payload from a server older than the removal can still carry
-// them, and its provider-down entry would otherwise reach the bell as an alert nobody can act on
-// — the queue is the seam that keeps them off the surface.
-const RETIRED_ATTENTION_KINDS: ReadonlySet<string> = new Set(['provider-down', 'failed-setup']);
-
 export const selectQueue = (state: DashboardState): readonly AttentionItem[] => {
   const queue = state.analytics?.attentionQueue ?? EMPTY_QUEUE;
   const suppressed = state.suppressedAttentionIds;
-  const suppressedAny = Object.keys(suppressed).length > 0;
-  const retiredAny = queue.some((item) => RETIRED_ATTENTION_KINDS.has(item.kind));
-  if (!suppressedAny && !retiredAny) return queue;
+  if (Object.keys(suppressed).length === 0) return queue;
   if (queue === cachedQueueSource && suppressed === cachedSuppressedSource)
     return cachedVisibleQueue;
   cachedQueueSource = queue;
   cachedSuppressedSource = suppressed;
   // Suppression is the view's own record that the human acknowledged an occurrence. Every entry
   // is one acknowledgement per occurrence (MIK-R200 rule 7), so a suppressed id hides its row
-  // whatever the entry's kind: nothing else may keep a read entry on the queue. A payload from a
-  // server older than the provider retirement can still carry a retired kind; nothing publishes
-  // it, so nothing can dismiss it, and this filter is the seam that keeps it off the surface.
-  cachedVisibleQueue = queue.filter(
-    (item) => !RETIRED_ATTENTION_KINDS.has(item.kind) && !suppressed[item.id],
-  );
+  // whatever the entry's kind: nothing else may keep a read entry on the queue.
+  cachedVisibleQueue = queue.filter((item) => !suppressed[item.id]);
   return cachedVisibleQueue;
 };
 

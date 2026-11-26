@@ -293,7 +293,7 @@ def _run(
 def _install_runtime(fixture: FreshUserFixture) -> dict[str, Any]:
     return install_runtime_from_config(
         _config(fixture),
-        RuntimeInstallRequest(install_provider_deps=False, include_benchmarks=False),
+        RuntimeInstallRequest(include_benchmarks=False),
     )
 
 
@@ -413,7 +413,7 @@ def _start_leaf_worktree(fixture: FreshUserFixture) -> dict[str, Any]:
             memory_mode="external",
             stale_base_choice="proceed-stale",
         ),
-        execution=StartExecution(skip_provider_setup=True),
+        execution=StartExecution(),
     )
 
 
@@ -568,7 +568,7 @@ def run_fixture_scenario(
             records,
             fixture,
             STEP_INSTALL,
-            "install_runtime_from_config(config, RuntimeInstallRequest(install_provider_deps=False))",
+            "install_runtime_from_config(config, RuntimeInstallRequest())",
             lambda: _install_runtime(fixture),
         )
         _record_check(
@@ -687,7 +687,7 @@ def run_fixture_scenario(
             "leaf_id='FRESH-USER-LEAF-1', worktree_name='leaf-1', parent_task='fresh-user-master', "
             "workflow_kind='light-task'), bases=TaskBases(work_branch='ar/leaf-1', "
             "memory_mode='external', stale_base_choice='proceed-stale'), "
-            "execution=StartExecution(skip_provider_setup=True))",
+            "execution=StartExecution())",
             lambda: _start_leaf_worktree(fixture),
         )
 
@@ -884,7 +884,7 @@ def first_worktree_task_blocked(records: list[StepRecord], chains: dict[str, Any
             "worktree_start_tool(config, TaskIdentity(task_name='fresh-user-master', "
             "leaf_id='FRESH-USER-LEAF-1', worktree_name='leaf-1', workflow_kind='light-task'), "
             "bases=TaskBases(work_branch='ar/leaf-1', memory_mode='external'), "
-            "execution=StartExecution(skip_provider_setup=True))"
+            "execution=StartExecution())"
         ),
         status="blocked",
         result={

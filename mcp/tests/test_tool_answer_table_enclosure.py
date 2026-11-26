@@ -114,16 +114,13 @@ class ToolAnswerEnclosureTests(unittest.TestCase):
             )
             removed: list[tuple[str, bool]] = []
 
-            class FakeLifecycle:
-                def remove_tree(self, path: Path, *, dry_run: bool) -> dict[str, object]:
-                    removed.append((path.as_posix(), dry_run))
-                    if not dry_run and path.exists():
-                        shutil.rmtree(path, ignore_errors=True)
-                    return {"path": path.as_posix(), "removed": True}
+            def fake_remove_tree(path: Path, *, dry_run: bool) -> dict[str, object]:
+                removed.append((path.as_posix(), dry_run))
+                if not dry_run and path.exists():
+                    shutil.rmtree(path, ignore_errors=True)
+                return {"path": path.as_posix(), "removed": True}
 
-            services = mock.Mock()
-            services.provider_lifecycle = FakeLifecycle()
-            with mock.patch.object(terminal_group, "worktree_services", return_value=services):
+            with mock.patch.object(terminal_group, "remove_tree", side_effect=fake_remove_tree):
                 directories = terminal_group.remove_terminal_group(contract)
             self.assertEqual(removed, [(group.as_posix(), False)])
             self.assertIn("logs", directories)
@@ -207,11 +204,6 @@ class KeptToolCallsTests(unittest.TestCase):
     def _kept_lines(self) -> list[dict[str, Any]]:
         return [json.loads(raw) for raw in self.kept.read_text(encoding="utf-8").split("\n") if raw]
 
-    def _services(self, lifecycle: _RecordingLifecycle) -> mock.Mock:
-        services = mock.Mock()
-        services.provider_lifecycle = lifecycle
-        return services
-
     def test_cleanup_keeps_only_this_leafs_lines_before_removing_logs(self) -> None:
         refused = _line(self.own_task, "2026-11-19T10:00:00+00:00", ok=False, code="file-unknown")
         self._write_day("2026-11-19", [refused, _line(OTHER_TASK, "2026-11-19T10:01:00+00:00")])
@@ -219,9 +211,7 @@ class KeptToolCallsTests(unittest.TestCase):
         self._write_day("2026-11-18", [own, _line(None, "2026-11-18T09:01:00+00:00"), "{not json"])
         lifecycle = _RecordingLifecycle(self.logs)
         with (
-            mock.patch.object(
-                terminal_group, "worktree_services", return_value=self._services(lifecycle)
-            ),
+            mock.patch.object(terminal_group, "remove_tree", side_effect=lifecycle.remove_tree),
             mock.patch.object(outside_scratch, "removal_entry_for", return_value={}),
         ):
             directories = terminal_group.remove_terminal_group(self.contract)
@@ -261,9 +251,7 @@ class KeptToolCallsTests(unittest.TestCase):
 
         lifecycle = _RecordingLifecycle(self.logs, on_remove)
         with (
-            mock.patch.object(
-                abandon_module, "worktree_services", return_value=self._services(lifecycle)
-            ),
+            mock.patch.object(abandon_module, "remove_tree", side_effect=lifecycle.remove_tree),
             mock.patch.object(outside_scratch, "removal_entry_for", return_value={}),
         ):
             directories = abandon_module._abandon_directories(
@@ -278,7 +266,7 @@ class KeptToolCallsTests(unittest.TestCase):
 
     def _blockers(self, directories: dict[str, dict[str, object]]) -> list[dict[str, object]]:
         return terminal_result_blockers(
-            TerminalResult(providers={}, worktrees={}, branches={}, directories=directories)
+            TerminalResult(worktrees={}, branches={}, directories=directories)
         )
 
     def test_a_failed_keep_leaves_the_log_and_blocks_the_cleanup_until_a_retry(self) -> None:
@@ -287,9 +275,7 @@ class KeptToolCallsTests(unittest.TestCase):
         lifecycle = _RecordingLifecycle(self.logs)
         group = Path(self.contract.worktree_group)
         patches = (
-            mock.patch.object(
-                terminal_group, "worktree_services", return_value=self._services(lifecycle)
-            ),
+            mock.patch.object(terminal_group, "remove_tree", side_effect=lifecycle.remove_tree),
             mock.patch.object(outside_scratch, "removal_entry_for", return_value={}),
         )
         with (
@@ -325,9 +311,7 @@ class KeptToolCallsTests(unittest.TestCase):
         self._write_day("2026-11-19", [_line(self.own_task, "2026-11-19T10:00:00+00:00")])
         self.kept.mkdir(parents=True, exist_ok=True)
         try:
-            preview = terminal_group.prepare_terminal_group(
-                self.contract, dry_run=True, teardown_providers=True
-            )
+            preview = terminal_group.prepare_terminal_group(self.contract, dry_run=True)
             self.assertIn(
                 {"directory": "logs", "reason": KEEP_FAILED_REASON},
                 [
@@ -344,9 +328,7 @@ class KeptToolCallsTests(unittest.TestCase):
                 kept_module, "atomic_write_text", side_effect=OSError(28, "No space left")
             ),
         ):
-            prepared = terminal_group.prepare_terminal_group(
-                self.contract, dry_run=False, teardown_providers=True
-            )
+            prepared = terminal_group.prepare_terminal_group(self.contract, dry_run=False)
         self.assertIn(
             {"directory": "logs", "reason": KEEP_FAILED_REASON},
             [
@@ -362,9 +344,7 @@ class KeptToolCallsTests(unittest.TestCase):
         group = Path(self.contract.worktree_group)
         lifecycle = _RecordingLifecycle(self.logs)
         with (
-            mock.patch.object(
-                abandon_module, "worktree_services", return_value=self._services(lifecycle)
-            ),
+            mock.patch.object(abandon_module, "remove_tree", side_effect=lifecycle.remove_tree),
             mock.patch.object(outside_scratch, "removal_entry_for", return_value={}),
             mock.patch.object(kept_module, "atomic_write_text", side_effect=OSError("disk")),
         ):

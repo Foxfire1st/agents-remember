@@ -37,7 +37,6 @@ from agents_remember.cli import (
     memory_backfill,
     memory_citations,
     paseo_runtime,
-    providers_remove,
     removed_stores,
     tool_log_stats,
     upgrade_user_settings,
@@ -203,12 +202,6 @@ def _register_runtime_commands(sub: argparse._SubParsersAction) -> None:
     )
     upgrade_user_settings.add_arguments(upgrade)
     upgrade.set_defaults(func=upgrade_user_settings.run)
-    removal = sub.add_parser(
-        "providers-remove",
-        help="Stop provider watchers and remove leftover provider runtime folders.",
-    )
-    providers_remove.add_arguments(removal)
-    removal.set_defaults(func=providers_remove.run)
     stores = sub.add_parser(
         "removed-stores",
         help="Remove the stores of removed parts (MIK-R113 rule 5).",

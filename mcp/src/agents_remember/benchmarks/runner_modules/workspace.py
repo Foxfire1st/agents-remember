@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +22,6 @@ from agents_remember.benchmarks.runner_modules.manifest import (
     manifest_relative_path,
 )
 from agents_remember.benchmarks.runner_modules.mcp_registration import (
-    prepare_configured_providers,
     write_benchmark_mcp_registration,
 )
 from agents_remember.benchmarks.runner_modules.models import (
@@ -198,57 +196,13 @@ def prepare_memory_repo(
     return memory_repo
 
 
-UNFILTERED_PROVIDERS_ENV = "AR_BENCHMARK_ALLOW_UNFILTERED_PROVIDERS"
-
-
-def filter_benchmark_provider_ids(
-    case_id: str,
-    provider_ids: tuple[str, ...],
-    allowed_provider_ids: tuple[str, ...] | None,
-) -> tuple[str, ...]:
-    """Containment R1 (260707-HFX-L1): the case manifest is not launch authority.
-
-    Providers outside the live MCP authority set are neither persisted into the
-    workspace registration (which arms every later session booted there) nor
-    launched by prepare_configured_providers. ``None`` (no authority context,
-    i.e. direct script use below the MCP layer) is FAIL-CLOSED too — review
-    finding B4: an implicit default must not be the bypass. The explicit
-    developer act is the ``AR_BENCHMARK_ALLOW_UNFILTERED_PROVIDERS=1`` env var.
-    """
-    if allowed_provider_ids is None:
-        if os.environ.get(UNFILTERED_PROVIDERS_ENV) == "1":
-            return provider_ids
-        if provider_ids:
-            print(
-                f"Skipping benchmark providers {list(provider_ids)} for {case_id}: no MCP "
-                "authority context (containment R1); direct script runs must set "
-                f"{UNFILTERED_PROVIDERS_ENV}=1 to arm providers without an authority filter"
-            )
-        return ()
-    allowed = set(allowed_provider_ids)
-    skipped = tuple(p for p in provider_ids if p not in allowed)
-    kept = tuple(p for p in provider_ids if p in allowed)
-    if skipped:
-        print(
-            f"Skipping benchmark providers {list(skipped)} for {case_id}: not enabled "
-            "in the live MCP authority settings (containment R1); the workspace registration "
-            "carries only authority-enabled providers"
-        )
-    return kept
-
-
 def prepare_case(
     preparation: BenchmarkPreparation,
     case: BenchmarkCase,
-    *,
-    provider_ids: tuple[str, ...] = (),
 ) -> None:
     benchmarks_root = preparation.benchmarks_root
     dry_run = preparation.dry_run
     force_clone = preparation.force_clone
-    provider_ids = filter_benchmark_provider_ids(
-        case.case_id, provider_ids, preparation.allowed_provider_ids
-    )
     repository = case.repository
     root = workspace_root(benchmarks_root, case)
     source_only_root = source_only_workspace_root(benchmarks_root, case)
@@ -276,17 +230,10 @@ def prepare_case(
         coordination_root=coordination_root,
         source_repo_root=with_memory_repo_root,
         memory_repo=memory_repo,
-        provider_ids=provider_ids,
     )
     write_benchmark_mcp_registration(
         workspace,
-        provider_timeout=preparation.provider_timeout,
         dry_run=dry_run,
-    )
-    prepare_configured_providers(
-        workspace,
-        dry_run=dry_run,
-        provider_timeout=preparation.provider_timeout,
     )
 
     if dry_run:

@@ -17,31 +17,11 @@ from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.terminal_group import (
     TerminalItems,
-    group_directory_blockers,
     prepare_terminal_group,
-    preview_unpublished_provider_skip,
 )
 from agents_remember.worktrees.modules.terminal_validation import TerminalPreflight
 from agents_remember.worktrees.services import TerminalGuard
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
-
-
-def _unpublished_provider_skip_refusal(
-    args: WorktreeArgs,
-    contract: WorktreeContract,
-    kept_line: dict[str, object] | None,
-) -> WorktreeCommandResult | None:
-    if args.teardown_providers:
-        return None
-    directories = preview_unpublished_provider_skip(contract)
-    if not directories:
-        return None
-    blocked = _group_blocked_result(
-        contract, directories, group_directory_blockers(directories, dry_run=True)
-    )
-    if kept_line is None:
-        return blocked
-    return WorktreeCommandResult(blocked.returncode, {**blocked.payload, "landedTips": kept_line})
 
 
 def _group_blocked_result(
@@ -71,11 +51,8 @@ def _cleanup_with_guard(
         terminal_archive = terminal_archive_required_result(
             contract,
             operation="worktree_cleanup",
-            arguments=TerminalWorktreeCleanupArguments(teardown_providers=args.teardown_providers),
+            arguments=TerminalWorktreeCleanupArguments(),
             dry_run=args.dry_run,
-            check_unpublished=lambda current: _unpublished_provider_skip_refusal(
-                args, current, kept_line
-            ),
         )
         if terminal_archive.returncode != 0:
             return terminal_archive
@@ -97,9 +74,7 @@ def _cleanup_with_guard(
                 if terminal is None:
                     raise RuntimeError("cleanup lost terminal archive authority before mutation")
                 current = terminal.archived_contract
-            prepared = prepare_terminal_group(
-                current, dry_run=args.dry_run, teardown_providers=args.teardown_providers
-            )
+            prepared = prepare_terminal_group(current, dry_run=args.dry_run)
             if prepared.blockers:
                 result = _group_blocked_result(current, prepared.directories, prepared.blockers)
             else:

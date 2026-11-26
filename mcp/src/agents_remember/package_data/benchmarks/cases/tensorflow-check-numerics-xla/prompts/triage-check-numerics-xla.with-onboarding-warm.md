@@ -8,13 +8,6 @@ The benchmark harness has already validated that the pinned external-memory repo
 matches the pinned source checkout for this run. Treat benchmark-local
 onboarding and memory files as trusted current-state context.
 
-Provider setup:
-The benchmark-local context providers are already installed, indexed, and
-running from benchmark harness provider settings.
-GrepAI is available for semantic discovery over `ar-coordination/memory-repos`,
-and CodeGraphContext is available for relationship discovery over
-`repos/tensorflow`.
-
 Known benchmark-local paths:
 - code_root: `repos/tensorflow`
 - memory_root: `ar-coordination/memory-repos/ar-tensorflow`
@@ -31,8 +24,7 @@ Constraints:
 - Do not final-answer with only setup or memory-status notes.
 - Before triaging, resolve the benchmark-local context through the available MCP tools.
   Read the resolved memory layer's `system/settings.md` and `system/tools.md`
-  for its instructions and commands. Use the available provider tools when
-  those instructions call for them.
+  for its instructions and commands.
 - Do read relevant benchmark-local onboarding files alongside the source files
   they describe.
 - Use the benchmark-local memory repo only; do not use any parent workspace

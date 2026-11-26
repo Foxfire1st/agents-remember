@@ -223,7 +223,7 @@ class Operations:
                         {
                             "name": "host install",
                             "tool": "runtime_install",
-                            "arguments": {"dry_run": False, "install_provider_deps": False},
+                            "arguments": {"dry_run": False},
                         }
                     ],
                 },

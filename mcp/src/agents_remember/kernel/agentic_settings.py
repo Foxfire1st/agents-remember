@@ -19,8 +19,7 @@ Semantics (``docs/reference/settings-json.md`` is the schema reference):
   fixes the historic silent drop of ``orchestration.roles``/``concurrency``.
 - Unknown TOP-LEVEL families are tolerated-not-parsed: the same user
   file doubles as the shared memory-settings fallback, and it is the earmarked
-  future home of further families (``contextProviders`` first in line, gate
-  amendment 2026-07-06), so the fail-loud scope must not foreclose them.
+  future home of further families, so the fail-loud scope must not foreclose them.
 - Absent files (or an absent ``orchestration`` key) mean the documented
   defaults: all-human gate delegation, the L12 loop defaults, no role
   overrides, no concurrency caps, no spawn harness preference.

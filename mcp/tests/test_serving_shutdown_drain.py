@@ -67,7 +67,6 @@ sys.path.insert(0, str(MCP_SRC))
 
 import agents_remember.serving._app_lifespan as lifespan_module
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.providers.metrics import ProviderMetricsStore
 from agents_remember.serving._app_common import _ServingRuntime
 from agents_remember.serving._app_lifespan import _serving_lifespan
 from agents_remember.serving.stream_shutdown import StreamShutdown
@@ -226,7 +225,6 @@ class _ServingFixture:
         with contextlib.ExitStack() as stack:
             for name, replacement in (
                 ("compact_workspace_river", mock.Mock()),
-                ("_metrics_loop", _parked_forever),
                 ("_held_delivery_loop", _parked_forever),
                 ("_workspace_river_compaction_loop", _parked_forever),
                 ("_warmup_watch_loop", _parked_forever),
@@ -237,7 +235,7 @@ class _ServingFixture:
                 stack.enter_context(mock.patch.object(lifespan_module, name, replacement))
             stack.enter_context(mock.patch.object(asyncio, "sleep", self.clock.sleep))
             stack.enter_context(mock.patch.object(asyncio, "create_task", self._record_task))
-            lifespan = _serving_lifespan(self.runtime, cast(ProviderMetricsStore, mock.Mock()))
+            lifespan = _serving_lifespan(self.runtime)
             shutdowns = self.review_trees_shutdown.call_count
             async with lifespan(self.app):
                 yield

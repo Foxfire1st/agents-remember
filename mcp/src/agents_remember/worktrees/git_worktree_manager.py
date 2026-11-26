@@ -60,10 +60,7 @@ from agents_remember.worktrees.modules.integrate import (
     integrate_result,
     validate_integrate_contract,
 )
-from agents_remember.worktrees.modules.models import (
-    WorktreeCommandResult,
-    WorktreeProviderSetupConfig,
-)
+from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.onboarding import (
     ENTITY_FINGERPRINT_ALGORITHM,
     compute_git_blob_set_fingerprint,
@@ -83,7 +80,6 @@ from agents_remember.worktrees.modules.start import (
     attach_result,
     load_contract_from_args,
     prepare_memory_for_start,
-    prepare_providers_for_start,
     start_result,
     status_result,
 )
@@ -95,7 +91,6 @@ __all__ = [
     "FinalizeArgs",
     "WorktreeArgs",
     "WorktreeCommandResult",
-    "WorktreeProviderSetupConfig",
     "abandon_result",
     "add_common",
     "attach_result",
@@ -145,7 +140,6 @@ __all__ = [
     "parse_json_stdout",
     "pause_result",
     "prepare_memory_for_start",
-    "prepare_providers_for_start",
     "record_landing_result",
     "refresh_entity_fingerprints_for_context",
     "remove_empty_dir",

@@ -4,9 +4,7 @@
 // memory verify/block, stale-base preflight/block, sync needed, cleanup pending, integration
 // conflict) plus a step-through of one enclosure being assembled.
 //
-// Provider state left the surface (MIK-R112): no workspace engine stack, no per-enclosure
-// provider boot nodes, and no seed/clone lanes. The scenarios carry only the enclosure-centered
-// process facts the server still composes.
+// Scenarios carry the enclosure-centered process facts composed by the server.
 
 import type {
   CommitRefNode,

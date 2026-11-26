@@ -10,6 +10,7 @@ from pathlib import Path
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving import change_watcher as m
+from agents_remember.serving.projections import paths as projection_paths
 
 
 class Trace:
@@ -265,6 +266,34 @@ class TopologyTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(topology)
             self.assertTrue(replace_watch)
             self.assertEqual(paths, set())
+
+
+def test_genuine_projection_roots_keep_their_own_domain(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    root = cfg.coordination_root
+    for relative in (
+        "tasks",
+        "temp/worktree-start",
+        "temp/tool-reports",
+        "logs/observer/workspace",
+        "logs/observer/drift",
+    ):
+        (root / relative).mkdir(parents=True, exist_ok=True)
+
+    roots = m.projection_watch_plan(cfg).roots
+
+    expected = {
+        root / "tasks": m.ProjectionDomain.TASKS,
+        root / "logs" / "observer" / "workspace": m.ProjectionDomain.WORKSPACE,
+        projection_paths.drift_snapshot_dir(root): m.ProjectionDomain.DRIFT,
+        root / "temp" / "worktree-start": m.ProjectionDomain.START_PROGRESS,
+        root / "temp" / "tool-reports": m.ProjectionDomain.TOOL_REPORTS,
+    }
+    for path, domain in expected.items():
+        assert path in roots, f"{path} is no longer watched"
+        assert m.projection_domains_for_paths(cfg, {str(path / "event.json")}) == frozenset(
+            {domain}
+        ), f"{path} no longer invalidates exactly {domain}"
 
 
 if __name__ == "__main__":

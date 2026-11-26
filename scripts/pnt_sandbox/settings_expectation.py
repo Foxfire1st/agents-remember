@@ -141,8 +141,8 @@ def host_authority(before: dict[str, Any], default: dict[str, Any]) -> tuple[dic
 
 
 def receipt_settings(data: dict[str, Any]) -> dict[str, Any]:
-    """Keep settings provenance without copying either provider map into the receipt."""
-    result = {key: value for key, value in data.items() if key != "providers"}
+    """Keep settings provenance without copying the Paseo provider map into the receipt."""
+    result = dict(data)
     if isinstance(result.get("paseoRuntime"), dict):
         result["paseoRuntime"] = {
             key: value for key, value in result["paseoRuntime"].items() if key != "providers"

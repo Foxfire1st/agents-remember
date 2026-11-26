@@ -135,35 +135,6 @@ def _shaped_terminal_blocker(blocker: dict[str, object]) -> dict[str, object]:
     return {**blocker, "code": code, "sentence": sentence}
 
 
-def provider_setup_blocked(
-    contract: WorktreeContract,
-    *,
-    summary: str,
-) -> WorktreeCommandResult:
-    """Answer a teardown while provider setup still runs, dry run or real.
-
-    The liveness read is side-effect free, so the dry run evaluates it too:
-    a dry run never promises a cleanup the real call would refuse. The
-    caller's own sentence is kept byte-identical; the code and the poll
-    step are added around it.
-    """
-    return WorktreeCommandResult(
-        2,
-        {
-            **status_payload(contract),
-            "state": "blocked",
-            "code": "provider-setup-running",
-            "error": summary,
-            "summary": summary,
-            "nextStep": {
-                "summary": "Poll worktree_status until providers are terminal, then retry.",
-                "nextTool": "worktree_status",
-                "nextArgs": {"contract_path": contract.contract_path.as_posix()},
-            },
-        },
-    )
-
-
 def closeout_queue_refusal(
     contract: WorktreeContract,
     error: CloseoutQueueError,

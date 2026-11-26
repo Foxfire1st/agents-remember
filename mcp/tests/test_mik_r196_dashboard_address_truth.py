@@ -9,11 +9,14 @@ asked and the origin answers, and when it does not answer the answer carries the
 
 from __future__ import annotations
 
+import builtins
+import sys
 import types
 from typing import Any
 
 import pytest
 from agents_remember.cli import dashboard_address as owner
+from agents_remember.cli import paseo_bridge
 
 PORT = 8765
 
@@ -99,3 +102,41 @@ def test_an_owner_that_failed_is_not_published_over_a_listening_port(
     assert answer["dashboardAddress"] is None
     assert "'failed'" in answer["dashboardAddressDetail"]
     assert "HTTP 200" in answer["dashboardAddressDetail"]
+
+
+def _paseo_config() -> Any:
+    return types.SimpleNamespace(paseo_runtime=types.SimpleNamespace(embed=[]))
+
+
+def test_chat_address_for_surfaces_bridge_import_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed lazy import of paseo_bridge raises its real ImportError, not UnboundLocalError."""
+
+    real_import = builtins.__import__
+
+    def failing_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "agents_remember.cli.paseo_bridge":
+            raise ModuleNotFoundError("simulated missing paseo_bridge", name=name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.delitem(sys.modules, "agents_remember.cli.paseo_bridge", raising=False)
+    monkeypatch.setattr(builtins, "__import__", failing_import)
+
+    with pytest.raises(ModuleNotFoundError, match="simulated missing paseo_bridge"):
+        owner.chat_address_for(_paseo_config(), "agent-1")
+
+
+def test_chat_address_for_reports_bridge_failure_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A PaseoBridgeFailure from bridge_call is still caught and reported as chatAddressDetail."""
+
+    def failing_call(*_args: Any, **_kwargs: Any) -> Any:
+        raise paseo_bridge.PaseoBridgeFailure("paseo_daemon_unreachable", "daemon offline")
+
+    monkeypatch.setattr(paseo_bridge, "bridge_call", failing_call)
+
+    answer = owner.chat_address_for(_paseo_config(), "agent-1")
+
+    assert answer == {"chatAddress": None, "chatAddressDetail": "daemon offline"}

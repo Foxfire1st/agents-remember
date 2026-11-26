@@ -75,7 +75,6 @@ def server_info_payload(
             "workspaceRoot": config.workspace_root.as_posix(),
             "transcriptRoot": config.transcript_root.as_posix(),
             "allowedRepoIds": list(config.allowed_repo_ids),
-            "unusedProviderKeys": list(config.allowed_provider_ids),
             "unusedSettingsKeys": _unused_settings_keys(config),
             **(
                 {"checkoutBinding": config.checkout_binding.as_payload()}
@@ -177,10 +176,9 @@ def compact_runtime_install_payload(
     Only the row's fields ride (``operation`` and any undeclared field stay
     in the whole result for the report and the log); messages keep the first
     five entries cut to the short-string bound each, with the rest counted
-    into the report; the rebind digest keeps attempted/ok and
-    phase/action/ok per run; the stores of removed parts keep their count,
-    their size and the sentences that name the command, and the list of the
-    stores stays in the report. ``log`` is attached by the response boundary.
+    into the report; the stores of removed parts keep their count, their size
+    and the sentences that name the command, and the list of the stores stays
+    in the report. ``log`` is attached by the response boundary.
     """
     compact = {key: value for key, value in full.items() if key in RUNTIME_INSTALL_ANSWER_FIELDS}
     messages = full.get("messages")
@@ -195,21 +193,6 @@ def compact_runtime_install_payload(
         if len(messages) > 5:
             cut.append(f"... {len(messages) - 5} more in the report")
         compact["messages"] = cut
-    rebind = full.get("providerWatcherRebind")
-    if isinstance(rebind, dict):
-        compact["providerWatcherRebind"] = {
-            "attempted": rebind.get("attempted"),
-            "ok": rebind.get("ok"),
-            "phases": [
-                {
-                    "phase": run.get("phase"),
-                    "action": run.get("action"),
-                    "ok": run.get("ok"),
-                }
-                for run in rebind.get("runs", [])
-                if isinstance(run, dict)
-            ],
-        }
     stores = full.get("removedPartStores")
     if isinstance(stores, dict):
         compact["removedPartStores"] = {

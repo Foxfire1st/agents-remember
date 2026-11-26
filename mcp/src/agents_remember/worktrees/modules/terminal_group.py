@@ -13,6 +13,7 @@ from agents_remember.worktrees.group_messages import (
     GroupMessageCollectionError,
     collect_group_messages,
 )
+from agents_remember.worktrees.modules.filesystem import remove_tree
 from agents_remember.worktrees.modules.kept_tool_calls import keep_tool_calls_for_group
 from agents_remember.worktrees.modules.terminal_agents import (
     archive_terminal_agents,
@@ -28,7 +29,6 @@ from agents_remember.worktrees.role_reports import (
     collect_group_reports,
     remove_group_report_locators,
 )
-from agents_remember.worktrees.services import worktree_services
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 type TerminalItems = dict[str, dict[str, object]]
@@ -43,15 +43,7 @@ def legacy_series_group(contract: WorktreeContract) -> bool:
     )
 
 
-def preview_unpublished_provider_skip(contract: WorktreeContract) -> TerminalItems:
-    if legacy_series_group(contract) or not _group_observation(contract).get("would_remove"):
-        return {}
-    return _preview_provider_skip(
-        contract, remediation="Repeat worktree_cleanup with teardown_providers=true."
-    )
-
-
-def preview_group_removal(contract: WorktreeContract, *, teardown_providers: bool) -> TerminalItems:
+def preview_group_removal(contract: WorktreeContract) -> TerminalItems:
     if legacy_series_group(contract):
         return legacy_series_directories(contract, dry_run=True)
     group = _group_observation(contract)
@@ -60,18 +52,7 @@ def preview_group_removal(contract: WorktreeContract, *, teardown_providers: boo
             "worktree_group": group,
             **outside_scratch.removal_entry_for(contract, dry_run=True),
         }
-    runtime = contract.worktree_group / "provider-runtime"
-    if not teardown_providers:
-        blocked = _preview_provider_skip(
-            contract,
-            remediation=(
-                "Ask the provider owner to settle that state, then repeat worktree_cleanup "
-                "with teardown_providers=false."
-            ),
-        )
-        if blocked:
-            return blocked
-    blocker = _directory_blocker(contract, runtime if teardown_providers else None)
+    blocker = _directory_blocker(contract)
     if blocker is not None:
         return {"worktree_group": blocker}
     return {
@@ -121,9 +102,7 @@ def remove_terminal_group(contract: WorktreeContract) -> TerminalItems:
     if kept and ENCLOSURE_LOGS_DIRECTORY in reports:
         reports[ENCLOSURE_LOGS_DIRECTORY] = {**reports[ENCLOSURE_LOGS_DIRECTORY], **kept}
     try:
-        removed = worktree_services().provider_lifecycle.remove_tree(
-            contract.worktree_group, dry_run=False
-        )
+        removed = remove_tree(contract.worktree_group, dry_run=False)
     except OSError as error:
         removed = _refused(contract.worktree_group, str(error))
     return {
@@ -137,9 +116,7 @@ def group_directory_blockers(
     directories: TerminalItems, *, dry_run: bool
 ) -> list[dict[str, object]]:
     return terminal_result_blockers(
-        TerminalResult(
-            providers={}, worktrees={}, branches={}, directories=directories, preview=dry_run
-        )
+        TerminalResult(worktrees={}, branches={}, directories=directories, preview=dry_run)
     )
 
 
@@ -162,12 +139,10 @@ def _group_observation(contract: WorktreeContract) -> dict[str, object]:
     return {"path": group.as_posix(), "would_remove": True, "removed": False}
 
 
-def _directory_blocker(
-    contract: WorktreeContract, provider_runtime: Path | None
-) -> dict[str, object] | None:
+def _directory_blocker(contract: WorktreeContract) -> dict[str, object] | None:
     """Inspect directories owned by the final recursive removal."""
 
-    separate_removals = {provider_runtime}
+    separate_removals: set[Path] = set()
     if contract.kind == "leaf":
         separate_removals.add(contract.code_worktree)
         if contract.memory_worktree is not None:
@@ -204,45 +179,6 @@ def _working_child_rows(contract: WorktreeContract, key: str) -> TerminalItems:
     }
 
 
-def _has_provider_runtime(contract: WorktreeContract, path: Path) -> bool:
-    if path.is_symlink() or not path.is_dir():
-        return False
-    provider = worktree_services().provider_lifecycle
-    state_names = ("provider-state.json", "setup-progress.json")
-    if (
-        not any((path / name).is_symlink() for name in state_names)
-        and provider.setup_status(contract) is not None
-    ):
-        return True
-    planned = teardown_terminal_providers(contract, dry_run=True)
-    return bool(planned.get("settingsFound"))
-
-
-def _preview_provider_skip(contract: WorktreeContract, *, remediation: str) -> TerminalItems:
-    runtime = contract.worktree_group / "provider-runtime"
-    try:
-        if _has_provider_runtime(contract, runtime):
-            return {
-                "provider-runtime": _refused(
-                    runtime, f"{runtime} still contains provider state. {remediation}"
-                )
-            }
-    except OSError as error:
-        return {"provider-runtime": _refused(runtime, str(error))}
-    return {}
-
-
-def teardown_terminal_providers(contract: WorktreeContract, *, dry_run: bool) -> dict[str, object]:
-    runtime = contract.worktree_group / "provider-runtime"
-    settings = runtime / "settings"
-    if any(path.is_symlink() for path in (runtime, settings, settings / "provider-settings.json")):
-        return {
-            "state": "skipped",
-            "reason": "Linked provider state belongs outside this task folder.",
-        }
-    return worktree_services().provider_lifecycle.teardown(contract, dry_run=dry_run)
-
-
 def _move_out(contract: WorktreeContract, *, dry_run: bool) -> TerminalItems:
     try:
         collect_group_reports(contract, dry_run=dry_run)
@@ -264,7 +200,6 @@ def _refused(path: Path, reason: str) -> dict[str, object]:
 
 def legacy_series_directories(contract: WorktreeContract, *, dry_run: bool) -> TerminalItems:
     group = contract.worktree_group
-    remove_tree = worktree_services().provider_lifecycle.remove_tree
     reports = group / ENCLOSURE_REPORTS_DIRECTORY
     row = (
         {
@@ -277,11 +212,15 @@ def legacy_series_directories(contract: WorktreeContract, *, dry_run: bool) -> T
         else remove_tree(reports, dry_run=dry_run)
     )
     remove_tree(group / ENCLOSURE_LOGS_DIRECTORY, dry_run=dry_run)
-    return {
+    provider_runtime = remove_tree(group / "provider-runtime", dry_run=dry_run)
+    series_dirs: TerminalItems = {
         "reports": row,
         "lifecycle": remove_tree(group / ".lifecycle", dry_run=dry_run),
         **outside_scratch.removal_entry_for(contract, dry_run=dry_run),
     }
+    if provider_runtime.get("reason") != "already-absent":
+        series_dirs["provider_runtime"] = provider_runtime
+    return series_dirs
 
 
 @dataclass(frozen=True)
@@ -291,10 +230,8 @@ class GroupPreparation:
     blockers: list[dict[str, object]]
 
 
-def prepare_terminal_group(
-    contract: WorktreeContract, *, dry_run: bool, teardown_providers: bool
-) -> GroupPreparation:
-    directories = preview_group_removal(contract, teardown_providers=teardown_providers)
+def prepare_terminal_group(contract: WorktreeContract, *, dry_run: bool) -> GroupPreparation:
+    directories = preview_group_removal(contract)
     blockers = group_directory_blockers(directories, dry_run=True)
     if blockers:
         return GroupPreparation(directories, {}, blockers)

@@ -21,13 +21,11 @@ import hashlib
 import json
 import shutil
 import sys
-from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
-from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 if str(MCP_SRC) not in sys.path:
@@ -50,7 +48,6 @@ from agents_remember.serving.projections.snapshots import read_tool_reports
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 CANONICAL_SKILLS = REPOSITORY_ROOT / "skills"
-CANONICAL_PROVIDER_REQUIREMENTS = REPOSITORY_ROOT / "providers" / "requirements"
 
 CORPUS_FINGERPRINT = "Bootstrap sets up one repository during a new user's first hour and reports what actually happened."
 """A canonical block identity: the opening statement of ``roles/bootstrap.md``.
@@ -102,17 +99,8 @@ def assert_no_retired_startup_files(coordination_root: Path) -> None:
         assert not path.exists() and not path.is_symlink(), target
 
 
-def _copy(source: Path, destination: Path) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, destination)
-
-
 def create_install_source(root: Path) -> Path:
-    """One install source tree built from this repository's canonical assets.
-
-    The package-data layout, canonical corpus the compiler reads, and provider
-    requirement files ``require_runtime_tree`` insists on.
-    """
+    """One install source tree built from this repository's canonical assets."""
 
     source = root / "package_data"
     runtime_root = source / "runtime"
@@ -120,20 +108,7 @@ def create_install_source(root: Path) -> Path:
         CANONICAL_SKILLS / "l-01-agent-lifecycles",
         runtime_root / "skills" / "l-01-agent-lifecycles",
     )
-    for name in ("codegraphcontext.txt", "grepai.txt"):
-        _copy(
-            CANONICAL_PROVIDER_REQUIREMENTS / name,
-            runtime_root / "providers" / "requirements" / name,
-        )
     return source
-
-
-def dispatcherless_deps() -> install_runtime.ProviderDependencyInstall:
-    """Provider dependencies off: this module never starts a provider stack."""
-
-    return install_runtime.ProviderDependencyInstall(
-        settings={}, timeout=int(HANG_GUARD_SECONDS), enabled=False
-    )
 
 
 def run_install(
@@ -151,7 +126,6 @@ def run_install(
         source_root=source,
         coordination_root=coordination_root,
         dry_run=dry_run,
-        provider_deps=dispatcherless_deps(),
         experiment=selection if selection.selected else None,
     )
     if selection.selected:
@@ -160,7 +134,6 @@ def run_install(
         scope.source_root,
         scope.coordination_root,
         scope.dry_run,
-        provider_deps=scope.provider_deps,
     )
 
 
@@ -287,7 +260,8 @@ def test_an_unselected_run_leaves_no_retired_startup_files(
     assert_no_retired_startup_files(coordination_root)
     assert summary.removed_paths == (3 if earlier_install else 0)
     assert fingerprint_count(coordination_root, LEGACY_FINGERPRINT) == 0
-    assert (coordination_root / "providers/requirements/grepai.txt").is_file()
+    assert (coordination_root / "logs" / "mcp").is_dir()
+    assert not (coordination_root / "providers").exists()
 
 
 def test_the_module_states_that_an_unselected_install_still_retires_startup_files() -> None:
@@ -644,7 +618,6 @@ def test_the_registered_tool_takes_the_selection_as_this_run_s_own_input(tmp_pat
 
     selected_request = install_runtime.RuntimeInstallRequest(
         dry_run=True,
-        install_provider_deps=False,
         source_root=source,
         experiment=install_experiment.ROLE_CAPSULES,
     )
@@ -652,7 +625,6 @@ def test_the_registered_tool_takes_the_selection_as_this_run_s_own_input(tmp_pat
         "runtime_install",
         {
             "dry_run": True,
-            "install_provider_deps": False,
             "experiment": install_experiment.ROLE_CAPSULES,
         },
         config=config,
@@ -674,7 +646,6 @@ def test_the_registered_tool_takes_the_selection_as_this_run_s_own_input(tmp_pat
         config,
         install_runtime.RuntimeInstallRequest(
             dry_run=True,
-            install_provider_deps=False,
             source_root=source,
             experiment=None,
         ),
@@ -814,15 +785,14 @@ def test_an_install_over_an_earlier_experimental_installation_fails_on_none_of_i
     assert [(node.tool, node.path) for node in listed] == [("runtime_install", report.as_posix())]
 
 
-def test_benchmark_asset_sync_retires_the_same_startup_files(tmp_path: Path, monkeypatch) -> None:
-    source = create_install_source(tmp_path)
+def test_benchmark_asset_sync_retires_the_same_startup_files(tmp_path: Path) -> None:
     coordination_root = tmp_path / "benchmark-coordination"
     plant_retired_startup_files(coordination_root)
     before = snapshot_regular_files(coordination_root)
-    monkeypatch.setattr(filesystem, "packaged_source_root", lambda: nullcontext(source))
 
     filesystem.sync_runtime_assets(coordination_root, dry_run=True)
     assert snapshot_regular_files(coordination_root) == before
     filesystem.sync_runtime_assets(coordination_root, dry_run=False)
     assert_no_retired_startup_files(coordination_root)
-    assert (coordination_root / "providers/requirements/grepai.txt").is_file()
+    assert (coordination_root / "logs" / "mcp").is_dir()
+    assert not (coordination_root / "providers").exists()

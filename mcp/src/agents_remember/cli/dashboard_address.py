@@ -115,12 +115,12 @@ def chat_address_for(config: McpRuntimeConfig, agent_id: str | None) -> dict[str
         return {"chatAddress": None, "chatAddressDetail": str(error)}
     server_id: str | None = None
     if settings is not None and agent_id:
-        try:
-            from agents_remember.cli.paseo_bridge import (  # noqa: PLC0415 - bridge stays lazy
-                PaseoBridgeFailure,
-                bridge_call,
-            )
+        from agents_remember.cli.paseo_bridge import (  # noqa: PLC0415 - bridge stays lazy
+            PaseoBridgeFailure,
+            bridge_call,
+        )
 
+        try:
             reply = bridge_call(config, "runtime-info", {})
             named = reply.get("serverId")
             server_id = named if isinstance(named, str) and named else None

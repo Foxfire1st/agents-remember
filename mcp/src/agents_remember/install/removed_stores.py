@@ -26,6 +26,9 @@ REMOVED_PART_STORE_PATHS = (
     "runtime/structural-seat-locks",
     "runtime/eve-carriers",
     "runtime/eve-agent",
+    "providers",
+    "logs/providers",
+    "logs/observer/providers",
 )
 # The gate logs. The landing chain still reads them, and no part of the product decides a
 # gate any more: removing them is the way out of a refusal by a stored gate.
@@ -74,6 +77,11 @@ def _entries(folder: Path, unreadable: dict[str, str]) -> list[Path]:
 def _is_plain_file(path: Path, unreadable: dict[str, str]) -> bool:
     mode = _own_mode(path, unreadable)
     return mode is not None and stat.S_ISREG(mode)
+
+
+def _is_plain_dir(path: Path, unreadable: dict[str, str]) -> bool:
+    mode = _own_mode(path, unreadable)
+    return mode is not None and stat.S_ISDIR(mode)
 
 
 def _folder_files(folder: Path, unreadable: dict[str, str]) -> list[Path]:
@@ -215,9 +223,12 @@ def removed_part_stores(
     """
     unreadable = {} if unreadable is None else unreadable
     found: list[dict[str, Any]] = []
-    stores = [coordination_root / relative for relative in REMOVED_PART_STORE_PATHS]
-    stores.extend(_pattern_paths(coordination_root, REMOVED_LIFECYCLE_STORE_PATTERNS, unreadable))
-    for store in stores:
+    for relative in REMOVED_PART_STORE_PATHS:
+        store = coordination_root / relative
+        files = _store_files(store, unreadable)
+        if files or _is_plain_dir(store, unreadable):
+            found.append(_store_entry(store, files, gate_log=False))
+    for store in _pattern_paths(coordination_root, REMOVED_LIFECYCLE_STORE_PATTERNS, unreadable):
         files = _store_files(store, unreadable)
         if files:
             found.append(_store_entry(store, files, gate_log=False))

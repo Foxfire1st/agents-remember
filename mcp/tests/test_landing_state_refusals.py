@@ -603,7 +603,8 @@ class ToolDescriptionBoundsTests(unittest.TestCase):
         "worktree_closeout_apply": "closeout-gate-blocked",
         "worktree_integrate": "handover-gate-blocked",
         "worktree_checkpoint_landing": "handover-gate-blocked",
-        "worktree_cleanup": "provider-setup-running",
+        "worktree_cleanup": "blocked",
+        "worktree_abandon": "abandon-blocked",
         "worktree_status": "carryover-pending",
     }
 

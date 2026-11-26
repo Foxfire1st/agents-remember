@@ -58,7 +58,6 @@ REPOSITORY_ROOTS = (
     "resolver.task_root",
     "resolver.temp_root",
 )
-PROVIDER_ROOTS = ("runtimeRoot", "logRoot")
 
 
 class _Roots:
@@ -106,13 +105,11 @@ def _configuration_paths(value: Any, key: str) -> Iterator[tuple[str, Path]]:
             yield from _configuration_paths(item, f"{key}[{index}]")
 
 
-def expected_roots(repositories: list[str], providers: list[str]) -> list[str]:
+def expected_roots(repositories: list[str]) -> list[str]:
     """The keys a complete resolution reports for this configuration."""
     keys = [*CONFIGURATION_ROOTS, *DERIVED_ROOTS]
     for repo_id in repositories:
         keys.extend(f"repositories.{repo_id}.{name}" for name in REPOSITORY_ROOTS)
-    for provider_id in providers:
-        keys.extend(f"providers.{provider_id}.{name}" for name in PROVIDER_ROOTS)
     return keys
 
 
@@ -158,7 +155,7 @@ def resolve_roots(config_path: str) -> dict[str, Any]:
     if paseo is not None:
         found.add("paseoRuntime.home", lambda: paseo.home)
         found.add("paseoRuntime.installPrefix", lambda: paseo.install_prefix)
-    report["expected"] = expected_roots(sorted(config.repositories), sorted(config.providers))
+    report["expected"] = expected_roots(sorted(config.repositories))
     report["values"] = {
         "dashboard.port": config.dashboard.port,
         "dashboard.autoStart": config.dashboard.auto_start,

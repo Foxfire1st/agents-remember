@@ -157,7 +157,7 @@ def terminalize_test_enclosure(
         terminal_archive_required_result(
             contract,
             operation="worktree_cleanup",
-            arguments=TerminalWorktreeCleanupArguments(teardown_providers=False),
+            arguments=TerminalWorktreeCleanupArguments(),
             dry_run=False,
         )
         if cleanup

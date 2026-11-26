@@ -25,9 +25,8 @@ The package carries everything Agents Remember runs or copies:
 - the [skill](concepts.md#skill) `l-01-agent-lifecycles` with the instructions of the roles,
   which the tool server serves to a harness;
 - the version pin of the host and the plug-in that Agents Remember installs into the host;
-- the file `tool-details.md` and the files of the two [search providers](concepts.md#search-provider)
-  that an install copies into the coordination root, and the benchmark material that
-  `runtime_install` copies there with `include_benchmarks=true`.
+- the file `tool-details.md` that an install copies into the coordination root, and the benchmark
+  material that `runtime_install` copies there with `include_benchmarks=true`.
 
 The package does not carry the host itself. An install downloads the host and the Node version it
 runs on.
@@ -120,7 +119,6 @@ Bootstrap call or the tool `runtime_install` creates it with every folder below 
   logs/              the tool log and the dashboard's log
   memory-repos/      the memory repositories, one folder ar-<id> for each code repository
   notes/             notes and reports
-  providers/         the files of the two search providers; nothing starts, indexes or queries them
   runtime/           caches and process records, among them the knowledge index
   tasks/             the task documents
   temp/              the whole results of tool calls
@@ -134,8 +132,8 @@ and the files outside the coordination root.
 
 These parts write the folders:
 
-- The install, which is the first Bootstrap call or `runtime_install`, writes `docs/` and
-  `providers/` and creates the empty folders.
+- The install, which is the first Bootstrap call or `runtime_install`, writes `docs/` and creates
+  the empty folders.
 - The tool `task_doc` writes the task documents under `tasks/`.
 - The tool `memory_init` creates a memory repository under `memory-repos/`.
 - The start of a Worker, a Reviewer or a Curator on a task creates the task's enclosure under

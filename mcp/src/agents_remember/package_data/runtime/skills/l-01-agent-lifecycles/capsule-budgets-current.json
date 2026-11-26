@@ -6212,8 +6212,8 @@
         "reviewer/orientation": 3869,
         "reviewer/review": 4187,
         "reviewer/recovery": 3190,
-        "investigator/orientation": 2157,
-        "investigator/recovery": 1514,
+        "investigator/orientation": 2105,
+        "investigator/recovery": 1462,
         "bootstrap/orientation": 1750,
         "bootstrap/recovery": 1457,
         "bootstrap/bootstrap": 2556,
@@ -6261,7 +6261,7 @@
         "templates/turn-report.md": 1735
       },
       "digest": {
-        "core/every-role.md": 2325
+        "core/every-role.md": 2295
       },
       "ordinary_templates": {
         "templates/bootstrap-report.md": 309,
@@ -6330,8 +6330,8 @@
         "sha256": "702b67efa7c5f61f541dc44373b76a74b320d1ffb4a8b251354bb58625a494eb"
       },
       "skills/l-01-agent-lifecycles/composition-manifest.json": {
-        "size_words": 3636,
-        "sha256": "4073a458bb6feffd26424d615d94411fad4f157278e417ded366cc0c51ba590c"
+        "size_words": 3634,
+        "sha256": "24c8b9428669a5f2e3c5c9523e81fe82d8ebe23bf1a620ecfda5bdffdb232e71"
       },
       "skills/l-01-agent-lifecycles/core/acceptance.md": {
         "size_words": 1647,
@@ -6342,12 +6342,12 @@
         "sha256": "c62a88a1f6dde87d27c5a140efcde3a753baf56725e250553789c263280cb506"
       },
       "skills/l-01-agent-lifecycles/core/digest-map.json": {
-        "size_words": 18866,
-        "sha256": "38e80e48a5b6cf2c7bd749b98693e26467d7a5c5240639526a614bda56c58614"
+        "size_words": 18879,
+        "sha256": "92bf9ae2475aa9382eeca114141deb17a2ff3a2aa00d230fc6d2c7ecbb6c2ddd"
       },
       "skills/l-01-agent-lifecycles/core/every-role.md": {
-        "size_words": 2325,
-        "sha256": "4784d11facb09568de64bb96b0a83bb6bbaab872aba5ab086366e8ee8903f4dc"
+        "size_words": 2295,
+        "sha256": "68e960fd780493a3aa6cef46f6a8f5edf5643bd863f03b0933295911a9fda68b"
       },
       "skills/l-01-agent-lifecycles/core/invariants.md": {
         "size_words": 1213,
@@ -6358,8 +6358,8 @@
         "sha256": "a12603fbe8a85e641c39e2b851d4be344fbca25ac033a69a0f8dca16071c0bb5"
       },
       "skills/l-01-agent-lifecycles/core/lifecycle-frame.md": {
-        "size_words": 390,
-        "sha256": "661f7438655f25d884b1596b31cfcc04ba609633dd8e5906acc6f0b839cca405"
+        "size_words": 240,
+        "sha256": "3f73a468d32a0ca49fb6a95fa9fc71f3c22cce399224496c3016e19ab208eb5c"
       },
       "skills/l-01-agent-lifecycles/core/loop.md": {
         "size_words": 1400,
@@ -6598,8 +6598,8 @@
         "sha256": "95de8680982ad844fc99a05d1bb085fa3bf1c1837f38280529c5212db9ad779d"
       },
       "skills/l-01-agent-lifecycles/roles/investigator.md": {
-        "size_words": 1201,
-        "sha256": "54134483bed0c0cb45fbe46de56fa2b3b643f940f8a38ac4f0a0b4a645c4e31c"
+        "size_words": 1143,
+        "sha256": "851518cf23e4a1bc25139ef2663d951ea08399d679e9815a2fc005a62949c361"
       },
       "skills/l-01-agent-lifecycles/roles/manager.md": {
         "size_words": 2517,
@@ -6646,8 +6646,8 @@
         "sha256": "78fedcd5acfb265b0ea28f7ace834df5bcdc9a759150b7b0d3eb68e4a7bcb1eb"
       },
       "skills/l-01-agent-lifecycles/templates/manager-brief.md": {
-        "size_words": 1470,
-        "sha256": "87cf6a757b2b512861db35338153f824aaead3a971e848fc3c7d1cf871fb7fcc"
+        "size_words": 1463,
+        "sha256": "057e5f89df9250cb278ebf0b33e240563bf136438342927e013b6f321a3abaef"
       },
       "skills/l-01-agent-lifecycles/templates/master-handover-packet.md": {
         "size_words": 742,
@@ -6688,13 +6688,13 @@
     },
     "compiler_input_revisions": {
       "SKILL.md": "sha256:702b67efa7c5f61f541dc44373b76a74b320d1ffb4a8b251354bb58625a494eb",
-      "composition-manifest.json": "sha256:4073a458bb6feffd26424d615d94411fad4f157278e417ded366cc0c51ba590c",
+      "composition-manifest.json": "sha256:24c8b9428669a5f2e3c5c9523e81fe82d8ebe23bf1a620ecfda5bdffdb232e71",
       "core/acceptance.md": "sha256:579904c9e64af0329dc249bcd3d95cf7af4e306321f1ffce0dca1a3f89dd41af",
       "core/authority.md": "sha256:c62a88a1f6dde87d27c5a140efcde3a753baf56725e250553789c263280cb506",
-      "core/every-role.md": "sha256:4784d11facb09568de64bb96b0a83bb6bbaab872aba5ab086366e8ee8903f4dc",
+      "core/every-role.md": "sha256:68e960fd780493a3aa6cef46f6a8f5edf5643bd863f03b0933295911a9fda68b",
       "core/invariants.md": "sha256:63fec8a32ae5a69ffa7acb472707122f8eae1f9126ffda60a98c20c0fcf9d753",
       "core/launcher.md": "sha256:a12603fbe8a85e641c39e2b851d4be344fbca25ac033a69a0f8dca16071c0bb5",
-      "core/lifecycle-frame.md": "sha256:661f7438655f25d884b1596b31cfcc04ba609633dd8e5906acc6f0b839cca405",
+      "core/lifecycle-frame.md": "sha256:3f73a468d32a0ca49fb6a95fa9fc71f3c22cce399224496c3016e19ab208eb5c",
       "core/loop.md": "sha256:7d47ecf18036fdba20740dcb8d5811898abc1dd0cf142f3275b4eea1a9fc92ee",
       "operations/bootstrap.md": "sha256:c988052b9a104b4206086b55f10178c308a38eebe091cac422d7b5976a73b96f",
       "operations/closeout.md": "sha256:1ccda6fb00ce922fb03c815867a7e781e9525104d4a2aa59ba013c3d8f084cd2",
@@ -6745,7 +6745,7 @@
       "roles/architect.md": "sha256:f3837873607961fc207d6b1456c2b085b1401dbf72863e9751da6d89ae042b87",
       "roles/bootstrap.md": "sha256:dfeb754dd69851760d35bc2eb5df1bcb46d26ce4ed11aee2c72342a72e04e795",
       "roles/curator.md": "sha256:95de8680982ad844fc99a05d1bb085fa3bf1c1837f38280529c5212db9ad779d",
-      "roles/investigator.md": "sha256:54134483bed0c0cb45fbe46de56fa2b3b643f940f8a38ac4f0a0b4a645c4e31c",
+      "roles/investigator.md": "sha256:851518cf23e4a1bc25139ef2663d951ea08399d679e9815a2fc005a62949c361",
       "roles/manager.md": "sha256:bcd649f532341c2b33a3c412d91b7f8027cba2c8ddc686d68fc5cf0e20762d3d",
       "roles/orchestrator.md": "sha256:30881c99db709b245c0954c16234055d723593878436190b45caebefbb932944",
       "roles/reviewer.md": "sha256:c21ff79789e258ccb096fd76a2ca088e4c21cfa13694fee329d5fdc37dde2d2d",

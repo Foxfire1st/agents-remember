@@ -4,7 +4,7 @@ Moved whole out of ``cleanup.py`` under the Owner extraction case: local branch
 deletion primitives, remote branch deletion, single-branch retirement with its
 read-only guard phase, the contract-derived branch authority they check, and the
 repository-identity keys that authority is compared by. ``cleanup.py`` keeps the
-terminal authority *builder*, worktree/directory/provider reclamation and the
+terminal authority *builder*, worktree/directory reclamation and the
 stage orchestration; ``abandon.py`` consumes this module for its branch stage.
 A refused retirement changes nothing: every guard runs before the first deletion.
 """

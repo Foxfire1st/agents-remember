@@ -453,14 +453,13 @@ class MaterialOwnerUnitTests(unittest.IsolatedAsyncioTestCase):
                     mock.patch.object(serving, "malloc_trim_enabled", return_value=False)
                 )
                 for name in (
-                    "_metrics_loop",
                     "_leaf_archive_recovery_loop",
                     "_held_delivery_loop",
                     "_workspace_river_compaction_loop",
                     "_warmup_watch_loop",
                 ):
                     stack.enter_context(mock.patch.object(serving, name, parked))
-                async with serving._serving_lifespan(runtime, mock.Mock())(FastAPI()):
+                async with serving._serving_lifespan(runtime)(FastAPI()):
                     self.assertEqual([name for name, _, _ in clock.trace], ["river", "heap-setup"])
                     clock.clocks[clock.loop] = clock.clocks.get(clock.loop, 0) + 1000
             self.assertEqual(
@@ -496,7 +495,7 @@ class MaterialOwnerUnitTests(unittest.IsolatedAsyncioTestCase):
                 )
 
                 async def start(runtime=runtime) -> None:
-                    async with serving._serving_lifespan(runtime, mock.Mock())(FastAPI()):
+                    async with serving._serving_lifespan(runtime)(FastAPI()):
                         raise AssertionError(
                             "a failed or cancelled startup compaction must not admit serving"
                         )

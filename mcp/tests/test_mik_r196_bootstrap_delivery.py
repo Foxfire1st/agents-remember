@@ -399,10 +399,10 @@ def test_installer_failure_reports_the_files_already_written(tmp_path, monkeypat
     assert payload["preparationStatus"] == "bootstrap-scaffold-failed"
 
 
-def test_an_occupied_providers_file_returns_a_refusal_with_partial_effects(tmp_path):
+def test_an_occupied_worktrees_file_returns_a_refusal_with_partial_effects(tmp_path):
     config = load_config(_workspace_config(tmp_path))
     config.coordination_root.mkdir(parents=True)
-    occupied = config.coordination_root / "providers"
+    occupied = config.coordination_root / "worktrees"
     occupied.write_text("keep this file", encoding="utf-8")
 
     payload = _preparation_refusal(config)

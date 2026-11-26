@@ -243,7 +243,7 @@ def test_a_series_contract_is_never_routed_to_the_coherence_route(tmp_path: Path
     series = replace(
         _integrated_contract(tmp_path),
         kind="series",
-        integration_status="pending",
+        integration_status="not-started",
         closeout_status="completed",
     )
 

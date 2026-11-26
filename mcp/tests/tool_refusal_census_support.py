@@ -75,7 +75,7 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
         "server_info": {},
         "context_packet": {"repo_id": "no-such-repo"},
         "read_ar_files": {"repo_id": REPO, "files": [{"path": "not-covered.md"}]},
-        "runtime_install": {"dry_run": True, "install_provider_deps": False},
+        "runtime_install": {"dry_run": True},
         # -- memory -------------------------------------------------------------------
         "memory_quality_check": {
             "request": {"mode": "sync", "repo_id": REPO, "contract_path": contract}

@@ -164,7 +164,6 @@ class LeafDocMasterLinkBindingTests(unittest.TestCase):
                 leaf_id=LEAF_ID,
                 workflow_kind="light-task",
                 memory_mode="external",
-                skip_provider_setup=True,
                 lifecycle_id=lifecycle_id,
             )
         )
@@ -216,9 +215,7 @@ class LeafDocMasterLinkBindingTests(unittest.TestCase):
         self.assertEqual(started.returncode, 0, started.payload)
         contract_path = leaf_enclosure_path(self.task_root, LEAF_DOC_ID)
         abandoned = worktree_manager.abandon_result(
-            worktree_manager.WorktreeArgs(
-                contract_path=contract_path, approved=True, teardown_providers=False
-            )
+            worktree_manager.WorktreeArgs(contract_path=contract_path, approved=True)
         )
         self.assertEqual(abandoned.returncode, 0, abandoned.payload)
         self.assertEqual(read_task_doc(self.leaf_doc_path).status, "abandoned")
@@ -243,7 +240,6 @@ class LeafDocMasterLinkBindingTests(unittest.TestCase):
                 worktree_manager.WorktreeArgs(
                     contract_path=contract_path,
                     approved=True,
-                    teardown_providers=False,
                     dry_run=dry_run,
                 )
             )

@@ -192,7 +192,6 @@ def _settings(tmp_path: Path) -> Path:
                         "memoryRoot": str(root / "memory"),
                     }
                 },
-                "providers": {},
                 "dashboard": {"autoStart": True, "port": 8765},
             }
         ),

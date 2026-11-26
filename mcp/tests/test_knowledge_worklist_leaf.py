@@ -566,7 +566,6 @@ def test_a_completed_sync_recomputes_through_the_bound_port(leaf: Leaf) -> None:
     assert recompute_knowledge_worklist(contract) is None  # nothing bound: the sync is unchanged
     bind_worktree_services(
         WorktreeServices(
-            provider_lifecycle=cast(Any, None),
             memory_quality=cast(Any, None),
             citation_guard=cast(Any, None),
             knowledge_worklist=worklist_leaf.LeafWorklistRecompute(),
@@ -731,7 +730,6 @@ def test_the_recompute_never_raises_and_a_failure_never_fails_a_completed_sync(
     failing_port.recompute.side_effect = RuntimeError("port failed")
     bind_worktree_services(
         WorktreeServices(
-            provider_lifecycle=cast(Any, None),
             memory_quality=cast(Any, None),
             citation_guard=cast(Any, None),
             knowledge_worklist=failing_port,

@@ -29,8 +29,8 @@ and master-exit handover under the [Manager role](../roles/manager.md).
 - Plan priority grade: <critical | high | normal | low> · rationale/evidence <refs>.
 - Leaves: <L0 …, with status and local dependency notes>; build order is not portfolio landing
   authority.
-- Trust facts (compiled by the orchestrator — do not re-run the checkpoint): providers <state /
-  stack key or NONE>, drift <count>, freshness <state>.
+- Trust facts (compiled by the orchestrator — do not re-run the checkpoint): drift <count>,
+  freshness <state>.
 
 ## The source edge owned by the lifecycle tools
 

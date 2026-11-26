@@ -148,7 +148,6 @@ COORDINATION_WRITE_ZONES = (
     "controlplane/",
     "logs/",
     "notes/",
-    "providers/",
     "skills/",
     "system/",
     "tasks/",
@@ -350,7 +349,6 @@ class EntryPointWorld:
                             "memoryRoot": self.adopt.as_posix(),
                         },
                     },
-                    "providers": {},
                     "benchmarksEnabled": True,
                     # The delegation policy rides the authority file as the
                     # supported legacy fallback (its home is the global agentic
@@ -632,7 +630,6 @@ class EntryPointWorld:
                 "leaf_id": LEAF_ID,
                 "parent_task": MASTER,
                 "workflow_kind": "light-task",
-                "skip_provider_setup": True,
             },
         )
         assert self.contract.exists(), f"the fixture enclosure is missing: {self.contract}"
@@ -656,7 +653,7 @@ class EntryPointWorld:
             "server_info": {},
             "context_packet": {"repo_id": REPO},
             "read_ar_files": {"repo_id": REPO, "files": ["not-covered.md"]},
-            "runtime_install": {"dry_run": True, "install_provider_deps": False},
+            "runtime_install": {"dry_run": True},
             "memory_quality_check": {
                 "request": {"mode": "sync", "repo_id": REPO, "contract_path": contract}
             },

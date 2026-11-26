@@ -24,14 +24,12 @@ class _PreparedStartEnclosure:
     contract: WorktreeContract
     code_state: str
     memory_state: dict[str, object]
-    provider_plan: dict[str, object]
 
 
 @dataclass(frozen=True)
 class _StartEnclosurePlan:
     contract: WorktreeContract
     memory_preview: dict[str, object]
-    provider_plan: dict[str, object]
 
 
 def _blocked_memory_start_result(
@@ -71,41 +69,10 @@ def _contract_after_memory_start(
     return contract
 
 
-def _blocked_provider_start_result(
-    context,
-    args: WorktreeArgs,
-    code_state: str,
-    memory_state: dict[str, object],
-    provider_state: dict[str, object],
-) -> WorktreeCommandResult:
-    return WorktreeCommandResult(
-        2,
-        {
-            "state": "blocked",
-            "summary": "Worktree provider setup could not be prepared safely.",
-            **recovery_guidance(
-                "choose_provider_setup_recovery",
-                tool="worktree_start",
-                args={
-                    "repo_id": context.code_repository_name,
-                    "task_name": args.task_name,
-                    "worktree_name": args.worktree_name,
-                    "workflow_kind": args.workflow_kind,
-                    "skip_provider_setup": True,
-                },
-            ),
-            "code_worktree": code_state,
-            "memory": memory_state,
-            "providers": provider_state,
-        },
-    )
-
-
 def _preview_start_enclosure(plan: _StartEnclosurePlan) -> _PreparedStartEnclosure:
     code_state = ensure_worktree(plan.contract, side="code", dry_run=True)
     return _PreparedStartEnclosure(
         plan.contract,
         code_state,
         plan.memory_preview,
-        plan.provider_plan,
     )
