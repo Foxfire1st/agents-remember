@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 import agents_remember.cli.paseo_role_tools as tools
 import agents_remember.cli.role_held_messages as held
+from agents_remember.cli import role_held_store
 from agents_remember.cli import role_launch_receipts as receipts_module
 from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND
 from agents_remember.cli.role_held_messages import (
@@ -24,7 +25,7 @@ from agents_remember.cli.role_held_messages import (
     HeldMessage,
     _reset_sweep_cursor,
 )
-from agents_remember.cli.role_held_store import GENERATION, held_seat_ref
+from agents_remember.cli.role_held_store import GENERATION, HeldSeatRef, held_seat_ref
 from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA
 from agents_remember.observer.host_activity import HOST_ACTIVITY_FILE
 from agents_remember.serving.projections import host_activity as host_activity_module
@@ -758,6 +759,69 @@ class HeldSweepBoundsTests(RoleToolsTestCase):
         self.assertEqual((swept["swept"], swept["delivered"], swept["stillHeld"]), (3, 3, 0))
         for agent_id in agents:
             self.assertEqual(len(self.received(agent_id)), 1)
+
+    def test_bad_receipts_do_not_abort_a_tick_with_valid_work(self) -> None:
+        agent_id, good, _folder = self.craft_recipient("valid")
+        sessions = good.parent / "worker" / "sessions"
+        sessions.mkdir(parents=True)
+        good.rename(sessions / good.name)
+        malformed = sessions / "malformed.json"
+        malformed.write_text("{", encoding="utf-8")
+        other_document = sessions / "attachment.json"
+        other_document.write_text('{"example": "not a receipt"}', encoding="utf-8")
+        # A queued receipt is visited first. The walk discovers the other JSON and valid work.
+        held.note_held_receipt(self.config, malformed)
+
+        with self.assertLogs(held.__name__, level="WARNING") as logs:
+            swept = held.sweep_held_messages(self.config)
+
+        self.assertEqual((swept["swept"], swept["delivered"], swept["stillHeld"]), (1, 1, 0))
+        self.assertEqual(len(self.received(agent_id)), 1)
+        self.assertEqual(len(logs.output), 2)
+        for path in (malformed, other_document):
+            self.assertEqual(sum(str(path) in message for message in logs.output), 1)
+
+    def test_receipt_helpers_warn_once_when_a_read_fails(self) -> None:
+        bad = self.root / "bad.json"
+        bad.write_text("{", encoding="utf-8")
+        bad_ref = HeldSeatRef(bad, "req-bad", "agent-bad", None, 0)
+        cases = (
+            ("queued receipt", lambda: held._readable_queued_receipt(bad), None),
+            ("refresh count", lambda: held._refresh_waiting_count(bad_ref), None),
+            ("apply drain", lambda: held.apply_drain_to_receipt(bad, {}), False),
+        )
+        for operation, run, expected in cases:
+            with self.subTest(operation=operation):
+                with self.assertLogs(held.__name__, level="WARNING") as logs:
+                    self.assertIs(run(), expected)
+                self.assertEqual(len(logs.output), 1)
+                self.assertIn(str(bad), logs.output[0])
+
+    def test_receipt_writers_warn_once_when_the_locked_read_fails(self) -> None:
+        _agent_id, receipt, _folder = self.craft_recipient("corrupted-before-write")
+        valid = receipt.read_text(encoding="utf-8")
+        ref = held_seat_ref(receipt, json.loads(valid))
+
+        def corrupt(_current: dict[str, Any]) -> None:
+            # The real writer rereads the file under its lock after this recount.
+            receipt.write_text("{", encoding="utf-8")
+
+        cases = (
+            ("refresh count", lambda: held._refresh_waiting_count(ref), None),
+            ("apply drain", lambda: held.apply_drain_to_receipt(receipt, {}), False),
+        )
+        for operation, run, expected in cases:
+            with self.subTest(operation=operation):
+                receipt.write_text(valid, encoding="utf-8")
+                with (
+                    patch.object(held, "recount_waiting_for", side_effect=corrupt),
+                    patch.object(role_held_store, "recount_waiting_for", side_effect=corrupt),
+                    self.assertLogs(held.__name__, level="WARNING") as logs,
+                ):
+                    self.assertIs(run(), expected)
+                self.assertEqual(len(logs.output), 1)
+                self.assertIn(str(receipt), logs.output[0])
+                self.assertEqual(receipt.read_text(encoding="utf-8"), "{")
 
     def test_a_large_backlog_rotates_under_the_cap_with_dead_and_history(self) -> None:
         live = [self.craft_recipient(f"recipient-{index:02d}")[0] for index in range(40)]

@@ -8,6 +8,7 @@ import unittest
 from itertools import pairwise
 from pathlib import Path
 
+import pytest
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving import change_watcher as m
 from agents_remember.serving.projections import paths as projection_paths
@@ -137,6 +138,65 @@ def config(root: Path) -> McpRuntimeConfig:
         coordination_root=root,
         workspace_root=root,
         transcript_root=root / "logs/mcp",
+    )
+
+
+@pytest.mark.parametrize(
+    "coordination_path",
+    [
+        pytest.param(".", id="ordinary-root"),
+        pytest.param("notes/ar-coordination", id="earlier-notes"),
+        pytest.param(
+            "notes/reports/paseo-native-executions/history/ar-coordination",
+            id="receipt-like-ancestor",
+        ),
+    ],
+)
+def test_held_watch_admits_receipts_and_ignores_taskless_message_artifacts(
+    tmp_path: Path, coordination_path: str
+) -> None:
+    cfg = config(tmp_path / coordination_path)
+    holder = m.held_receipt_root(cfg)
+    task = cfg.coordination_root / "tasks/messages/master"
+    task.mkdir(parents=True)
+    (task / "task.json").write_text("{}", encoding="utf-8")
+    task_bound = task / "notes/reports" / holder.name / "worker-request.json"
+    taskless = holder / "investigator/sessions/request.json"
+    skipped = (
+        holder / "investigator/messages/request.attach-1-data.json",
+        holder / "investigator/messages/request.md",
+        holder / "investigator/message-bindings/request.json",
+        holder / "investigator/sessions/history/request.json",
+        holder / "investigator/messages/notes/reports" / holder.name / "worker-request.json",
+    )
+    for path in (task_bound, taskless, *skipped):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+
+    plan = m.projection_watch_plan(cfg)
+    assert holder in plan.roots
+    assert m.watchfiles is not None
+    changes = {
+        (m.watchfiles.Change.modified, str(path)) for path in (task_bound, taskless, *skipped)
+    }
+    watch_filter = m.ProjectionInputWatcher(cfg)._watch_filter(plan)
+    admitted = {raw for change, raw in changes if watch_filter(change, raw)}
+    assert admitted == {str(task_bound), str(taskless)}
+    paths, deferred, overflow, _, _ = m._judge_planned_changes(changes, plan)
+    assert paths == admitted
+    assert not deferred and not overflow
+    for path in skipped:
+        assert not m.is_held_receipt(path.relative_to(cfg.coordination_root)), path
+        assert not plan.admits_file(path), path
+    for path in (taskless, task_bound):
+        assert m.is_held_receipt(path.relative_to(cfg.coordination_root)), path
+        assert plan.admits_file(path), path
+    if coordination_path == "notes/ar-coordination":
+        assert m.is_held_receipt(taskless)
+    held = m.ProjectionDomain.ATTENTION_HELD
+    assert m.projection_domains_for_paths(cfg, {str(taskless)}) == frozenset({held})
+    assert m.projection_domains_for_paths(cfg, {str(task_bound)}) == frozenset(
+        {held, m.ProjectionDomain.TASKS}
     )
 
 
