@@ -379,4 +379,4 @@ creates `mcp/.venv` with `scripts/bootstrap-mcp-venv.sh` and installs the dashbo
 with `npm --prefix dashboard ci`.
 
 - Python: `mcp/.venv/bin/python -m pytest mcp/tests/test_canvas_host.py mcp/tests/test_canvas_presenter.py mcp/tests/test_canvas_serving.py mcp/tests/test_canvas_readiness.py mcp/tests/test_canvas_kit_references.py mcp/tests/test_canvas_motion.py mcp/tests/test_canvas_starters_exemplar.py`
-- Dashboard, from `dashboard/`: `npx vitest run src/panels/review/canvas src/panels/review/explainer`, `npx tsc -b`, `npx eslint src/panels/review/canvas src/panels/review/explainer`.
+- Dashboard, from `dashboard/`: `npx vitest run src/panels/review/canvas src/panels/review/explainer`, `npx tsc -b`, `npx oxlint src/panels/review/canvas src/panels/review/explainer`.

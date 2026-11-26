@@ -260,7 +260,15 @@ describe("L150-CODE-06: the dispatch notifies the current callback at acceptance
       expect(seen.some((call) => call.url === "/api/role-launch/dispatch")).toBe(true);
     });
     const dispatches = seen.filter((call) => call.url === "/api/role-launch/dispatch");
-    return (dispatches[dispatches.length - 1]?.body as Record<string, string>)["requestId"];
+    const lastBody = dispatches[dispatches.length - 1]?.body;
+    if (!lastBody || typeof lastBody !== "object") {
+      throw new Error("Expected a /api/role-launch/dispatch request with a JSON object body");
+    }
+    const requestId = (lastBody as Record<string, unknown>)["requestId"];
+    if (typeof requestId !== "string") {
+      throw new Error(`Expected string requestId in dispatch body, got ${typeof requestId}`);
+    }
+    return requestId;
   }
 
   it("calls only the replaced callback", async () => {

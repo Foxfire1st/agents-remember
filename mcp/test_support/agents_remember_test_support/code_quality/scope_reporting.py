@@ -25,7 +25,7 @@ from agents_remember_test_support.code_quality.scope import (
     coverage_json_file_count,
     dashboard_build_inputs,
     derive_scope,
-    eslint_result_files,
+    oxlint_result_files,
     python_files_under,
     read_pyproject,
     toml_section,
@@ -572,21 +572,21 @@ def config_input_files(dashboard: Path, config: dict[str, object]) -> set[Path]:
 
 
 def dashboard_lint_scope_line(dashboard: Path) -> str:
-    config = dashboard / "eslint.config.js"
+    config = dashboard / ".oxlintrc.json"
     findings = []
     if not config.is_file():
-        findings.append("dashboard/eslint.config.js is missing; restore the lint config")
+        findings.append("dashboard/.oxlintrc.json is missing; restore the lint config")
     if findings:
         raise ScopeReportingError("; ".join(findings))
     try:
-        resolved = eslint_result_files(dashboard)
+        resolved = oxlint_result_files(dashboard)
     except ScopeError as error:
         raise ScopeReportingError(str(error)) from error
     return scope_line(
         "dashboard-lint",
-        "ESLint machine-readable result set after flat-config ignores",
-        "dashboard/eslint.config.js + dashboard/package.json script lint (eslint .)",
-        f"{len(resolved)} ESLint-resolved files",
+        "oxlint machine-readable diagnostics after config ignores",
+        "dashboard/.oxlintrc.json + dashboard/package.json script lint (oxlint .)",
+        f"{len(resolved)} oxlint files with findings",
     )
 
 

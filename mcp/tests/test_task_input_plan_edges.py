@@ -229,20 +229,30 @@ def test_receipt_root_discovery_only_uses_live_canonical_task_holders(tmp_path: 
 
 
 def test_receipt_content_skip_rules_match_native_walk(tmp_path: Path) -> None:
-    root = holder(tmp_path / "tasks/r/t")
+    tasks = tmp_path / "tasks"
+    root = holder(tasks / "r/t")
     kept = put(root / ".retained/receipt.json")
-    skipped = [put(root / name / "receipt.json") for name in ("history", "message-bindings")]
-    discovery_skipped = put(holder(tmp_path / "tasks/r/t/nested") / "receipt.json")
-    walk = ReceiptWalk(root)
-    native: set[Path] = set()
-    while not walk.done:
-        native.update(Path(path) for path in walk.take(256))
+    skipped_dirs = [root / "worker" / name for name in ("history", "message-bindings", "messages")]
+    skipped = {put(directory / "nested/receipt.json") for directory in skipped_dirs}
+    discovery_skipped = put(holder(tasks / "r/t/nested") / "receipt.json")
+    with mock.patch("os.scandir", wraps=os.scandir) as native_scans:
+        walk = ReceiptWalk(root)
+        native: set[Path] = set()
+        while not walk.done:
+            native.update(Path(path) for path in walk.take(256))
     assert walk.complete and kept in native
     assert not native.intersection(skipped)
-    plan = task_input_plan(tmp_path / "tasks")
+    for directory in skipped_dirs:
+        assert mock.call(directory) not in native_scans.call_args_list
+    with mock.patch("os.scandir", wraps=os.scandir) as plan_scans:
+        plan = task_input_plan(tasks)
+        planned = set(plan.input_files())
     assert plan.complete, plan.errors
-    assert plan.accepts_file(kept)
+    assert plan.accepts_file(kept) and kept in planned
     assert not any(plan.accepts_file(path) for path in skipped)
+    assert not planned.intersection(skipped)
+    for directory in skipped_dirs:
+        assert mock.call(directory) not in plan_scans.call_args_list
     assert not plan.accepts_file(discovery_skipped)
 
 

@@ -362,9 +362,7 @@ def knowledge_changes(
     """Definition 7 between K_B and K_C."""
 
     changes = {
-        invariant: InvariantChange(
-            record_changed=base.record_file(invariant) != candidate.record_file(invariant)
-        )
+        invariant: InvariantChange(record_changed=base.record_file_changed(candidate, invariant))
         for invariant in base.invariants
     }
 
@@ -386,9 +384,7 @@ def knowledge_changes(
         if entry_id not in candidate.entries:
             note(before.entry.invariant, "retired", _entry_fact(before))
     families = frozenset(
-        family
-        for family in base.families
-        if base.record_file(family) != candidate.record_file(family)
+        family for family in base.families if base.record_file_changed(candidate, family)
     )
     return KnowledgeChanges(invariants=changes, families=families)
 

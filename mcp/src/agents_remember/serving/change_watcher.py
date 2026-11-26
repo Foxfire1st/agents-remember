@@ -90,7 +90,10 @@ from pathlib import Path
 from time import time as _wall_now
 from typing import TYPE_CHECKING, Protocol
 
-from agents_remember.controlplane.held_store_discovery import receipt_holder_chain
+from agents_remember.controlplane.held_store_discovery import (
+    SKIPPED_RECEIPT_DIRS,
+    receipt_holder_chain,
+)
 from agents_remember.kernel.file_lock import lock_path_for
 from agents_remember.kernel.own_writes import OWN_WRITES
 from agents_remember.observer.store import WORKSPACE_CURSOR_FILE, WORKSPACE_LOCK_FILE
@@ -229,12 +232,9 @@ HELD_RECEIPT_DIRECTORY = "paseo-native-executions"
 
 
 def held_receipt_root(config: McpRuntimeConfig) -> Path:
-    """Where taskless seats keep their held receipts, so a withdrawal there is watched.
+    """Watch taskless receipts here, including withdrawals.
 
-    A taskless receipt lives at ``notes/reports/paseo-native-executions/<role>/sessions/
-    <request>.json`` and a task-bound one inside its task's own ``notes/reports`` tree. The
-    task-bound shape is already under the recursive ``tasks`` root; this root covers the
-    taskless shape, which nothing watched before (L190-R1-F10).
+    Task-bound receipts are already covered by the task input plan.
     """
 
     return config.coordination_root / "notes" / "reports" / HELD_RECEIPT_DIRECTORY
@@ -251,15 +251,12 @@ def is_held_receipt(path: Path) -> bool:
     parts = path.parts
     if path.suffix != ".json":
         return False
-    try:
-        index = parts.index("notes")
-    except ValueError:
-        return False
-    return (
-        len(parts) > index + 3
-        and parts[index + 1] == "reports"
-        and parts[index + 2] == HELD_RECEIPT_DIRECTORY
-    )
+    holder = ("notes", "reports", HELD_RECEIPT_DIRECTORY)
+    for index in range(len(parts) - len(holder)):
+        end = index + len(holder)
+        if parts[index:end] == holder:
+            return SKIPPED_RECEIPT_DIRS.isdisjoint(parts[end:-1])
+    return False
 
 
 def _fixed_shallow_roots(config: McpRuntimeConfig) -> frozenset[Path]:
@@ -330,9 +327,10 @@ class ProjectionWatchPlan:
         )
 
     def admits_file(self, path: Path) -> bool:
+        if path.is_relative_to(self.receipt_chain[-1]):
+            return is_held_receipt(path.relative_to(self.receipt_chain[0]))
         if path.parent in self.task_directories:
             return self.task_inputs.accepts_file(path)
-        # These are only discovery parents. Actual holder data retains its recursive root.
         return path.parent not in self.receipt_chain[:-1]
 
 
@@ -456,7 +454,8 @@ def projection_domains_for_paths(
                 # L190-R1-F10: a held receipt also invalidates the held reader, whichever root
                 # happens to hold it first -- the task-bound shape lives under ``tasks``, so
                 # stopping at that root used to drop the receipt's held meaning entirely.
-                if is_held_receipt(path):
+                receipt_path = path.relative_to(root) if domain is ProjectionDomain.TASKS else path
+                if is_held_receipt(receipt_path):
                     domains.add(ProjectionDomain.ATTENTION_HELD)
                 break
         if not matched:

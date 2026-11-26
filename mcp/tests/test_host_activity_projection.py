@@ -82,6 +82,44 @@ def publish(home: Path, boot: str = "boot-a", **agents: object) -> None:
     )
 
 
+def test_unstamped_turn_ends_trigger_delivery_once_per_plugin_boot(tmp_path: Path) -> None:
+    home = tmp_path / "host"
+    config = runtime_config(tmp_path, home)
+    agents = {
+        "closed": {"state": "closed"},
+        "ended": {"state": "ended"},
+        "idle": {"state": "idle"},
+        "running": {"state": "in-turn"},
+    }
+    publish(home, "boot-a", **agents)
+    assert publish_role_agent(
+        home,
+        "idle",
+        {"role": "worker", "task": "repo/master/leaf.json", "reportPath": "/report"},
+    )
+    path = home / "agents-remember" / host_activity.HOST_ACTIVITY_FILE
+    original = path.read_bytes()
+    delivery_seen: dict[str, str] = {}
+    usage_seen: dict[str, str] = {}
+    assert host_activity.turn_ended_agents(config, delivery_seen) == ["closed", "ended", "idle"]
+    assert host_activity.turn_ended_agents(config, delivery_seen) == []
+    assert delivery_seen == dict.fromkeys(("closed", "ended", "idle"), "unstamped:boot-a")
+    assert host_activity.new_stamped_ends(config, usage_seen) == []
+    assert path.read_bytes() == original
+
+    publish(home, "boot-a", **{**agents, "idle": {"state": "idle", "eventAt": NOW.isoformat()}})
+    assert host_activity.turn_ended_agents(config, delivery_seen) == ["idle"]
+    assert host_activity.new_stamped_ends(config, usage_seen) == ["idle"]
+    assert host_activity.turn_ended_agents(config, delivery_seen) == []
+    assert host_activity.new_stamped_ends(config, usage_seen) == []
+
+    publish(home, "boot-b", **agents)
+    assert host_activity.turn_ended_agents(config, delivery_seen) == ["closed", "ended", "idle"]
+    assert host_activity.turn_ended_agents(config, delivery_seen) == []
+    assert delivery_seen == dict.fromkeys(("closed", "ended", "idle"), "unstamped:boot-b")
+    assert host_activity.new_stamped_ends(config, usage_seen) == []
+
+
 def test_startup_replaces_old_activity_before_it_can_be_served(tmp_path: Path) -> None:
     home = tmp_path / "host"
     config = runtime_config(tmp_path, home)

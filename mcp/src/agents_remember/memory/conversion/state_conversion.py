@@ -346,3 +346,52 @@ def _change(plan: StateConversionPlan, path: str, original: bytes | None, value:
     if data != original:
         plan.changes[path] = data
         plan.originals[path] = original
+
+
+def _parse_json_object(raw: bytes) -> tuple[str, dict[str, Any]] | None:
+    try:
+        text = raw.decode("utf-8")
+        document = parse_json(text)
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return None
+    return (text, document) if isinstance(document, dict) else None
+
+
+def _validated_stamp(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    try:
+        return WriterStamp.model_validate(value).to_document()
+    except ValidationError:
+        return None
+
+
+def state_conversion_only(base_raw: bytes, candidate_raw: bytes) -> bool:
+    """Whether ``candidate_raw`` differs from ``base_raw`` only by state-conversion edits.
+
+    Applies the conversion's two edits to the canonical base object -- removing a legacy
+    ``status`` word (:data:`LEGACY_STATE_WORDS`) and adding a valid :class:`WriterStamp` where
+    the base has none -- renders canonically with :func:`canonical_text`, and compares exact
+    bytes with ``candidate_raw``. Non-canonical inputs, formatting-only changes, non-legacy
+    status edits, changes to an existing ``writer``, and any other field edits return ``False``.
+    """
+
+    if base_raw == candidate_raw:
+        return False
+    base_parsed = _parse_json_object(base_raw)
+    candidate_parsed = _parse_json_object(candidate_raw)
+    if base_parsed is None or candidate_parsed is None:
+        return False
+    base_text, base = base_parsed
+    _, candidate = candidate_parsed
+    if canonical_text(base) != base_text:
+        return False
+    expected = dict(base)
+    if expected.get("status") in LEGACY_STATE_WORDS:
+        del expected["status"]
+    if "writer" not in expected:
+        stamp = _validated_stamp(candidate.get("writer"))
+        if stamp is None:
+            return False
+        expected["writer"] = stamp
+    return expected != base and canonical_text(expected).encode("utf-8") == candidate_raw

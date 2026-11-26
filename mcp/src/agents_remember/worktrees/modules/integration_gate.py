@@ -21,13 +21,14 @@ from agents_remember.worktrees.knowledge_gate import (
     converted_memory,
     landing_gate_refusal,
     leaf_cutover_refusal,
+    master_document_base,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.closeout_external import leaf_pair_refusal
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.series_closeout import landed_chain_refusal
 from agents_remember.worktrees.services import LandingGateRequest
-from agents_remember.worktrees.worktree_contract import WorktreeContract, original_base_pair
+from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 __all__ = ["integration_gate_block"]
 
@@ -61,6 +62,7 @@ def integration_gate_block(
     if contract.kind != "series":
         refusal = _leaf_landing_lock(contract, commits, sources)
     else:
+        master_end = operation != "worktree_checkpoint_landing"
         refusal = landing_gate_refusal(
             LandingGateRequest(
                 memory_repository=contract.memory_repo_path,
@@ -72,8 +74,16 @@ def integration_gate_block(
                 series_contract=contract.contract_path.as_posix(),
                 # Only the landing that finishes the master refuses document debt (MIK-R124
                 # rule 8); a checkpoint lands and leaves the master open, so it reports.
-                master_end=operation != "worktree_checkpoint_landing",
-                document_base=original_base_pair(contract),
+                master_end=master_end,
+                document_base=(
+                    master_document_base(
+                        contract,
+                        code_commit=commits.code,
+                        memory_commit=commits.memory_content,
+                    )
+                    if master_end
+                    else None
+                ),
             )
         )
         if refusal is None:
