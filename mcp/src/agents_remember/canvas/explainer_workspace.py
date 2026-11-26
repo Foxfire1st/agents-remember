@@ -522,6 +522,8 @@ def _copy_package_folder(source: Path, destination: Path, *, root: Path, label: 
         if first_nested_symlink(destination) is not None:
             raise PathRefused(f"{label} holds a symlink at {destination}")
         shutil.rmtree(destination)
+    elif destination.is_file() and not destination.is_symlink():
+        destination.unlink()
     return copy_folder(source, destination, root=root)
 
 

@@ -177,6 +177,16 @@ async function observe(page) {
     const unresolved = [...references, ...allClaimIds]
       .filter((reference) => !reference)
       .map(() => "(empty)");
+    const mediaElements = [...document.querySelectorAll("audio, video")].map(
+      (element) => ({
+        tag: element.tagName.toLowerCase(),
+        autoplay: Boolean(element.autoplay || element.hasAttribute("autoplay")),
+        loop: Boolean(element.loop || element.hasAttribute("loop")),
+        controls: Boolean(element.controls || element.hasAttribute("controls")),
+        id: element.id || "",
+        src: element.getAttribute("src") || "",
+      }),
+    );
     const body = document.body;
     return {
       unresolved,
@@ -184,6 +194,7 @@ async function observe(page) {
       // in separate inventories for the Python caller to resolve against its packet.
       references: references.filter(Boolean),
       claimIds: allClaimIds.filter(Boolean),
+      mediaElements,
       title: document.title,
       rendered: Boolean(
         body &&
@@ -191,6 +202,30 @@ async function observe(page) {
       ),
     };
   });
+}
+
+function mediaControlFaults(elements) {
+  const problems = [];
+  if (elements.some((item) => item.autoplay)) {
+    problems.push("the page autoplays media a reader cannot stop");
+  }
+  if (elements.some((item) => item.loop)) {
+    problems.push("the page loops media a reader cannot stop");
+  }
+  const missing = elements.find((item) => !item.controls);
+  if (missing) {
+    const attrs = [
+      missing.id ? `id="${missing.id}"` : "",
+      missing.src ? `src="${missing.src}"` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const label = `<${missing.tag}${attrs ? ` ${attrs}` : ""}>`;
+    problems.push(
+      `the page plays audio or video without controls a reader can use: ${label}`,
+    );
+  }
+  return problems;
 }
 
 /** Measure painted information, keeping backgrounds and occluding overlays in place.
@@ -401,6 +436,11 @@ async function observeInBrowser(origin) {
       ]),
     ];
     const foreignRequests = [...new Set([...foreign, ...outside])];
+    const mediaElements = [
+      ...(initialSeen.mediaElements || []),
+      ...(postSeen.mediaElements || []),
+    ];
+    const mediaFaults = mediaControlFaults(mediaElements);
     const visibleContentOk = Boolean(initialVisible);
     const faults = [
       errors.length ? `${errors.length} console or load error(s)` : "",
@@ -411,6 +451,7 @@ async function observeInBrowser(origin) {
       unresolvedReferences.length
         ? `${unresolvedReferences.length} unresolved evidence reference(s)`
         : "",
+      mediaFaults.length ? `${mediaFaults.length} media-control fault(s)` : "",
       initialSeen.rendered ? "" : "the document rendered no body",
       visibleContentOk
         ? ""
@@ -429,6 +470,8 @@ async function observeInBrowser(origin) {
       unresolvedReferences,
       evidenceReferences,
       claimIds,
+      mediaElements,
+      mediaFaults,
       loadedAssets: [...loadedAssets].sort(),
       domInventory,
       detail: `${faults.length ? `faults: ${faults.join(", ")}` : "no fault observed"}; page title ${JSON.stringify(

@@ -174,6 +174,7 @@ unit-regression = [
   "mcp/tests/test_explainer_server.py",
   "mcp/tests/test_explainer_service.py",
   "mcp/tests/test_explainer_shared_preparation.py",
+  "mcp/tests/test_explainer_staging_and_checks.py",
   "mcp/tests/test_explainer_staleness.py",
   "mcp/tests/test_explainer_surface.py",
   "mcp/tests/test_explainer_target.py",

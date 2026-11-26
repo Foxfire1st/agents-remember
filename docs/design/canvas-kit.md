@@ -216,6 +216,7 @@ mcp/.venv/bin/python -m pytest mcp/tests/test_canvas_kit.py mcp/tests/test_canva
   inside `kit/`. The existing `text/plain` type admits the `LICENSE` file names of the libraries
   unchanged, and the canvas host serves those files only through that revision's session prefix with
   the same integrity checks as other assets.
+- **Kit files are loaded by literal path.** A page loads kit files by literal path (static imports, re-exports, or string-literal `import(...)`); computed `import()` expressions cannot be resolved statically and are not carried automatically at reseed.
 - **Rebuilding is manual.** The manifest records the exact esbuild command and entry for each
   bundle, but the repository holds no npm dependency for them. Shiki and Motion Canvas are built
   from the npm packages of their pinned versions, OpenGenerativeUI and ar-video from their own

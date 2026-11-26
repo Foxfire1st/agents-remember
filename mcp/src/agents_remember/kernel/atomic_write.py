@@ -41,8 +41,10 @@ def _temp_path_for(path: Path) -> Path:
 
 # What ``_temp_path_for`` appends to ``.<name>``: the writer's process id and its per-call id.
 _TEMP_WRITER = re.compile(r"\.(\d+)\.[0-9a-f]{32}\.tmp")
-# The temps that writes of this process hold right now, in any thread.
-_temps_in_flight: set[Path] = set()
+# Per-call temp filenames held in flight by this process across all threads. Keying by the
+# unique basename (pid + uuid4) rather than full Path preserves identity when concurrent callers
+# write the same directory through different ``/proc/<pid>/fd/<N>`` descriptor paths.
+_temps_in_flight: set[str] = set()
 _temps_in_flight_guard = threading.Lock()
 
 
@@ -52,7 +54,7 @@ def _writer_is_gone(temp: Path, process_id: int) -> bool:
         # This process's own number: a write in flight in another thread, or a leftover of an
         # earlier process that had the same number.
         with _temps_in_flight_guard:
-            return temp not in _temps_in_flight
+            return temp.name not in _temps_in_flight
     try:
         os.kill(process_id, 0)
     except ProcessLookupError:
@@ -129,7 +131,7 @@ def atomic_write_bytes(path: Path, payload: bytes, *, note_own: bool = False) ->
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = _temp_path_for(path)
         with _temps_in_flight_guard:
-            _temps_in_flight.add(tmp)
+            _temps_in_flight.add(tmp.name)
         try:
             with tmp.open("wb") as handle:
                 handle.write(payload)
@@ -151,7 +153,7 @@ def atomic_write_bytes(path: Path, payload: bytes, *, note_own: bool = False) ->
             raise
         finally:
             with _temps_in_flight_guard:
-                _temps_in_flight.discard(tmp)
+                _temps_in_flight.discard(tmp.name)
 
 
 def atomic_write_text(

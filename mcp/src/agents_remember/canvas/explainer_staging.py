@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -16,16 +18,24 @@ from agents_remember.application.review_frame_inventory import (
 from agents_remember.application.review_frame_store import (
     FramePublication,
     FrameScope,
+    begin_draft,
     read_draft,
     task_lock,
 )
 from agents_remember.application.review_planned_comparison import task_frames_total
 from agents_remember.canvas.explainer_paths import DRAFTS_DIRECTORY, STATE_DIRECTORY
 from agents_remember.canvas.inventory import build_inventory
-from agents_remember.models.knowledge.review_frame import FrameDraft
+from agents_remember.canvas.paths import PathRefused, guard_path
+from agents_remember.kernel.file_lock import exclusive_file_lock
+from agents_remember.models.knowledge.review_frame import (
+    FrameAuthoring,
+    FrameDraft,
+    FrameLimits,
+)
 
 __all__ = [
     "PUBLISH_STAGING_DIRECTORY",
+    "DraftStagingRequest",
     "active_staging_dirs",
     "discard_unused_staging",
     "observed_assets",
@@ -33,9 +43,43 @@ __all__ = [
     "publish_working_directory",
     "record_published_inventory",
     "safe_build_inventory",
+    "stage_and_begin_draft",
 ]
 
 PUBLISH_STAGING_DIRECTORY = "publish-staging"
+
+
+@dataclass(frozen=True)
+class DraftStagingRequest:
+    """Inputs for locked draft staging and frame-store admission."""
+
+    drafts: Path
+    request_id: str
+    seat: str | None
+    moment: str
+    focus: str
+    assets: Mapping[str, bytes]
+    carried_kit: Mapping[str, bytes]
+    draft_digest: str
+    limits: FrameLimits
+
+
+def _staging_root(workspace: Path) -> Path:
+    """Guard ``<workspace>/state/publish-staging`` without resolving symlinks first."""
+
+    return guard_path(
+        workspace,
+        workspace / STATE_DIRECTORY / PUBLISH_STAGING_DIRECTORY,
+        label="publish staging root",
+    )
+
+
+def _guard_recorded_path(workspace: Path, target: Path, *, label: str) -> Path:
+    """Guard a recorded working path using ``workspace.resolve()`` when recorded resolved."""
+
+    resolved_workspace = workspace.resolve()
+    root = workspace if target.is_relative_to(workspace) else resolved_workspace
+    return guard_path(root, target, label=label)
 
 
 def publish_working_directory(
@@ -48,17 +92,29 @@ def publish_working_directory(
 ) -> tuple[Path, bool]:
     """Allocate a request-scoped staging folder for carried kit drafts without clobbering active ones."""
 
+    staging_root = _staging_root(workspace)
+    guarded_drafts = guard_path(workspace, drafts, label="explainer drafts")
+    resolved_drafts = guarded_drafts.resolve()
     if not carried_kit:
-        return drafts.resolve(), False
-    staging_root = (workspace / STATE_DIRECTORY / PUBLISH_STAGING_DIRECTORY).resolve()
+        return resolved_drafts, False
+    resolved_staging_root = staging_root.resolve()
     if earlier is not None:
         reused = Path(earlier.working_directory)
-        if reused.is_absolute() and (reused == drafts.resolve() or reused.parent == staging_root):
-            return reused, False
+        if not reused.is_absolute():
+            raise PathRefused(f"reused publish staging {reused} is not an absolute path")
+        guarded_reused = _guard_recorded_path(workspace, reused, label="reused publish staging")
+        if (
+            guarded_reused.resolve() == resolved_drafts
+            or guarded_reused.parent == resolved_staging_root
+        ):
+            return guarded_reused, False
     staging_root.mkdir(parents=True, exist_ok=True)
+    _staging_root(workspace)
     staging = staging_root / f"{draft_digest[:16]}-{uuid4().hex[:8]}"
+    guard_path(workspace, staging, label="publish staging directory")
     staging.mkdir(parents=True, exist_ok=True)
-    return staging, True
+    guard_path(workspace, staging, label="publish staging directory")
+    return staging.resolve(), True
 
 
 def active_staging_dirs(scope: FrameScope) -> set[Path]:
@@ -78,32 +134,91 @@ def active_staging_dirs(scope: FrameScope) -> set[Path]:
 
 
 def prune_finished_staging(workspace: Path, scope: FrameScope) -> None:
-    """Reclaim completed request staging folders not referenced by any active draft."""
+    """Reclaim completed request staging folders under the task lock without leaving ``workspace``."""
 
-    staging_root = (workspace / STATE_DIRECTORY / PUBLISH_STAGING_DIRECTORY).resolve()
-    if not staging_root.is_dir() or staging_root.is_symlink():
+    with exclusive_file_lock(task_lock(scope), "review frame store"):
+        staging_root = _staging_root(workspace)
+        if not staging_root.is_dir():
+            return
+        entries = [
+            entry for entry in staging_root.iterdir() if not entry.is_symlink() and entry.is_dir()
+        ]
+        if not entries:
+            return
+        active = active_staging_dirs(scope)
+        for entry in entries:
+            guard_path(workspace, entry, label="publish staging entry")
+            if entry.resolve() in active:
+                continue
+            guard_path(workspace, entry, label="publish staging entry")
+            shutil.rmtree(entry, ignore_errors=True)
+
+
+def discard_unused_staging(
+    workspace: Path, publish_working: Path, adopted: FrameDraft | None
+) -> None:
+    """Remove a freshly created staging folder inside ``workspace`` when the store did not adopt it."""
+
+    staging_root = _staging_root(workspace)
+    guarded = _guard_recorded_path(workspace, publish_working, label="publish staging directory")
+    resolved_staging_root = staging_root.resolve()
+    resolved_target = guarded.resolve()
+    guard_path(resolved_staging_root, resolved_target, label="publish staging directory")
+    if resolved_target == resolved_staging_root:
+        raise PathRefused(f"refusing to discard the publish staging root {publish_working}")
+    if adopted is not None and Path(adopted.working_directory).resolve() == resolved_target:
         return
-    entries = [
-        entry for entry in staging_root.iterdir() if not entry.is_symlink() and entry.is_dir()
-    ]
-    if not entries:
-        return
-    active = active_staging_dirs(scope)
-    for entry in entries:
-        if entry.resolve() in active:
-            continue
-        shutil.rmtree(entry, ignore_errors=True)
+    shutil.rmtree(guarded, ignore_errors=True)
 
 
-def discard_unused_staging(publish_working: Path, adopted: FrameDraft | None) -> None:
-    """Remove a freshly created staging folder when the store did not adopt it."""
+def stage_and_begin_draft(
+    workspace: Path,
+    scope: FrameScope,
+    request: DraftStagingRequest,
+) -> FrameDraft:
+    """Read earlier draft, stage working directory, and admit the draft under one task lock."""
 
-    if (
-        adopted is not None
-        and Path(adopted.working_directory).resolve() == publish_working.resolve()
-    ):
-        return
-    shutil.rmtree(publish_working, ignore_errors=True)
+    with exclusive_file_lock(task_lock(scope), "review frame store"):
+        earlier = read_draft(scope, request.request_id)
+        publish_working, created_staging = publish_working_directory(
+            workspace,
+            request.drafts,
+            request.carried_kit,
+            draft_digest=request.draft_digest,
+            earlier=earlier,
+        )
+        began_draft = False
+        try:
+            admitted = begin_draft(
+                scope,
+                request_id=request.request_id,
+                authoring=(
+                    earlier.authoring
+                    if earlier is not None
+                    else FrameAuthoring(
+                        request_id=request.request_id,
+                        session_id=request.seat or None,
+                        started_at=request.moment,
+                        finished_at=request.moment,
+                    )
+                ),
+                focus=request.focus,
+                assets=request.assets,
+                working_directory=publish_working,
+                limits=request.limits,
+                now=request.moment,
+            )
+            began_draft = True
+            if created_staging:
+                discard_unused_staging(workspace, publish_working, admitted)
+            return admitted
+        except BaseException:
+            if created_staging and not began_draft:
+                with suppress(PathRefused):
+                    discard_unused_staging(
+                        workspace, publish_working, read_draft(scope, request.request_id)
+                    )
+            raise
 
 
 def observed_assets(report: Mapping[str, Any]) -> tuple[str, ...]:

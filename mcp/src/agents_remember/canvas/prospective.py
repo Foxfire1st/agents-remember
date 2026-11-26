@@ -110,6 +110,7 @@ class ProspectiveResult:
     browser: dict[str, object] | None = None
     dom_inventory: dict[str, Any] | None = None
     loaded_assets: tuple[str, ...] = ()
+    media_faults: tuple[str, ...] = ()
 
     @property
     def loaded(self) -> bool:
@@ -127,6 +128,8 @@ class ProspectiveResult:
             parts.append(f"requests outside the revision: {_joined(self.foreign_requests)}")
         if self.unresolved_references:
             parts.append(f"unresolved evidence references: {_joined(self.unresolved_references)}")
+        if self.media_faults:
+            parts.append(f"media-controls: {_joined(self.media_faults)}")
         if not self.visible_content_ok:
             parts.append("the document painted no visible text, controls, or graphics")
         return "; ".join(parts)
@@ -177,6 +180,38 @@ def _loaded_assets(value: object) -> tuple[str, ...]:
         if cleaned:
             found.add(cleaned)
     return tuple(sorted(found))
+
+
+def _media_element_label(item: dict[str, Any]) -> str:
+    tag = item.get("tag") if isinstance(item.get("tag"), str) and item.get("tag") else "media"
+    attrs = [
+        f'{key}="{item[key]}"'
+        for key in ("id", "src")
+        if isinstance(item.get(key), str) and item[key]
+    ]
+    return f"<{tag}{(' ' + ' '.join(attrs)) if attrs else ''}>"
+
+
+def _media_faults(elements: object, reported: object) -> tuple[str, ...]:
+    """Evaluate browser-observed audio/video elements against the markup media-control rules."""
+
+    faults: list[str] = []
+    if isinstance(elements, list):
+        items = [item for item in elements if isinstance(item, dict)]
+        if any(bool(item.get("autoplay")) for item in items):
+            faults.append("the page autoplays media a reader cannot stop")
+        if any(bool(item.get("loop")) for item in items):
+            faults.append("the page loops media a reader cannot stop")
+        without_controls = [
+            _media_element_label(item) for item in items if not item.get("controls")
+        ]
+        if without_controls:
+            faults.append(
+                "the page plays audio or video without controls a reader can use: "
+                + without_controls[0]
+            )
+    faults.extend(_strings(reported))
+    return tuple(dict.fromkeys(faults))
 
 
 def _flag(value: object, *, default: bool) -> bool:
@@ -500,6 +535,7 @@ def _read_result(invocation: _Invocation) -> ProspectiveResult:
         detail=detail if isinstance(detail, str) else "",
         dom_inventory=_dom_inventory(payload.get("domInventory")),
         loaded_assets=_loaded_assets(payload.get("loadedAssets")),
+        media_faults=_media_faults(payload.get("mediaElements"), payload.get("mediaFaults")),
     )
     return _consistent(result)
 
@@ -555,6 +591,8 @@ def _observed_faults(result: ProspectiveResult) -> tuple[str, ...]:
         faults.append(f"{len(result.foreign_requests)} request(s) outside the revision")
     if result.unresolved_references:
         faults.append(f"{len(result.unresolved_references)} unresolved evidence reference(s)")
+    if result.media_faults:
+        faults.append(f"{len(result.media_faults)} media-control fault(s)")
     if not result.visible_content_ok:
         faults.append("the document painted no visible text, controls, or graphics")
     return tuple(faults)
