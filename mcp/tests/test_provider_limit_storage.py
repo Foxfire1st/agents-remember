@@ -15,6 +15,7 @@ import pytest
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.observer.provider_limits import ProviderLimits, read_provider_limits
 from agents_remember.serving.paseo import provider_limits as writer
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 NOW = datetime(2026, 11, 24, 11, 0, tzinfo=UTC)
 RESET = NOW + timedelta(days=3)
@@ -245,7 +246,7 @@ def test_concurrent_usage_reads_keep_both_reports_and_mappings(
     def paused_write(path: Path, limits: ProviderLimits) -> None:
         if not getattr(second_thread, "writing", False):
             first_write_ready.set()
-            assert let_first_write.wait(timeout=5)
+            assert let_first_write.wait(timeout=HANG_GUARD_SECONDS)
         original_write(path, limits)
 
     def write_second() -> ProviderLimits | None:
@@ -259,13 +260,13 @@ def test_concurrent_usage_reads_keep_both_reports_and_mappings(
             writer.record_usage_reads, NO_CONFIG, {WORKER: [_entry("report-a")]}, now=NOW
         )
         try:
-            assert first_write_ready.wait(timeout=5)
+            assert first_write_ready.wait(timeout=HANG_GUARD_SECONDS)
             second = threads.submit(write_second)
-            assert second_lock_ready.wait(timeout=5)
+            assert second_lock_ready.wait(timeout=HANG_GUARD_SECONDS)
         finally:
             let_first_write.set()
-        assert first.result(timeout=5) is not None
-        assert second.result(timeout=5) is not None
+        assert first.result(timeout=HANG_GUARD_SECONDS) is not None
+        assert second.result(timeout=HANG_GUARD_SECONDS) is not None
 
     stored = read_provider_limits(limits_path)
     assert stored.reports.keys() == {"report-a", "report-b"}

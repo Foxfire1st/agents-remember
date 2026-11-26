@@ -174,7 +174,7 @@ class MessageFileTests(RoleToolsTestCase):
     def test_two_messages_of_one_second_get_a_counter(self) -> None:
         _request, worker = self.started(status="idle")
         stem = "20261011T000000Z_reviewer-aaaaaaaa_to_worker-bbbbbbbb"
-        with patch.object(paseo_role_tools, "utc_stem", return_value=stem):
+        with patch.object(role_message_delivery, "utc_stem", return_value=stem):
             first = self.message(binding("reviewer"), "one", agent_id=worker)
             second = self.message(binding("reviewer"), "two", agent_id=worker)
         self.assertTrue(Path(first["messageFile"]).name == f"{stem}.md")
@@ -533,6 +533,25 @@ class TransactionTests(RoleToolsTestCase):
             "pathlib.Path.mkdir",
             side_effect=PermissionError("read-only record"),
         ):
+            result = self.refusal(
+                self.message(binding("worker"), "hello", agent_id=worker),
+                "message-file-failed",
+            )
+        self.assertIn("cannot be created", result["detail"])
+        self.assertIn("Nothing was delivered", result["detail"])
+        self.assertEqual(self.received(worker), [])
+
+    def test_a_message_folder_creation_failure_after_lock_is_a_named_refusal(self) -> None:
+        _request, worker = self.started(status="idle")
+        target_folder = self.leaf_folder()
+        real_mkdir = Path.mkdir
+
+        def fail_message_folder(path: Path, *args: Any, **kwargs: Any) -> None:
+            if path == target_folder:
+                raise PermissionError("read-only record")
+            real_mkdir(path, *args, **kwargs)
+
+        with patch.object(Path, "mkdir", autospec=True, side_effect=fail_message_folder):
             result = self.refusal(
                 self.message(binding("worker"), "hello", agent_id=worker),
                 "message-file-failed",

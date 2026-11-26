@@ -295,6 +295,8 @@ def _queue_held_work(config: SimpleNamespace, workspace: Path) -> None:
             {
                 "schema": RECEIPT_SCHEMA,
                 "status": "running",
+                "agentId": AGENT,
+                "requestId": "33333333-3333-5333-8333-333333333333",
                 "execution": {"agentId": AGENT},
                 "workspace": {"path": str(workspace)},
             }
