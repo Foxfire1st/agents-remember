@@ -6185,24 +6185,24 @@
   "derived": {
     "current_measurements": {
       "capsules": {
-        "architect/orientation": 4673,
-        "architect/planning": 4432,
-        "architect/review": 4673,
-        "architect/coordination": 5446,
-        "architect/authorized-closeout": 4125,
-        "architect/recovery": 3905,
-        "orchestrator/orientation": 2795,
-        "orchestrator/planning": 2118,
-        "orchestrator/review": 2466,
-        "orchestrator/coordination": 3691,
-        "orchestrator/authorized-closeout": 2351,
-        "orchestrator/recovery": 2131,
-        "manager/orientation": 3518,
-        "manager/review": 3189,
-        "manager/curation": 3397,
-        "manager/coordination": 4589,
-        "manager/authorized-closeout": 3074,
-        "manager/recovery": 2854,
+        "architect/orientation": 4703,
+        "architect/planning": 4462,
+        "architect/review": 4703,
+        "architect/coordination": 5476,
+        "architect/authorized-closeout": 4155,
+        "architect/recovery": 3935,
+        "orchestrator/orientation": 2825,
+        "orchestrator/planning": 2148,
+        "orchestrator/review": 2496,
+        "orchestrator/coordination": 3721,
+        "orchestrator/authorized-closeout": 2381,
+        "orchestrator/recovery": 2161,
+        "manager/orientation": 3523,
+        "manager/review": 3194,
+        "manager/curation": 3402,
+        "manager/coordination": 4594,
+        "manager/authorized-closeout": 3079,
+        "manager/recovery": 2859,
         "worker/orientation": 3314,
         "worker/implementation": 3590,
         "worker/recovery": 2635,
@@ -6343,7 +6343,7 @@
       },
       "skills/l-01-agent-lifecycles/core/digest-map.json": {
         "size_words": 18879,
-        "sha256": "34f5742eae2de147f69aee6f5a2b00d45685c890a19fab03d03af04be41b288d"
+        "sha256": "80daf0843259cbaef290dad1ddbc29b79db640c9802bc7e11a690c2d24b97d57"
       },
       "skills/l-01-agent-lifecycles/core/every-role.md": {
         "size_words": 2295,
@@ -6586,8 +6586,8 @@
         "sha256": "c11ed6c846183bd54433dd007c53467810982712f021400a7cbb3794b0f79ad3"
       },
       "skills/l-01-agent-lifecycles/roles/architect.md": {
-        "size_words": 3567,
-        "sha256": "f3837873607961fc207d6b1456c2b085b1401dbf72863e9751da6d89ae042b87"
+        "size_words": 3597,
+        "sha256": "2a016012e4d8b0490062e3eb9c8d74992ac2ff62f07ae53948c7ac1fb7260079"
       },
       "skills/l-01-agent-lifecycles/roles/bootstrap.md": {
         "size_words": 1249,
@@ -6602,12 +6602,12 @@
         "sha256": "851518cf23e4a1bc25139ef2663d951ea08399d679e9815a2fc005a62949c361"
       },
       "skills/l-01-agent-lifecycles/roles/manager.md": {
-        "size_words": 2517,
-        "sha256": "bcd649f532341c2b33a3c412d91b7f8027cba2c8ddc686d68fc5cf0e20762d3d"
+        "size_words": 2522,
+        "sha256": "3f72f28bc433ea42d80d08722465ba9dd4f892d6e1c3ea1ab6573f8d5c178b4c"
       },
       "skills/l-01-agent-lifecycles/roles/orchestrator.md": {
-        "size_words": 1793,
-        "sha256": "30881c99db709b245c0954c16234055d723593878436190b45caebefbb932944"
+        "size_words": 1823,
+        "sha256": "c5078ef91b7c3bcf80005010ab1c2c712e65574c7a386d8add857ac33934fca0"
       },
       "skills/l-01-agent-lifecycles/roles/reviewer.md": {
         "size_words": 2869,
@@ -6742,12 +6742,12 @@
       "reference/tasks/document-authoring.md": "sha256:5c66644a20d1b02c9303f60b6c152374e26e3cbbe5bc1333f8694bfdc6eec54f",
       "reference/writing/technical-english-profile.md": "sha256:e381e9b560fa509b0cfb55565e80991a857a68ec657ee42e22fe3f56df5fe788",
       "reference/writing/visual-explainers.md": "sha256:c11ed6c846183bd54433dd007c53467810982712f021400a7cbb3794b0f79ad3",
-      "roles/architect.md": "sha256:f3837873607961fc207d6b1456c2b085b1401dbf72863e9751da6d89ae042b87",
+      "roles/architect.md": "sha256:2a016012e4d8b0490062e3eb9c8d74992ac2ff62f07ae53948c7ac1fb7260079",
       "roles/bootstrap.md": "sha256:dfeb754dd69851760d35bc2eb5df1bcb46d26ce4ed11aee2c72342a72e04e795",
       "roles/curator.md": "sha256:95de8680982ad844fc99a05d1bb085fa3bf1c1837f38280529c5212db9ad779d",
       "roles/investigator.md": "sha256:851518cf23e4a1bc25139ef2663d951ea08399d679e9815a2fc005a62949c361",
-      "roles/manager.md": "sha256:bcd649f532341c2b33a3c412d91b7f8027cba2c8ddc686d68fc5cf0e20762d3d",
-      "roles/orchestrator.md": "sha256:30881c99db709b245c0954c16234055d723593878436190b45caebefbb932944",
+      "roles/manager.md": "sha256:3f72f28bc433ea42d80d08722465ba9dd4f892d6e1c3ea1ab6573f8d5c178b4c",
+      "roles/orchestrator.md": "sha256:c5078ef91b7c3bcf80005010ab1c2c712e65574c7a386d8add857ac33934fca0",
       "roles/reviewer.md": "sha256:369d3c5cdfd03d981d99b8098a3432dc481c6baea97886a5f1dc6dfacc4437ae",
       "roles/worker.md": "sha256:b99e6ae2bc61c97af708715a631f6c79cc9a522b62289874c1a9a448bbd88ed3",
       "templates/turn-report.md": "sha256:67ca3513d6b2c90f7115ae52ba0d83a754595b8903a8c284e69429d07334cdab"

@@ -12,11 +12,24 @@ import uuid
 from pathlib import Path
 from typing import Any, Protocol
 
+from agents_remember.application.agent_binding import (
+    AGENT_ID_VARIABLE,
+    REQUEST_ID_VARIABLE,
+    ROLE_VARIABLE,
+    TOOL_SERVER_NAME,
+)
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
+from agents_remember.cli.paseo_seat_policy import provider_starts_tool_server_at_create
 from agents_remember.cli.role_handover_artifacts import artifact_line
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleDispatchRequest
+from agents_remember.serving.server_bindings import (
+    BoundIdentityPayload,
+    ServerBindingRecord,
+    bindings_directory,
+    process_start,
+)
 from agents_remember.worktrees.role_handover_locator import locator_directory
 from paseo_runtime_test_support import runtime_settings, write_runtime_block
 
@@ -70,6 +83,8 @@ class FakeRuntime:
         self.creation_error: str | None = None
         # Agents a listing did not reach: with any, the listing reports itself as not ended.
         self.unlisted: set[str] = set()
+        self.write_server_bindings: bool = True
+        self._binding_files: dict[str, Path] = {}
 
     def fail(self, command: str, code: str, message: str = "", after_effect: bool = False) -> None:
         failure = PaseoBridgeFailure(code, message or f"{command} failed with {code}")
@@ -83,7 +98,7 @@ class FakeRuntime:
         return {"serverId": SERVER_ID, "present": payload["messageId"] in carried}
 
     def __call__(
-        self, _config: McpRuntimeConfig, command: str, payload: dict[str, Any]
+        self, config: McpRuntimeConfig, command: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
         self.calls.append((command, copy.deepcopy(payload)))
         if self.observer is not None and command in LAUNCH_COMMANDS:
@@ -93,9 +108,55 @@ class FakeRuntime:
         if failure is not None and not after_effect:
             raise failure
         reply = getattr(self, "_" + command.replace("-", "_"))(payload)
+        if command == "agent-create":
+            self._record_fake_binding(config, payload)
+        elif command == "agent-archive":
+            self._remove_fake_binding(str(payload.get("agentId") or ""))
         if failure is not None:
             raise failure
         return copy.deepcopy(reply)
+
+    def _record_fake_binding(self, config: McpRuntimeConfig, payload: dict[str, Any]) -> None:
+        if not self.write_server_bindings or not isinstance(config, McpRuntimeConfig):
+            return
+        provider = payload.get("provider")
+        if not isinstance(provider, str) or not provider_starts_tool_server_at_create(provider):
+            return
+        servers = payload.get("mcpServers")
+        if not isinstance(servers, dict) or not isinstance(servers.get(TOOL_SERVER_NAME), dict):
+            return
+        env = servers[TOOL_SERVER_NAME].get("env")
+        if not isinstance(env, dict):
+            return
+        agent_id = env.get(AGENT_ID_VARIABLE)
+        request_id = env.get(REQUEST_ID_VARIABLE)
+        role = env.get(ROLE_VARIABLE)
+        if not (
+            isinstance(agent_id, str) and isinstance(request_id, str) and isinstance(role, str)
+        ):
+            return
+        pid = os.getpid()
+        record = ServerBindingRecord(
+            pid=pid,
+            processStart=process_start(pid),
+            startedAt="2026-10-02T00:00:00Z",
+            configPath=str(config.config_path),
+            parentPid=0,
+            parentProcessStart=None,
+            ancestors=[],
+            bindingState="bound",
+            binding=BoundIdentityPayload(agentId=agent_id, requestId=request_id, role=role),
+        )
+        directory = bindings_directory(config)
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"fake-{agent_id}.json"
+        path.write_text(record.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        self._binding_files[agent_id] = path
+
+    def _remove_fake_binding(self, agent_id: str) -> None:
+        path = self._binding_files.pop(agent_id, None)
+        if path is not None:
+            path.unlink(missing_ok=True)
 
     def launch_calls(self) -> list[tuple[str, dict[str, Any]]]:
         return [call for call in self.calls if call[0] in LAUNCH_COMMANDS]

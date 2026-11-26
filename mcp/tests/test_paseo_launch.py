@@ -501,7 +501,7 @@ class LaunchRefusalTests(PaseoLaunchTestCase):
         self.assertEqual((status, body["status"]), (200, "running"))
         self.assertEqual(
             [name for name, _ in self.runtime.calls],
-            ["catalog", "catalog", "workspace-open", "agent-create"],
+            ["catalog", "catalog", "workspace-open", "agent-create", "agent-create"],
         )
         self.assertEqual(self.runtime.calls[0][1]["mode"], "metadata")
         self.assertEqual(self.runtime.calls[1][1]["mode"], "selected")

@@ -155,6 +155,30 @@ class RepeatTestCase(launch.PaseoLaunchTestCase):
 
 
 class RepeatAfterChangeTests(RepeatTestCase):
+    def _assert_replayed_create_calls(
+        self,
+        created: list[dict[str, Any]],
+        saved: dict[str, Any],
+        expected_message: str,
+        artifact: Path,
+    ) -> None:
+        self.assertEqual(len(created), 2)
+        create_call, send_call = created
+        self.assertNotIn("prompt", create_call)
+        self.assertEqual(
+            (create_call["agentId"], send_call["agentId"], send_call["prompt"]),
+            (saved["agentId"], saved["agentId"], expected_message),
+        )
+        stored = saved["replayRequest"]["agent"]
+        self.assertEqual(
+            {key: create_call[key] for key in stored if key != "prompt"},
+            {key: value for key, value in stored.items() if key != "prompt"},
+        )
+        self.assertEqual({key: send_call[key] for key in stored}, stored)
+        self.assertTrue(send_call["skipToolServerWait"])
+        self.assertIn("agents-remember-task", stored["mcpServers"])
+        self.assertIn(artifact.as_posix(), stored["systemPrompt"])
+
     def test_a_repeat_is_answered_from_its_receipt_whatever_changed_since_the_launch(self) -> None:
         cases = [
             (role, state)
@@ -210,18 +234,10 @@ class RepeatAfterChangeTests(RepeatTestCase):
                         self.runtime.calls, [("agent-state", {"agentId": saved["agentId"]})]
                     )
                 else:
-                    # The stored call runs again unchanged: the same agent id, the first message
-                    # as saved with its artifact line, the saved recovery note and tool server.
-                    self.assertEqual(
-                        [(call["agentId"], call["prompt"]) for call in created],
-                        [(saved["agentId"], expected_message)],
-                    )
-                    stored = saved["replayRequest"]["agent"]
-                    self.assertEqual(
-                        [{key: call[key] for key in stored} for call in created], [stored]
-                    )
-                    self.assertIn("agents-remember-task", stored["mcpServers"])
-                    self.assertIn(artifact.as_posix(), stored["systemPrompt"])
+                    # The stored call runs again unchanged: eager confirmation creates the
+                    # seat first without prompt, confirms its binding, then sends the saved
+                    # first message with its artifact line, recovery note and tool server.
+                    self._assert_replayed_create_calls(created, saved, expected_message, artifact)
                     self.assertEqual(
                         [
                             payload
@@ -783,7 +799,9 @@ class RuntimeReplyTests(RepeatTestCase):
 
         self.assertEqual(self.dispatch(self.request("orchestrator"))[0], 200)
 
-        opened, created = self.runtime.launch_calls()
+        opened, created_empty, created = self.runtime.launch_calls()
+        self.assertNotIn("prompt", created_empty[1])
+        self.assertTrue(created[1]["skipToolServerWait"])
         # The runtime keys a workspace by the path text: a link and its target would be two.
         self.assertEqual(opened, ("workspace-open", {"cwd": real.as_posix()}))
         self.assertEqual(len(created[1]["title"]), 200)
@@ -882,7 +900,7 @@ class ServiceTierReplayTests(RepeatTestCase):
                 self.assertEqual(
                     [command for command, _ in launches],
                     (["agent-archive"] if model is not None else [])
-                    + ["workspace-open", "agent-create"],
+                    + ["workspace-open", "agent-create", "agent-create"],
                 )
                 created = launches[-1]
                 self.assertEqual(created[1]["provider"], "codex")

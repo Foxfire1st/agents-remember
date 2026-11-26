@@ -710,7 +710,8 @@ async function sendFirstMessage(api, daemon, agent, request) {
     }
   }
   try {
-    if (request.hasToolServers) await toolServerStart()
+    // L51-R2: skip the blind startup wait when the launcher already confirmed the bound server.
+    if (request.hasToolServers && !request.skipToolServerWait) await toolServerStart()
     // A newly created agent runs no turn yet; no active-turn behaviour is asked for, so a
     // message never ends a turn (MIK-R171 rule 2).
     await handle.send(request.prompt, { messageId: request.firstMessageId })
@@ -744,6 +745,10 @@ function agentCreation(input, agentId) {
     throw failure('invalid_bridge_payload', 'featureValues must map feature ids to booleans or nonempty option ids.')
   }
   const prompt = optionalText(input, 'prompt')
+  const skipToolServerWait = input.skipToolServerWait === true
+  if (input.skipToolServerWait !== undefined && typeof input.skipToolServerWait !== 'boolean') {
+    throw failure('invalid_bridge_payload', 'skipToolServerWait must be a boolean when provided.')
+  }
   const idempotencyKey = requiredText(input, 'idempotencyKey')
   const shared = { agentId, idempotencyKey, labels: requiredLabels(input) }
   const title = requiredText(input, 'title')
@@ -855,6 +860,7 @@ function agentCreation(input, agentId) {
     prompt,
     firstMessageId: `${idempotencyKey}${FIRST_MESSAGE_SUFFIX}`,
     hasToolServers: appliedServers !== null && Object.keys(appliedServers).length > 0,
+    skipToolServerWait,
     kept,
     // The agent is created without a message; `sendFirstMessage` sends `prompt` afterwards.
     async create(api, daemon, deadline = Date.now() + DEFAULT_DEADLINE_MS) {

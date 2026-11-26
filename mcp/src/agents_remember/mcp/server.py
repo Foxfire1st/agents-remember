@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime
 from functools import partial
@@ -42,9 +43,14 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.kernel.request_memo import request_memo_scope
 from agents_remember.memory_quality.style.citations.extents import definition_scope
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.tools.role_tool_scope import tools_for_role
 from agents_remember.models.tools.tool_schema_compaction import compact_tool_schema
 from agents_remember.serving.build_currentness import build_currentness
+from agents_remember.serving.server_bindings import (
+    BoundIdentityPayload,
+    register_server_binding,
+)
 from agents_remember.serving.server_registry import register_server
 
 from .build_staleness import is_stale_build_write, stale_build_refusal
@@ -470,12 +476,50 @@ def create_server(config: McpRuntimeConfig) -> Any:
     return server
 
 
+def _document_ref_dict(ref: TaskDocumentRef | None) -> dict[str, str] | None:
+    if ref is None:
+        return None
+    return {"repository": ref.repository, "path": ref.path}
+
+
+def _register_process_binding(config: McpRuntimeConfig) -> Callable[[], None]:
+    """L51-R1: publish this MCP server's binding snapshot before FastMCP runs."""
+    try:
+        agent_binding = read_agent_binding()
+    except ValueError as error:
+        return register_server_binding(
+            config,
+            binding_state="unreadable",
+            unreadable_reason=str(error),
+        )
+    if agent_binding is None:
+        return register_server_binding(config, binding_state="unbound")
+    return register_server_binding(
+        config,
+        binding_state="bound",
+        binding=BoundIdentityPayload(
+            agentId=agent_binding.agent_id,
+            requestId=agent_binding.request_id,
+            role=agent_binding.role,
+            sprintDocumentRef=_document_ref_dict(agent_binding.sprint_ref),
+            masterDocumentRef=_document_ref_dict(agent_binding.master_ref),
+            taskDocumentRef=_document_ref_dict(agent_binding.task_ref),
+        ),
+    )
+
+
 def run_server(config: McpRuntimeConfig) -> None:
     cleanup = register_server(config, "mcp")
+    cleanup_binding: Callable[[], None] | None = None
     try:
+        cleanup_binding = _register_process_binding(config)
         create_server(config).run()
     finally:
-        cleanup()
+        try:
+            if cleanup_binding is not None:
+                cleanup_binding()
+        finally:
+            cleanup()
 
 
 def main(argv: list[str] | None = None) -> int:

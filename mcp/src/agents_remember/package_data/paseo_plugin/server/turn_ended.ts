@@ -80,8 +80,14 @@ import {
   appendWaitRows,
   checkDelayMs,
   declaredNames,
+  endDeclaredWait,
   judgeDeclaredEnd,
 } from "./declared_wait_state.ts";
+import {
+  IDENTITY_MISMATCH_LOG_KIND,
+  composeIdentityMismatchParentLine,
+  extractIdentityMismatchLine,
+} from "./identity_mismatch.ts";
 import {
   startTimer,
   stopTimer,
@@ -2509,12 +2515,17 @@ async function noteParentLine(
   mark: { readonly ordinal: number; readonly at: string } | undefined,
   scheduling: TurnEndScheduling,
   states: HostStates,
+  precomposedLine?: string,
 ): Promise<TurnEndedOutcome> {
   const target = resolveWakeParent(agent, facts, records, tracker, states);
   if (target === null) return { kind: "none" };
-  if (turnHasReturnToParent(own, target.id, target.facts)) return { kind: "none" };
-  const base = composeTurnEndedLine(agent.id, facts, lastLineOfTurn(own));
-  const line = mark === undefined ? base : markThirdSilentEnd(base, mark.ordinal);
+  if (precomposedLine === undefined && turnHasReturnToParent(own, target.id, target.facts)) return { kind: "none" };
+  const line =
+    precomposedLine !== undefined
+      ? precomposedLine
+      : mark === undefined
+        ? composeTurnEndedLine(agent.id, facts, lastLineOfTurn(own))
+        : markThirdSilentEnd(composeTurnEndedLine(agent.id, facts, lastLineOfTurn(own)), mark.ordinal);
   if (mark !== undefined) {
     tracker.append(turnEndRow("marked-parent-line", facts, agent.id, mark.ordinal, "silent end in a row", mark.at));
   }
@@ -2599,6 +2610,24 @@ export async function noteTurnEnded(
   const own = slice.rows;
   await flushHeldLines(tracker, sender, records, options, states);
   if (intakeObsolete()) return { kind: "none" };
+
+  // L51-R4: a seat ending with `IDENTITY MISMATCH:` gets no wake message and
+  // delivers the line straight to its parent without counting as a silent end.
+  const mismatchLine = extractIdentityMismatchLine(lastLineOfTurn(own), TURN_ENDED_LAST_TEXT_LIMIT);
+  if (mismatchLine !== null) {
+    cancelSeatWake(tracker, agent.id, "identity mismatch ended the turn", now, options);
+    cancelLimitResume(tracker, agent.id, now, "identity mismatch ended the turn");
+    cancelSubagentLeftAlone(tracker, agent.id);
+    if (tracker.declarations.has(agent.id)) {
+      endDeclaredWait(tracker, agent.id, facts, now, (handle) => stopTimer(options, handle), "identity mismatch ended the turn");
+      announceWait(tracker, agent.id);
+    }
+    tracker.append(
+      turnEndRow(IDENTITY_MISMATCH_LOG_KIND, facts, agent.id, tracker.silentEnds.get(agent.id) ?? 0, mismatchLine, isoWithOffset(now())),
+    );
+    const line = composeIdentityMismatchParentLine(agent.id, facts, mismatchLine, TURN_ENDED_LINE_LIMIT);
+    return noteParentLine(agent, facts, own, records, tracker, sender, sequence, undefined, options, states, line);
+  }
 
   const isSeat = TURN_ENDED_SEAT_ROLES.has(facts.role);
   const handoff = turnHasHandoff(own);

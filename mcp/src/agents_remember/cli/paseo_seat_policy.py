@@ -55,3 +55,14 @@ def preapproval_detail(provider: str) -> str:
             "and tools added by later builds require replacing the seat."
         )
     return "Claude's task-server approval covers server_info for this session."
+
+
+def provider_starts_tool_server_at_create(provider: str) -> bool:
+    """Whether ``provider`` starts its task tool server at agent creation rather than lazily.
+
+    Claude starts MCP tool servers on the first turn and native Antigravity drops them (D890);
+    every other provider is confirmed eagerly before the opening message is delivered (BUG-R51@v1).
+    """
+
+    normalized = provider.strip().lower()
+    return bool(normalized) and normalized not in {"claude", "antigravity"}

@@ -44,12 +44,40 @@ More folders appear when the product is used:
 | `<coordination-root>/logs/dashboard/` | the dashboard's state `daemon.json`, its log `dashboard.log`, the log of the start before as `dashboard.log.1`, and `ensure.lock` | `agents-remember dashboard --daemon` |
 | `<coordination-root>/logs/observer/` | the records the dashboard reads, among them `workspace/events.jsonl` | the product's own processes |
 | `<coordination-root>/runtime/servers/<pid>.json` | one record for each running tool server and dashboard | each of those processes |
+| `<coordination-root>/runtime/server-bindings/<pid>.json` | one binding and process-ancestry record for each running MCP tool server; see [Server binding records](#server-binding-records) | each MCP tool server |
 | `<coordination-root>/runtime/knowledge-index/` | the cache that `agents-remember knowledge-index` keeps when it is called with `--coordination-root <coordination-root>` | that command |
 | `<coordination-root>/runtime/review-answers/`, `runtime/review-memos/`, `runtime/changeset-ranges/` and `runtime/capture-indexes/` | what the product keeps for the review page: prepared answers, memos, the ranges of change sets and the indexes of kept comparisons | the product's own processes |
 | `<coordination-root>/controlplane/` | state that the product keeps between calls, among them `attention-notices.json` and the folder `lifecycle-enclosures/` | the product's own processes |
 | `<coordination-root>/temp/tool-reports/<tool>/` | the full result of a tool call as one JSON file | the tool |
 | `<coordination-root>/notes/reports/paseo-native-executions/` | the receipts of role starts that belong to no task, for example those of the Bootstrap role agent | `role_start`; `runtime_install` with `reconcile_shared_held_stores=true` writes waiting messages into closed seats' receipts |
 | `<coordination-root>/benchmarks/` | the benchmark material; see [Benchmarks](#benchmarks) | `runtime_install` with `include_benchmarks=true` |
+
+### Server binding records
+
+Each running MCP tool server writes one JSON file at
+`<coordination-root>/runtime/server-bindings/<pid>.json` before its transport loop starts. These
+files stand in their own directory rather than `<coordination-root>/runtime/servers/` so older
+builds reading server inventory continue to see the unchanged `<pid>.json` records there.
+
+Each record holds:
+
+- `pid` and `processStart`: the server's process ID and Linux `/proc/<pid>/stat` start time (`null`
+  when `/proc` is unavailable), used to detect PID reuse;
+- `startedAt`: ISO-8601 UTC timestamp when the record was registered;
+- `configPath`: path to the settings JSON file the server loaded;
+- `parentPid`, `parentProcessStart` and `ancestors`: the immediate parent PID, its start time when
+  readable, and up to 8 `{pid, processStart}` entries walked upward from the parent while `ppid > 1`
+  (stopping at PID 1, a cycle, an unreadable entry, or when `/proc` is absent);
+- `bindingState`: `bound` when the server started with a valid role-agent binding, `unbound` when no
+  agent binding environment was present, or `unreadable` when a binding was present but failed
+  validation;
+- `binding`: for `bound` servers, `{agentId, requestId, role, sprintDocumentRef, masterDocumentRef,
+  taskDocumentRef}` (`null` otherwise);
+- `unreadableReason`: for `unreadable` servers, the validation error message (`null` otherwise).
+
+Each server removes its own file on normal exit through an idempotent cleanup hook. When readers
+list live binding records, they verify liveness against `pid` and `processStart` and unlink records
+belonging to exited or recycled processes.
 
 ## What `runtime_install` writes, removes and leaves
 

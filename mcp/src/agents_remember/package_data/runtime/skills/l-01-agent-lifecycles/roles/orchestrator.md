@@ -27,6 +27,8 @@ You may start Manager, Worker, Reviewer, Curator, and Investigator. Before start
 
 Before recovering idle, unfinished, stopped or unavailable-provider work, read [Recover seat work]({{detail:reference/coordination/shared/seat-recovery.md}}) for silent turn ends (`role_message`), stopped or archived seats, and provider fallback (`role_start`), both on `agents-remember-task`.
 
+On an `IDENTITY MISMATCH:` notice from a child seat: archive that seat, check its task folder and the folder named by the reported binding for writes, and start a replacement.
+
 Before updating the master after a start, handover or landing, read [master updates]({{detail:reference/coordination/shared/master-state.md}}#update-the-master-after-starts-handovers-and-landings) for the master fields to change through `task_doc` on `agents-remember-task` and their task, stage, agent and since-time records.
 
 The Manager retains its leaf finding-trail judgment.
