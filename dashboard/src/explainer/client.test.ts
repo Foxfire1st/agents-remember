@@ -400,6 +400,27 @@ describe('the presses', () => {
     expect(built).not.toBeNull();
     expect(built?.state).toMatchObject({ seat: 'live', agentId: 'a-exp', workspaceId: '/wks', generation: 1 });
     expect(built?.held).toEqual({ reason: 'provider-rate-limit', detail: 'queued until window resets' });
+
+    const withRealWorkspaceId = parseAttemptAnswer({
+      state: 'ok',
+      workspaceId: 'wks_paseo_99',
+      seat: {
+        agentId: 'a-exp',
+        workspace: '/coord/explainer/repo/master/L181',
+        generation: 1,
+        seat: 'live',
+      },
+    });
+    expect(withRealWorkspaceId?.state.workspaceId).toBe('wks_paseo_99');
+
+    const stateWithBoth = parseExplainerState({
+      state: 'ok',
+      seat: { state: 'live', agentId: 'a-exp' },
+      workspace: '/coord/explainer/repo/master/L181',
+      explainer: { workspaceId: 'wks_paseo_99', workspace: '/coord/explainer/repo/master/L181' },
+    });
+    expect(stateWithBoth.kind).toBe('state');
+    if (stateWithBoth.kind === 'state') expect(stateWithBoth.value.workspaceId).toBe('wks_paseo_99');
   });
 
   it('says the host could not be reached rather than failing the page', async () => {

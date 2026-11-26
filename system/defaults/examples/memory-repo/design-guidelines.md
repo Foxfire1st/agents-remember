@@ -50,8 +50,8 @@ are what the figures draw.
 4. **List the states:** default, hover, focus, pressed or selected, disabled, empty, loading,
    stale and error, as far as they apply, at each width, each with a fixed fixture.
 5. **List the interactions:** for each control, what it changes, which reader's question it
-   answers, its keys, and its reduced-motion and narrow forms. A control that answers no question
-   is cut here.
+   answers, its keys, its narrow form, and (for dashboard UI surfaces) its reduced-motion form. A
+   control that answers no question is cut here.
 6. **Find the controls that exist** and reuse them. A new control needs a reason and is built as a
    shared one.
 
@@ -66,11 +66,14 @@ are what the figures draw.
 
 ### Explanation Pages
 
-The explainer reads `TREATMENT.md` and `TECHNIQUES.md` before it builds. It plans the page around
-the essay: in "How it works" a figure only where one helps a part, never a quota, drawn from this
-comparison when one is drawn; claims, code lines and figure nodes linked; the still form in the
-markup. When it needed a technique the table lacks, or a number did not hold, it proposes a row in
-its report.
+The explainer reads `TREATMENT.md` and `TECHNIQUES.md` before it builds. It plans the essay and
+its figures together: the page reads in full without animations, and "How it works" shows the
+central mechanism with at least one figure the reader drives, drawn from this comparison's own
+material; quoted code is highlighted with the kit; claims, code lines and figure nodes link;
+evidence marks stay inline with prose rhythm; the still form lives in the markup. An explanation
+page is viewed apart from the dashboard: no reduced-motion or quiet-mode check applies to it, and
+the dashboard's reduced-motion setting and quiet switch do not apply to it. When it needed a
+technique the table lacks, or a number did not hold, it proposes a row in its report.
 
 ### Check In The Browser: Look, Then Operate
 
@@ -93,13 +96,14 @@ whether a control explains anything.
    motion ends on a final state.
 2. **By keyboard alone.** Tab reaches it with a visible focus ring; its keys work (←, →, Space,
    Home, End, Escape); focus is never lost or trapped.
-3. **With reduced motion** (`prefers-reduced-motion: reduce` emulated): every control still works,
-   nothing animates, every figure shows its still form.
+3. **With reduced motion (dashboard UI only):** on dashboard application surfaces, confirm
+   reduced-motion and quiet settings still update state cleanly. Explanation pages are viewed apart
+   from the dashboard and have no reduced-motion or quiet-mode check.
 4. **Narrow,** at 560 and 390px: nothing scrolls sideways, controls stay usable.
 5. **Before script runs:** the markup holds the same content.
 
-For an explanation page, ask after operating it: do I now understand the change better than from
-the diff? A figure that shows only what one sentence would is a finding.
+For an explanation page, ask after operating it: does each figure make the mechanism clearer than
+reading the diff alone, while staying honest to the bound material and within the page's bounds?
 
 The explainer operates its page with what its tools give. Where they give only a load and a
 picture, it reads the picture and names in its report the controls, widths and forms it could not
@@ -131,14 +135,15 @@ are not proof.
 - **Record.** It covers every state, control and width.
 - **Eye.** In its own browser, beside the reference: a visible difference neither repaired nor
   named is a finding, with location and severity.
-- **Operation.** It operates every control by pointer and keyboard, with reduced motion and at
-  narrow width. A control that fails, traps focus, shifts content under the reader or lacks a
-  still form is a finding.
-- **Explains through interaction.** On an explanation page, "How it works" may have a figure the
-  reader drives where it helps the essay; text alone is right when no figure helps. Each control
-  answers a question and agrees with the code it cites; claims, lines and figures link both ways;
-  there is no claim list; a figure drawn from code says so, a model is marked as reading. A page
-  that adds a figure without a part that needs it is a finding.
+- **Operation.** It operates every control by pointer and keyboard, at narrow width, and (for
+  dashboard UI surfaces) with reduced motion. A control that fails, traps focus, shifts content
+  under the reader or lacks a still form is a finding.
+- **Explains through interaction.** On an explanation page, "How it works" shows the central
+  mechanism with at least one driven figure while the page still reads in full without animations.
+  Judge figures on clarity, honesty and the real bounds—never penalise an ambitious figure that
+  holds them. Each control answers a question and agrees with the code it cites; quoted code is
+  highlighted and evidence marks keep prose line rhythm; claims, lines and figures link both ways;
+  there is no claim list; a figure drawn from code says so, and a model is marked as reading.
 - **Readouts** trace to the reference, not the implementation. **Reuse:** no second control for
   one job. **Tokens:** no raw values. **Baselines:** none changed without approval.
 
@@ -159,7 +164,9 @@ repository's widths, tools or values into it.
 - the token files each design file rests on;
 - where approved references and their shots live;
 - the widths and viewports every state is captured at;
-- the fixtures, and the switch that turns animations off;
-- the browser tool the agents use to look and operate, and how it sets reduced motion and width;
+- the fixtures, and (for dashboard UI) the switch that turns animations off (the dashboard's quiet
+  switch does not apply to explanation pages);
+- the browser tool the agents use to look and operate, and how it sets width (and reduced motion
+  for dashboard UI);
 - the automated visual test lanes, if any, as the tools file names them;
 - where saved views and the per-state record are kept as evidence.

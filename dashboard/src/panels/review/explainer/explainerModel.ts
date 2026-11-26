@@ -355,6 +355,17 @@ function standfirstCoverage(
   return coverage ? ` · interactions checked: ${coverage}` : '';
 }
 
+/** The shown revision's page inventory summary, from its row or the saved explanation. */
+function standfirstInventory(
+  row: ExplainerRevision | undefined,
+  state: ExplainerState | null | undefined,
+  shown: number,
+): string {
+  const saved = state?.explanation?.revision === shown ? state.explanation.inventory : undefined;
+  const inventory = row ? row.inventory : saved;
+  return inventory ? ` · shows: ${inventory}` : '';
+}
+
 function standfirstAt(
   row: ExplainerRevision | undefined,
   state: ExplainerState | null | undefined,
@@ -370,6 +381,19 @@ function standfirstBinding(
   return state?.explanation?.binding ?? state?.binding ?? null;
 }
 
+/** Plain reason when the shown revision has no inventory sidecar because the task limit was reached. */
+export function inventoryOmittedText(
+  state: ExplainerState | null | undefined,
+  shown: number,
+  rows: readonly ExplainerRevision[] = [],
+): string | null {
+  const row = rows.find((entry) => entry.revision === shown);
+  if (row) return row.inventory ? null : (row.inventoryOmitted ?? null);
+  const explanation = state?.explanation;
+  if (!explanation || explanation.revision !== shown || explanation.inventory) return null;
+  return explanation.inventoryOmitted ?? null;
+}
+
 export function standfirstText(
   state: ExplainerState | null | undefined,
   shown: number,
@@ -380,5 +404,6 @@ export function standfirstText(
   const bound = bindingLabel(standfirstBinding(row, state));
   const retired = state?.retired ? ' · explainer retired' : '';
   const coverage = standfirstCoverage(row, state, shown);
-  return ` · ${at} · revision ${shown}${coverage} · bound to ${bound}${rowKindSuffix(row)}${retired}`;
+  const inventory = standfirstInventory(row, state, shown);
+  return ` · ${at} · revision ${shown}${coverage}${inventory} · bound to ${bound}${rowKindSuffix(row)}${retired}`;
 }

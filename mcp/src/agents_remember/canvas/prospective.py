@@ -8,13 +8,12 @@ at that point and the three honest answers it can give:
 
 ``loaded``
     a browser opened the exact prospective assets from a loopback server that serves only them,
-    under the served policy headers, with the reader's reduced-motion preference in force, and
-    observed no console error, no failed request, no request outside the revision, no unresolved
-    evidence reference and no motion the preference could not stop. Only then may publication
-    proceed.
+    under the served policy headers, and observed visible content with no console error, no failed
+    request, no request outside the revision, and no unresolved evidence reference. Only then may
+    publication proceed.
 ``failed``
     something *was* observed: the diagnostics name the console errors, the foreign requests, the
-    unresolved references and the reduced-motion result. A failed load refuses publication and
+    unresolved references, and any missing visible content. A failed load refuses publication and
     preserves the last ready revision.
 ``unavailable``
     nothing could be observed, so nothing is claimed. A missing browser, a missing script, a load
@@ -28,11 +27,11 @@ instead of silently replacing the load with a byte scan.
 
 The browser run is the packaged ``canvas/canvas-prospective-load.mjs``: it writes the assets to a temporary
 directory, serves that directory (and nothing else) from a random loopback port with the same
-headers :mod:`agents_remember.canvas.policy` produces, opens it in Chromium under
-``prefers-reduced-motion: reduce``, and prints one JSON object. It runs no model.
-Both evidence attributes are retained through a bounded two-second post-load observation.
-Paint suppression checks that visible text, controls or graphics reach the reduced-motion viewport;
-it judges no explanation quality and makes no claim about arbitrary future script execution.
+headers :mod:`agents_remember.canvas.policy` produces, opens it in Chromium at 1280x720, and prints
+one JSON object. It runs no model. Both evidence attributes are retained through a bounded
+two-second post-load observation. Paint suppression checks that visible text, controls or graphics
+reach the rendered viewport; it judges no explanation quality and makes no claim about arbitrary
+future script execution.
 """
 
 from __future__ import annotations
@@ -44,7 +43,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal, Protocol, TypeGuard
+from typing import Any, Literal, Protocol, TypeGuard
 
 from agents_remember.canvas.explainer_browser import (
     browser_environment,
@@ -102,13 +101,16 @@ class ProspectiveResult:
     kind: Literal["browser", "static"]
     errors: tuple[str, ...] = ()
     foreign_requests: tuple[str, ...] = ()
-    reduced_motion_ok: bool = True
+    visible_content_ok: bool = True
     unresolved_references: tuple[str, ...] = ()
     evidence_references: tuple[str, ...] = ()
     claim_ids: tuple[str, ...] = ()
     detail: str = ""
     interactive: dict[str, object] | None = None
     browser: dict[str, object] | None = None
+    dom_inventory: dict[str, Any] | None = None
+    loaded_assets: tuple[str, ...] = ()
+    media_faults: tuple[str, ...] = ()
 
     @property
     def loaded(self) -> bool:
@@ -126,8 +128,10 @@ class ProspectiveResult:
             parts.append(f"requests outside the revision: {_joined(self.foreign_requests)}")
         if self.unresolved_references:
             parts.append(f"unresolved evidence references: {_joined(self.unresolved_references)}")
-        if not self.reduced_motion_ok:
-            parts.append("the page is not usable with prefers-reduced-motion: reduce")
+        if self.media_faults:
+            parts.append(f"media-controls: {_joined(self.media_faults)}")
+        if not self.visible_content_ok:
+            parts.append("the document painted no visible text, controls, or graphics")
         return "; ".join(parts)
 
 
@@ -155,6 +159,59 @@ def _strings(value: object, limit: int = 40) -> tuple[str, ...]:
         return ()
     found = [item for item in value if isinstance(item, str) and item.strip()]
     return tuple(found[:limit])
+
+
+def _dom_inventory(value: object) -> dict[str, Any] | None:
+    """Read the optional DOM inventory mapping when present."""
+
+    return dict(value) if isinstance(value, dict) else None
+
+
+def _loaded_assets(value: object) -> tuple[str, ...]:
+    """Read sorted unique revision-relative asset paths served during browser observation."""
+
+    if not isinstance(value, (list, tuple)):
+        return ()
+    found: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        cleaned = item.split("?", 1)[0].split("#", 1)[0].strip().lstrip("/")
+        if cleaned:
+            found.add(cleaned)
+    return tuple(sorted(found))
+
+
+def _media_element_label(item: dict[str, Any]) -> str:
+    tag = item.get("tag") if isinstance(item.get("tag"), str) and item.get("tag") else "media"
+    attrs = [
+        f'{key}="{item[key]}"'
+        for key in ("id", "src")
+        if isinstance(item.get(key), str) and item[key]
+    ]
+    return f"<{tag}{(' ' + ' '.join(attrs)) if attrs else ''}>"
+
+
+def _media_faults(elements: object, reported: object) -> tuple[str, ...]:
+    """Evaluate browser-observed audio/video elements against the markup media-control rules."""
+
+    faults: list[str] = []
+    if isinstance(elements, list):
+        items = [item for item in elements if isinstance(item, dict)]
+        if any(bool(item.get("autoplay")) for item in items):
+            faults.append("the page autoplays media a reader cannot stop")
+        if any(bool(item.get("loop")) for item in items):
+            faults.append("the page loops media a reader cannot stop")
+        without_controls = [
+            _media_element_label(item) for item in items if not item.get("controls")
+        ]
+        if without_controls:
+            faults.append(
+                "the page plays audio or video without controls a reader can use: "
+                + without_controls[0]
+            )
+    faults.extend(_strings(reported))
+    return tuple(dict.fromkeys(faults))
 
 
 def _flag(value: object, *, default: bool) -> bool:
@@ -281,7 +338,7 @@ class BrowserProspectiveLoad:
             interactive = None
             if self._interactive_directory is not None:
                 # D565/D518: a second observation, never another publication gate. In particular,
-                # its timeout or malformed result cannot erase the reduced-motion observation.
+                # its timeout or malformed result cannot erase the primary load observation.
                 extra = self._invoke(
                     directory,
                     entrypoint,
@@ -471,11 +528,14 @@ def _read_result(invocation: _Invocation) -> ProspectiveResult:
         kind="browser",
         errors=_strings(payload.get("errors")),
         foreign_requests=_strings(payload.get("foreignRequests")),
-        reduced_motion_ok=_flag(payload.get("reducedMotionOk"), default=declared != "loaded"),
+        visible_content_ok=_flag(payload.get("visibleContentOk"), default=declared != "loaded"),
         unresolved_references=_strings(payload.get("unresolvedReferences")),
         evidence_references=tuple(references),
         claim_ids=tuple(claim_ids),
         detail=detail if isinstance(detail, str) else "",
+        dom_inventory=_dom_inventory(payload.get("domInventory")),
+        loaded_assets=_loaded_assets(payload.get("loadedAssets")),
+        media_faults=_media_faults(payload.get("mediaElements"), payload.get("mediaFaults")),
     )
     return _consistent(result)
 
@@ -531,8 +591,10 @@ def _observed_faults(result: ProspectiveResult) -> tuple[str, ...]:
         faults.append(f"{len(result.foreign_requests)} request(s) outside the revision")
     if result.unresolved_references:
         faults.append(f"{len(result.unresolved_references)} unresolved evidence reference(s)")
-    if not result.reduced_motion_ok:
-        faults.append("the page is not usable with reduced motion")
+    if result.media_faults:
+        faults.append(f"{len(result.media_faults)} media-control fault(s)")
+    if not result.visible_content_ok:
+        faults.append("the document painted no visible text, controls, or graphics")
     return tuple(faults)
 
 
@@ -545,16 +607,10 @@ def _consistent(result: ProspectiveResult) -> ProspectiveResult:
     if not faults:
         return result
     detail = result.detail or "the load reported no detail"
-    return ProspectiveResult(
+    return replace(
+        result,
         state="failed",
-        kind=result.kind,
-        errors=result.errors,
-        foreign_requests=result.foreign_requests,
-        reduced_motion_ok=result.reduced_motion_ok,
-        unresolved_references=result.unresolved_references,
         detail=f"the load called itself loaded while naming {', '.join(faults)}; {detail}",
-        interactive=result.interactive,
-        browser=result.browser,
     )
 
 
