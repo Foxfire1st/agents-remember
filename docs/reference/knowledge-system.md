@@ -351,10 +351,14 @@ actual quality/checklist states and the coherence result before treating a
 candidate as ready.
 
 A full `memory_quality_check` of a task, the tool that checks the memory of a task before closeout
-(see [Memory](mcp-tools.md#memory)), also reports two findings that refuse nothing and do not
-count as actionable. `landing-cut-card` names a card that lost text against the task's memory
+(see [Memory](mcp-tools.md#memory)), also reports non-blocking findings that refuse nothing and do not
+count as actionable (`reportOnlyFindings`). `landing-cut-card` names a card that lost text against the task's memory
 base, the memory commit that the task's worktree contract records as its base: it removes at least 8 lines and more than twice the lines it adds. `landing-added-file`
-names a file that the task adds outside `onboarding/`, `knowledge/` and `system/`.
+names a file that the task adds outside `onboarding/`, `knowledge/` and `system/`. Dependent-record checks
+(`dependent_flags`) also report `pre_base_stale_confirmation` (a dependent confirmed without editing its
+document while already stale at the leaf's base), `deferral_lifted` (a lifted deferral in the leaf's
+history), `deferral_orphaned` (an open deferral targeting a terminal task), and `deferral_due_warning`
+(an open deferral whose watched file changed before the leaf's base without this leaf editing it).
 
 ## Derived index and reads
 
@@ -498,7 +502,8 @@ of the tree with the state of its owner, beside the findings. These observations
 A sync is a call of `worktree_sync`: it merges the [official line](../concepts.md#official-line)
 into a task's worktrees. When a sync merges memory, the knowledge files and the cards merge by their
 structure. Markdown merges by line; sidecars merge references by number and
-entries by ID; records merge by field. Reference numbers are aligned with their Markdown markers. Differently
+entries by ID; records merge by field, and a dependent record's `deferrals` list merges by deferral ID
+(`DFR-*`, omitting the key when empty). Reference numbers are aligned with their Markdown markers. Differently
 changed authored fields remain explicit conflicts for the Curator; mechanical
 anchor changes do not justify choosing between meanings. Record-conflict repair
 uses the writer and advances revision above both sides. The staged check described in

@@ -70,6 +70,7 @@ _TITLE_FIELDS: Final[Mapping[str, tuple[str, ...]]] = {
     "scenario": ("situation",),
     "diagnostic": ("condition",),
     "term": ("term",),
+    "dependent": ("document",),
 }
 _RECORD_TARGET_KINDS: Final = frozenset({"invariant", "family", "decision", "incident", "record"})
 

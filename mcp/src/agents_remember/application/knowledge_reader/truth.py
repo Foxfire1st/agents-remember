@@ -42,6 +42,7 @@ from agents_remember.application.knowledge_reader.files import (
     normal_path,
     read_memory_file,
 )
+from agents_remember.application.knowledge_reader.marks import dependent_detail
 from agents_remember.application.knowledge_reader.paths import entry_document, states_at
 from agents_remember.application.knowledge_reader.records import (
     Decisions,
@@ -65,6 +66,7 @@ from agents_remember.models.knowledge_files.history import membership_subject
 from agents_remember.models.knowledge_files.records import (
     LEGACY_STATE_WORDS,
     RECORD_MODELS,
+    DependentRecord,
     WeaknessRecord,
 )
 from agents_remember.serving.media import media_type_for
@@ -113,6 +115,13 @@ def record_view(
     if closed is not None:
         part["facet"]["closed"] = closed
     document.update(part)
+    if record.kind == "dependent":
+        try:
+            parsed_dependent = DependentRecord.model_validate(record.document)
+        except ValidationError:
+            parsed_dependent = None
+        if parsed_dependent is not None:
+            document["dependent"] = dependent_detail(selection, parsed_dependent)
     document["timeline"] = record_timeline(
         selection,
         record,

@@ -53,11 +53,23 @@ CURATOR_SENTENCES = (
     "Never remove text merely to clear a quality finding.",
     "Evidence and working files belong in the task record or scratch root, never the memory worktree.",
 )
-CURATOR_SENTENCE_EQUIVALENTS = {
-    CURATOR_SENTENCES[
-        0
-    ]: "For every quality-check cut card, name in the handover the source evidence that makes its removed text untrue.",
+_CURATOR_MERGED_CUT_SENTENCE = (
+    "For each quality-check card cut, cite source evidence proving the removed text untrue; "
+    "never cut text merely to clear a finding."
+)
+CURATOR_SENTENCE_EQUIVALENTS: dict[str, tuple[str, ...]] = {
+    CURATOR_SENTENCES[0]: (
+        "For every quality-check cut card, name in the handover the source evidence that makes its removed text untrue.",
+        _CURATOR_MERGED_CUT_SENTENCE,
+    ),
+    CURATOR_SENTENCES[1]: (_CURATOR_MERGED_CUT_SENTENCE,),
 }
+
+
+def curator_sentence_variants(sentence: str) -> tuple[str, ...]:
+    """Every accepted wording (canonical plus equivalents) for one pinned Curator sentence."""
+
+    return (sentence, *CURATOR_SENTENCE_EQUIVALENTS.get(sentence, ()))
 
 
 def _curator_landing_missing(text: str) -> list[str]:
@@ -73,7 +85,7 @@ def _curator_landing_missing(text: str) -> list[str]:
         if not any(
             " ".join(variant.split())
             in (handover_reading if sentence == CURATOR_SENTENCES[0] else reading)
-            for variant in (sentence, CURATOR_SENTENCE_EQUIVALENTS.get(sentence, sentence))
+            for variant in curator_sentence_variants(sentence)
         )
     ]
 

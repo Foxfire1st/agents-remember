@@ -14,11 +14,16 @@ from agents_remember.application.knowledge_writer.code_anchors import (
     AnchorResolutionError,
     CodeSnapshot,
 )
+from agents_remember.application.knowledge_writer.deferrals import (
+    deferral_condition_files,
+    is_deferral_only_fields,
+)
 from agents_remember.application.knowledge_writer.handoff import (
     CoverRequest,
     EntryRequest,
     HandoffDocument,
     LocatorRequest,
+    RecordRequest,
     TestRangeReference,
     read_handoff_shapes,
     read_locator,
@@ -173,6 +178,19 @@ class _Check:
         else:
             self.anchor(path, locator, where)
 
+    def dependent(self, record: RecordRequest, where: str) -> None:
+        deferral_only = record.record_id is not None and is_deferral_only_fields(record.fields)
+        if not deferral_only:
+            self.file(record.fields.get("document"), f"{where}.document")
+            links = record.fields.get("stands_on", [])
+            if not isinstance(links, list):
+                self.problems.append(f"{where}.stands_on: links are a list")
+            else:
+                for position, link in enumerate(links, 1):
+                    self.link(link, f"{where}.stands_on[{position}]")
+        for field_path, file_path in deferral_condition_files(record.fields):
+            self.file(file_path, f"{where}.{field_path}")
+
     def document(self, document: HandoffDocument) -> None:
         all_entries = (*document.entries, *document.rulings)
         entries = {entry.entry_id: entry for entry in all_entries}
@@ -183,13 +201,7 @@ class _Check:
             if record.kind == "weakness":
                 self.written_anchor(record.fields.get("anchor"), f"{where}.anchor")
             elif record.kind == "dependent" and not record.remove:
-                self.file(record.fields.get("document"), f"{where}.document")
-                links = record.fields.get("stands_on", [])
-                if not isinstance(links, list):
-                    self.problems.append(f"{where}.stands_on: links are a list")
-                else:
-                    for position, link in enumerate(links, 1):
-                        self.link(link, f"{where}.stands_on[{position}]")
+                self.dependent(record, where)
         for row in document.rows:
             where = f"history[{row.position}] ({row.subject})"
             for position, cover in enumerate(row.covers, 1):

@@ -6209,9 +6209,9 @@
         "curator/orientation": 3993,
         "curator/curation": 4536,
         "curator/recovery": 3290,
-        "reviewer/orientation": 3869,
-        "reviewer/review": 4187,
-        "reviewer/recovery": 3190,
+        "reviewer/orientation": 3821,
+        "reviewer/review": 4174,
+        "reviewer/recovery": 3142,
         "investigator/orientation": 2105,
         "investigator/recovery": 1462,
         "bootstrap/orientation": 1750,
@@ -6343,7 +6343,7 @@
       },
       "skills/l-01-agent-lifecycles/core/digest-map.json": {
         "size_words": 18879,
-        "sha256": "92bf9ae2475aa9382eeca114141deb17a2ff3a2aa00d230fc6d2c7ecbb6c2ddd"
+        "sha256": "34f5742eae2de147f69aee6f5a2b00d45685c890a19fab03d03af04be41b288d"
       },
       "skills/l-01-agent-lifecycles/core/every-role.md": {
         "size_words": 2295,
@@ -6374,8 +6374,8 @@
         "sha256": "5e49920d8be62e5471fdb42bf8dae895f28b908e292c68cd4e71b78b976ae2e8"
       },
       "skills/l-01-agent-lifecycles/criteria/onboarding-memory.md": {
-        "size_words": 591,
-        "sha256": "bf3c3b23e48b98821f50c00797f2c0ce4facbeca98e45826dd45256ffd403da6"
+        "size_words": 746,
+        "sha256": "bbbb975139ed7d21c77db75817f3afdd6473a173f751b0eab816d2e1d2fe896d"
       },
       "skills/l-01-agent-lifecycles/criteria/plan-review.md": {
         "size_words": 1073,
@@ -6418,8 +6418,8 @@
         "sha256": "5740777d773a2c8733d5696ac52af01718a1d40813d85b6e0a0c46d904d74429"
       },
       "skills/l-01-agent-lifecycles/operations/review.md": {
-        "size_words": 1816,
-        "sha256": "82946b4b91b1e51b1fb11cdae2d065215cf4bc63549b101ac3e913aa214dc6f5"
+        "size_words": 1851,
+        "sha256": "41e39c0afc0d224ec74944153958d9e37b0b083c4c9679e67554e363c88d1b6b"
       },
       "skills/l-01-agent-lifecycles/pointer-actions-derived.json": {
         "size_words": 3460,
@@ -6610,8 +6610,8 @@
         "sha256": "30881c99db709b245c0954c16234055d723593878436190b45caebefbb932944"
       },
       "skills/l-01-agent-lifecycles/roles/reviewer.md": {
-        "size_words": 2917,
-        "sha256": "c21ff79789e258ccb096fd76a2ca088e4c21cfa13694fee329d5fdc37dde2d2d"
+        "size_words": 2869,
+        "sha256": "369d3c5cdfd03d981d99b8098a3432dc481c6baea97886a5f1dc6dfacc4437ae"
       },
       "skills/l-01-agent-lifecycles/roles/worker.md": {
         "size_words": 2332,
@@ -6704,7 +6704,7 @@
       "operations/orientation.md": "sha256:dad6d63bfacdeb22edc166840acc31227e9cb1fbace53b7114032a49f409c1f9",
       "operations/planning.md": "sha256:44ad84e9bca975aef237b6215e8a53f8cb279aee861e73f76cbe5d1b864d330b",
       "operations/recovery.md": "sha256:5740777d773a2c8733d5696ac52af01718a1d40813d85b6e0a0c46d904d74429",
-      "operations/review.md": "sha256:82946b4b91b1e51b1fb11cdae2d065215cf4bc63549b101ac3e913aa214dc6f5",
+      "operations/review.md": "sha256:41e39c0afc0d224ec74944153958d9e37b0b083c4c9679e67554e363c88d1b6b",
       "reference/bootstrap/failure-states.md": "sha256:6e78e0368bea8f3894fc4be894fda8ae9fb5e94955e967dac963f1c0b5ee89f4",
       "reference/bootstrap/foundation-state.md": "sha256:e8273f95fb816c142bfa5711a9887fe639fc0e5fa4f7eb4da685f1a645e5b3d6",
       "reference/coordination/architect/claim-verification.md": "sha256:9979acc5bbee3aa8aa748115b3f66a23901dfca0f34be5b07f882ad9c584e07b",
@@ -6748,7 +6748,7 @@
       "roles/investigator.md": "sha256:851518cf23e4a1bc25139ef2663d951ea08399d679e9815a2fc005a62949c361",
       "roles/manager.md": "sha256:bcd649f532341c2b33a3c412d91b7f8027cba2c8ddc686d68fc5cf0e20762d3d",
       "roles/orchestrator.md": "sha256:30881c99db709b245c0954c16234055d723593878436190b45caebefbb932944",
-      "roles/reviewer.md": "sha256:c21ff79789e258ccb096fd76a2ca088e4c21cfa13694fee329d5fdc37dde2d2d",
+      "roles/reviewer.md": "sha256:369d3c5cdfd03d981d99b8098a3432dc481c6baea97886a5f1dc6dfacc4437ae",
       "roles/worker.md": "sha256:b99e6ae2bc61c97af708715a631f6c79cc9a522b62289874c1a9a448bbd88ed3",
       "templates/turn-report.md": "sha256:67ca3513d6b2c90f7115ae52ba0d83a754595b8903a8c284e69429d07334cdab"
     }

@@ -14,6 +14,7 @@ from agents_remember.memory_quality.converted_check import (
     KnowledgeBasePort,
     converted_knowledge_check,
 )
+from agents_remember.memory_quality.dependent_flags import DependentFlagScope
 from agents_remember.memory_quality.landing_report import LandingBasePort
 from agents_remember.memory_quality.reference_state import is_converted_memory
 from agents_remember.memory_quality.source_files import QualitySourceFiles
@@ -75,6 +76,8 @@ class DriftCheckContext:
     """The converted tree's comparison base (MIK-R24 rule 7); without it, a converted ``HEAD``."""
     landing_base: LandingBasePort | None = None
     """The leaf's admitted memory base for the landing report (MIK-R120 rule 1)."""
+    dependent_scope: DependentFlagScope | None = None
+    """Optional leaf scope for dependent-deferral and pre-base-stale confirmation flags."""
 
 
 def run_memory_quality_check(
@@ -129,6 +132,7 @@ def _converted_check(
             QualitySourceFiles(drift_context.code_repository_root),
             base=drift_context.knowledge_base,
             landing_base=drift_context.landing_base,
+            dependent_scope=drift_context.dependent_scope,
         )
     return check, run_check(check, onboarding_root)
 

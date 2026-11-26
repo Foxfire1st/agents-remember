@@ -11,6 +11,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 
+from agents_remember.memory_quality.dependent_flags import (
+    DependentFlagInputs,
+    DependentFlagScope,
+    collect_dependent_report_only_findings,
+)
 from agents_remember.memory_quality.knowledge_validator.trees import (
     CodeDirectory,
     KnowledgeTree,
@@ -78,13 +83,14 @@ def _unbuildable_base(problem: str) -> dict[str, Any]:
     }
 
 
-def converted_knowledge_check(
+def converted_knowledge_check(  # noqa: PLR0913 -- optional dependent_scope rides the existing public check signature
     memory_root: Path,
     code_root: Path | QualitySourceFiles,
     *,
     base: KnowledgeBasePort | None = None,
     landing_base: LandingBasePort | None = None,
     include_landing: bool = True,
+    dependent_scope: DependentFlagScope | None = None,
 ) -> dict[str, Any]:
     """Validate the converted tree and report its stale references (report-only).
 
@@ -155,6 +161,23 @@ def converted_knowledge_check(
             )
         )
         report_only.extend(landing["reportOnlyFindings"])
+        base_memory_tree = (
+            resolved_leaf_base.cards
+            if resolved_leaf_base is not None and resolved_leaf_base.cards is not None
+            else (bases[0] if bases else None)
+        )
+        report_only.extend(
+            collect_dependent_report_only_findings(
+                DependentFlagInputs(
+                    memory_root=memory_root,
+                    candidate_tree=tree,
+                    code_root=code_root,
+                    code=code,
+                    base_tree=base_memory_tree,
+                    scope=dependent_scope,
+                )
+            )
+        )
         landing_counts = {
             "cutCardCount": landing["cutCardCount"],
             "cutCards": landing["cutCards"],

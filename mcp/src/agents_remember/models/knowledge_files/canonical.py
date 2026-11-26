@@ -24,9 +24,12 @@ from typing import Any, Final
 FORMATTER_COMMAND: Final = "agents-remember knowledge-format"
 
 # The schema positions that hold identified entries: a file sidecar's realization and proof entries,
-# and a history file's rows with their covered entries and examined members (MIK-R07). Each is a set
-# keyed by ``id`` whose order carries no meaning. An array is sorted only in one of these positions.
-IDENTIFIED_ENTRY_KEYS: Final = frozenset({"realizes", "proves", "rows", "covers", "examined"})
+# a dependent record's deferrals, and a history file's rows with their covered entries and examined
+# members (MIK-R07). Each is a set keyed by ``id`` whose order carries no meaning. An array is
+# sorted only in one of these positions.
+IDENTIFIED_ENTRY_KEYS: Final = frozenset(
+    {"realizes", "proves", "rows", "covers", "examined", "deferrals"}
+)
 
 
 class CanonicalFormatError(ValueError):

@@ -29,6 +29,7 @@ const KIND_NAMES: Record<string, string> = {
   scenario: 'Scenarios',
   diagnostic: 'Diagnostics',
   term: 'Terms',
+  dependent: 'Dependents',
 };
 function ancestors(address: ReaderAddress): string[] {
   if (address.view === 'record')
@@ -51,6 +52,7 @@ function recordKind(id: string) {
       SCN: 'scenario',
       DGN: 'diagnostic',
       TRM: 'term',
+      DPD: 'dependent',
     }[id.slice(0, 3)] ?? ''
   );
 }

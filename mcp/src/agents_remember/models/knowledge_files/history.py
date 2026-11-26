@@ -74,6 +74,7 @@ from agents_remember.models.knowledge_files.history_product import (
     WrittenRevision,
 )
 from agents_remember.models.knowledge_files.ids import (
+    DEFERRAL_ID_PATTERN,
     ENTRY_ID_PATTERN,
     RECORD_PREFIXES,
     ROW_ID_PATTERN,
@@ -112,12 +113,20 @@ INVARIANT_DISPOSITIONS: Final = ("changed", "moved", "deleted", "extended", "no_
 FAMILY_DISPOSITIONS: Final = ("changed", "rerouted", "assigned", "retired", "no_impact")
 ONBOARDING_DISPOSITIONS: Final = ("updated", "no_impact")
 MEMBERSHIP_DISPOSITIONS: Final = ("no_family",)
-RECORD_DISPOSITIONS: Final = ("changed", "retired", "no_impact")
+DEFERRAL_RECORD_DISPOSITIONS: Final = ("deferred", "re_deferred", "deferral_lifted")
+RECORD_DISPOSITIONS: Final = (
+    "changed",
+    "retired",
+    "no_impact",
+    *DEFERRAL_RECORD_DISPOSITIONS,
+)
 InvariantDisposition = Literal["changed", "moved", "deleted", "extended", "no_impact"]
 FamilyDisposition = Literal["changed", "rerouted", "assigned", "retired", "no_impact"]
 OnboardingDisposition = Literal["updated", "no_impact"]
 MembershipDisposition = Literal["no_family"]
-RecordDisposition = Literal["changed", "retired", "no_impact"]
+RecordDisposition = Literal[
+    "changed", "retired", "no_impact", "deferred", "re_deferred", "deferral_lifted"
+]
 
 _OWNER_ID = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
 _CROSSING_ID = r"^[A-Za-z0-9][A-Za-z0-9._-]*-crossing-[1-9][0-9]*$"
@@ -126,6 +135,7 @@ CrossingId = Annotated[str, Field(min_length=1, max_length=128, pattern=_CROSSIN
 Attempt = Annotated[StrictInt, Field(ge=2)]
 RowId = Annotated[str, Field(pattern=ROW_ID_PATTERN)]
 EntryId = Annotated[str, Field(pattern=ENTRY_ID_PATTERN)]
+DeferralId = Annotated[str, Field(pattern=DEFERRAL_ID_PATTERN)]
 Revision = Annotated[StrictInt, Field(ge=1)]
 Absent = Literal["absent"]
 
@@ -533,15 +543,28 @@ class RecordRow(HistoryRow):
     revision: Revision
     effect: EffectLabel | None = None
     because: tuple[Because, ...] | None = Field(default=None, min_length=1)
+    deferralIds: tuple[DeferralId, ...] | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def _require_disposition_effect(self) -> RecordRow:
+        is_dependent = self.subject.startswith(f"{RECORD_PREFIXES['dependent']}-")
         if self.disposition == "changed" and self.effect is None:
             raise ValueError("a changed record row names its effect")
         if self.disposition == "retired" and self.effect != "retire":
             raise ValueError("a retired record row's effect is retire")
         if self.disposition == "no_impact" and self.effect is not None:
             raise ValueError("a no_impact record row carries no effect")
+        if self.disposition in DEFERRAL_RECORD_DISPOSITIONS:
+            if not is_dependent:
+                raise ValueError(
+                    f"disposition {self.disposition!r} applies only to a dependent record"
+                )
+            if self.effect is not None:
+                raise ValueError(f"a {self.disposition} record row carries no effect")
+        if self.deferralIds is not None:
+            if not is_dependent:
+                raise ValueError("'deferralIds' applies only to a dependent record row")
+            require_unique(self.deferralIds, what="deferral ids")
         return self
 
 
