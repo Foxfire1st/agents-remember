@@ -2,11 +2,11 @@
 
 The message is read again from cache on every turn of a seat's life, so it is assembled here once
 with its static prefix first (the static header, the direction to split its own work, the AR-tools
-paragraph, the optional shared block, and the compiled capsule), followed by the dynamic
-``## Launch Context`` section (who started the seat, the first-read paragraph, and optional link
-roots), and finally the projection of the hand-over under its heading. Nothing here says anything
-twice, and nothing here writes a file: the projection's file reference is planned from the bytes
-the launch will write beside the message.
+paragraph, the identity self-check paragraph, the optional shared block, and the compiled capsule),
+followed by the dynamic ``## Launch Context`` section (who started the seat, the first-read
+paragraph, and optional link roots), and finally the projection of the hand-over under its heading.
+Nothing here says anything twice, and nothing here writes a file: the projection's file reference
+is planned from the bytes the launch will write beside the message.
 """
 
 from __future__ import annotations
@@ -28,6 +28,16 @@ SHARED_BLOCK_HEADING = "What every role acts on"
 LAUNCH_CONTEXT_HEADING = "## Launch Context"
 # The heading the projection follows. A role's own text names it, so it is written once.
 HANDOVER_HEADING = "AR owner assignment and canonical task handover:"
+# Every started seat verifies its live tool-server binding against its handover before any write.
+IDENTITY_SELF_CHECK_PARAGRAPH = (
+    "Identity self-check (first action before any other call or write): call `server_info` on "
+    "`agents-remember-task` and verify `agentBinding.requestId`, `agentBinding.role`, and its "
+    "task document refs match `requestId`, `role`, and `selection` in your handover below "
+    "(ignore host.parent.agentId, which is your parent's id). On any mismatch, or if "
+    "`agents-remember-task` does not answer, do no work, make no write, send no `role_message`, "
+    "and end your turn with one final line (at most 300 characters): "
+    "`IDENTITY MISMATCH: expected requestId=<requestId> role=<role>; got <actual binding or none>`."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +85,7 @@ def brief_prompt(
         f"{parts.direction}\n\n"
         # Before the capsule, which names AR tools: where this session holds them.
         f"AR tools, before your first tool call: {parts.ar_tools}\n\n"
+        f"{IDENTITY_SELF_CHECK_PARAGRAPH}\n\n"
         f"{shared_block(parts.shared_block)}{parts.instructions}"
     )
     launch_context = (

@@ -784,7 +784,9 @@ def test_host_default_successor_model_is_observed_without_losing_requested_prove
     assert data["requestedTo"]["model"] is None
     assert data["choices"]["model"]["source"] == "host default"
     assert data["requestId"] == str(request.request_id)
-    assert len([1 for command, _ in world.runtime.calls if command == "agent-create"]) == 2
+    # Original codex seat uses eager two-step create+send; eve successor creates in one call.
+    assert len([1 for command, _ in world.runtime.calls if command == "agent-create"]) == 3
+    assert len({p["agentId"] for c, p in world.runtime.calls if c == "agent-create"}) == 2
 
 
 @pytest.mark.parametrize("history", [[], [{"round": 3, "kind": "code", "findingsRemain": True}]])

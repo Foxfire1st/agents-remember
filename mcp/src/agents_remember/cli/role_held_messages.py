@@ -47,7 +47,7 @@ from agents_remember.cli.paseo_bridge import (
     PaseoBridgeFailure,
     bridge_call,
 )
-from agents_remember.cli.paseo_launch import run_launch_call
+from agents_remember.cli.paseo_launch import LaunchExecutionPolicy, run_launch_call
 from agents_remember.cli.paseo_status import read_agent
 from agents_remember.cli.role_activity import publish_receipt_role_agent, resume_role_agent
 from agents_remember.cli.role_held_store import (
@@ -65,6 +65,12 @@ from agents_remember.cli.role_held_store import (
 )
 from agents_remember.cli.role_held_store import (
     refresh_waiting_count as _refresh_waiting_count,
+)
+from agents_remember.cli.role_launch_confirmation import (
+    apply_held_open_confirmation,
+    held_open_outcome_extras,
+    held_seat_lost_settlement,
+    is_held_seat_lost,
 )
 from agents_remember.cli.role_launch_receipts import (
     _leaf_before_create,
@@ -309,6 +315,8 @@ def _end_batch(
     status: Literal["stopped", "rejected"] = "stopped",
     *,
     host_state: HostClosure | None = None,
+    receipt_updates: dict[str, Any] | None = None,
+    remove_receipt_fields: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
     """End an archived or lost recipient and save the still-waiting text."""
     with open_held_store(batch.ref) as transaction:
@@ -318,7 +326,8 @@ def _end_batch(
         settle_held_store(
             batch.ref,
             host_state=host_state,
-            receipt_updates={"status": status, "updatedAt": _now_iso()},
+            receipt_updates={"status": status, "updatedAt": _now_iso(), **(receipt_updates or {})},
+            remove_receipt_fields=remove_receipt_fields,
         )
         return rows
 
@@ -490,11 +499,18 @@ def _open_held_seat(batch: _DrainBatch) -> dict[str, Any]:
         "agent": {**(launch_call.get("agent") or {}), "prompt": opening_text},
     }
     publish_receipt_role_agent(batch.config, batch.receipt)
+    policy = LaunchExecutionPolicy(
+        mode="open-held",
+        on_retry_agent=lambda agent_id: publish_receipt_role_agent(
+            batch.config, {**batch.receipt, "agentId": agent_id}
+        ),
+    )
     if batch.receipt.get("role") in LEAF_ROLES:
         outcome = run_launch_call(
             batch.config,
             call,
             before_create=lambda: _leaf_before_create(batch.path, batch.receipt, opening_held=True),
+            execution=policy,
         )
         current = _read_receipt(batch.path)
         if current is not None and _leaf_is_closing(current):
@@ -510,7 +526,7 @@ def _open_held_seat(batch: _DrainBatch) -> dict[str, Any]:
                 transaction.receipt.pop("heldOpenPending", None)
                 _write_receipt(batch.path, transaction.receipt)
     else:
-        outcome = run_launch_call(batch.config, call)
+        outcome = run_launch_call(batch.config, call, execution=policy)
     if outcome.kind == "created":
         _stage_batch_ends(batch, messages, _END_DELIVERED)
         removed = _remove_ids(batch.ref, {row["id"] for row in messages}, batch.claim)
@@ -521,17 +537,19 @@ def _open_held_seat(batch: _DrainBatch) -> dict[str, Any]:
             "how": _END_DELIVERED,
             "execution": outcome.execution,
             "applied": outcome.applied,
+            **held_open_outcome_extras(outcome),
         }
-    if outcome.kind == "refused" and outcome.lost_agent_id:
-        ended = _end_batch(batch, "rejected")
+    if is_held_seat_lost(outcome):
+        detail, updates, remove_fields, extras = held_seat_lost_settlement(outcome)
+        ended = _end_batch(
+            batch, "rejected", receipt_updates=updates, remove_receipt_fields=remove_fields
+        )
         return {
             "outcome": "seat-lost",
-            "detail": (
-                "The held seat's agent exists but can never take its first message; "
-                f"its waiting messages end as not delivered. {outcome.message}"
-            ),
+            "detail": detail,
             "ended": ended,
             "how": _END_NOT_DELIVERED,
+            **extras,
         }
     _release_claim(batch.ref, batch.claim)
     return {
@@ -1173,6 +1191,7 @@ def _apply_drain_result(path: Path, current: dict[str, Any], result: dict[str, A
             detail=str(result.get("detail") or "The held seat can never take its first message."),
             updatedAt=_now_iso(),
         )
+    apply_held_open_confirmation(current, result)
     recount_waiting_for(current)
     try:
         _write_receipt(path, current)

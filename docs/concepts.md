@@ -636,7 +636,9 @@ names that file in `handoverFilePath`; the first message of the role agent carri
 
 A hand-off is what a role agent delivers before it ends a turn: a delivered `role_message` or a
 write to a task document. When a Worker, a Reviewer or a Curator ends a turn without one, the
-plug-in sends it a message that begins `[ar-plugin] turn ended with no hand-off:`.
+plug-in sends it a message that begins `[ar-plugin] turn ended with no hand-off:` — except when
+the turn's last line starts `IDENTITY MISMATCH:`, which skips the 60-second wait and wake
+messages and goes immediately to the parent unmarked.
 
 ### Message file
 

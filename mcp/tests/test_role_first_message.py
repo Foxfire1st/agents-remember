@@ -324,7 +324,7 @@ class FirstMessageMatrixTests(FirstMessageMatrixBase):
                     resent = [
                         call[1]["prompt"]
                         for call in self.runtime.calls
-                        if call[0] == "agent-create"
+                        if call[0] == "agent-create" and "prompt" in call[1]
                     ][-1]
                     self.assertEqual(resent, saved)
                     self.check_message(

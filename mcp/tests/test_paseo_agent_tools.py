@@ -822,8 +822,19 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             artifact = Path(self.artifact(request)["canonicalPath"])
             written = artifact.stat()
             self.assertEqual(self.dispatch(request)[1]["status"], "running")
-            first, second = (call[1] for call in self.runtime.calls if call[0] == "agent-create")
-            self.assertEqual(second, first)
+            first, retry_create, retry_send = (
+                call[1] for call in self.runtime.calls if call[0] == "agent-create"
+            )
+            self.assertEqual(retry_create, first)
+            self.assertEqual(
+                {
+                    key: value
+                    for key, value in retry_send.items()
+                    if key not in ("prompt", "skipToolServerWait")
+                },
+                first,
+            )
+            self.assertTrue(retry_send["skipToolServerWait"])
             self.assertEqual(
                 (artifact.stat().st_ino, artifact.stat().st_mtime_ns),
                 (written.st_ino, written.st_mtime_ns),

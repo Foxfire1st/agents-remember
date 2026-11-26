@@ -147,9 +147,13 @@ class LaunchOutcomeTests(PaseoLaunchTestCase):
         status, public = self.dispatch(request)
 
         self.assertEqual((status, public["status"]), (200, "running"))
-        first, second = (call[1] for call in self.runtime.calls if call[0] == "agent-create")
-        self.assertEqual(first["prompt"], self.first_message(request))
-        self.assertEqual(second, first)
+        first, retry_create, retry_send = (
+            call[1] for call in self.runtime.calls if call[0] == "agent-create"
+        )
+        self.assertNotIn("prompt", first)
+        self.assertEqual(retry_create, first)
+        self.assertEqual(retry_send["prompt"], self.first_message(request))
+        self.assertTrue(retry_send["skipToolServerWait"])
 
 
 class RepeatAndConflictTests(PaseoLaunchTestCase):
@@ -182,6 +186,7 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
                 retry_payload = {
                     **self.runtime.launch_calls()[-1][1],
                     "provider": "antigravity",
+                    "prompt": saved["replayRequest"]["agent"]["prompt"],
                 }
                 agents_before = set(self.runtime.agents)
 
@@ -220,7 +225,15 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
 
         self.assertEqual(self.dispatch(request)[0], 200)
 
-        self.assertEqual(self.runtime.launch_calls()[-1], ("agent-create", first))
+        retry_create, retry_send = self.runtime.launch_calls()[-2:]
+        self.assertEqual(retry_create, ("agent-create", first))
+        self.assertEqual(
+            retry_send,
+            (
+                "agent-create",
+                {**first, "prompt": self.first_message(request), "skipToolServerWait": True},
+            ),
+        )
         self.assertEqual(list(self.runtime.agents), [first["agentId"]])
 
     def test_a_repeated_request_converges_on_the_same_agent(self) -> None:
@@ -236,8 +249,12 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
             self.assertEqual((status, public["status"]), (200, "running"))
             self.assertEqual(public["execution"]["agentId"], agent_id)
             self.assertEqual(list(self.runtime.agents), [agent_id])
-            first, second = (call[1] for call in self.runtime.calls if call[0] == "agent-create")
-            self.assertEqual(second, first)
+            first, retry_create, retry_send = (
+                call[1] for call in self.runtime.calls if call[0] == "agent-create"
+            )
+            self.assertEqual(retry_create, first)
+            self.assertEqual(retry_send["agentId"], agent_id)
+            self.assertTrue(retry_send["skipToolServerWait"])
             self.assertEqual(len(self.enclosures.start_calls), 1)
             # A resolved request is answered by a refresh of its execution: a read, no launch.
             launches = len(self.runtime.launch_calls())
@@ -366,7 +383,7 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
             # R214 rule 1: a new start asks fresh metadata before creating.
             self.assertEqual(
                 [call[0] for call in self.runtime.calls],
-                ["catalog", "workspace-open", "agent-create"],
+                ["catalog", "workspace-open", "agent-create", "agent-create"],
             )
             self.assertEqual(self.runtime.calls[0][1]["mode"], "metadata")
 
@@ -392,7 +409,14 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
         # R214 rule 1 adds the fresh metadata question before the same retirement sequence.
         self.assertEqual(
             [call[0] for call in self.runtime.calls],
-            ["catalog", "agent-state", "agent-archive", "workspace-open", "agent-create"],
+            [
+                "catalog",
+                "agent-state",
+                "agent-archive",
+                "workspace-open",
+                "agent-create",
+                "agent-create",
+            ],
         )
         self.assertEqual(self.runtime.calls[0][1]["mode"], "metadata")
         self.assertEqual(self.runtime.calls[2][1], {"agentId": old_agent})

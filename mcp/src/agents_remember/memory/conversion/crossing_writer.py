@@ -1,11 +1,18 @@
 """Who wrote a record the crossing merge stores: the line whose record it is, or the product.
 
 The merge never combines ``writer`` as a field (:func:`merge_with_writers`). Each side's records are
-merged without it, and every record the merge stores without a conflict then takes the stamp of
-whoever wrote exactly that content:
+merged without ``writer`` or legacy typed ``status`` words, and every record the merge stores
+without a conflict then takes the bytes of whoever wrote that content:
 
-* it equals the own line's record: the own line's ``writer``, or none where that record has none;
-* else it equals the incoming line's record: that line's ``writer``, or none;
+* it equals only one side's stripped record: that side's stored bytes (its ``writer``, or none);
+* it equals both sides' stripped records (a stripped tie):
+  1. if own's and incoming's stored bytes differ and exactly one side differs from the base's stored
+     bytes (absence at the base counts as differing on both sides), that side's bytes are stored;
+  2. else if exactly one side's stored record is in the product's state form (no legacy typed
+     ``status`` word and a stored ``writer`` field), that side's bytes are stored;
+  3. else own's bytes are stored.
+  For crossing selection, ``tied`` is the stripped equality: a stamp-only tie joins both sides'
+  reviews and writes no ``crossingSelections`` row when both lines share their selection history;
 * it equals neither, because the merge combined the two lines' meaning edits: the product's stamp,
   ``by: product`` with the operation :data:`CROSSING_OPERATION`. The syncing owner's writable
   history file names that revision with the same stamp, so the revision's stamp and state are read
@@ -289,6 +296,55 @@ def _stamp_combined(
     )
 
 
+def _is_state_form(document: Mapping[str, Any]) -> bool:
+    """Whether a stored record has no legacy typed status word and carries a ``writer`` field."""
+
+    return document.get("status") not in LEGACY_STATE_WORDS and document.get("writer") is not None
+
+
+def _pick_tied_side(
+    base_bytes: bytes | None,
+    own_bytes: bytes,
+    incoming_bytes: bytes,
+    own_record: Mapping[str, Any],
+    incoming_record: Mapping[str, Any],
+) -> tuple[str, str]:
+    """Choose ``(selected, peer)`` on a stripped tie: changed side, else state form, else own."""
+
+    if own_bytes == incoming_bytes:
+        return "own", "incoming"
+    own_changed = own_bytes != base_bytes
+    incoming_changed = incoming_bytes != base_bytes
+    if own_changed != incoming_changed:
+        return ("own", "incoming") if own_changed else ("incoming", "own")
+    own_state_form = _is_state_form(own_record)
+    incoming_state_form = _is_state_form(incoming_record)
+    if own_state_form != incoming_state_form:
+        return ("own", "incoming") if own_state_form else ("incoming", "own")
+    return "own", "incoming"
+
+
+def _choose_side(
+    path: str,
+    *,
+    tied: bool,
+    equals_own: bool,
+    converted: Mapping[str, Mapping[str, bytes]],
+    records: tuple[Mapping[str, Any], Mapping[str, Any]],
+) -> tuple[str, str]:
+    """Return ``(selected, peer)`` when the merged record matches one or both stripped sides."""
+
+    if not tied:
+        return ("own", "incoming") if equals_own else ("incoming", "own")
+    return _pick_tied_side(
+        converted.get("base", {}).get(path),
+        converted["own"][path],
+        converted["incoming"][path],
+        records[0],
+        records[1],
+    )
+
+
 def stamp_merged_records(
     merge: MergeResult,
     converted: Mapping[str, Mapping[str, bytes]],
@@ -298,8 +354,8 @@ def stamp_merged_records(
 ) -> MergeWrites:
     """Give each record the merge stores cleanly its writer and retain evidence of shared numbers.
 
-    ``converted`` and ``stripped`` hold each side (``own``, ``incoming``) with and without its
-    records' writers. A conflicted record is left to the curator's write.
+    ``converted`` and ``stripped`` hold each side (``base``, ``own``, ``incoming``) with and
+    without its records' writers. A conflicted record is left to the curator's write.
     """
 
     files = merge.files
@@ -329,17 +385,25 @@ def stamp_merged_records(
         if merged is None:
             continue
         if merged in (own, incoming):
-            side, other = ("own", "incoming") if merged == own else ("incoming", "own")
+            tied = own == incoming
+            side, other = _choose_side(
+                path,
+                tied=tied,
+                equals_own=merged == own,
+                converted=converted,
+                records=(own_record, incoming_record),
+            )
             files[path] = converted[side][path]
-            source = own_record if side == "own" else incoming_record
-            peer = incoming_record if side == "own" else own_record
+            source, peer = (
+                (own_record, incoming_record) if side == "own" else (incoming_record, own_record)
+            )
             if source.get("status") not in LEGACY_STATE_WORDS and source.get(
                 "revision"
             ) == peer.get("revision"):
                 selection = _crossing_selection(
                     source,
                     (states(side), states(other)),
-                    tied=files[path] == converted[other].get(path),
+                    tied=tied,
                 )
                 if selection is not None:
                     selected.append(selection)
@@ -417,12 +481,14 @@ def merge_with_writers(
 ) -> MergeResult:
     """Merge three converted trees with every record's ``writer`` decided from the merged content."""
 
-    sides = {"own": own, "incoming": incoming}
-    stripped = {name: without_writers(tree) for name, tree in (("base", base), *sides.items())}
+    converted = {"base": base, "own": own, "incoming": incoming}
+    stripped = {name: without_writers(tree) for name, tree in converted.items()}
     merged = merge_trees(
         stripped["base"], stripped["own"], stripped["incoming"], repository=repository
     )
-    writes = stamp_merged_records(merged, sides, stripped, product, reviewed_content(repository))
+    writes = stamp_merged_records(
+        merged, converted, stripped, product, reviewed_content(repository)
+    )
     if product is not None:
         name_product_revisions(merged.files, product, writes.combined)
         name_crossing_evidence(merged.files, product.crossing_owner, writes)

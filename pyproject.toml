@@ -41,18 +41,23 @@ ignore = [
 max-complexity = 10
 
 [tool.pyright]
-# Bare Pyright and editors cover the whole checkout. The quality wrapper supplies its validated
-# index-known file scope explicitly.
+# Bare Pyright and editors exclude virtual environments, dependency trees, build outputs, and
+# tool caches at any depth; `exclude` avoids a blanket dot-folder rule because tracked Python
+# lives under `.dagger/` (Pyright's own default dot-folder exclude applies independently). The
+# hooks and quality wrapper supply their validated index-known file list explicitly.
 include = ["."]
 exclude = [
   "**/__pycache__",
-  ".cache",
-  ".pytest_cache",
-  ".ruff_cache",
-  ".venv",
-  "build",
-  "dist",
-  "node_modules",
+  "**/.cache",
+  "**/.mypy_cache",
+  "**/.pytest_cache",
+  "**/.ruff_cache",
+  "**/.venv",
+  "**/*.egg-info",
+  "**/build",
+  "**/dist",
+  "**/node_modules",
+  "**/venv",
 ]
 pythonVersion = "3.14"
 typeCheckingMode = "basic"

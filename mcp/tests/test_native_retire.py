@@ -383,7 +383,9 @@ class NativeRetireTests(RoleToolsTestCase):
             before = self.receipt(request)
             self.assertEqual(before["status"], "starting")
             self.assertEqual(before["agentId"], payload["agentId"])
-            self.assert_retirement_waits_for_launch(request, before)
+            self.assert_retirement_waits_for_launch(
+                request, before, expect_absent="prompt" not in payload
+            )
 
         self.runtime.observer = while_creating
         try:
@@ -402,9 +404,12 @@ class NativeRetireTests(RoleToolsTestCase):
         self.assertEqual(self.receipt(request)["agentId"], before["agentId"])
         self.assert_confirmed_retirement_survives_replay(request)
 
-    def assert_retirement_waits_for_launch(self, request, before) -> None:
+    def assert_retirement_waits_for_launch(
+        self, request, before, *, expect_absent: bool = True
+    ) -> None:
         agent_id = before["agentId"]
-        self.assertNotIn(agent_id, self.runtime.agents)
+        if expect_absent:
+            self.assertNotIn(agent_id, self.runtime.agents)
         result = retire(self, self.architect, agent_id, role="manager")
         self.assertEqual((result["ok"], result["status"]), (False, "launch-unresolved"))
         self.assertIn(str(request.request_id), result["detail"])

@@ -407,7 +407,9 @@ nothing at first:
 The plug-in sends no such message to an Architect, an Orchestrator or a Manager. It sends none
 to a role agent whose own helper still runs, and none to a role agent that a provider limit
 stops. It messages such a role agent once, 60 seconds after the end of the limit that the model
-provider reports.
+provider reports. When a turn ends with a last line starting `IDENTITY MISMATCH:`, the plug-in
+skips the 60-second wait, sends no wake messages, and delivers the unmarked line immediately to
+the parent (cut at 300 characters).
 
 ### Declared waits
 

@@ -1061,6 +1061,7 @@ class ReviveTests(StatusTestCase):
                     "agent-archive",
                     "workspace-open",
                     "agent-create",
+                    "agent-create",
                 ],
             )
             self.assertNotEqual(started["execution"]["agentId"], old_agent)

@@ -304,7 +304,13 @@ class RoleStartTests(RoleToolsTestCase):
         repeat = self.start(self.architect, "worker", request_id=request_id)
         self.assertEqual((repeat["status"], repeat["agentId"]), ("running", first["agentId"]))
         created = [p for c, p in self.runtime.calls if c == "agent-create"]
-        self.assertEqual(created, [original])
+        self.assertEqual(len(created), 2)
+        self.assertEqual(created[0], original)
+        self.assertEqual(
+            {k: v for k, v in created[1].items() if k not in ("prompt", "skipToolServerWait")},
+            original,
+        )
+        self.assertTrue(created[1]["skipToolServerWait"])
         self.assertNotIn("role-profiles", [c for c, _p in self.runtime.calls])
         self.assertEqual(len(self.runtime.agents), 1)
 
@@ -364,7 +370,7 @@ class RoleStartTests(RoleToolsTestCase):
         )
 
         self.runtime.observer = None
-        self.assertEqual(locked, [True, True])
+        self.assertEqual(locked, [True, True, True])
         request = self.request("worker", request_id)
         receipt = self.receipt(request)
         create = next(
@@ -405,7 +411,7 @@ class RoleStartTests(RoleToolsTestCase):
         self.assertEqual(len(self.enclosures.start_calls), 1)
         self.assertEqual(
             [command for command, _payload in self.runtime.calls],
-            ["catalog", "workspace-open", "agent-create"],
+            ["catalog", "workspace-open", "agent-create", "agent-create"],
         )
         with self.subTest("the process keeps no catalog between calls and frees the launch lock"):
             self.assertIsNone(paseo_catalog._OPERATION_CATALOGS.get())
@@ -541,7 +547,8 @@ class RoleStartTests(RoleToolsTestCase):
                     [p["mode"] for c, p in self.runtime.calls if c == "catalog"],
                     ["metadata", "selected"],
                 )
-                self.assertEqual(commands.count("agent-create"), 1)
+                self.assertEqual(commands.count("agent-create"), 2)
+                self.assertEqual(len(self.runtime.agents), 1 if role == "worker" else 2)
 
     def test_each_launch_status_and_the_same_request_id(self) -> None:
         with self.subTest("no usable answer, then the same request id"):
@@ -629,9 +636,17 @@ class RoleStartTests(RoleToolsTestCase):
             created = [
                 payload for command, payload in self.runtime.calls if command == "agent-create"
             ]
-            # The replay sends the stored agent definition, key for key.
+            # The replay sends the stored agent definition: eager confirmation creates without
+            # prompt, confirms the binding, then sends the stored prompt with skipToolServerWait.
             stored = replay_request["agent"]
-            self.assertEqual([{key: call[key] for key in stored} for call in created], [stored])
+            self.assertEqual(len(created), 2)
+            self.assertNotIn("prompt", created[0])
+            self.assertEqual(
+                {key: created[0][key] for key in stored if key != "prompt"},
+                {key: value for key, value in stored.items() if key != "prompt"},
+            )
+            self.assertEqual({key: created[1][key] for key in stored}, stored)
+            self.assertTrue(created[1]["skipToolServerWait"])
             self.assertEqual(self.receipt(request)["parentAgentId"], self.architect.agent_id)
             self.assertEqual(list(self.runtime.agents), [unknown["agentId"]])
             # The launcher's bar offers this Retry: the result route says so with the same payload.

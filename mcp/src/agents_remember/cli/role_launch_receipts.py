@@ -33,7 +33,11 @@ from agents_remember.cli.message_binding_files import (
     message_binding_projection_bytes,
     message_binding_projection_matches,
 )
-from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, run_launch_call
+from agents_remember.cli.paseo_launch import (
+    PASEO_AGENT_KIND,
+    LaunchExecutionPolicy,
+    run_launch_call,
+)
 from agents_remember.cli.role_activity import publish_receipt_role_agent
 from agents_remember.cli.role_handover_restore import HandoverFileRefusal, restore_launch_files
 from agents_remember.cli.role_held_store import (
@@ -183,12 +187,20 @@ def _run_prepared_launch(
 
     require_step_up_archive_idle(config, current, launch_call)
     prior = _predecessor_held_ref(path, current, launch_call)
+    policy = LaunchExecutionPolicy(
+        on_retry_agent=lambda agent_id: publish_receipt_role_agent(
+            config, {**current, "agentId": agent_id}
+        )
+    )
     if current.get("role") in LEAF_ROLES:
         outcome = run_launch_call(
-            config, launch_call, before_create=lambda: _leaf_before_create(path, current)
+            config,
+            launch_call,
+            before_create=lambda: _leaf_before_create(path, current),
+            execution=policy,
         )
     else:
-        outcome = run_launch_call(config, launch_call)
+        outcome = run_launch_call(config, launch_call, execution=policy)
     with exclusive_file_lock(path, "role execution receipt"):
         current = _same_request_receipt(path, current)
         settled = finish_replacing_predecessor(path, current, launch_call, outcome)
@@ -683,6 +695,7 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
                 "assignmentReadGrant",
                 "predecessorCollectionError",
                 "reportCollection",
+                "bindingConfirmation",
                 "canRevive",
             )
             if key in receipt

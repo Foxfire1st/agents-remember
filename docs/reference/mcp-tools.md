@@ -771,7 +771,9 @@ in a turn receives the line when it is free. When the parent of a Worker, a Revi
 is archived, the line goes to the current Manager of the task's master. When a Worker, a Reviewer
 or a Curator ends a turn with no [hand-off](../concepts.md#hand-off), the plug-in first sends a
 message to that role agent itself, at most two times in a row; from the third such end on, the
-parent receives the line, marked with the count.
+parent receives the line, marked with the count — except when the turn's last line starts
+`IDENTITY MISMATCH:`, which skips the 60-second wait and wake messages and goes immediately to
+the parent unmarked.
 [Roles and role agents](../roles.md) describes a turn that ends without a hand-off.
 
 ### Message files and the tool log
