@@ -255,7 +255,6 @@ def test_archiving_deletes_the_tasks_review_refs_legacy_pins_and_dataset_copies(
     assert len(preview["reviewRefs"]) == 2 and len(preview["datasetCopies"]) == 2
     bind_worktree_services(
         WorktreeServices(
-            provider_lifecycle=mock.Mock(),
             memory_quality=mock.Mock(),
             citation_guard=mock.Mock(),
             review_artifact_cleanup=ReviewArtifactCleanup(),
@@ -400,7 +399,6 @@ def test_the_archive_hook_never_raises_and_holds_a_generation_its_owner_refused(
     broken.cleanup.side_effect = FileNotFoundError("gone")
     bind_worktree_services(
         WorktreeServices(
-            provider_lifecycle=mock.Mock(),
             memory_quality=mock.Mock(),
             citation_guard=mock.Mock(),
             review_artifact_cleanup=broken,

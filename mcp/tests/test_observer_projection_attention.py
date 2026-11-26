@@ -611,7 +611,7 @@ def test_actual_asgi_click_refresh_restart_and_write_failure(dismissal_sources, 
 
     def capture(*args, **kwargs):
         result = original(*args, **kwargs)
-        runtimes.append(result[0])
+        runtimes.append(result)
         return result
 
     monkeypatch.setattr(serving_app, "_build_serving_runtime", capture)

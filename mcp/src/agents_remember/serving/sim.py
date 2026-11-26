@@ -122,7 +122,7 @@ class SimSetup:
 
 def _materialize_surfaces(fixture_dir: Path, root: Path) -> None:
     """Copy the fixture's structural surfaces into the fresh sim root so the projector reads them
-    like a live coordination root: worktree contracts, task documents, provider state, memory ledgers,
+    like a live coordination root: worktree contracts, task documents, memory ledgers,
     and persisted drift snapshots. Copied observer workspace logs are removed: the feeder
     replays workspace events over sim time, so copying them too would double-apply them.
     Copied lifecycle gate logs are also removed from the fresh simulation; they are not replayed.

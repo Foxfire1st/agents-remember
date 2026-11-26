@@ -44,8 +44,6 @@ def _register_task_finalizer_tools(server: FastMCP, config: McpRuntimeConfig) ->
         master_doc_path: str | None = None,
         subtask_number: str = "",
         dry_run: bool = False,
-        *,
-        teardown_providers: bool = True,
     ) -> dict[str, Any]:
         """Prove the landed edge, complete a task once all steps are done, and reconcile its parent row (ancestors are not completed; leaves require a master). States: finalized, would-finalize, blocked. Docs: docs/reference/mcp-tools.md."""
         return tools.lifecycle_finalize_task_payload(
@@ -57,7 +55,6 @@ def _register_task_finalizer_tools(server: FastMCP, config: McpRuntimeConfig) ->
                 subtask_number=subtask_number,
             ),
             dry_run=dry_run,
-            teardown_providers=teardown_providers,
         )
 
 

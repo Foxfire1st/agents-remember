@@ -79,9 +79,6 @@ class ServerInfoResponse(ResponseModel):
     workspaceRoot: str
     transcriptRoot: str
     allowedRepoIds: list[str] = Field(default_factory=list)
-    # Provider ids still present in settings, named once as no longer used: no tool
-    # reports on the CGC or GrepAI providers anymore and nothing starts them.
-    unusedProviderKeys: list[str] = Field(default_factory=list)
     # Settings keys the files hold that only removed parts read, as dotted names: named
     # here once as no longer used, and not read anywhere.
     unusedSettingsKeys: list[str] = Field(default_factory=list)

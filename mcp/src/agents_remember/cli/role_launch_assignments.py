@@ -38,7 +38,7 @@ def investigator_assignment(report_path: str, *, started_by: Any | None) -> str:
         f"Investigator launch: investigate one scoped concern of any kind. {concern} Write one "
         f"report to {report_path}. Change no code checkout or leaf enclosure, memory, task "
         "document or status; make no commit, closeout or integration and start no role. Change "
-        "provider or system state only after the report and an explicit authorized order."
+        "system state only after the report and an explicit authorized order."
     )
 
 
@@ -59,8 +59,8 @@ def bootstrap_assignment(report_path: str, *, started_by: Any | None) -> str:
         "Bootstrap launch: set one repository up through the surfaces that own each step "
         "(runtime_install, memory_init, memory_baseline_status, memory_baseline_adopt and "
         "user_settings_init) and report what actually happened. Ask the developer which code "
-        "repository they mean, which branch is its memory's foundation, whether the memory repository is new "
-        "or existing, and whether providers should index now or be deferred; invent no "
+        "repository they mean, which branch is its memory's foundation, and whether the memory "
+        "repository is new or existing; invent no "
         "repository, branch, task or identity, and create no task, worktree or role. "
         f"Write the setup report to {report_path} and name on its first line where it "
         f"stands. {made}"

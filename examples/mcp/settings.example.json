@@ -9,24 +9,13 @@
       "certificationProfile": "mcp/certification-profile-v1.json"
     }
   },
-  "providers": {
-    "codegraphcontext-code": {},
-    "grepai-memory": {}
-  },
   "timeoutCaps": {
-    "toolSeconds": 30,
-    "providerSetupSeconds": 1800
+    "toolSeconds": 30
   },
   "benchmarksEnabled": false,
   "dashboard": {
     "autoStart": false,
     "port": 8765
-  },
-  "providerDegradation": {
-    "enabled": true,
-    "failSafeEnabled": true,
-    "memoryDegradedRatio": 0.8,
-    "memoryCriticalRatio": 0.92
   },
   "retirement": {
     "autoLandOnIntegration": true,

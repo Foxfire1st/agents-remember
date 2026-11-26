@@ -54,11 +54,7 @@ class ContextPacketTests(unittest.TestCase):
             self.assertIn("pathRules", packet["memory"]["storage"])
             self.assertIn("crossRepo", packet["memory"])
             self.assertEqual(packet["worktree"], {"state": "inactive"})
-            self.assertEqual(packet["providers"]["state"], "skipped")
-            self.assertNotIn("diagnosticsTool", packet["providers"])
-            self.assertNotIn("currentState", packet["providers"])
-            self.assertNotIn("rawStatus", packet["providers"])
-            self.assertEqual(packet["providers"]["items"], [])
+            self.assertNotIn("providers", packet)
             self.assertEqual(packet["drift"], {"status": "notChecked"})
 
     def test_rejects_unknown_repo_before_filesystem_resolution(self) -> None:

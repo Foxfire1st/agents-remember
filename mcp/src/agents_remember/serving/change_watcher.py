@@ -54,7 +54,7 @@ the non-input churn (the raw event river + cursor/lock) is name-filtered, and th
 lockfiles are suffix-filtered in every watched directory -- including the two native stores
 added for L190-R1-F10 (``attention-notices.json.lock``, ``held-message-queue.json.lock``):
 every durable-store append and every rewrite opens one ``a+b``, and none is an input. TTL-gated
-writers that run inside a tick (event retention, provider current-state refresh) cost at most
+writers that run inside a tick (event retention) cost at most
 one debounced echo tick per TTL window, whose diff emits nothing. The same bound covers the one
 native write a tick can make: settling an interrupted terminal notice rewrites the notice store
 through the writer it shares with the worktree operations (so it carries no own-write note), and
@@ -300,16 +300,9 @@ def _fixed_projection_roots(config: McpRuntimeConfig) -> list[Path]:
     activity = activity_directory(config)
     if activity is not None:
         candidates.append(activity)
-    # logs/providers/{status,setup} are NOT watched: no surviving projection reader reads
-    # them, and they carry no entry in projection_domains_for_paths, so an event there would
-    # fail open to every domain and rebuild projections from state nothing displays. The
-    # independent provider-safety sampler keeps its own loop and needs no watch root.
-    #
-    # Deliberately NOT under coordination_root/worktrees either: those trees carry each task's
-    # live provider-runtime data (Postgres data, search indexes) which the daemon user cannot
-    # read and which churn on container writes -- watching them recursively both crashed the
-    # watcher (permission-denied on the container data dir) and would have re-projected on every
-    # WAL write.
+    # Deliberately NOT under coordination_root/worktrees: the checkouts are ~50k dirs
+    # (recursive watching would recreate the scan cost this module removes) and worktree
+    # working-tree churn is not a projection input.
     return [path for path in candidates if path.exists()]
 
 

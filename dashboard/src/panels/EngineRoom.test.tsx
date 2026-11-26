@@ -141,11 +141,10 @@ describe('EngineRoom lifecycle phase motion (5f S5, T12–T18)', () => {
     );
   });
 
-  it('renders no official provider strip — workspace engines left the surface (MIK-R112)', () => {
+  it('renders the live enclosure canvas without fallback chrome', () => {
     seed('engine-bootstrap');
 
     const { queryByTestId } = render(<EngineRoom />);
-    expect(queryByTestId('official-strip')).toBeNull();
     expect(queryByTestId('engine-room-fallback')).toBeNull();
     expect(queryByTestId('enclosure-canvas')).not.toBeNull();
   });

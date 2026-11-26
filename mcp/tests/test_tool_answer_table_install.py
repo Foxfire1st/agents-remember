@@ -9,12 +9,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
-from unittest import mock
 
 from agents_remember.application.runtime.install import RuntimeInstallRequest, run_runtime_install
 from agents_remember.application.tool_answer_log import TOOL_LOG_BASENAME_PREFIX, tool_call_context
 from agents_remember.application.tool_response import complete_tool_response
-from agents_remember.install import provider_watchers as install_provider_watchers
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.tools.core import compact_runtime_install_payload
 from agents_remember.models.tokens import count_response_tokens
@@ -38,20 +36,19 @@ from tool_answer_table_support import (
 _PACKAGE_DATA = Path(__file__).resolve().parents[1] / "src" / "agents_remember" / "package_data"
 
 
-def _produced_install_compact(*, stop_ok: bool) -> tuple[dict[str, Any], str]:
+def _produced_install_compact(*, with_removed_stores: bool) -> tuple[dict[str, Any], str]:
     """Run the real install and project it: the operation-produced answer.
 
-    A disposable dry run from the packaged tree with the watcher stop mocked
-    at the lifecycle boundary (ok or failed with a fixed process); returns
-    the projected compact and the coordination root for normalization. The
-    run with the failed stop finds a store of a removed part and a gate log
-    in its root, so that it is the largest answer the operation gives.
+    A disposable dry run from the packaged tree; returns the projected compact
+    and the coordination root for normalization. With ``with_removed_stores``,
+    the root holds a store of a removed part and a gate log so it is the largest
+    answer the operation gives.
     """
     with tempfile.TemporaryDirectory() as tmp_dir:
         root = Path(tmp_dir)
         coord = (root / "coord").resolve()
         coord.mkdir(parents=True, exist_ok=True)
-        if not stop_ok:
+        if with_removed_stores:
             workspace = coord / "logs" / "observer" / "workspace"
             workspace.mkdir(parents=True)
             (workspace / "operator-inbox.jsonl").write_text("{}\n", encoding="utf-8")
@@ -64,33 +61,7 @@ def _produced_install_compact(*, stop_ok: bool) -> tuple[dict[str, Any], str]:
             repositories={},
         )
         request = RuntimeInstallRequest(dry_run=True, source_root=_PACKAGE_DATA.resolve())
-        if stop_ok:
-            stop_result: dict[str, Any] = {
-                "provider": "watchers",
-                "action": "stop",
-                "partial": False,
-                "recoveryActions": [],
-                "ok": True,
-            }
-        else:
-            stop_result = {
-                "provider": "watchers",
-                "action": "stop",
-                "partial": False,
-                "recoveryActions": [],
-                "ok": False,
-                "process": {"pid": 1234, "command": "cgc watch"},
-            }
-
-        def stop_watcher(args: Any, action: str) -> dict[str, Any]:
-            return {"provider": "watchers", **stop_result, "action": action}
-
-        with mock.patch.object(
-            install_provider_watchers.lifecycle,
-            "watchers_run",
-            side_effect=stop_watcher,
-        ):
-            full = run_runtime_install(config, request)
+        full = run_runtime_install(config, request)
         compact = compact_runtime_install_payload(full, f"{_CASE_ROOT}/report.json")
         raw = json.dumps(compact).replace(coord.as_posix(), _CASE_ROOT)
         normalized = json.loads(raw)
@@ -123,7 +94,7 @@ class L112FinalRowProductionTests(unittest.TestCase):
     # ruling puts the host block in the MCP authority settings file, so these cases are
     # deterministic in any shell and need no XDG precondition.
     def test_ordinary_install_case_is_operation_produced(self) -> None:
-        produced, _ = _produced_install_compact(stop_ok=True)
+        produced, _ = _produced_install_compact(with_removed_stores=False)
         self.assertEqual(produced, _INSTALL_ORDINARY_CASE)
         self.assertLessEqual(
             count_response_tokens(dict(_INSTALL_ORDINARY_CASE)),
@@ -131,7 +102,7 @@ class L112FinalRowProductionTests(unittest.TestCase):
         )
 
     def test_largest_install_case_is_operation_produced(self) -> None:
-        produced, _ = _produced_install_compact(stop_ok=False)
+        produced, _ = _produced_install_compact(with_removed_stores=True)
         self.assertEqual(produced, _INSTALL_LARGEST_CASE)
         self.assertLessEqual(
             count_response_tokens(dict(_INSTALL_LARGEST_CASE)),
@@ -139,8 +110,8 @@ class L112FinalRowProductionTests(unittest.TestCase):
         )
 
     def test_projection_forwards_no_undeclared_fields(self) -> None:
-        for stop_ok in (True, False):
-            produced, _ = _produced_install_compact(stop_ok=stop_ok)
+        for with_removed_stores in (False, True):
+            produced, _ = _produced_install_compact(with_removed_stores=with_removed_stores)
             self.assertNotIn("operation", produced)
             self.assertEqual(set(produced) - set(RUNTIME_INSTALL_ANSWER_FIELDS), set())
             for message in produced.get("messages", []):
@@ -150,7 +121,7 @@ class L112FinalRowProductionTests(unittest.TestCase):
         # Over the 600 row bound but under the 4,000 net: only the row bound
         # overflows this answer, through the unchanged L108 guard.
         whole = dict(_INSTALL_LARGEST_CASE)
-        whole["messages"] = [f"note {index:04d}-abcdefgh;" * 8 for index in range(5)]
+        whole["messages"] = [f"note {index:04d}-abcdefgh;" * 8 for index in range(8)]
         measured = count_response_tokens(whole)
         self.assertGreater(measured, bound_for("runtime_install"))
         self.assertLess(measured, TOOL_ANSWER_EXCEPTION_MAX_TOKENS)

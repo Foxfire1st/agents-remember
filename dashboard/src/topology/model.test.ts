@@ -71,12 +71,8 @@ describe('entry worktrees in the topology', () => {
   });
 
   it('builds only the workspace, checkout and enclosure rings', () => {
-    // The provider satellites — one node per engine, orbiting its scoped parent on a `poff` angle —
-    // left with the search providers. The model's vocabulary and every node's own keys say so, so
-    // a satellite cannot come back without failing here first.
     const nodes = buildTopology([{ enclosure: enclosure() }]);
     expect(new Set(nodes.map((node) => node.kind))).toEqual(new Set(['ws', 'repo', 'wt']));
-    for (const node of nodes) expect(Object.keys(node)).not.toContain('poff');
     expect(nodes.find((node) => node.kind === 'ws')?.sub).toBe('1 checkouts · 1 active worktrees');
   });
 

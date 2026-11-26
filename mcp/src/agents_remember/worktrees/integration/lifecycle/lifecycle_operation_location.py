@@ -21,7 +21,7 @@ from agents_remember.models.lifecycles.enclosure import (
     TerminalEnclosurePredecessor,
 )
 from agents_remember.models.lifecycles.operation import LifecycleOperationKind
-from agents_remember.worktrees import outside_scratch
+from agents_remember.worktrees import outside_scratch as _outside_scratch
 from agents_remember.worktrees.integration.lifecycle import (
     lifecycle_location_cache as location_cache,
 )
@@ -137,7 +137,7 @@ class EnclosurePublicationArtifacts:
     manifest_text: str
     contract_text: str
     reserved_locator: LifecycleEnclosureLocator
-    outside_scratch: outside_scratch.OutsideScratchRoot | None = None
+    outside_scratch: _outside_scratch.OutsideScratchRoot | None = None
 
     @property
     def manifest(self) -> LifecycleEnclosureManifest:
@@ -289,7 +289,7 @@ def prepare_enclosure_publication(
 
 def _outside_scratch_record(
     contract: WorktreeContract,
-) -> outside_scratch.OutsideScratchRoot | None:
+) -> _outside_scratch.OutsideScratchRoot | None:
     """The root this generation records, computed without touching the disk.
 
     The record is durable authority, so it is decided here and written into the manifest before
@@ -299,7 +299,7 @@ def _outside_scratch_record(
     nobody recorded.
     """
 
-    return outside_scratch.recorded_root(contract)
+    return _outside_scratch.recorded_root(contract)
 
 
 def _materialise_outside_scratch(artifacts: EnclosurePublicationArtifacts) -> None:
@@ -309,8 +309,8 @@ def _materialise_outside_scratch(artifacts: EnclosurePublicationArtifacts) -> No
     if record is None:
         return
     try:
-        outside_scratch.ensure_root(record)
-    except outside_scratch.OutsideScratchError as error:
+        _outside_scratch.ensure_root(record)
+    except _outside_scratch.OutsideScratchError as error:
         raise _location_error(
             "operation-location-outside-scratch-unavailable",
             f"the enclosure's outside scratch root cannot be allocated: {error}",

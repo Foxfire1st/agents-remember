@@ -39,7 +39,7 @@ catch the error and carry on. The same teardown fails a test that took the guard
 hook back.
 
 **What this guard cannot see.** Code that no test executes. Another process: Git materialising a
-blob, a provider container, any child. A SQLite library other than ``apsw`` and the standard
+blob, any child. A SQLite library other than ``apsw`` and the standard
 library's. The journal and write-ahead files SQLite creates beside a connection. Bytes read from a
 database file through the file API and written under a name that is not a database file name. A
 renamed directory that holds a database file. A production open that passes through a constructor

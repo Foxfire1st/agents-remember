@@ -18,7 +18,6 @@ def lifecycle_finalize_task_payload(
     *,
     docs: FinalizeTaskDocs = NO_TASK_DOCS,
     dry_run: bool = False,
-    teardown_providers: bool = True,
 ) -> dict:
     return _tool_payload(
         "lifecycle_finalize_task",
@@ -27,6 +26,5 @@ def lifecycle_finalize_task_payload(
             contract_path,
             docs=docs,
             dry_run=dry_run,
-            teardown_providers=teardown_providers,
         ),
     )

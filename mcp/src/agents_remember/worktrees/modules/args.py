@@ -24,7 +24,6 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecoveryCommits,
 )
 from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction, SyncSource
-from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
 
 if TYPE_CHECKING:
     from agents_remember.worktrees.integration.certification import IntegrationCertificationOwner
@@ -60,19 +59,12 @@ class WorktreeArgs:
     custom_instruction: str | None = None
     lifecycle_id: str = ""
 
-    # Provider setup
-    skip_provider_setup: bool = False
-    provider_setup_config: WorktreeProviderSetupConfig | None = None
-    provider_timeout: int = 1800
-    retry_provider_setup: bool = False
-
     # Lifecycle flags
     dry_run: bool = False
     strategy: str = "ff-only"
     approved: bool = False
     approval_note: str = ""
     force: bool = False
-    teardown_providers: bool = True
 
     # Closeout owns one normalized input for its code and memory-content outputs.
     closeout_input: EffectiveCloseoutInput | None = None

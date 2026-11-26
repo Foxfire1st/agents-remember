@@ -27,7 +27,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
@@ -146,7 +145,6 @@ def bound_validation_services() -> Iterator[None]:
 
     bind_worktree_services(
         WorktreeServices(
-            provider_lifecycle=mock.Mock(),
             memory_quality=cast(Any, None),
             citation_guard=cast(Any, None),
             knowledge_validation=GitKnowledgeValidation(base_converter=GitBaseConverter()),

@@ -149,9 +149,6 @@ COMPUTED_IMPORTS_ALLOWED = {
         "a lazy view over the payload-builder package: the name comes from the attribute a "
         "registration module asks for, never from an author or a request"
     ),
-    "providers/lifecycle/__init__.py": "a lazy facade over its own _EXPORT_MODULES list",
-    "providers/cgc/lifecycle/__init__.py": "a lazy facade over its own _EXPORT_MODULES list",
-    "providers/grepai/lifecycle/__init__.py": "a lazy facade over its own _EXPORT_MODULES list",
 }
 # A production module may name a database file only here; a copy of a dataset needs such a name.
 SQLITE_FILE_NAMES_ALLOWED = {

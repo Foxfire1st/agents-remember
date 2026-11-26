@@ -16,15 +16,13 @@ Both `~/.config` locations stand under `XDG_CONFIG_HOME` when that variable is s
 
 A key that a loader does not know is handled in one of two ways:
 
-- Inside `orchestration`, `dashboard`, `toolLog`, `providerDegradation`, `timeoutCaps` and
-  `paseoRuntime`, an unknown key refuses the load. So does a key other than `instanceId` and
-  `scope` in an entry of the top-level `providers`, which lists
-  [search providers](../concepts.md#search-provider) by the ids `grepai-memory` and
-  `codegraphcontext-code`; another id refuses the load as well. The message names the key; under
-  `orchestration` it also names the file.
+- Inside `orchestration`, `dashboard`, `toolLog`, `timeoutCaps` and `paseoRuntime`, an unknown key
+  refuses the load. The message names the key; under `orchestration` it also names the file.
 - At the top level of the settings file, inside an entry of `repositories` and everywhere in the
   memory settings file, an unknown key loads without a message and is read by nothing. Check the
-  spelling of such a key yourself.
+  spelling of such a key yourself. Legacy `providers`, `providerDegradation` and
+  `timeoutCaps.providerSetupSeconds` keys load unread without error and are named under
+  `server_info.unusedSettingsKeys`.
 
 `<memory-root>/system/settings.md` is the prose guidance file beside the memory settings file.
 When `settings.json` is absent there, the loader reads a fenced block of `settings.md` in its
@@ -168,60 +166,12 @@ nothing and rewrites no configuration or plug-in file of the host. A dashboard s
 `--sim` touches no host. Stopping or restarting the dashboard leaves the host and its agents
 running.
 
-### providerDegradation
-
-`providerDegradation` (optional) configures the provider degradation detector. Two keys switch
-it: `enabled` (default `true`) runs the detector, and `failSafeEnabled` (default `true`) lets it
-call a stop. A provider here is a [search provider](../concepts.md#search-provider); its Docker
-containers carry the label `agents-remember.provider`. The detector runs in the dashboard's
-server, the process that serves the dashboard. The stop it may call is the watcher stop: it
-stops the watchers of the search providers, as `runtime_install` does before it refreshes its
-files.
-
-The detector is a safety check over the containers of search providers that run on the machine;
-no part of Agents Remember starts such a container. It is a
-background loop of the dashboard process, not an install step: every 30 seconds
-it samples the Docker state of every labelled provider container, appends that sample to
-`<coordinationRoot>/logs/observer/providers/metrics.jsonl`, republishes `metrics-current.json`,
-evaluates the recent window and compacts the log, for as long as the dashboard is up,
-independently of any install or cleanup. It is not a revival: it starts nothing, installs
-nothing, indexes nothing and queries nothing. A change of state writes the degradation state and
-an event under `<coordinationRoot>/logs/observer/providers/`. On the change into `critical`,
-`failSafeEnabled: true` makes that same sample tick call the watcher stop,
-the same stop that `runtime_install` calls, and the event records the attempt and its result
-under `criticalFailsafe`. With `failSafeEnabled: false` the
-event records `{"enabled": false}` and no stop is called. No tool of the tool server performs
-that stop.
-
-An install writes no provider block: the lifecycle document that it generates declares no
-providers (`{"enabled": false, "providers": {}}`). With no provider declared, the stop selects
-nothing, stops nothing, and the event still records the attempt and its result under
-`criticalFailsafe`.
-
-Fourteen more keys set the thresholds of the detector. A ratio is a number above 0 and at most 1;
-every other key takes a whole number from 1.
-
-| Keys | Defaults | What they set |
-| --- | --- | --- |
-| `memoryDegradedRatio`, `memoryCriticalRatio` | 0.80, 0.92 | the share of its memory limit at which a container counts as degraded or critical |
-| `watcherLagDegradedCommits`, `watcherLagCriticalCommits` | 5, 20 | the number of files that the index of a search provider is behind; the names say commits, the detector counts files |
-| `watcherLagDegradedMinutes`, `watcherLagCriticalMinutes` | 10, 30 | the minutes for which a lagging index has been served |
-| `probeDegradedMs`, `probeCriticalMs` | 2000, 10000 | the time a probe of a search provider takes, in milliseconds |
-| `setupFailureDegradedStreak`, `setupFailureCriticalStreak` | 2, 3 | the number of failed setups in a row |
-| `degradedSamples`, `criticalSamples`, `healthySamples` | 3, 2, 3 | how many recent samples must be degraded, or critical, for the state `degraded` or `critical`, and how many healthy samples in a row return the state to `healthy` |
-| `recentSampleLimit` | 120 | how many recent samples the detector reads |
-
-### timeoutCaps.providerSetupSeconds
-
-`timeoutCaps` holds two keys, `providerSetupSeconds` and `toolSeconds`; another key refuses the
-load, and the message names the two. `timeoutCaps.providerSetupSeconds` (a whole number that is
-not negative, default 1800) bounds in seconds the watcher stop of `runtime_install` and the
-provider setup of `worktree_start`.
-
 ### timeoutCaps.toolSeconds
 
-`timeoutCaps.toolSeconds` takes a whole number that is not negative. The key is accepted and
-enforces nothing: no tool call is bounded by it.
+`timeoutCaps` holds `toolSeconds` (a whole number that is not negative); another unknown key refuses
+the load. `timeoutCaps.toolSeconds` is accepted and enforces nothing: no tool call is bounded by
+it. A legacy `timeoutCaps.providerSetupSeconds` key loads unread and is named under
+`server_info.unusedSettingsKeys`.
 
 ### orchestration in the settings file
 

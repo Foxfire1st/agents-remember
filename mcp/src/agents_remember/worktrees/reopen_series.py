@@ -851,7 +851,6 @@ def _collect_completed_uncleaned(
             contract_path=contract.contract_path,
             approved=not dry_run,
             dry_run=dry_run,
-            teardown_providers=False,
         )
     )
     if dry_run or result.returncode == 0:

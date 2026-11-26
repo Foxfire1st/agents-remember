@@ -752,11 +752,10 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
             shutil.rmtree(path)
             return {"path": str(path), "removed": True}
 
-        services = SimpleNamespace(provider_lifecycle=SimpleNamespace(remove_tree=remove))
         self.assertEqual(terminal_group.prepare_group_removal(contract), {})
         self.assertEqual(canonical.read_text(), "Completed report with retained evidence")
         report.write_text("Newly collected evidence")
-        with patch.object(terminal_group, "worktree_services", return_value=services):
+        with patch.object(terminal_group, "remove_tree", side_effect=remove):
             directories = terminal_group.remove_terminal_group(contract)
         self.assertTrue(directories["worktree_group"]["removed"])
         self.assertFalse(group.exists())

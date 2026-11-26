@@ -129,8 +129,7 @@ def _write_settings(root: Path, contract: WorktreeContract) -> Path:
                 "coordinationRoot": str(contract.coordination_root),
                 "workspaceRoot": str(root / "workspace"),
                 "repositories": {REPO_NAME: {}},
-                "providers": {},
-                "timeoutCaps": {"toolSeconds": 30, "providerSetupSeconds": 1800},
+                "timeoutCaps": {"toolSeconds": 30},
                 "benchmarksEnabled": False,
             },
             indent=2,
@@ -183,7 +182,7 @@ def _terminal_archive_ready_status(
     (
         pytest.param(
             "worktree_cleanup",
-            TerminalWorktreeCleanupArguments(teardown_providers=True),
+            TerminalWorktreeCleanupArguments(),
             worktree_cleanup_payload,
             id="worktree_cleanup",
         ),

@@ -42,7 +42,7 @@ def _is_disposed(fact: EngineProcessFacts) -> bool:
     """A cleaned-up or abandoned worktree whose runtime is gone (05l Gap B).
 
     ``cleanup`` reaching ``completed``/``abandoned`` means ``worktree_cleanup``/``worktree_abandon``
-    already removed the worktrees + reclaimed the provider stack, so the enclosure is disposed. Drop
+    already removed the worktrees, so the enclosure is disposed. Drop
     it from the active engine-room set so the frontend (05k) animates the removal instead of
     rendering a fully-active phantom. ``cleanup-pending`` (cleanup not yet run) is intentionally kept,
     so the de-materialise beat still has a live node to animate.

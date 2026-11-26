@@ -39,7 +39,6 @@ def setup_config(root):
             {
                 "coordinationRoot": str(root / "coordination"),
                 "workspaceRoot": str(root / "projects"),
-                "providers": {},
             }
         )
     )

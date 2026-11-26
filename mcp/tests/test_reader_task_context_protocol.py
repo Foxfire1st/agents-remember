@@ -82,7 +82,6 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
                     "coordinationRoot": self.contract.coordination_root.as_posix(),
                     "workspaceRoot": self.root.as_posix(),
                     "repositories": {self.repo_id: {}},
-                    "providers": {},
                 }
             )
             + "\n",

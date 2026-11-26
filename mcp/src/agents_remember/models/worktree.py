@@ -381,11 +381,6 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     # it, worktree_attach resumes it. Emitted snake_case (lifecycle_id) like its
     # siblings; declared here for wire discoverability.
     lifecycleId: str | None = None
-    # Background provider setup state (GitHub #53): worktree_start returns
-    # 'starting' with a progressFile; worktree_status then projects the live
-    # progress as running / stale (dead heartbeat) / ok /
-    # ready-with-failed-phases / failed, with currentPhase and seedFallback.
-    providers: dict[str, Any] | None = None
     # MIK-R207: the outside scratch root this ending removed, or left with its reason.
     outsideScratch: dict[str, Any] | None = None
     outsideScratchReconcile: dict[str, Any] | None = None

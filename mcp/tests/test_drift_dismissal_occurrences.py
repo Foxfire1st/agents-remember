@@ -393,7 +393,7 @@ def test_drift_actual_http_click_restart_and_new_occurrence(drift_source, monkey
 
     def capture(*args, **kwargs):
         result = original(*args, **kwargs)
-        runtimes.append(result[0])
+        runtimes.append(result)
         return result
 
     monkeypatch.setattr(serving_app, "_build_serving_runtime", capture)

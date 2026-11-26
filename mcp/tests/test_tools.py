@@ -68,10 +68,8 @@ class McpToolTests(unittest.TestCase):
             # MIK-R196 rule 7: no installed-harness skill root is named by the running server.
             self.assertNotIn("harnessSkillRoot", payload)
             self.assertEqual(payload["allowedRepoIds"], ["agents-remember"])
-            self.assertEqual(
-                payload["unusedProviderKeys"],
-                ["codegraphcontext-code", "grepai-memory"],
-            )
+            self.assertNotIn("unusedProviderKeys", payload)
+            self.assertEqual(payload["unusedSettingsKeys"], [])
             self.assertNotIn("tools", payload)
             self.assertNotIn("reservedTools", payload)
             self.assertEqual(
@@ -84,6 +82,38 @@ class McpToolTests(unittest.TestCase):
                     "packageRoot": "/runtime/agents_remember",
                     "commit": "abc1234",
                 },
+            )
+
+    def test_server_info_payload_reports_legacy_provider_keys_as_unused_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / ".codex" / "mcp" / "settings.json"
+            legacy = settings_payload(root)
+            legacy["providers"] = {"codegraphcontext-code": {}, "grepai-memory": {}}
+            legacy["providerDegradation"] = {"enabled": True}
+            legacy["timeoutCaps"] = {"providerSetupSeconds": 1800, "toolSeconds": 30}
+            write_json(path, legacy)
+            config = load_config(path)
+
+            build = ServingBuild(
+                version=SERVER_VERSION,
+                commit="abc1234",
+                booted_at="2026-08-25T00:00:00Z",
+                source_digest="sha256:" + "a" * 64,
+                python_executable="/runtime/bin/python",
+                package_root="/runtime/agents_remember",
+            )
+            payload = server_info_payload(config, build.payload())
+
+            self.assertNotIn("unusedProviderKeys", payload)
+            self.assertEqual(
+                payload["unusedSettingsKeys"],
+                [
+                    "providers.codegraphcontext-code",
+                    "providers.grepai-memory",
+                    "providerDegradation.enabled",
+                    "timeoutCaps.providerSetupSeconds",
+                ],
             )
 
     def test_memory_init_repairs_authority_after_config_write_failure(self) -> None:

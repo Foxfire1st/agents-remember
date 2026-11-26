@@ -104,7 +104,7 @@ def _cleanup(contract: WorktreeContract, *, dry_run: bool) -> WorktreeCommandRes
     return terminal_archive_required_result(
         contract,
         operation="worktree_cleanup",
-        arguments=TerminalWorktreeCleanupArguments(teardown_providers=True),
+        arguments=TerminalWorktreeCleanupArguments(),
         dry_run=dry_run,
     )
 

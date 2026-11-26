@@ -11,8 +11,9 @@ from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_text
 
-from agents_remember_test_support.code_quality import diff_coverage, retry_proof, targeted
+from agents_remember_test_support.code_quality import diff_coverage, retry_proof
 from agents_remember_test_support.code_quality import scope as quality_scope
+from agents_remember_test_support.code_quality import targeted as quality_targeted
 from agents_remember_test_support.testing.dagger_admission import (
     DaggerAdmission,
     require_dagger_admission_capability,
@@ -109,7 +110,7 @@ class CheckConfig:
     diff_base: str | None = None
     targeted: bool = False
     targeted_base: diff_coverage.BaseResolution | None = None
-    targeted_scope: targeted.TargetedScopeResult | None = None
+    targeted_scope: quality_targeted.TargetedScopeResult | None = None
     file_size_armed: bool = False
     pytest_report_log: Path | None = None
     pytest_phase_report: Path | None = None

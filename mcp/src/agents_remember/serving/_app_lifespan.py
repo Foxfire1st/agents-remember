@@ -7,7 +7,6 @@ import time
 from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
-from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
@@ -31,17 +30,9 @@ from agents_remember.observer.event_retention import (
     WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS,
     compact_workspace_river,
 )
-from agents_remember.providers.degradation import evaluate_provider_degradation
-from agents_remember.providers.metrics import (
-    DEFAULT_SAMPLE_INTERVAL_SECONDS,
-    ProviderMetricsStore,
-    sample_provider_containers,
-)
-from agents_remember.providers.watcher_service import run_configured_watchers
 from agents_remember.serving._app_common import _ServingRuntime, logger
 from agents_remember.serving.background_accounting import (
     OWNER_HELD_DELIVERY,
-    OWNER_METRICS,
     OWNER_RIVER_COMPACTION,
     OWNER_STARTUP,
     OWNER_TERMINAL_OBSERVATION,
@@ -108,40 +99,6 @@ async def _leaf_archive_recovery_loop(runtime: _ServingRuntime) -> None:
             await asyncio.sleep(RECOVERY_TICK_SECONDS)
     finally:
         archives.close()
-
-
-async def _metrics_loop(
-    config: McpRuntimeConfig,
-    metrics_store: ProviderMetricsStore,
-    ledger: BackgroundLedger | None = None,
-) -> None:
-    while True:
-        # One accounted unit per sample stage (MIK-R81 rule 1, F01): each worker
-        # thread's own CPU is its unit; the loop's waits are never measured.
-        try:
-            snapshot = await _to_thread_owned(
-                OWNER_METRICS,
-                ledger,
-                sample_provider_containers,
-                cwd=config.coordination_root,
-            )
-            await _to_thread_owned(OWNER_METRICS, ledger, metrics_store.record, snapshot)
-            await _to_thread_owned(
-                OWNER_METRICS,
-                ledger,
-                evaluate_provider_degradation,
-                config,
-                stop_provider_stacks=partial(
-                    run_configured_watchers,
-                    action="stop",
-                    dry_run=False,
-                ),
-            )
-            # Reclaim the append-only metrics log (O(1) stat unless past its byte budget).
-            await _to_thread_owned(OWNER_METRICS, ledger, metrics_store.compact)
-        except Exception:
-            logger.exception("provider metrics sample failed; retrying next interval")
-        await asyncio.sleep(DEFAULT_SAMPLE_INTERVAL_SECONDS)
 
 
 @dataclass(frozen=True)
@@ -378,7 +335,7 @@ async def _warmup_watch_loop(runtime: _ServingRuntime) -> None:
 #:
 #: A preview process is started from a worktree against the developer's real data, so it must not be
 #: a second deliverer of held role messages, a second archive recoverer, a second warmup that
-#: resumes agents, a second workspace-river compactor or a second metrics writer. What it MAY do is
+#: resumes agents or a second workspace-river compactor. What it MAY do is
 #: serve, build and keep the projection: those are the app itself.
 _PREVIEW_BACKGROUND_ENV = "AR_SERVING_PREVIEW_NO_BACKGROUND"
 
@@ -387,7 +344,6 @@ _PREVIEW_SUPPRESSED_LOOPS = (
     "leaf-archive-recovery",
     "warmup-watch",
     "workspace-river-compaction",
-    "metrics",
 )
 """The loops only the live dashboard may own, in the order the startup notice names them."""
 
@@ -435,10 +391,10 @@ async def _prepare_launcher_catalog(runtime: _ServingRuntime) -> None:
 
 
 def _serving_lifespan(
-    runtime: _ServingRuntime, metrics_store: ProviderMetricsStore
+    runtime: _ServingRuntime,
 ) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
     """Prepare the launcher's catalog while the existing serving lifetime starts."""
-    serving = _running_lifespan(runtime, metrics_store)
+    serving = _running_lifespan(runtime)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -487,7 +443,7 @@ async def _prepare_master_inputs(runtime: _ServingRuntime) -> None:
 
 
 def _running_lifespan(
-    runtime: _ServingRuntime, metrics_store: ProviderMetricsStore
+    runtime: _ServingRuntime,
 ) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
     """The app lifespan: serve while shared inputs prepare, then stop their owners cleanly."""
 
@@ -518,19 +474,6 @@ def _running_lifespan(
             None
             if runtime.master_preparation is None
             else asyncio.create_task(_prepare_master_inputs(runtime))
-        )
-        # The provider safety sampler. Suppression is preview-only: a preview shares its coordination
-        # root with the installed host, which runs this loop and writes the metrics samples the
-        # preview reads, so the preview's fail-safe is not blind while the host runs. What must hold
-        # is the *default* path: with the switch absent, `_preview_suppresses()` is empty and every
-        # loop below starts.
-        metrics_task = _live_background_task(
-            "metrics",
-            suppressed,
-            _metrics_loop,
-            runtime.config,
-            metrics_store,
-            runtime.background_ledger,
         )
         archive_recovery_task = _live_background_task(
             "leaf-archive-recovery", suppressed, _leaf_archive_recovery_loop, runtime
@@ -569,7 +512,6 @@ def _running_lifespan(
                 held_delivery_task,
                 warmup_watch_task,
                 move_watch_task,
-                metrics_task,
             )
             if task is not None
         ]

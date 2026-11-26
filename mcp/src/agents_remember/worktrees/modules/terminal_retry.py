@@ -32,13 +32,10 @@ from agents_remember.worktrees.modules.terminal_group import (
     prepare_group_removal,
     preview_group_removal,
     remove_terminal_group,
-    teardown_terminal_providers,
 )
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalMode,
-    TerminalResult,
     _worktree_preflight,
-    terminal_result_blockers,
 )
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
@@ -79,10 +76,8 @@ def _worktree_blockers(contract: WorktreeContract, mode: TerminalMode) -> list[d
     return blockers
 
 
-def _preview_retry(
-    contract: WorktreeContract, mode: TerminalMode, *, teardown_providers: bool
-) -> GroupPreparation:
-    directories = preview_group_removal(contract, teardown_providers=teardown_providers)
+def _preview_retry(contract: WorktreeContract, mode: TerminalMode) -> GroupPreparation:
+    directories = preview_group_removal(contract)
     blockers = group_directory_blockers(directories, dry_run=True)
     if directories.get("worktree_group", {}).get("would_remove"):
         blockers.extend(_worktree_blockers(contract, mode))
@@ -128,13 +123,8 @@ def _retry_modern_group(
     mode: TerminalMode = (
         "cleanup" if isinstance(accepted, TerminalWorktreeCleanupArguments) else "abandon"
     )
-    teardown_providers = (
-        accepted.teardown_providers
-        if isinstance(accepted, TerminalWorktreeCleanupArguments)
-        else True
-    )
     contract = expected.current_contract
-    prepared = _preview_retry(contract, mode, teardown_providers=teardown_providers)
+    prepared = _preview_retry(contract, mode)
     if prepared.blockers:
         return prepared
     if prepared.directories.get("worktree_group", {}).get("would_remove"):
@@ -151,32 +141,21 @@ def _retry_modern_group(
         return prepared
     with reservation:
         contract = _require_generation(expected)
-        return _apply_retry(
-            contract, mode, prepared.agent_archive, teardown_providers=teardown_providers
-        )
+        return _apply_retry(contract, mode, prepared.agent_archive)
 
 
 def _apply_retry(
     contract: WorktreeContract,
     mode: TerminalMode,
     archive: dict[str, object],
-    *,
-    teardown_providers: bool,
 ) -> GroupPreparation:
-    fresh = _preview_retry(contract, mode, teardown_providers=teardown_providers)
+    fresh = _preview_retry(contract, mode)
     if fresh.blockers:
         return replace(fresh, agent_archive=archive)
     move_out = prepare_group_removal(contract)
     blockers = group_directory_blockers(move_out, dry_run=False)
     if blockers:
         return GroupPreparation(move_out, archive, blockers)
-    if teardown_providers and fresh.directories.get("worktree_group", {}).get("would_remove"):
-        providers = teardown_terminal_providers(contract, dry_run=False)
-        blockers = terminal_result_blockers(
-            TerminalResult(providers=providers, worktrees={}, branches={}, directories={})
-        )
-        if blockers:
-            return GroupPreparation({}, archive, blockers)
     directories = remove_terminal_group(contract)
     return GroupPreparation(
         directories, archive, group_directory_blockers(directories, dry_run=False)

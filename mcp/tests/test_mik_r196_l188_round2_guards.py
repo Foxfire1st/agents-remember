@@ -108,9 +108,7 @@ def test_benchmark_preparation_discovers_package_skills_without_installing_copie
             "workspace": {"fixturePath": "workspaces/fixture"},
         },
     )
-    preparation = BenchmarkPreparation(
-        benchmarks_root=benchmarks, dry_run=False, allowed_provider_ids=()
-    )
+    preparation = BenchmarkPreparation(benchmarks_root=benchmarks, dry_run=False)
     # The same operation must remain usable on a previously prepared case, too.
     prepare_case(preparation, case)
     prepare_case(preparation, case)
@@ -145,7 +143,6 @@ def test_benchmark_preparation_discovers_package_skills_without_installing_copie
     config = config_from_mapping(settings, settings_path)
     assert config.repositories["fixture"].path == memory / "repos/fixture"
     assert config.coordination_root == memory / "ar-coordination"
-    assert config.providers == {}
     server = FastMCP("benchmark package resources")
     register_capsule_and_skill_tools(server, config)
 

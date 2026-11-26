@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.log_capture import summarize_command_logs
 from agents_remember.application.review_external_git_movement import (
     external_git_movement_result_block,
 )
@@ -23,10 +24,8 @@ from agents_remember.kernel.direct_execution_grants import (
     read_grant,
 )
 from agents_remember.kernel.primitives.runtime_config import (
-    DEFAULT_PROVIDER_SETUP_SECONDS,
     McpRuntimeConfig,
     RepositoryScope,
-    reload_provider_authority,
 )
 from agents_remember.models.certification.corrective import RedCatalogDisposition
 from agents_remember.models.closeout.input import CloseoutCorrectedCall, EffectiveCloseoutInput
@@ -39,8 +38,6 @@ from agents_remember.models.lifecycles.operation import (
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionInput
 from agents_remember.observer.ulid import new_ulid
-from agents_remember.providers.lifecycle.log_capture import summarize_command_logs
-from agents_remember.providers.settings import write_lifecycle_settings
 from agents_remember.worktrees import git_worktree_manager
 from agents_remember.worktrees.closeout_input import (
     CloseoutInputError,
@@ -206,28 +203,6 @@ def worktree_start_tool(
         return direct_refusal
     # Stable contract/event scope identity; no session owns a worktree.
     lifecycle_id = new_ulid()
-    # Containment R1 (260707-HFX-L1): the on-disk authority file — not the boot
-    # snapshot — decides whether provider setup may launch. An empty (or
-    # unreadable: fail-closed) live providers map skips setup outright; the
-    # worktree itself is still created. Launch runs on the LIVE providers map.
-    authority = None if execution.skip_provider_setup else reload_provider_authority(config)
-    settings_path = (
-        write_lifecycle_settings()
-        if authority is not None and authority.providers and authority.error is None
-        else None
-    )
-    provider_setup_config = (
-        None
-        if settings_path is None
-        else git_worktree_manager.WorktreeProviderSetupConfig(
-            coordination_root=config.coordination_root,
-            settings_path=settings_path,
-            seed_source_coordination_root=config.coordination_root,
-            # The temp settings file must outlive this entry point's call: the
-            # background setup thread reads it and owns the unlink (GitHub #53).
-            unlink_settings_after_setup=True,
-        )
-    )
     args = _worktree_namespace(
         config,
         repo,
@@ -243,45 +218,11 @@ def worktree_start_tool(
         memory_choice=bases.memory_choice,
         stale_base_choice=bases.stale_base_choice,
         custom_instruction=None,
-        skip_provider_setup=execution.skip_provider_setup,
-        retry_provider_setup=execution.retry_provider_setup,
-        provider_setup_config=provider_setup_config,
-        # Setup-flow bound: the documented timeoutCaps.providerSetupSeconds cap
-        # (matching runtime_install), not the docker-control default — the seed
-        # export of a large graph is legitimate setup work (GitHub #53/#58).
-        provider_timeout=config.timeout_caps.get(
-            "providerSetupSeconds", DEFAULT_PROVIDER_SETUP_SECONDS
-        ),
         dry_run=execution.dry_run,
     )
-    result: dict[str, Any] | None = None
-    try:
-        result = _worktree_result("worktree_start", git_worktree_manager.start_result(args))
-        if authority is not None and (
-            authority.error is not None or (config.providers and not authority.providers)
-        ):
-            # Surface the veto so a stale-snapshot session sees WHY setup was
-            # skipped instead of silently diverging from its boot config.
-            veto: dict[str, Any] = {
-                "source": str(authority.source_path),
-                "bootSnapshotProviders": sorted(config.providers),
-            }
-            if authority.error is not None:
-                veto["error"] = authority.error
-            result["providersAuthority"] = veto
-        result["eligibility"] = dict(_START_ELIGIBILITY)
-        return result
-    finally:
-        if settings_path is not None and not _settings_owned_by_background(result):
-            settings_path.unlink(missing_ok=True)
-
-
-def _settings_owned_by_background(result: dict[str, Any] | None) -> bool:
-    """True when a launched background setup took over the temp settings file."""
-    if result is None:
-        return False
-    providers = result.get("providers")
-    return isinstance(providers, dict) and providers.get("state") == "starting"
+    result = _worktree_result("worktree_start", git_worktree_manager.start_result(args))
+    result["eligibility"] = dict(_START_ELIGIBILITY)
+    return result
 
 
 def summarized_worktree_start_tool(
@@ -765,7 +706,6 @@ def worktree_cleanup_tool(
     *,
     contract_path: str,
     dry_run: bool = False,
-    teardown_providers: bool = True,
 ) -> dict[str, Any]:
     configured = admit_configured_terminal_contract(
         config, contract_path, operation="worktree_cleanup"
@@ -776,7 +716,6 @@ def worktree_cleanup_tool(
         contract_path=configured.contract_path,
         approved=not dry_run,
         dry_run=dry_run,
-        teardown_providers=teardown_providers,
     )
     return _worktree_result("worktree_cleanup", git_worktree_manager.cleanup_result(args))
 
@@ -815,7 +754,6 @@ def lifecycle_finalize_task_tool(
     *,
     docs: FinalizeTaskDocs = NO_TASK_DOCS,
     dry_run: bool = False,
-    teardown_providers: bool = True,
 ) -> dict[str, Any]:
     confined_contract = require_within_coordination(config, contract_path, "contract_path")
     args = git_worktree_manager.FinalizeArgs(
@@ -828,7 +766,6 @@ def lifecycle_finalize_task_tool(
         else None,
         subtask_number=docs.subtask_number,
         dry_run=dry_run,
-        teardown_providers=teardown_providers,
     )
     result = _worktree_result("lifecycle_finalize_task", git_worktree_manager.finalize_result(args))
     return result

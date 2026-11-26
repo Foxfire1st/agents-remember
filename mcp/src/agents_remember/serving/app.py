@@ -35,7 +35,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.gzip import GZipMiddleware
 
-from agents_remember.providers.metrics import ProviderMetricsStore
 from agents_remember.serving._app_common import (
     INFERRED_LIVE_INPUTS,
     LiveProjectionInputs,
@@ -100,13 +99,11 @@ def _build_serving_runtime(
     replay: ProjectionReplay,
     live_inputs: LiveProjectionInputs,
     collaborators: ServingCollaborators,
-) -> tuple[_ServingRuntime, ProviderMetricsStore]:
+) -> _ServingRuntime:
     """Construct the long-lived collaborators one serving app owns, before any route exists.
 
     Separated from ``create_app`` because the two halves answer different questions: this is
-    what the process will be running, and ``create_app`` is what it will serve. The metrics
-    store rides back beside the runtime rather than on it -- the lifespan owns its sampling
-    loop, and nothing that handles a request reads it.
+    what the process will be running, and ``create_app`` is what it will serve.
     """
     enabled = live_inputs.resolved(replay)
     # The always-on background account (MIK-R81 rule 1): one ledger per app, shared
@@ -142,11 +139,7 @@ def _build_serving_runtime(
         usage_read=collaborators.usage_read,
         explainer_application=collaborators.explainer_application,
     )
-    # The serving daemon samples labeled provider
-    # containers on its own cadence (decoupled from the 1s projection tick) into
-    # the central metrics store — the feed for provider_status, the statistics
-    # board, and the degradation protocol. Read-only + dockerless-safe.
-    return runtime, ProviderMetricsStore(config.coordination_root)
+    return runtime
 
 
 #: The old authoring POSTs, which the explainer replaced. Their reads and retained-revision
@@ -206,9 +199,7 @@ def create_app(
     staleness (default ``DEFAULT_HEARTBEAT_SECONDS``). ``collaborators`` are the ports of the
     composition root.
     """
-    runtime, metrics_store = _build_serving_runtime(
-        config, cadence, replay, live_inputs, collaborators
-    )
+    runtime = _build_serving_runtime(config, cadence, replay, live_inputs, collaborators)
     app = FastAPI(
         title="Agents Remember dashboard",
     )
@@ -227,7 +218,7 @@ def create_app(
         preparation.bind_ledger(runtime.background_ledger)
         runtime.projector.bind_series_changed(preparation.offer_master)
     runtime = replace(runtime, master_preparation=preparation)
-    app.router.lifespan_context = _serving_lifespan(runtime, metrics_store)
+    app.router.lifespan_context = _serving_lifespan(runtime)
     register_notes_routes(app, config)
     register_requirements_routes(app, config)
     register_review_routes(

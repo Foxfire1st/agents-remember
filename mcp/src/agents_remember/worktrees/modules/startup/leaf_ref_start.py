@@ -38,7 +38,6 @@ def start_input_edge_refusal(
         "leaf_id": args.leaf_id,
         "workflow_kind": args.workflow_kind,
         "dry_run": args.dry_run,
-        "skip_provider_setup": args.skip_provider_setup,
         "memory_mode": args.memory_mode,
         "source_branch": args.source_branch,
         "parent_task": args.parent_task,

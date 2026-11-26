@@ -18,7 +18,6 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
@@ -26,7 +25,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.install import provider_watchers as install_provider_watchers
 from agents_remember.install import runtime as install_runtime
 from agents_remember.mcp.registration import TOOL_REGISTRARS
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
@@ -260,9 +258,8 @@ class ToolDescriptionBoundsTests(unittest.TestCase):
         # longer explanation. The keyed phrases below are the omitted details.
         details = " ".join(TOOL_DETAILS_CHECKOUT.read_text(encoding="utf-8").split())
         required = (
-            "unusedProviderKeys",
-            "install_provider_deps=true",
-            "install/start/watch",
+            "unusedSettingsKeys",
+            "removed-stores",
             "dry_run",
             "reportPath",
             "role-capsules",
@@ -273,10 +270,6 @@ class ToolDescriptionBoundsTests(unittest.TestCase):
             "wouldInstallHost",
             "configured: false",
             "restartRequired",
-            "never count as enabled",
-            "providerless",
-            "cache-reuse flag",
-            "changes nothing observable",
             # role_start_set and retire_child (MIK-R113): what their short descriptions omit.
             "featureValues",
             "replaces_interrupt_turn",
@@ -306,30 +299,13 @@ class ShippedToolDetailsTests(unittest.TestCase):
         # file (checked by the bounds test above) and the installed
         # <coordinationRoot>/docs/ copy. This installs the real packaged tree
         # into a disposable coordination root and reads the named place back.
-        def watcher_result(action: str, **kwargs: object) -> dict:
-            return {
-                "provider": "watchers",
-                "action": action,
-                "ok": True,
-                "partial": False,
-                "recoveryActions": [],
-            }
-
         with tempfile.TemporaryDirectory() as tmp_dir:
             coordination_root = Path(tmp_dir) / "ar-coordination"
-            with patch.object(
-                install_provider_watchers.lifecycle,
-                "watchers_run",
-                side_effect=lambda args, action: watcher_result(action),
-            ):
-                install_runtime.install_runtime(
-                    MCP_SRC / "agents_remember" / "package_data",
-                    coordination_root,
-                    dry_run=False,
-                    provider_deps=install_runtime.ProviderDependencyInstall(
-                        settings={}, timeout=1800, enabled=False
-                    ),
-                )
+            install_runtime.install_runtime(
+                MCP_SRC / "agents_remember" / "package_data",
+                coordination_root,
+                dry_run=False,
+            )
             installed = coordination_root / "docs" / TOOL_DETAILS_NAME
             self.assertTrue(installed.exists(), "installed docs/tool-details.md is missing")
             self.assertEqual(

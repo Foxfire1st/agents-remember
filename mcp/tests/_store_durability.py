@@ -1,4 +1,4 @@
-"""Force an append into the compaction window of four real JSONL stores.
+"""Force an append into the compaction window of two real control-plane JSONL stores.
 
 Forked processes use disposable roots and independent receipt-versus-disk
 accounting. Bounded rendezvous and joins preserve termination when locking
@@ -28,16 +28,6 @@ from agents_remember.controlplane.records import (
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.file_lock import lock_path_for
 from agents_remember.models.structural.gates import GateState
-from agents_remember.providers.degradation import (
-    DEGRADATION_EVENT_SCHEMA,
-    ProviderDegradationStore,
-)
-from agents_remember.providers.metrics import (
-    PROVIDER_METRICS_SCHEMA,
-    ContainerSample,
-    MetricsSnapshot,
-    ProviderMetricsStore,
-)
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 # Survivors are what the harness accounts for. The anchor is a record that is never prunable and
@@ -156,128 +146,14 @@ class AttentionAdapter(StoreAdapter):
         store.reconcile([AttentionObservation("blocked-start", observed_before, existing=existing)])
 
 
-class ProviderStoreAdapter(StoreAdapter):
-    """The two ``providers/`` logs, which sit under a coordination root rather than an observer one.
-
-    ``StoreAdapter.log_path`` resolves ``<root>/workspace/<log>`` because that is where the two
-    control-plane logs live. Both provider stores build their own directory from a COORDINATION
-    root instead (``<root>/logs/observer/providers``), so the harness root means the same thing to
-    them -- a throwaway tree -- and only the path under it differs.
-    """
-
-    def log_path(self, root: Path) -> Path:
-        return root / "logs" / "observer" / "providers" / self.log_name
-
-
-class ProviderMetricsAdapter(ProviderStoreAdapter):
-    """``providers/metrics.py`` -- the store the leaf's first pass left outside ``controlplane/``.
-
-    The pairing measured here is the shipped one, not a constructed one. ``write`` is
-    ``record_index_state``, which the MCP process appends through on its provider-setup thread
-    (``providers/provider_setup.py`` ``_record_index_state``, reached from ``worktree_start`` /
-    ``runtime_install``); ``reclaim`` is the dashboard's ``_metrics_loop`` in the order that loop
-    runs it -- ``record`` and then ``compact`` (``serving/app.py``).
-
-    ``max_bytes=0`` holds the byte-budget guard open so every tick really rewrites, and
-    ``retain_rows`` is set far above anything a run can produce so RETENTION never drops a
-    survivor. A missing record is then a lost update and cannot be a truncation.
-    """
-
-    name = "provider_metrics"
-    log_name = "metrics.jsonl"
-    RETAIN_ROWS = 1_000_000
-
-    def open(self, root: Path) -> Any:
-        return ProviderMetricsStore(root)
-
-    def write(self, store: Any, record_id: str) -> None:
-        store.record_index_state({"id": record_id, "provider": "durability-harness"})
-
-    def write_decoy(self, store: Any, tick: int) -> None:
-        store.record(
-            MetricsSnapshot(
-                schema=PROVIDER_METRICS_SCHEMA,
-                sampledAt=_iso(_now()),
-                containers=[
-                    ContainerSample(
-                        name=f"{DECOY_PREFIX}{os.getpid()}-{tick}",
-                        provider="durability-harness",
-                        instance="harness",
-                        running=True,
-                        restarts=0,
-                    )
-                ],
-            )
-        )
-
-    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
-        store.compact(retain_rows=self.RETAIN_ROWS, max_bytes=0)
-
-
-class ProviderDegradationAdapter(ProviderStoreAdapter):
-    """``providers/degradation.py`` -- the provider degradation audit log.
-
-    ``compact_events`` reclaims by ROW COUNT and skips the rewrite entirely while the log is
-    under ``retain_rows``, so the seed pre-fills the log to exactly that many rows: from the first
-    tick onward every reclaim rewrites, and the newest ``retain_rows`` always covers every record
-    the run appends, so retention can never be mistaken for loss.
-
-    The seeded backlog and decoy rows precede the anchor and appended survivor,
-    keeping both within the retained window while forcing a real rewrite.
-    """
-
-    name = "provider_degradation"
-    log_name = "degradation-events.jsonl"
-    RETAIN_ROWS = 1_500
-
-    def open(self, root: Path) -> Any:
-        return ProviderDegradationStore(root)
-
-    def _event(self, record_id: str) -> dict[str, Any]:
-        return {
-            "schema": DEGRADATION_EVENT_SCHEMA,
-            "id": record_id,
-            "at": _iso(_now()),
-            "from": "healthy",
-            "to": "degraded",
-        }
-
-    def write(self, store: Any, record_id: str) -> None:
-        store.append_event(self._event(record_id))
-
-    def write_decoy(self, store: Any, tick: int) -> None:
-        store.append_event(self._event(f"{DECOY_PREFIX}{os.getpid()}-{tick}"))
-
-    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
-        store.compact_events(retain_rows=self.RETAIN_ROWS)
-
-    def seed(self, root: Path) -> None:
-        # Bulk-written rather than appended one call at a time: the seed is setup, not
-        # measurement, and 2,000 locked-and-fsynced appends would cost more than the run.
-        path = self.log_path(root)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            for index in range(self.RETAIN_ROWS):
-                handle.write(json.dumps(self._event(f"seed-{index}"), sort_keys=True) + "\n")
-        super().seed(root)
-
-
 CONTROLPLANE_ADAPTERS: tuple[type[StoreAdapter], ...] = (
     GateAdapter,
     AttentionAdapter,
 )
-PROVIDER_ADAPTERS: tuple[type[StoreAdapter], ...] = (
-    ProviderMetricsAdapter,
-    ProviderDegradationAdapter,
-)
 ADAPTERS: dict[str, type[StoreAdapter]] = {
-    adapter.name: adapter for adapter in (*CONTROLPLANE_ADAPTERS, *PROVIDER_ADAPTERS)
+    adapter.name: adapter for adapter in CONTROLPLANE_ADAPTERS
 }
-# ``CASES`` stays the two control-plane stores and ``PROVIDER_CASES`` is separate, so adding the
-# provider stores to the shared instrument does not silently widen what the control-plane
-# contract test asserts -- each test file names the stores it speaks for.
 CASES: tuple[str, ...] = tuple(adapter.name for adapter in CONTROLPLANE_ADAPTERS)
-PROVIDER_CASES: tuple[str, ...] = tuple(adapter.name for adapter in PROVIDER_ADAPTERS)
 
 
 # --------------------------------------------------------------------------------------------

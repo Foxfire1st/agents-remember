@@ -43,7 +43,6 @@ order = [
   "worktrees",
   "memory_quality",
   "memory",
-  "providers",
   "harness_control",
   "hosted_sessions",
   "supervision",
@@ -220,16 +219,6 @@ database. The index storage ranks with the record stores rather than with the ap
 Consumers that rank below it -- `worktrees` and `memory_quality` among them -- receive
 `models/knowledge` values or an already-prepared result from `application`, and never import
 `memory/knowledge/`.
-"""
-
-[package.providers]
-rank = 13
-path = "providers/"
-present = true
-charter = """
-External retrieval providers: their container lifecycle, settings, identity, status and
-degradation policy. Declares the PORTS it needs from above -- a stop action, a watcher
-control -- and never reaches up to the application layer for an implementation.
 """
 
 [package.harness_control]

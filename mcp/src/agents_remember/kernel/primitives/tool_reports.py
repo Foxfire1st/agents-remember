@@ -1,10 +1,10 @@
 """Bulk tool diagnostics written to temp report files with retention.
 
-Verbose passthrough payloads (raw provider status trees, watcher rebind runs,
-command transcripts) flooded tool responses with thousands of tokens per call.
-The compact response keeps the outcome plus a ``reportPath``; the full payload
-lands here, under ``temp/tool-reports/<tool>/``, where the caller opens it only
-when forensic depth is needed.
+Verbose passthrough payloads (raw diagnostic trees, command transcripts) flooded
+tool responses with thousands of tokens per call. The compact response keeps the
+outcome plus a ``reportPath``; the full payload lands here, under
+``temp/tool-reports/<tool>/``, where the caller opens it only when forensic
+depth is needed.
 
 Retention is write-time and deterministic — keep the newest ``KEEP_LAST`` files
 per tool and nothing older than ``MAX_AGE_DAYS`` — so disk stays bounded with
@@ -22,8 +22,8 @@ from typing import Any
 KEEP_LAST = 5
 MAX_AGE_DAYS = 7
 
-# Provider commands embed credentials inline (e.g. PGPASSWORD=...); reports are
-# files on disk and must never contain them, success or failure.
+# Captured commands may embed credentials inline (e.g. PGPASSWORD=...); reports
+# are files on disk and must never contain them, success or failure.
 _SECRET_PATTERN = re.compile(r"(PASSWORD=)[^\s\"']+")
 
 

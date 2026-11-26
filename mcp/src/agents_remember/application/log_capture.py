@@ -1,10 +1,9 @@
 """Trim verbose command output before it rides up into a tool response.
 
-Provider setup runs ``pg_dump | psql``, ``ollama pull``, and CGC ``bundle import``; their
-combined stdout/stderr can be hundreds of KB (an ``ollama pull`` alone is one giant progress
-bar) -- large enough that the client refuses to render the response. A tool response only
-needs the *outcome*: drop the logs on success, keep a short tail on failure, and never echo
-secrets embedded in the command line.
+Subprocess stdout/stderr can be hundreds of KB -- large enough that a client
+refuses to render the response. A tool response only needs the *outcome*: drop
+the logs on success, keep a short tail on failure, and never echo secrets
+embedded in the command line.
 """
 
 from __future__ import annotations
@@ -14,12 +13,11 @@ from typing import Any
 DEFAULT_FAILURE_TAIL = 30
 _LOG_KEYS = ("stdout", "stderr")
 _COMMAND_KEYS = ("command", "commands")
-# Always redundant in a response: provider results carry a `json` mirror of `payload`
-# (setup_common attaches `"json": result.get("payload")`), doubling the size for nothing.
+# Always redundant in a response: raw result nodes can carry a `json` mirror of
+# `payload`, doubling the response size for nothing.
 _DROP_ALWAYS = ("json",)
-# Verbose provider plumbing only needed to debug a failure; on a successful node the
-# outcome (ok + key fields) is enough, and the full detail still lands in the
-# provider-state file on disk. Dropping these is what keeps worktree_start renderable.
+# Verbose command plumbing only needed to debug a failure; on a successful node
+# the outcome (ok + key fields) is enough.
 _DROP_ON_SUCCESS = ("command", "commands", "compose", "migration")
 
 
@@ -93,8 +91,8 @@ def _redact_commands(value: Any) -> Any:
 
 
 def _redact_token(token: Any) -> Any:
-    # Provider clone commands embed credentials inline (e.g. ``PGPASSWORD=...``); never
-    # surface them in a tool response.
+    # Subprocess commands can embed credentials inline (e.g. ``PGPASSWORD=...``);
+    # never surface them in a tool response.
     if isinstance(token, str) and "PASSWORD=" in token:
         prefix, _, _ = token.partition("=")
         return f"{prefix}=***"

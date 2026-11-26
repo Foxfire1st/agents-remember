@@ -48,7 +48,6 @@ def command_prepare(args: argparse.Namespace) -> int:
                 case_id=args.case_id,
                 dry_run=args.dry_run,
                 force_clone=args.force_clone,
-                provider_timeout=args.provider_timeout,
             )
         )
     for message in payload["messages"]:
@@ -70,7 +69,6 @@ def command_run(args: argparse.Namespace) -> int:
                 dry_run=args.dry_run,
                 skip_prepare=args.skip_prepare,
                 force_clone=args.force_clone,
-                provider_timeout=args.provider_timeout,
                 codex_sandbox=args.codex_sandbox,
             )
         )
@@ -116,12 +114,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Discard existing benchmark repository checkouts before cloning.",
     )
-    prepare_parser.add_argument(
-        "--provider-timeout",
-        type=int,
-        default=1800,
-        help="Seconds allowed for each benchmark provider install/index command.",
-    )
     prepare_parser.add_argument("--dry-run", action="store_true")
     prepare_parser.set_defaults(func=command_prepare)
 
@@ -147,12 +139,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--force-clone",
         action="store_true",
         help="Discard existing benchmark repository checkouts during preparation.",
-    )
-    run_parser.add_argument(
-        "--provider-timeout",
-        type=int,
-        default=1800,
-        help="Seconds allowed for each benchmark provider install/index command during preparation.",
     )
     run_parser.add_argument(
         "--codex-sandbox",

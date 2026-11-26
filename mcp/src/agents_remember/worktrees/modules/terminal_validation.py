@@ -249,7 +249,6 @@ class TerminalResult:
     the two interpretations one call apart rather than one keyword apart at every call site.
     """
 
-    providers: Mapping[str, object]
     worktrees: dict[str, dict[str, object]]
     branches: dict[str, dict[str, object]]
     directories: dict[str, dict[str, object]]
@@ -261,7 +260,6 @@ def terminal_result_blockers(result: TerminalResult) -> list[dict[str, object]]:
     """Every reason this terminal operation did not finish reclaiming what it set out to."""
 
     blockers: list[dict[str, object]] = []
-    blockers.extend(_provider_blockers(result.providers))
     blockers.extend(
         _result_blockers(
             "worktree",
@@ -301,7 +299,7 @@ def terminal_result_blockers(result: TerminalResult) -> list[dict[str, object]]:
                 # key, looked like a blockage, and ``_blocker`` raised on the missing reason. The
                 # producer answers a dry run with ``would_remove``
                 # (``kernel/primitives/drift_snapshot.py::_remove_snapshot_file``) exactly as the
-                # worktree, directory and provider collections beside it do, so without it the
+                # worktree and directory collections beside it do, so without it the
                 # entry was neither reclaimed, nor pending, nor reasoned and every preview of a
                 # task that HAS a drift snapshot crashed on its own producer's output
                 # (260918-TSIP ``T62``/``D49``; the same keyword was fixed independently on the
@@ -623,31 +621,6 @@ def _remote_branch_preflight(repo: Path, branch: str) -> dict[str, object]:
     if not result.stdout.strip():
         return {"remote_deleted": False, "reason": "already-absent"}
     return {"remote_deleted": False, "would_delete": True}
-
-
-def _provider_blockers(providers: Mapping[str, object]) -> list[dict[str, object]]:
-    if providers.get("state") == "skipped":
-        return []
-    blockers: list[dict[str, object]] = []
-    for collection in ("containers", "networks"):
-        values = providers.get(collection, [])
-        if not isinstance(values, list):
-            blockers.append(_blocker({"provider": collection}, "invalid-result"))
-            continue
-        for index, item in enumerate(values):
-            if not isinstance(item, dict) or _blocked(
-                item, done_key="removed", pending_key="would_remove"
-            ):
-                blockers.append(
-                    _blocker({"provider": f"{collection}[{index}]"}, _blocked_reason(item))
-                )
-    runtime = providers.get("providerRuntime")
-    if runtime is not None and (
-        not isinstance(runtime, dict)
-        or _blocked(runtime, done_key="removed", pending_key="would_remove")
-    ):
-        blockers.append(_blocker({"provider": "providerRuntime"}, _blocked_reason(runtime)))
-    return blockers
 
 
 def _result_blockers(

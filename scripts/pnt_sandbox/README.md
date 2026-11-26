@@ -127,8 +127,8 @@ gives its processes, and resolves with the build's own configuration loader and 
 root the dashboard and the tool server would use for the sandbox settings:
 
 - every path the loaded configuration holds, under whatever key (coordination root, Projects
-  folder `workspaceRoot`, transcript and skill roots, repository and memory roots, provider
-  roots, the Paseo home and prefix);
+  folder `workspaceRoot`, transcript and skill roots, repository and memory roots, the Paseo
+  home and prefix);
 - the roots the build derives: task root, leaf enclosures, receipts, reports, observer and
   dashboard directories, product Node and its archive cache, the agentic settings
   file, the Dagger authority root, and what the
@@ -277,9 +277,6 @@ The live roots are not among them. These are writes of other programs, in their 
   directory, and the task-specific tool-server definition carries that value even
   when its harness does not forward the parent environment. Its four index slots
   are therefore sandbox-owned rather than shared with the installed runtime.
-- **The provider container listing.** The dashboard runs
-  `docker ps --all --filter label=agents-remember.provider` on every projection. It reads the
-  containers of the installed runtime's providers and shows none of them.
 
 The host install phase uses the candidate's public `runtime_install` tool after
 server_info proves the exact sandbox roots and package root. Coordination asset

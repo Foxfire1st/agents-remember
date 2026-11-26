@@ -4,7 +4,6 @@ import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
-from agents_remember.benchmarks.runner_modules.constants import BENCHMARK_PROVIDER_IDS
 from agents_remember.benchmarks.runner_modules.models import BenchmarkCase
 
 
@@ -34,83 +33,6 @@ def manifest_path_component(value: object, label: str) -> str:
     return path.parts[0]
 
 
-def parse_benchmark_provider_ids(
-    raw: object,
-    label: str,
-    *,
-    default: tuple[str, ...] = (),
-) -> tuple[str, ...]:
-    if raw is None:
-        return default
-    if raw is False:
-        return ()
-    if isinstance(raw, str) and raw == "all":
-        return BENCHMARK_PROVIDER_IDS
-    if isinstance(raw, list):
-        return unique_benchmark_provider_ids(raw, label)
-    raise ValueError(f"{label} must be an array of provider ids, false, or 'all'")
-
-
-def unique_benchmark_provider_ids(raw: list[object], label: str) -> tuple[str, ...]:
-    provider_ids: list[str] = []
-    for value in raw:
-        provider_id = require_benchmark_provider_id(value, label)
-        if provider_id not in provider_ids:
-            provider_ids.append(provider_id)
-    return tuple(provider_ids)
-
-
-def require_benchmark_provider_id(value: object, label: str) -> str:
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"{label} entries must be non-empty provider ids")
-    if value not in BENCHMARK_PROVIDER_IDS:
-        raise ValueError(
-            f"{label} contains unsupported provider id {value!r}; "
-            f"supported ids: {', '.join(BENCHMARK_PROVIDER_IDS)}"
-        )
-    return value
-
-
-def case_default_provider_ids(case: BenchmarkCase) -> tuple[str, ...]:
-    return parse_benchmark_provider_ids(
-        case.data.get("providers"),
-        f"{case.case_id}.providers",
-    )
-
-
-def variant_provider_ids(
-    case: BenchmarkCase,
-    variant: dict[str, Any],
-    *,
-    default: tuple[str, ...] = (),
-) -> tuple[str, ...]:
-    variant_id = str(variant.get("id", "<unknown>"))
-    if "providers" in variant:
-        return parse_benchmark_provider_ids(
-            variant.get("providers"),
-            f"{case.case_id}.{variant_id}.providers",
-        )
-    if variant.get("allowMemory") is True:
-        return default
-    return ()
-
-
-def selected_provider_ids(
-    case: BenchmarkCase,
-    *,
-    prompt_id: str | None = None,
-    variant_id: str | None = None,
-) -> tuple[str, ...]:
-    case_default = case_default_provider_ids(case)
-    provider_ids: list[str] = []
-    for prompt in case_prompt(case, prompt_id):
-        for variant in prompt_variant(prompt, variant_id):
-            for provider_id in variant_provider_ids(case, variant, default=case_default):
-                if provider_id not in provider_ids:
-                    provider_ids.append(provider_id)
-    return tuple(provider_ids)
-
-
 def validate_case_manifest(case: BenchmarkCase) -> None:
     validate_workspace_paths(case)
     manifest_path_component(case.repository["name"], f"{case.case_id}.repository.name")
@@ -118,7 +40,8 @@ def validate_case_manifest(case: BenchmarkCase) -> None:
         manifest_path_component(
             case.memory_repository["name"], f"{case.case_id}.memoryRepository.name"
         )
-    validate_prompt_manifests(case, case_default_provider_ids(case))
+    # Any legacy optional "providers" key on a case or variant is ignored.
+    validate_prompt_manifests(case)
 
 
 def validate_workspace_paths(case: BenchmarkCase) -> None:
@@ -136,28 +59,23 @@ def validate_workspace_paths(case: BenchmarkCase) -> None:
             manifest_relative_path(workspace[key], f"{case.case_id}.workspace.{key}")
 
 
-def validate_prompt_manifests(
-    case: BenchmarkCase,
-    default_providers: tuple[str, ...],
-) -> None:
+def validate_prompt_manifests(case: BenchmarkCase) -> None:
     for prompt in case.prompts:
         prompt_id = prompt.get("id", "<unknown>")
         for variant in prompt.get("variants", []):
-            validate_prompt_variant(case, prompt_id, variant, default_providers)
+            validate_prompt_variant(case, prompt_id, variant)
 
 
 def validate_prompt_variant(
     case: BenchmarkCase,
     prompt_id: object,
     variant: dict[str, Any],
-    default_providers: tuple[str, ...],
 ) -> None:
     variant_id = variant.get("id", "<unknown>")
     manifest_relative_path(
         variant["promptPath"], f"{case.case_id}.{prompt_id}.{variant_id}.promptPath"
     )
     manifest_relative_path(variant["cwd"], f"{case.case_id}.{prompt_id}.{variant_id}.cwd")
-    variant_provider_ids(case, variant, default=default_providers)
 
 
 def load_json(path: Path) -> dict[str, Any]:

@@ -28,10 +28,6 @@ from agents_remember.kernel.memory_mode import (
 )
 from agents_remember.kernel.primitives import checkout_coordination
 from agents_remember.kernel.primitives.gate_policy import DEFAULT_GATE_POLICY, GatePolicy
-from agents_remember.kernel.primitives.identity import (
-    explicit_provider_instance_id,
-    provider_instance_id,
-)
 from agents_remember.kernel.primitives.paseo_authority import (
     HostAuthorityRefused,
     load_authority_paseo_runtime,
@@ -40,14 +36,6 @@ from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoRuntimeSettings,
     PaseoRuntimeSettingsError,
 )
-from agents_remember.kernel.primitives.provider_degradation_settings import (
-    ProviderDegradationSettings,
-    ProviderDegradationSettingsError,
-    parse_provider_degradation_settings,
-)
-
-DEFAULT_PROVIDER_SETUP_SECONDS = 1800
-DEFAULT_DOCKER_CONTROL_SECONDS = 120
 
 _logger = logging.getLogger(__name__)
 
@@ -58,12 +46,11 @@ _logger = logging.getLogger(__name__)
 _LEGACY_GATE_DELEGATION_WARNED: set[tuple[str, bool]] = set()
 
 # The documented timeout caps (see examples/mcp/settings.example.json and
-# docs/reference/settings-json.md). Unknown keys are rejected so a typo
-# (e.g. "providerSetupSecond") fails loudly instead of being silently stored and
-# ignored -- matching how the providers section rejects unknown fields. Only
-# providerSetupSeconds is currently consumed by the runtime; toolSeconds is a
-# documented, reserved cap.
-KNOWN_TIMEOUT_CAPS = frozenset({"providerSetupSeconds", "toolSeconds"})
+# docs/reference/settings-json.md). Unknown keys are rejected so a typo fails
+# loudly instead of being silently stored and ignored. ``toolSeconds`` is a
+# documented, reserved cap; the retired ``providerSetupSeconds`` key is
+# accepted and ignored when present in an older file.
+KNOWN_TIMEOUT_CAPS = frozenset({"toolSeconds"})
 
 DEFAULT_DASHBOARD_PORT = 8765
 
@@ -73,7 +60,7 @@ KNOWN_DASHBOARD_FIELDS = frozenset({"autoStart", "port"})
 # MIK-R113 rule 4: top-level sections an earlier build read and this one does not. A file that
 # holds one loads; nothing in it is read or checked, and its keys are named once as no longer
 # used (``McpRuntimeConfig.unused_settings_keys``).
-UNUSED_SETTINGS_SECTIONS = ("retirement",)
+UNUSED_SETTINGS_SECTIONS = ("retirement", "providers", "providerDegradation")
 # MIK-R108 rule 3: the tool-call log keeping. Unknown keys fail loud, like
 # every other settings family.
 KNOWN_TOOL_LOG_FIELDS = frozenset({"keepDays", "maxBytes", "enclosureMaxBytes"})
@@ -96,15 +83,6 @@ class RepositoryScope:
     memory_root: Path | None = None
     contract_path: Path | None = None
     certification_profile: Path | None = None
-
-
-@dataclass(frozen=True)
-class ProviderScope:
-    provider_id: str
-    runtime_root: Path
-    log_root: Path
-    instance_id: str
-    scope: str = "workspace"
 
 
 @dataclass(frozen=True)
@@ -194,14 +172,10 @@ class McpRuntimeConfig:
     workspace_root: Path
     transcript_root: Path
     repositories: dict[str, RepositoryScope] = field(default_factory=dict)
-    providers: dict[str, ProviderScope] = field(default_factory=dict)
     timeout_caps: dict[str, int] = field(default_factory=dict)
     benchmarks_enabled: bool = False
     dashboard: DashboardSettings = field(default_factory=DashboardSettings)
     orchestration: OrchestrationSettings = field(default_factory=OrchestrationSettings)
-    provider_degradation: ProviderDegradationSettings = field(
-        default_factory=ProviderDegradationSettings
-    )
     tool_log: ToolLogSettings = field(default_factory=ToolLogSettings)
     # MIK-R113 rule 4: the keys this file holds that are no longer read, as dotted names.
     unused_settings_keys: tuple[str, ...] = ()
@@ -219,10 +193,6 @@ class McpRuntimeConfig:
     def allowed_repo_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self.repositories))
 
-    @property
-    def allowed_provider_ids(self) -> tuple[str, ...]:
-        return tuple(sorted(self.providers))
-
 
 def load_config(config_path: str | Path) -> McpRuntimeConfig:
     """Load trusted authority or the leaf-local synthetic checkout config."""
@@ -233,79 +203,6 @@ def load_config(config_path: str | Path) -> McpRuntimeConfig:
         return candidate
     path = candidate
     return config_from_mapping(_read_config_mapping(path), path)
-
-
-@dataclass(frozen=True)
-class ProviderAuthority:
-    """The providers map re-read from the on-disk authority settings.
-
-    Containment R1 (260707-HFX-L1): the boot-snapshot config is NOT launch
-    authority. A server process loads its config once and closes over it, so
-    editing the authority file to ``"providers": {}`` — the operator's only
-    fleet-wide kill-switch — previously changed nothing until every running
-    server restarted. Launch-capable operations re-read the file through this
-    type instead. ``error`` carries the fail-closed reason when the file could
-    not be read or parsed: callers must treat that as "no launch authority",
-    never fall back to the snapshot. Stopping and cleanup are never gated.
-    """
-
-    providers: dict[str, ProviderScope]
-    source_path: Path
-    error: str | None = None
-
-    def apply(self, config: McpRuntimeConfig) -> McpRuntimeConfig:
-        """The boot config with the live providers map swapped in."""
-        return replace(config, providers=dict(self.providers))
-
-
-def reload_provider_authority(config: McpRuntimeConfig) -> ProviderAuthority:
-    """Re-read only the providers map from the authority settings file."""
-    path = config.config_path
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        return ProviderAuthority(
-            providers={},
-            source_path=path,
-            error=f"cannot re-read MCP authority settings: {path}: {error}",
-        )
-    if not isinstance(data, dict):
-        return ProviderAuthority(
-            providers={},
-            source_path=path,
-            error=f"MCP authority settings must be a JSON object: {path}",
-        )
-    try:
-        providers = parse_providers(
-            data.get("providers", {}),
-            config.coordination_root,
-            config.workspace_root,
-        )
-    except ConfigError as error:
-        return ProviderAuthority(providers={}, source_path=path, error=str(error))
-    return ProviderAuthority(providers=providers, source_path=path)
-
-
-def require_provider_launch_authority(
-    config: McpRuntimeConfig, *, operation: str
-) -> McpRuntimeConfig:
-    """Gate a provider-launching operation on the on-disk authority (fail-closed).
-
-    Returns the boot config with the live providers map applied; raises
-    ``ConfigError`` when the authority file disables providers or cannot be
-    read. Stop/status/cleanup paths must not call this — stopping is always
-    legal.
-    """
-    authority = reload_provider_authority(config)
-    if authority.error is not None:
-        raise ConfigError(f"{operation} refused (containment R1, fail-closed): {authority.error}")
-    if not authority.providers:
-        raise ConfigError(
-            f"{operation} refused: providers are disabled in the on-disk authority settings "
-            f"({authority.source_path}); the boot snapshot ({sorted(config.providers)}) is not "
-            "launch authority (containment R1). stop/status/cleanup remain available."
-        )
-    return authority.apply(config)
 
 
 def require_config_path(config_path: str | Path) -> Path:
@@ -343,15 +240,10 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         workspace_root,
     )
     _require_unique_repository_git_identities(repositories)
-    providers = parse_providers(data.get("providers", {}), coordination_root, workspace_root)
     timeout_caps = parse_timeout_caps(data.get("timeoutCaps", {}))
     benchmarks_enabled = parse_benchmarks_enabled(data.get("benchmarksEnabled", False))
     warn_retired_direct_execution_key(data, config_path)
     dashboard = parse_dashboard_settings(data.get("dashboard"))
-    try:
-        provider_degradation = parse_provider_degradation_settings(data.get("providerDegradation"))
-    except ProviderDegradationSettingsError as error:
-        raise ConfigError(str(error)) from error
     orchestration = parse_orchestration_settings(
         data.get("orchestration"),
         coordination_root=coordination_root,
@@ -367,12 +259,10 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         workspace_root=workspace_root,
         transcript_root=transcript_root,
         repositories=repositories,
-        providers=providers,
         timeout_caps=timeout_caps,
         benchmarks_enabled=benchmarks_enabled,
         dashboard=dashboard,
         orchestration=orchestration,
-        provider_degradation=provider_degradation,
         tool_log=tool_log,
         unused_settings_keys=unused_settings_keys(data),
     )
@@ -541,83 +431,6 @@ def default_memory_root(repo_path: Path, coordination_root: Path, repo_id: str) 
     return coordination_root / "memory-repos" / f"ar-{repo_id}"
 
 
-def parse_providers(
-    raw: object,
-    coordination_root: Path,
-    workspace_root: Path,
-) -> dict[str, ProviderScope]:
-    if not isinstance(raw, dict):
-        raise ConfigError("providers must be an object keyed by provider id")
-
-    providers: dict[str, ProviderScope] = {}
-    for provider_id, value in raw.items():
-        if not isinstance(provider_id, str) or not provider_id:
-            raise ConfigError("provider ids must be non-empty strings")
-        if not isinstance(value, dict):
-            raise ConfigError(f"provider settings for {provider_id!r} must be an object")
-
-        provider_config = parse_provider_config(value, workspace_root)
-        unsupported = sorted(set(value) - {"instanceId", "scope"})
-        if unsupported:
-            unsupported_text = ", ".join(unsupported)
-            raise ConfigError(
-                f"provider {provider_id} settings are derived by the server; "
-                f"remove unsupported fields: {unsupported_text}"
-            )
-        provider_name = provider_runtime_name(provider_id)
-
-        providers[provider_id] = ProviderScope(
-            provider_id=provider_id,
-            runtime_root=(
-                coordination_root
-                / "providers"
-                / "runners"
-                / provider_name
-                / provider_config["instance_id"]
-            ),
-            log_root=(
-                coordination_root
-                / "logs"
-                / "providers"
-                / provider_name
-                / provider_config["instance_id"]
-            ),
-            instance_id=provider_config["instance_id"],
-            scope=provider_config["scope"],
-        )
-    return providers
-
-
-def parse_provider_config(
-    value: dict[str, Any],
-    workspace_root: Path,
-) -> dict[str, str]:
-    scope = value.get("scope", "workspace")
-    if not isinstance(scope, str) or not scope:
-        raise ConfigError("provider scope must be a non-empty string")
-    # scope is an open set (workspace/worktree/benchmark + custom benchmark scopes);
-    # provider_instance_id slugifies it internally, so do not pre-mangle it here.
-    raw_instance = value.get("instanceId")
-    if raw_instance is None:
-        instance_id = provider_instance_id(scope, workspace_root)
-    elif not isinstance(raw_instance, str) or not raw_instance:
-        raise ConfigError("provider instanceId must be a non-empty string")
-    else:
-        instance_id = explicit_provider_instance_id(raw_instance)
-    return {"scope": scope, "instance_id": instance_id}
-
-
-def provider_runtime_name(provider_id: str) -> str:
-    names = {
-        "codegraphcontext-code": "codegraphcontext",
-        "grepai-memory": "grepai",
-    }
-    try:
-        return names[provider_id]
-    except KeyError as error:
-        raise ConfigError(f"unsupported provider id: {provider_id}") from error
-
-
 def warn_retired_direct_execution_key(data: dict[str, Any], config_path: Path) -> None:
     """The retired switch loads with one notice per load: a grant per task decides now.
 
@@ -671,6 +484,9 @@ def unused_settings_keys(data: dict[str, Any]) -> tuple[str, ...]:
             names.extend(f"{section}.{key}" for key in sorted(held))
         else:
             names.append(section)
+    timeout_caps = data.get("timeoutCaps")
+    if isinstance(timeout_caps, dict) and "providerSetupSeconds" in timeout_caps:
+        names.append("timeoutCaps.providerSetupSeconds")
     return tuple(names)
 
 
@@ -801,16 +617,13 @@ def _warn_legacy_gate_delegation(
 def parse_timeout_caps(raw: object) -> dict[str, int]:
     if not isinstance(raw, dict):
         raise ConfigError("timeoutCaps must be an object")
-    if "providerSeconds" in raw:
-        raise ConfigError(
-            "timeoutCaps.providerSeconds was renamed to providerSetupSeconds; "
-            "indexing and seed are now always uncapped"
-        )
 
     parsed: dict[str, int] = {}
     for key, value in raw.items():
         if not isinstance(key, str) or not key:
             raise ConfigError("timeout cap names must be non-empty strings")
+        if key == "providerSetupSeconds":
+            continue
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ConfigError(f"timeout cap {key!r} must be a non-negative integer")
         if key not in KNOWN_TIMEOUT_CAPS:
@@ -943,7 +756,6 @@ def _checkout_runtime_config(
         workspace_root=worktree_group,
         transcript_root=coordination_root / "logs" / "mcp",
         repositories={"agents-remember": repository},
-        providers={},
         benchmarks_enabled=False,
         dashboard=DashboardSettings(auto_start=False),
         orchestration=OrchestrationSettings(),

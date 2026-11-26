@@ -10,7 +10,10 @@ from agents_remember.kernel.primitives.drift_snapshot import remove_drift_snapsh
 from agents_remember.memory_quality.style.citations.source_index_cache import (
     TERMINAL_CLEANUP_STATES,
 )
-from agents_remember.models.lifecycles.enclosure import TerminalWorktreeCleanupArguments
+from agents_remember.models.lifecycles.enclosure import (
+    TerminalWorktreeCleanupArguments,
+    cleanup_arguments_match,
+)
 from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
     with_terminal_atomic_series_release,
 )
@@ -43,7 +46,6 @@ from agents_remember.worktrees.modules.guidance import carryover_done, status_pa
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.state_refusals import (
     RefusalNext,
-    provider_setup_blocked,
     shaped_terminal_blockers,
     state_refusal_result,
     terminal_state_refusal,
@@ -63,7 +65,6 @@ from agents_remember.worktrees.modules.terminal_branch_retirement import (
 from agents_remember.worktrees.modules.terminal_group import (
     preview_group_removal,
     remove_terminal_group,
-    teardown_terminal_providers,
 )
 from agents_remember.worktrees.modules.terminal_inventory import (
     _absent_branch_entries,
@@ -92,7 +93,6 @@ type TerminalItems = dict[str, dict[str, object]]
 # MIK-R108 rule 3: the tool-call log lives here, outside both worktrees and
 # outside Git. A closeout preview never lists it; cleanup removes it.
 type CleanupOutputs = tuple[
-    dict[str, object],
     TerminalItems,
     TerminalItems,
     TerminalItems,
@@ -354,8 +354,8 @@ def _cleanup_state(
 def _cleanup_summary(state: str) -> str:
     if state == "would-cleanup":
         return (
-            "Cleanup would reclaim the worktree provider stack, remove worktrees, "
-            "and delete merged local task branches where Git proves they are merged."
+            "Cleanup would remove worktrees and delete merged local task branches "
+            "where Git proves they are merged."
         )
     if state == "already-clean":
         return (
@@ -363,9 +363,8 @@ def _cleanup_summary(state: str) -> str:
             "remained to remove."
         )
     return (
-        "Cleanup completed; the worktree provider stack was reclaimed, worktrees "
-        "were removed and merged local task branches were deleted where Git proved "
-        "they were merged."
+        "Cleanup completed; worktrees were removed and merged local task branches "
+        "were deleted where Git proved they were merged."
     )
 
 
@@ -408,11 +407,6 @@ def _finish_cleanup_without_remains(
             },
         )
     try:
-        providers: dict[str, object] = (
-            teardown_terminal_providers(contract, dry_run=args.dry_run)
-            if args.teardown_providers
-            else {"state": "skipped", "reason": "teardown_providers disabled"}
-        )
         removed_worktrees = _absent_worktree_entries(contract)
         branches = _absent_branch_entries(contract)
         drift_snapshots = {
@@ -424,9 +418,7 @@ def _finish_cleanup_without_remains(
             )
         }
         directories = (
-            preview_group_removal(contract, teardown_providers=args.teardown_providers)
-            if args.dry_run
-            else remove_terminal_group(contract)
+            preview_group_removal(contract) if args.dry_run else remove_terminal_group(contract)
         )
         preflight = TerminalPreflight(
             worktrees=dict(removed_worktrees),
@@ -438,7 +430,7 @@ def _finish_cleanup_without_remains(
             contract,
             preflight,
             guard,
-            (providers, removed_worktrees, branches, drift_snapshots, directories),
+            (removed_worktrees, branches, drift_snapshots, directories),
             terminal_note=reason,
         )
     finally:
@@ -466,16 +458,6 @@ def _cleanup_without_remains_result(
     without_remains = terminal_without_remains_reason(contract, operation="worktree_cleanup")
     if without_remains is None:
         return None
-    # The liveness read is side-effect free: the dry run evaluates it too, so
-    # a dry run never promises a cleanup the real call would refuse.
-    if worktree_services().provider_lifecycle.setup_running(contract):
-        return provider_setup_blocked(
-            contract,
-            summary=(
-                "Provider setup is still running for this worktree; wait for a "
-                "terminal providers state (worktree_status) before cleanup."
-            ),
-        )
     return with_terminal_atomic_series_release(
         contract,
         _finish_cleanup_without_remains(args, contract, without_remains),
@@ -634,19 +616,13 @@ def _cleanup_terminal_branch(
             ),
             None,
         )
-    accepted_arguments = TerminalWorktreeCleanupArguments(
-        teardown_providers=args.teardown_providers
-    )
-    if (
-        terminal.archive.cleanupOperation != "worktree_cleanup"
-        or terminal.archive.cleanupArguments != accepted_arguments
+    accepted_arguments = TerminalWorktreeCleanupArguments()
+    if terminal.archive.cleanupOperation != "worktree_cleanup" or not cleanup_arguments_match(
+        terminal.archive.cleanupArguments, accepted_arguments
     ):
         return (
             contract,
-            _terminal_archive_observation(
-                contract,
-                teardown_providers=args.teardown_providers,
-            ),
+            _terminal_archive_observation(contract),
             None,
         )
     if terminal.state == "cleanup-completed":
@@ -654,7 +630,6 @@ def _cleanup_terminal_branch(
             contract,
             _already_completed_cleanup(
                 terminal,
-                teardown_providers=args.teardown_providers,
                 dry_run=args.dry_run,
             ),
             dry_run=args.dry_run,
@@ -690,27 +665,6 @@ def _cleanup_preflight_refusal(
             "summary": "Cleanup terminal preflight refused before any mutation.",
             "blockers": shaped_terminal_blockers(preflight.blockers),
         },
-    )
-
-
-def _cleanup_provider_refusal(
-    contract: WorktreeContract,
-) -> WorktreeCommandResult | None:
-    """Answer a running provider setup, dry run or real, or ``None`` when settled.
-
-    The liveness read is side-effect free, so the dry run evaluates it too: a
-    dry run never promises a cleanup the real call would refuse.
-    """
-    if not worktree_services().provider_lifecycle.setup_running(contract):
-        return None
-    # Teardown must not race the live background setup thread (GitHub #53);
-    # a dead thread surfaces as a stale heartbeat and does not block.
-    return provider_setup_blocked(
-        contract,
-        summary=(
-            "Provider setup is still running for this worktree; wait for a "
-            "terminal providers state (worktree_status) before cleanup."
-        ),
     )
 
 
@@ -820,15 +774,7 @@ def _cleanup_settled(
     contract: WorktreeContract,
     kept_line: dict[str, object] | None,
 ) -> WorktreeCommandResult:
-    """Run the settled tail: provider guard, terminal preflight, reservation.
-
-    The liveness read is side-effect free: the dry run evaluates it too, so
-    a dry run never promises a cleanup the real call would refuse.
-    """
-    provider_blocked = _cleanup_provider_refusal(contract)
-    if provider_blocked is not None:
-        return provider_blocked
-
+    """Run the settled tail: terminal preflight and reservation."""
     preflight = terminal_preflight(contract, mode="cleanup", force=False)
     blocked = _cleanup_preflight_refusal(contract, preflight)
     if blocked is not None:
@@ -912,13 +858,11 @@ def _cleanup_reserved(
 
 def _terminal_archive_observation(
     contract: WorktreeContract,
-    *,
-    teardown_providers: bool,
 ) -> WorktreeCommandResult:
     return terminal_archive_required_result(
         contract,
         operation="worktree_cleanup",
-        arguments=TerminalWorktreeCleanupArguments(teardown_providers=teardown_providers),
+        arguments=TerminalWorktreeCleanupArguments(),
         dry_run=False,
     )
 
@@ -926,14 +870,10 @@ def _terminal_archive_observation(
 def _already_completed_cleanup(
     terminal: TerminalCleanupContractAuthority,
     *,
-    teardown_providers: bool,
     dry_run: bool,
 ) -> WorktreeCommandResult:
     contract = terminal.current_contract
-    terminal_archive = _terminal_archive_observation(
-        contract,
-        teardown_providers=teardown_providers,
-    )
+    terminal_archive = _terminal_archive_observation(contract)
     if terminal_archive.returncode != 0:
         return terminal_archive
     residue = retry_terminal_group(terminal, dry_run=dry_run)
@@ -958,7 +898,6 @@ def _already_completed_cleanup(
                 "state": "already-clean",
                 **status_payload(contract),
                 "summary": _cleanup_summary("already-clean"),
-                "providers": {"state": "already-terminal"},
                 "removed_worktrees": {},
                 "branches": {},
                 "drift_snapshots": {},
@@ -993,10 +932,9 @@ def _cleanup_outputs_result(  # noqa: PLR0913 -- terminal_note rides the no-rema
     *,
     terminal_note: str | None = None,
 ) -> WorktreeCommandResult:
-    providers, removed_worktrees, branches, drift_snapshots, directories = outputs
+    removed_worktrees, branches, drift_snapshots, directories = outputs
     blockers = terminal_result_blockers(
         TerminalResult(
-            providers=providers,
             worktrees=removed_worktrees,
             branches=branches,
             directories=directories,
@@ -1015,7 +953,6 @@ def _cleanup_outputs_result(  # noqa: PLR0913 -- terminal_note rides the no-rema
                     if args.dry_run
                     else "Cleanup terminal mutation failed; cache and contract stayed live."
                 ),
-                "providers": providers,
                 "citation_source_index": _preserved_cache(
                     guard.preview(), "terminal-operation-failed"
                 ),
@@ -1034,7 +971,6 @@ def _cleanup_outputs_result(  # noqa: PLR0913 -- terminal_note rides the no-rema
                 "state": "would-cleanup",
                 **status_payload(contract),
                 "summary": _cleanup_summary("would-cleanup"),
-                "providers": providers,
                 "citation_source_index": guard.preview(),
                 "removed_worktrees": removed_worktrees,
                 "branches": branches,
@@ -1054,7 +990,7 @@ def _publish_cleanup(
     *,
     terminal_note: str | None = None,
 ) -> WorktreeCommandResult:
-    providers, removed_worktrees, branches, drift_snapshots, directories = outputs
+    removed_worktrees, branches, drift_snapshots, directories = outputs
     updated = amend_contract(
         contract,
         ContractCells(cleanup="completed", terminal_note=terminal_note),
@@ -1104,7 +1040,6 @@ def _publish_cleanup(
             "state": state,
             **status_payload(updated),
             "summary": _cleanup_summary(state),
-            "providers": providers,
             "citation_source_index": citation_cache,
             "removed_worktrees": removed_worktrees,
             "branches": branches,
@@ -1128,37 +1063,24 @@ def _cleanup_terminal_outputs(
         operation="worktree_cleanup",
         series_permit=series_permit,
     )
-    providers: dict[str, object] = (
-        teardown_terminal_providers(contract, dry_run=args.dry_run)
-        if args.teardown_providers
-        else {"state": "skipped", "reason": "teardown_providers disabled"}
-    )
-    if not args.dry_run and terminal_result_blockers(
-        TerminalResult(providers=providers, worktrees={}, branches={}, directories={})
-    ):
-        return providers, {}, {}, {}, {}
     removed_worktrees = (
         _removed_worktrees(contract, dry_run=True, authority=authority)
         if args.dry_run
         else _removed_worktrees(contract, dry_run=False, authority=authority)
     )
     if not args.dry_run and terminal_result_blockers(
-        TerminalResult(
-            providers=providers, worktrees=removed_worktrees, branches={}, directories={}
-        )
+        TerminalResult(worktrees=removed_worktrees, branches={}, directories={})
     ):
-        return providers, removed_worktrees, {}, {}, {}
+        return removed_worktrees, {}, {}, {}
     branches = (
         preflight.branches
         if args.dry_run
         else _deleted_branches(contract, dry_run=False, authority=authority)
     )
     if not args.dry_run and terminal_result_blockers(
-        TerminalResult(
-            providers=providers, worktrees=removed_worktrees, branches=branches, directories={}
-        )
+        TerminalResult(worktrees=removed_worktrees, branches=branches, directories={})
     ):
-        return providers, removed_worktrees, branches, {}, {}
+        return removed_worktrees, branches, {}, {}
     drift_snapshots = {
         "code": remove_drift_snapshot(
             contract.coordination_root,
@@ -1169,16 +1091,15 @@ def _cleanup_terminal_outputs(
     }
     if not args.dry_run and terminal_result_blockers(
         TerminalResult(
-            providers=providers,
             worktrees=removed_worktrees,
             branches=branches,
             directories={},
             drift_snapshots=drift_snapshots,
         )
     ):
-        return providers, removed_worktrees, branches, drift_snapshots, {}
+        return removed_worktrees, branches, drift_snapshots, {}
     directories = directory_preview if args.dry_run else remove_terminal_group(contract)
-    return providers, removed_worktrees, branches, drift_snapshots, directories
+    return removed_worktrees, branches, drift_snapshots, directories
 
 
 def _preserved_cache(cache: dict[str, object], reason: str) -> dict[str, object]:

@@ -1,52 +1,35 @@
-"""A cleanup blocker always names its reason, and a torn-down provider never invents one.
+"""A cleanup blocker always names its reason, and leftover provider-runtime trees are reclaimed directly.
 
-The defect this lane pins: ``lifecycle_finalize_task`` on leaf L6's enclosure returned
-``state: cleanup-blocked`` with ``blockers: [{"provider": "providerRuntime", "reason": null}]``
--- while the same payload proved the terminal archive, reported the providers ``torn-down``, and
-said in its own summary that enclosure deletion may continue. Cleanup stopped on a blockage that
-named no reason, preserved the citation-source index with ``terminal-operation-failed``, and left
-the leaf un-finalized; an immediate retry then reclaimed everything. A blockage an operator cannot
-read cannot be told apart from a spurious one, so the contract is now explicit in two places:
+The contract is explicit in two places:
 
 * ``terminal_validation._blocker`` is the only way a terminal result reports a blockage, and it
   refuses -- raising at the detecting call site -- unless both the component and a non-empty
   reason are present;
-* ``provider_runtime.remove_tree`` answers with a reason whenever it reclaimed nothing, so the
-  provider runtime result cannot be blocked without saying why.
+* ``worktrees/modules/filesystem.py::remove_tree`` removes a directory tree directly (including
+  any leftover ``<worktree_group>/provider-runtime`` directory) and answers with an explicit
+  reason whenever it reclaimed nothing.
 
-The cases below drive the real application tools over real Git repositories and real worktrees.
-The first two reproduce the L6 shape and its genuine counterpart at the whole-tool boundary; the
-last three pin the two invariant owners directly, including the reasonless result no current
-producer can emit and the empty reason one still can.
+The cases below drive ``remove_tree``, the real application tools over real Git repositories and
+real worktrees, and the terminal blocker validator directly.
 """
 
 from __future__ import annotations
 
 import os
-import shutil
 from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
-from unittest import mock
 
 import pytest
 from agents_remember.application import worktree_tools
-from agents_remember.application.provider_runtime import remove_tree
 from agents_remember.application.worktree_services import build_default_worktree_services
 from agents_remember.kernel.primitives.drift_snapshot import drift_snapshot_path
 from agents_remember.memory_quality.style.citations.source_index_cache import (
     TerminalNamespaceGuard,
 )
-from agents_remember.models.lifecycles.enclosure import TerminalWorktreeCleanupArguments
 from agents_remember.tasks import read_task_doc
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
-from agents_remember.worktrees.integration import terminal_enclosure_archive
-from agents_remember.worktrees.integration.lifecycle.lifecycle_enclosure_terminal import (
-    terminal_enclosure_archive_paths,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
-    inspect_lifecycle_operation_locator,
-)
+from agents_remember.worktrees.modules.filesystem import remove_tree
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalResult,
     _blocker,
@@ -58,6 +41,7 @@ from integration_branch_authority_test_support import (
     _authority_fixture,
     _closed_external_leaf_worktrees,
 )
+from test_source_lineage import _git
 from test_transaction_only_worktree_delivery import _public_config
 
 pytestmark = pytest.mark.integration
@@ -145,77 +129,81 @@ def _finalize(config, contract: WorktreeContract):
     )
 
 
-def test_a_torn_down_provider_runtime_finalizes_on_the_first_call(
+def test_cleanup_removes_leftover_provider_runtime_directory_directly(
     tmp_path: Path, bound_worktree_services
 ) -> None:
-    """The L6 shape finalizes first time: a provider already torn down blocks nothing.
-
-    L6's enclosure reached this exact state -- every provider resource already gone, the terminal
-    archive proven, nothing left to reclaim -- and cleanup still stopped on a blockage naming no
-    reason, which left the leaf open until a retry. This case pins the operator-visible outcome:
-    the first and only call finalizes the edge, and the report says what was reclaimed.
-    """
+    """Cleanup reclaims a leftover ``<group>/provider-runtime`` tree directly and finalizes."""
 
     closed = _landed_leaf(tmp_path)
-    reports = closed.worktree_group / "reports"
-    reports.mkdir(parents=True, exist_ok=True)
-    (reports / "review.md").write_text("# Review evidence\n", encoding="utf-8")
-    preview = worktree_tools.worktree_abandon_tool(
-        _public_config(tmp_path, closed),
+    provider_runtime = closed.worktree_group / "provider-runtime"
+    provider_runtime.mkdir(parents=True, exist_ok=True)
+    (provider_runtime / PROVIDER_RUNTIME_SETUP_FILE).write_text(
+        '{"state": "ok"}\n', encoding="utf-8"
+    )
+    config = _landed_leaf_config(tmp_path, closed)
+
+    preview = worktree_tools.worktree_cleanup_tool(
+        config,
         contract_path=closed.contract_path.as_posix(),
         dry_run=True,
-        force=True,
     )
-    assert preview["state"] == "would-abandon", preview
-    assert preview["blockers"] == []
-    assert closed.code_worktree.exists()
-    config = _landed_leaf_config(tmp_path, closed)
-    provider_runtime = closed.worktree_group / "provider-runtime"
-    if provider_runtime.exists():
-        shutil.rmtree(provider_runtime)
-    assert not provider_runtime.exists(), "the L6 shape is a provider runtime already gone"
+    assert preview["state"] == "would-cleanup", preview
+    assert preview["directories"]["worktree_group"]["would_remove"] is True
+    assert provider_runtime.exists()
 
-    torn_down = {
-        "state": "torn-down",
-        "settingsFound": False,
-        "containers": [],
-        "networks": [],
-        "providerRuntime": {
-            "path": provider_runtime.as_posix(),
-            "removed": False,
-            "reason": "already-absent",
-        },
-    }
-    with mock.patch.object(
-        bound_worktree_services.provider_lifecycle, "teardown", return_value=torn_down
-    ):
-        finalized = _finalize(config, closed)
-
+    finalized = _finalize(config, closed)
     assert finalized["state"] == "finalized", finalized
     assert finalized["cleanup"]["state"] == "cleanup-completed", finalized["cleanup"]
-    assert finalized["cleanup"]["notRemoved"] == {
-        "worktrees": [],
-        "localBranches": [],
-        "reports": [],
-        "enclosureRoot": [],
-    }
-    assert not closed.code_worktree.exists()
+    assert not provider_runtime.exists()
     assert not closed.worktree_group.exists()
     assert load_contract(closed.contract_path).cleanup == "completed"
     assert _landed_leaf_document(closed).status == "Completed"
 
 
-def test_a_provider_runtime_that_cannot_be_torn_down_blocks_with_its_own_reason(
+def test_abandon_removes_leftover_provider_runtime_directory_directly(
     tmp_path: Path, bound_worktree_services
 ) -> None:
-    """A genuine reclamation failure refuses, names itself, and no retry turns it into success.
+    """Abandon reclaims a leftover ``<group>/provider-runtime`` tree directly."""
 
-    The provider runtime is left behind by a real permission failure: the host user cannot remove
-    the tree and no reclaim image is configured, which is the production failure ``remove_tree``
-    already reports a reason for. The refusal must carry that reason, must not close the task
-    edge, and must refuse again on the identical retry -- a retry may only converge when it
-    re-observes the cause as resolved.
-    """
+    closed = _landed_leaf(tmp_path)
+    assert closed.memory_worktree is not None
+    assert closed.memory_source_branch is not None
+    _git(closed.code_worktree, "reset", "--hard", closed.code_source_branch)
+    _git(closed.memory_worktree, "reset", "--hard", closed.memory_source_branch)
+    config = _public_config(tmp_path, closed)
+    provider_runtime = closed.worktree_group / "provider-runtime"
+    provider_runtime.mkdir(parents=True, exist_ok=True)
+    (provider_runtime / PROVIDER_RUNTIME_SETUP_FILE).write_text(
+        '{"state": "ok"}\n', encoding="utf-8"
+    )
+
+    preview = worktree_tools.worktree_abandon_tool(
+        config,
+        contract_path=closed.contract_path.as_posix(),
+        dry_run=True,
+        force=False,
+    )
+    assert preview["state"] == "would-abandon", preview
+    assert preview["directories"]["worktree_group"]["would_remove"] is True
+    assert provider_runtime.exists()
+
+    abandoned = worktree_tools.worktree_abandon_tool(
+        config,
+        contract_path=closed.contract_path.as_posix(),
+        dry_run=False,
+        force=False,
+    )
+    assert abandoned["state"] == "abandoned", abandoned
+    assert abandoned["directories"]["worktree_group"]["removed"] is True
+    assert not provider_runtime.exists()
+    assert not closed.worktree_group.exists()
+    assert load_contract(closed.contract_path).cleanup == "abandoned"
+
+
+def test_an_unremovable_provider_runtime_directory_blocks_cleanup_with_its_reason(
+    tmp_path: Path, bound_worktree_services
+) -> None:
+    """A genuine permission failure on ``<group>/provider-runtime`` blocks cleanup with a reason."""
 
     closed = _landed_leaf(tmp_path)
     config = _landed_leaf_config(tmp_path, closed)
@@ -233,145 +221,38 @@ def test_a_provider_runtime_that_cannot_be_torn_down_blocks_with_its_own_reason(
 
     assert refused["state"] == "cleanup-blocked", refused
     assert refused["cleanup"]["state"] == "blocked", refused["cleanup"]
-    assert refused["cleanup"]["providers"]["providerRuntime"]["removed"] is False
-    assert refused["cleanup"]["providers"]["providerRuntime"]["reason"].startswith(
-        "permission denied"
-    )
-    assert refused["cleanup"]["blockers"] == [
-        {
-            "provider": "providerRuntime",
-            "reason": refused["cleanup"]["providers"]["providerRuntime"]["reason"],
-        }
-    ], refused["cleanup"]["blockers"]
-
-    # Nothing closed and nothing was reclaimed: the edge, its targets and the provider tree
-    # are exactly where they were.
+    entry = refused["cleanup"]["directories"]["worktree_group"]
+    assert entry["path"] == provider_runtime.as_posix()
+    assert entry["removed"] is False
+    assert str(provider_runtime) in str(entry["reason"])
+    assert any(
+        blocker.get("directory") == "worktree_group"
+        and str(provider_runtime) in str(blocker.get("reason", ""))
+        for blocker in refused["cleanup"]["blockers"]
+    ), refused["cleanup"]["blockers"]
     assert _landed_leaf_document(closed).status != "Completed"
     assert load_contract(closed.contract_path).cleanup == "pending"
-    assert closed.code_worktree.exists()
     assert provider_runtime.exists()
-
-    # The identical retry re-observes the same cause and refuses the same way; it is not
-    # convergence, and it does not become success.
-    os.chmod(provider_runtime, 0o500)
-    try:
-        retried = _finalize(config, closed)
-    finally:
-        os.chmod(provider_runtime, 0o700)
-
-    assert retried["state"] == "cleanup-blocked", retried
-    assert retried["cleanup"]["blockers"] == refused["cleanup"]["blockers"]
-    assert _landed_leaf_document(closed).status != "Completed"
-
-
-def test_a_reasonless_provider_result_is_named_instead_of_becoming_a_null_reason() -> None:
-    """No terminal result reaches an operator as a blockage with no reason at all.
-
-    This is the exact shape L6 reported -- a provider runtime that reclaimed nothing and said
-    nothing -- and it is the case that produced ``{"provider": "providerRuntime", "reason": null}``.
-    Every terminal blocker is built through :func:`_blocker`, which refuses an unnameable reason,
-    and the reasonless result is answered in operator language instead of being passed through.
-    """
-
-    blockers = terminal_result_blockers(
-        TerminalResult(
-            providers={"state": "torn-down", "providerRuntime": {"removed": False}},
-            worktrees={},
-            branches={},
-            directories={},
-        )
-    )
-
-    assert blockers == [
-        {"provider": "providerRuntime", "reason": "no reason reported by the terminal result"}
-    ]
 
 
 def test_an_unnameable_blocker_reason_is_refused_at_its_own_source() -> None:
-    """A producer whose reason is not operator language is a defect that fails loudly.
-
-    ``_blocked_reason`` answers every reasonless result, so this is the last line: a caller that
-    reaches the blocker builder with a reason no operator could read -- ``None``, a blank string,
-    a non-string -- is refused at that call site instead of emitting an anonymous blockage.
-    """
+    """A producer whose reason is not operator language is a defect that fails loudly."""
 
     for unnameable in (None, "", "   ", 17):
         with pytest.raises(RuntimeError) as refusal:
-            _blocker({"provider": "providerRuntime"}, unnameable)
+            _blocker({"directory": "provider_runtime"}, unnameable)
 
-        assert "providerRuntime" in str(refusal.value)
+        assert "provider_runtime" in str(refusal.value)
         assert "carries no reason" in str(refusal.value)
-
-
-def test_an_empty_provider_reason_is_replaced_by_a_named_statement() -> None:
-    """A producer that reports a blockage with a blank reason cannot produce a blank blocker.
-
-    ``_blocked`` reads an empty reason as a blockage, which is correct -- the resource was not
-    removed and nothing said it was already absent -- so the blocker still has to name what it
-    stopped on. The blank string becomes operator language instead of reaching an operator as
-    ``reason: ""``.
-    """
-
-    blockers = terminal_result_blockers(
-        TerminalResult(
-            providers={
-                "state": "torn-down",
-                "providerRuntime": {"removed": False, "reason": ""},
-            },
-            worktrees={},
-            branches={},
-            directories={},
-        )
-    )
-
-    assert blockers == [
-        {"provider": "providerRuntime", "reason": "no reason reported by the terminal result"}
-    ]
-
-
-def test_terminal_provider_results_keep_removals_and_refusals_distinct() -> None:
-    reason = "provider refused the removal"
-    refusals = [
-        {"provider": component, "reason": reason}
-        for component in ("containers[0]", "networks[0]", "providerRuntime")
-    ]
-    for case, row, expected in (
-        ("successful provider removal became a blocker", {"removed": True}, []),
-        ("provider removal preview became a blocker", {"removed": False, "would_remove": True}, []),
-        ("absent provider became a blocker", {"removed": False, "reason": "already-absent"}, []),
-        ("provider refusal reason changed", {"removed": False, "reason": reason}, refusals),
-    ):
-        preview = row.get("would_remove") is True
-        blockers = terminal_result_blockers(
-            TerminalResult(
-                providers={
-                    "state": "would-teardown" if preview else "torn-down",
-                    "containers": [{"container": "fixture-container", **row}],
-                    "networks": [{"network": "fixture-network", **row}],
-                    "providerRuntime": {"path": "/fixture/provider-runtime", **row},
-                },
-                worktrees={},
-                branches={},
-                directories={},
-                preview=preview,
-            )
-        )
-        assert blockers == expected, f"{case}: {blockers!r}"
 
 
 def test_remove_tree_answers_with_a_reason_whenever_it_reclaimed_nothing(
     tmp_path: Path,
 ) -> None:
-    """Every provider-runtime removal result either removed the tree or says why it did not.
-
-    ``remove_tree`` is the field's only producer and a terminal blocker is built from what it
-    reports, so a result of it that reclaimed nothing may not arrive reasonless -- which is what
-    the L6 payload's ``providerRuntime`` was.
-    """
+    """``worktrees/modules/filesystem.py::remove_tree`` handles absent, preview, removal, and errors."""
 
     absent = tmp_path / "already-gone"
-    absent_result = remove_tree(absent, dry_run=False)
-    assert absent_result == {
+    assert remove_tree(absent, dry_run=False) == {
         "path": absent.as_posix(),
         "removed": False,
         "reason": "already-absent",
@@ -380,70 +261,33 @@ def test_remove_tree_answers_with_a_reason_whenever_it_reclaimed_nothing(
     present = tmp_path / "present"
     (present / "data").mkdir(parents=True)
     (present / "data" / "file").write_text("content\n", encoding="utf-8")
-    removed = remove_tree(present, dry_run=False)
-    assert removed == {"path": present.as_posix(), "removed": True}
+    assert remove_tree(present, dry_run=True) == {
+        "path": present.as_posix(),
+        "removed": False,
+        "would_remove": True,
+    }
+    assert present.exists()
+
+    assert remove_tree(present, dry_run=False) == {"path": present.as_posix(), "removed": True}
     assert not present.exists()
 
-
-def test_a_reclaimed_but_surviving_provider_runtime_reports_why_it_survived(
-    tmp_path: Path,
-) -> None:
-    """The one branch that could answer ``removed: False`` silently now names its own cause.
-
-    Provider data written root-owned makes the plain removal fail; ownership is reclaimed through
-    a one-shot container and the removal is retried. When the tree survives that retry, the result
-    is what a terminal blocker is built from, and it says so in operator language instead of
-    arriving as a reasonless ``{"removed": False}``.
-    """
-
-    provider_runtime = tmp_path / "provider-runtime"
-    provider_runtime.mkdir()
-    (provider_runtime / "data").write_text("root-owned\n", encoding="utf-8")
-    calls = {"plain": 0}
-
-    def _rmtree(target: Path, *args: object, **kwargs: object) -> None:
-        calls["plain"] += 1
-        if calls["plain"] == 1:
-            raise PermissionError(13, "Permission denied", target.as_posix())
-
-    with (
-        mock.patch(
-            "agents_remember.application.provider_runtime._reclaim_ownership",
-            return_value={"ok": True, "image": "falkordb/falkordb:latest", "owner": "1000:1000"},
-        ),
-        mock.patch("agents_remember.application.provider_runtime.shutil.rmtree", _rmtree),
-    ):
-        result = remove_tree(
-            provider_runtime,
-            dry_run=False,
-            reclaim_image="falkordb/falkordb:latest",
-            reclaim_cwd=tmp_path,
-        )
-
-    assert calls["plain"] == 2, calls
-    assert result["removed"] is False
-    assert result["reclaimedViaDocker"] is True
-    assert result["reason"] == "still present after docker ownership reclaim"
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "file").write_text("stuck\n", encoding="utf-8")
+    os.chmod(locked, 0o500)
+    try:
+        failed = remove_tree(locked, dry_run=False)
+    finally:
+        os.chmod(locked, 0o700)
+    assert failed["path"] == locked.as_posix()
+    assert failed["removed"] is False
+    assert str(failed["reason"]).startswith("permission denied")
 
 
 def test_a_drift_snapshot_preview_is_not_read_as_an_unreclaimed_result() -> None:
-    """`T62`: the preview crashed on the output its own producer emits -- and must not.
-
-    ``worktrees/modules/terminal_validation.py`` built the drift-snapshot expectation as
-    ``TerminalExpectation(done_key="removed")`` while the worktree, branch and directory
-    collections beside it pass ``preview=result.preview``. ``_done_blockers`` reads the pending
-    key OFF that flag (``would_remove`` for a preview, ``would_delete`` for a real run), and the
-    producer answers a dry run with ``would_remove``. With the flag unset the entry was neither
-    reclaimed, nor pending, nor reasoned, so ``_blocker`` raised: every preview of a task that
-    HAS a drift snapshot failed, while the real run that removed it succeeded.
-
-    The case is the preview shape and asserts **no blocker and no raise**. Its control is the
-    case below, which asserts the same call still refuses a reason-less entry -- so this repair
-    cannot be satisfied by weakening the validator's own contract.
-    """
+    """`T62`: the preview crashed on the output its own producer emits -- and must not."""
 
     preview_shape = TerminalResult(
-        providers={},
         worktrees={},
         branches={},
         directories={},
@@ -455,7 +299,6 @@ def test_a_drift_snapshot_preview_is_not_read_as_an_unreclaimed_result() -> None
     # The control that locates the fault: the IDENTICAL shape passes in the worktree
     # collection, which excludes "the producer is malformed" and pins it to the drift branch.
     worktree_control = TerminalResult(
-        providers={},
         worktrees={"code": dict(DRIFT_PREVIEW_ENTRY)},
         branches={},
         directories={},
@@ -466,16 +309,9 @@ def test_a_drift_snapshot_preview_is_not_read_as_an_unreclaimed_result() -> None
 
 
 def test_a_real_reasonless_drift_snapshot_still_refuses_rather_than_passing_as_preview() -> None:
-    """The validator's own contract survives the preview allowance, measured not asserted.
-
-    A real (non-preview) terminal result whose drift snapshot was not reclaimed and carries no
-    reason is a producer defect, and the validator must still refuse it by name. If the repair
-    above had been made by teaching the validator to tolerate an unexplained entry, this case
-    would pass as an empty blocker list -- which is exactly the failure mode it exists to catch.
-    """
+    """The validator's own contract survives the preview allowance, measured not asserted."""
 
     reasonless = TerminalResult(
-        providers={},
         worktrees={},
         branches={},
         directories={},
@@ -555,155 +391,3 @@ def test_cleanup_preview_names_role_report_link_blocker(
     assert bad_report.is_symlink()
     assert closed.code_worktree.exists()
     assert load_contract(closed.contract_path).cleanup == "pending"
-
-
-def test_cleanup_skip_names_live_provider_in_task_folder(
-    tmp_path: Path, bound_worktree_services
-) -> None:
-    closed, config, state = _provider_skip_leaf(tmp_path)
-
-    for dry_run in (True, False):
-        result = worktree_tools.worktree_cleanup_tool(
-            config,
-            contract_path=closed.contract_path.as_posix(),
-            teardown_providers=False,
-            dry_run=dry_run,
-        )
-        assert not result["ok"] and str(state.parent) in str(result.get("blockers")), result
-        assert state.is_file()
-        assert closed.code_worktree.exists()
-        assert load_contract(closed.contract_path).cleanup == "pending"
-
-
-def _provider_skip_leaf(tmp_path: Path):
-    closed = _landed_leaf(tmp_path)
-    config = _landed_leaf_config(tmp_path, closed)
-    return closed, config, _seed_provider_state(closed)
-
-
-def _seed_provider_state(contract: WorktreeContract) -> Path:
-    runtime = contract.worktree_group / "provider-runtime"
-    runtime.mkdir(exist_ok=True)
-    state = runtime / "provider-state.json"
-    state.write_text('{"state": "prepared"}\n', encoding="utf-8")
-    return state
-
-
-def _fresh_terminal_archive_paths(contract: WorktreeContract) -> tuple[Path, Path]:
-    location = inspect_lifecycle_operation_locator(
-        contract.coordination_root, contract.contract_path
-    )
-    assert location.state == "addressable" and location.locator is not None, location
-    archive, receipt = terminal_enclosure_archive_paths(
-        contract.coordination_root, location.locator.publicationRequestId
-    )
-    assert not archive.exists() and not receipt.exists()
-    return archive, receipt
-
-
-def test_fresh_provider_skip_leaves_no_archive_and_allows_true_retry(
-    tmp_path: Path, bound_worktree_services
-) -> None:
-    closed, config, state = _provider_skip_leaf(tmp_path)
-    contract_path = closed.contract_path.as_posix()
-    archive, receipt = _fresh_terminal_archive_paths(closed)
-
-    blocked = worktree_tools.worktree_cleanup_tool(
-        config, contract_path=contract_path, dry_run=False, teardown_providers=False
-    )
-
-    assert not archive.exists() and not receipt.exists(), (
-        f"fresh provider skip published a terminal archive or receipt: {blocked}"
-    )
-    assert not blocked["ok"] and "teardown_providers=true" in str(blocked["blockers"]), blocked
-    assert "terminalArchive" not in blocked
-    assert state.is_file()
-
-    def teardown(contract: WorktreeContract, *, dry_run: bool) -> dict[str, object]:
-        runtime = contract.worktree_group / "provider-runtime"
-        return {"state": "torn-down", "providerRuntime": remove_tree(runtime, dry_run=dry_run)}
-
-    with mock.patch.object(bound_worktree_services.provider_lifecycle, "teardown", teardown):
-        retried = worktree_tools.worktree_cleanup_tool(
-            config, contract_path=contract_path, dry_run=False, teardown_providers=True
-        )
-
-    assert retried["ok"] and retried["state"] == "cleanup-completed", retried
-    assert retried["providers"]["providerRuntime"]["removed"] is True
-    assert retried["terminalArchive"]["cleanupArguments"] == {"teardown_providers": True}
-    assert not closed.worktree_group.exists()
-
-
-@pytest.mark.parametrize("interrupted", [False, True], ids=["published", "before-receipt"])
-def test_accepted_provider_skip_preserves_archive_and_retries_with_saved_arguments(
-    tmp_path: Path, bound_worktree_services, interrupted: bool
-) -> None:
-    closed = _landed_leaf(tmp_path)
-    config = _landed_leaf_config(tmp_path, closed)
-    contract_path = closed.contract_path.as_posix()
-    saved = {"teardown_providers": False}
-    archive, receipt = _fresh_terminal_archive_paths(closed)
-    interruption = (
-        mock.patch.object(
-            terminal_enclosure_archive,
-            "_publish_terminal_receipt",
-            side_effect=OSError("interrupted before publishing the terminal receipt"),
-        )
-        if interrupted
-        else nullcontext()
-    )
-    with interruption:
-        accepted = terminal_enclosure_archive.terminal_archive_required_result(
-            load_contract(closed.contract_path),
-            operation="worktree_cleanup",
-            arguments=TerminalWorktreeCleanupArguments(teardown_providers=False),
-            dry_run=False,
-        )
-    assert (accepted.returncode != 0) == interrupted, accepted.payload
-    assert receipt.is_file() != interrupted
-    archive_bytes = archive.read_bytes()
-    original_receipt = None if interrupted else receipt.read_bytes()
-    state = _seed_provider_state(closed)
-
-    changed = worktree_tools.worktree_cleanup_tool(
-        config, contract_path=contract_path, dry_run=False, teardown_providers=True
-    )
-    assert changed["status"] == "terminal-archive-request-conflict", changed
-    assert changed["observed"]["cleanupArguments"] == saved
-    assert archive.read_bytes() == archive_bytes
-    assert (receipt.read_bytes() if receipt.is_file() else None) == original_receipt
-
-    blocked = worktree_tools.worktree_cleanup_tool(
-        config, contract_path=contract_path, dry_run=False, teardown_providers=False
-    )
-
-    assert not blocked["ok"], blocked
-    reason = next(
-        (
-            row["reason"]
-            for row in blocked.get("blockers", [])
-            if row.get("directory") == "provider-runtime"
-        ),
-        None,
-    )
-    assert isinstance(reason, str), blocked
-    assert str(state.parent) in reason and "provider owner" in reason, blocked
-    assert "teardown_providers=false" in reason and "teardown_providers=true" not in reason
-    assert archive.read_bytes() == archive_bytes
-    receipt_bytes = receipt.read_bytes()
-    if original_receipt is not None:
-        assert receipt_bytes == original_receipt
-    assert state.is_file()
-    assert load_contract(closed.contract_path).cleanup == "pending"
-
-    state.unlink()
-    state.parent.rmdir()
-    retried = worktree_tools.worktree_cleanup_tool(
-        config, contract_path=contract_path, dry_run=False, teardown_providers=False
-    )
-
-    assert retried["ok"] and retried["state"] == "cleanup-completed", retried
-    assert retried["terminalArchive"]["cleanupArguments"] == saved
-    assert retried["providers"]["state"] == "skipped"
-    assert (archive.read_bytes(), receipt.read_bytes()) == (archive_bytes, receipt_bytes)
-    assert not closed.worktree_group.exists()

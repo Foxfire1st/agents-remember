@@ -36,8 +36,8 @@ python -m agents_remember.benchmarks.runner analyze <run-root> --write-summary
 | Sub-command | What it does |
 | --- | --- |
 | `list` | Prints each case with its status, its size band and its pinned repository commit. |
-| `prepare all`, `prepare case <case-id>` | Creates the workspaces of the cases. Options: `--force-clone`, `--dry-run`, `--provider-timeout <seconds>`: the time allowed for each install or index command of a search provider that a variant names (default 1800). |
-| `run all`, `run case <case-id>` | Prepares the workspaces and runs the prompts. Options: `--prompt`, `--variant`, `--repetitions`, `--jobs`, `--skip-prepare`, `--force-clone`, `--dry-run`, `--codex-sandbox`, and `--provider-timeout <seconds>` as for `prepare`. |
+| `prepare all`, `prepare case <case-id>` | Creates the workspaces of the cases. Options: `--force-clone`, `--dry-run`. |
+| `run all`, `run case <case-id>` | Prepares the workspaces and runs the prompts. Options: `--prompt`, `--variant`, `--repetitions`, `--jobs`, `--skip-prepare`, `--force-clone`, `--dry-run`, and `--codex-sandbox`. |
 | `analyze <run-root>` | Reads the results of one run and prints a summary. With `--write-summary` it writes the summary to `<run-root>/summary.md`. |
 
 The option `--benchmarks-root <folder>` stands before the sub-command and names the benchmark

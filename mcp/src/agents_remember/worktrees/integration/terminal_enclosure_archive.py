@@ -15,6 +15,7 @@ from agents_remember.models.lifecycles.enclosure import (
     TerminalCleanupOperation,
     TerminalEnclosureArchive,
     TerminalEnclosureReceipt,
+    cleanup_arguments_match,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_enclosure_terminal import (
     TerminalCleanupContractAuthority,
@@ -238,7 +239,7 @@ def _require_accepted_archive_request(
             },
             observed=observed,
         )
-    if accepted.cleanupArguments != arguments:
+    if not cleanup_arguments_match(accepted.cleanupArguments, arguments):
         raise LifecycleOperationLocationError(
             "terminal-archive-request-conflict",
             "the accepted terminal archive belongs to different public arguments",
@@ -391,7 +392,7 @@ def _observe_terminal_archive(
                 "cleanupArguments": archive.cleanupArguments.model_dump(mode="json"),
             },
         )
-    if archive.cleanupArguments != arguments:
+    if not cleanup_arguments_match(archive.cleanupArguments, arguments):
         raise LifecycleOperationLocationError(
             "terminal-archive-request-conflict",
             "the terminal locator already belongs to different public arguments",
@@ -678,10 +679,13 @@ def _terminal_action_args(
     contract: WorktreeContract,
     accepted_arguments: dict[str, object],
 ) -> dict[str, object]:
+    cleaned = {
+        key: value for key, value in accepted_arguments.items() if key != "teardown_providers"
+    }
     return {
         "contract_path": contract.contract_path.resolve(strict=False).as_posix(),
         "dry_run": False,
-        **accepted_arguments,
+        **cleaned,
     }
 
 

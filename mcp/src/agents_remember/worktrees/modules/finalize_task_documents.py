@@ -55,7 +55,6 @@ class FinalizeArgs:
     master_doc_path: Path | None = None
     subtask_number: str = ""
     dry_run: bool = False
-    teardown_providers: bool = True
 
 
 class FinalizeTaskDocumentError(ValueError):

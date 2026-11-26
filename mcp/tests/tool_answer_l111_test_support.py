@@ -357,7 +357,6 @@ _L111_USES: dict[str, str] = {
     "human_review_status": "the review the closeout waits on",
     "code_worktree_dirty": "whether the code worktree has uncommitted changes",
     "memory_worktree_dirty": "whether the memory worktree has uncommitted changes",
-    "providers": "the providers the step ran",
     "memory": "the memory side the step planned",
     "briefsProblem": "why the briefs could not be refreshed after writing the memory folder",
     "admission": "the admission the step observed, with what it expected",

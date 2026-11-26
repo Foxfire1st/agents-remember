@@ -166,7 +166,6 @@ def _world(tmp_path: Path, *, mode: str) -> tuple[Path, Path, dict[str, str]]:
                 "repositories": {
                     REPO: {"path": str(root / "repo"), "memoryRoot": str(root / "memory")}
                 },
-                "providers": {},
             }
         ),
         encoding="utf-8",

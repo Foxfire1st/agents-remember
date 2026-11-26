@@ -195,12 +195,6 @@ files of a code repository are eligible for a card: the rules are tried in their
 first rule whose `include` matches a file decides. [Path Rules](reference/path-rules.md) is the
 reference.
 
-### Search provider
-
-A search provider is one of two search programs whose files the install copies from the package
-into `<coordination-root>/providers/`. No part of Agents Remember starts, indexes or queries a
-search provider.
-
 ### Task folder
 
 A task folder is a folder of task documents under the coordination root. The task folder of a code

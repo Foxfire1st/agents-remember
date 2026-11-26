@@ -77,10 +77,6 @@ describe("EnclosureCanvas — GSAP gate (05f §8.4 — no ticker under effects=o
     expect(structural.querySelector("[data-fx='surge']")).toBeNull();
     expect(structural.querySelector("[data-fx='breath']")).toBeNull();
     expect(effects.querySelectorAll("[data-fx='surge']").length).toBeGreaterThanOrEqual(2);
-    // No reindex pulse remains anywhere: the engine-anchored reroute retired with the provider
-    // engines, so neither SVG carries the marker.
-    expect(structural.querySelector("[data-fx='reindex']")).toBeNull();
-    expect(effects.querySelector("[data-fx='reindex']")).toBeNull();
   });
 });
 
@@ -247,17 +243,6 @@ describe("EnclosureCanvas — conduit wiring polish (5h cleanup)", () => {
     const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
     // refX < the chevron apex (8.5) overshoots the endpoint into the target engine — see the marker comment.
     expect(container.querySelector("marker#er-chev")?.getAttribute("refX")).toBe("9.6");
-  });
-
-  it("renders no seed/clone conduits — the stage carries only the enclosure lanes", () => {
-    const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
-    // The seed/clone edge kinds are gone from the projection AND carry no stage geometry, so no
-    // conduit renders for them.
-    expect(container.querySelector('[data-kind="cgc-seed"]')).toBeNull();
-    expect(container.querySelector('[data-kind="grepai-clone"]')).toBeNull();
-    for (const edge of nodeFrom("engine-bootstrap").edges) {
-      expect(["worktree-add", "ledger-map", "sync", "integration", "integration-mem"]).toContain(edge.kind);
-    }
   });
 
   it("keeps the sync lane on the worktree-add centreline (one centred line, not an offset double)", () => {
@@ -471,52 +456,6 @@ describe("EnclosureCanvas — ledger popover columns (5h Tier 2)", () => {
     expect(cells?.[1].textContent).toBe("");
     expect(cells?.[5].textContent).toBe("");
     expect(cells?.[6].textContent).toBe("");
-  });
-});
-
-describe("EnclosureCanvas — provider traces are gone (MIK-R112 rule 2)", () => {
-  const PROVIDER_TEXT = /cgc|grepai|codegraphcontext|provider/i;
-  const REMOVED_NODE_FIELDS = [
-    "providers",
-    "setupState",
-    "currentPhase",
-    "completedPhases",
-    "failedPhases",
-    "heartbeatAgeSeconds",
-    "seedFallback",
-    "retryArgs",
-  ];
-
-  it("carries no provider state on any fixture node", () => {
-    for (const scenario of ENGINE_ROOM_SCENARIOS) {
-      for (const node of scenario.processes) {
-        for (const field of REMOVED_NODE_FIELDS) {
-          expect(node, `${scenario.name} still carries ${field}`).not.toHaveProperty(field);
-        }
-        for (const edge of node.edges) {
-          expect(
-            ["worktree-add", "ledger-map", "sync", "integration", "integration-mem"],
-            `${scenario.name} carries the retired ${edge.kind} lane`,
-          ).toContain(edge.kind);
-        }
-      }
-    }
-  });
-
-  it("renders no gauge, provider block, dropout halo, fault/reindex marker, seed/clone lane or provider text", () => {
-    document.documentElement.removeAttribute("data-effects"); // effects ON — a transient marker would render
-    for (const scenario of ENGINE_ROOM_SCENARIOS) {
-      const { container, unmount } = render(<EnclosureProcessMap node={scenario.processes[0]} />);
-      expect(container.querySelector('[data-testid="engine-gauge"]'), scenario.name).toBeNull();
-      expect(container.querySelector('[data-testid="provider-block"]'), scenario.name).toBeNull();
-      expect(container.querySelector('[data-testid="engine-dropout"]'), scenario.name).toBeNull();
-      expect(container.querySelector("[data-fx='fault']"), scenario.name).toBeNull();
-      expect(container.querySelector("[data-fx='reindex']"), scenario.name).toBeNull();
-      expect(container.querySelector('[data-kind="cgc-seed"]'), scenario.name).toBeNull();
-      expect(container.querySelector('[data-kind="grepai-clone"]'), scenario.name).toBeNull();
-      expect(container.textContent ?? "", scenario.name).not.toMatch(PROVIDER_TEXT);
-      unmount();
-    }
   });
 });
 

@@ -79,7 +79,6 @@ class ToolServerStartTests(unittest.TestCase):
                         "coordinationRoot": (root / "coordination").as_posix(),
                         "workspaceRoot": (root / "projects").as_posix(),
                         "repositories": {},
-                        "providers": {},
                         "dashboard": {"autoStart": False},
                     }
                 ),

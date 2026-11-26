@@ -195,7 +195,7 @@ def test_operation_store_and_cleanup_terminal_archive_read_a_legacy_record(tmp_p
     result = terminal_archive_required_result(
         closed,
         operation="worktree_cleanup",
-        arguments=TerminalWorktreeCleanupArguments(teardown_providers=True),
+        arguments=TerminalWorktreeCleanupArguments(),
         dry_run=False,
     )
     assert result.returncode == 0, result.payload

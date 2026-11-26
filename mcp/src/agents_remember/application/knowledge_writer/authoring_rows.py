@@ -90,7 +90,7 @@ ABSENT: Final = "absent"
 # The record kinds a `record` history row may be about (MIK-R53 rule 8, MIK-R118, MIK-R124).
 # One definition, because a `handoff:` alias and a literal ID name the same record: two lists that
 # drifted apart made the alias refuse the row the literal admitted (F02).
-RECORD_ROW_KINDS: Final[tuple[str, ...]] = (
+RECORD_ROW_KINDS: Final[tuple[RecordKind, ...]] = (
     "decision",
     "incident",
     "assumption",

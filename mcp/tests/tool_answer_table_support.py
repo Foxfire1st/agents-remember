@@ -124,10 +124,10 @@ def _l112_shaped_row(
 _CASE_ROOT = "/tmp/ar-answer-cases/coord"
 
 
-# The ordinary case the operation produces: a dry run on a fresh root with an
-# ok watcher stop. Produced by run_runtime_install + the row projection
+# The ordinary case the operation produces: a dry run on a fresh root.
+# Produced by run_runtime_install + the row projection
 # (compact_runtime_install_payload), paths normalized to _CASE_ROOT; the
-# producer test pins it byte-for-byte. Measured 266 tokens against the row
+# producer test pins it byte-for-byte. Measured 215 tokens against the row
 # bound 600. No host is configured, so the host step reports a successful
 # no-change result. The fresh root has no running server or dashboard.
 _INSTALL_ORDINARY_CASE = {
@@ -160,34 +160,24 @@ _INSTALL_ORDINARY_CASE = {
         "settingsPath": "/tmp/ar-answer-cases/coord/mcp.settings.json",
     },
     "includeBenchmarks": False,
-    "installProviderDeps": True,
     "ok": True,
-    "providerWatcherRebind": {
-        "attempted": True,
-        "ok": None,
-        "phases": [{"action": "stop", "ok": True, "phase": "pre-provider-refresh-stop"}],
-    },
     "reportPath": "/tmp/ar-answer-cases/coord/report.json",
     "runningServers": [],
     "summary": {
-        "copiedFiles": 15,
-        "createdDirs": 42,
-        "dependencyRuns": 0,
+        "copiedFiles": 2,
+        "createdDirs": 10,
         "removedPaths": 0,
         "replacedLinks": 0,
         "unchangedFiles": 0,
-        "unusedProviderKeys": [],
     },
 }
 
 
-# The largest case the operation produces: the same dry run with a failed
-# watcher stop, which records the stop, the failure message and the recovery
-# action. Post-retirement the rebind holds the single stop phase only. Its
-# root holds a store of a removed part and a gate log (MIK-R113 rule 5), so
-# the answer counts them and names the command and the way out of a stored
-# gate; their `logs/` folder is there before the run, so one folder fewer is
-# created. Measured 460 tokens; the row bound 600 sits between it and twice it.
+# The largest case the operation produces: the same dry run on a root holding
+# a store of a removed part and a gate log (MIK-R113 rule 5), so the answer
+# counts them and names the command and the way out of a stored gate; their
+# `logs/` folder is there before the run, so one folder fewer is created.
+# Measured 301 tokens; the row bound 600 sits within twice it.
 _INSTALL_LARGEST_CASE = {
     "coordinationRoot": "/tmp/ar-answer-cases/coord",
     "dryRun": True,
@@ -218,29 +208,7 @@ _INSTALL_LARGEST_CASE = {
         "settingsPath": "/tmp/ar-answer-cases/coord/mcp.settings.json",
     },
     "includeBenchmarks": False,
-    "installProviderDeps": True,
-    "messages": [
-        "Provider watcher stop failed before runtime provider refresh; the install continued "
-        'without watcher recovery. Failed stop: {"provider": "watchers", "action": "stop", '
-        '"partial": false, "recoveryActions…'
-    ],
-    "ok": False,
-    "providerWatcherRebind": {
-        "attempted": True,
-        "ok": False,
-        "phases": [{"action": "stop", "ok": False, "phase": "pre-provider-refresh-stop"}],
-    },
-    "recoveryActions": [
-        {
-            "action": "restart",
-            "provider": "watchers",
-            "recoveryAction": "Stop the named leftover process and rerun the install; no "
-            "product path restarts provider watchers. Only the "
-            "providers-remove command deletes leftover provider "
-            "runtime folders, and server_info reports enabled provider "
-            "keys once as unused.",
-        }
-    ],
+    "ok": True,
     "removedPartStores": {
         "bytes": 6,
         "count": 2,
@@ -254,19 +222,17 @@ _INSTALL_LARGEST_CASE = {
     "reportPath": "/tmp/ar-answer-cases/coord/report.json",
     "runningServers": [],
     "summary": {
-        "copiedFiles": 15,
-        "createdDirs": 41,
-        "dependencyRuns": 0,
+        "copiedFiles": 2,
+        "createdDirs": 9,
         "removedPaths": 0,
         "replacedLinks": 0,
         "unchangedFiles": 0,
-        "unusedProviderKeys": [],
     },
 }
 
 
 _INSTALL_FIELDS = {
-    "ok": "stop when the run failed; continue to provider cleanup when it passed",
+    "ok": "stop when the run failed; continue when it passed",
     "coordinationRoot": "confirm the run targeted this coordination root",
     "dryRun": "confirm the run wrote nothing before treating it as a preview",
     "experiment": "confirm which experiment selection the run applied",
@@ -274,11 +240,9 @@ _INSTALL_FIELDS = {
     "runningServers": "check each server's currentness and restart reason before claiming the running servers are current",
     "dashboard": "check the refresh or preview outcome before claiming the running dashboard is current",
     "includeBenchmarks": "confirm the knobs that ran before rerunning with different ones",
-    "installProviderDeps": "confirm the knobs that ran before rerunning with different ones",
     "summary": "read how many paths the run created, copied, replaced, or removed",
     "messages": "read the step notes the summary counts omit",
     "reportPath": "open the full install report",
-    "providerWatcherRebind": "see whether watcher recovery was attempted and which phases ran",
     "recoveryActions": "perform the recovery actions the run lists",
     "removedPartStores": "tell the user that stores of removed parts remain and which command lists or removes them",
     "sharedHeldStores": "read proposed or completed shared-store and lock removals, preserved seats, or the blocker",

@@ -18,16 +18,8 @@ A first install creates this tree:
     tool-details.md
   logs/
     mcp/
-    providers/
-      codegraphcontext/  grepai/  setup/  status/
   memory-repos/
   notes/
-  providers/
-    compose/  docker/  patches/  requirements/
-    data/
-      codegraphcontext/  grepai/
-    runners/
-      codegraphcontext/  grepai/
   tasks/
   temp/
   worktrees/
@@ -42,8 +34,6 @@ A first install creates this tree:
 | `<coordination-root>/notes/` | notes and reports | you and the role agents; the install creates the folder only |
 | `<coordination-root>/temp/` | working files of the product, for example the full results of tools | the tools |
 | `<coordination-root>/logs/mcp/` | the [tool log](../concepts.md#tool-log), one file `ar-tools-<date>.jsonl` for each day; the calls of a role agent on a task with an enclosure go to `<enclosure>/logs/` | the tool server; the setting `transcriptRoot` names another folder |
-| `<coordination-root>/logs/providers/` | the folders `codegraphcontext/`, `grepai/`, `setup/` and `status/` for the logs of the two [search providers](../concepts.md#search-provider) `codegraphcontext` and `grepai`; no part of the product starts a search provider | the install creates the folders; see [Search provider folders](#search-provider-folders) |
-| `<coordination-root>/providers/` | the files of the two search providers: Compose files in `compose/`, Docker build files in `docker/`, a patch in `patches/` and requirement files in `requirements/`; and the folders `data/` and `runners/`, with one empty folder for each search provider. No part of the product starts, indexes or queries a search provider | every install copies the files from the package; see [Search provider folders](#search-provider-folders) |
 
 The tool server serves the skills from its own package; see [Skills](#skills).
 
@@ -52,7 +42,7 @@ More folders appear when the product is used:
 | Path | What it holds | Written by |
 | --- | --- | --- |
 | `<coordination-root>/logs/dashboard/` | the dashboard's state `daemon.json`, its log `dashboard.log`, the log of the start before as `dashboard.log.1`, and `ensure.lock` | `agents-remember dashboard --daemon` |
-| `<coordination-root>/logs/observer/` | the records the dashboard reads, among them `workspace/events.jsonl` and the provider samples under `<coordination-root>/logs/observer/providers/` | the product's own processes |
+| `<coordination-root>/logs/observer/` | the records the dashboard reads, among them `workspace/events.jsonl` | the product's own processes |
 | `<coordination-root>/runtime/servers/<pid>.json` | one record for each running tool server and dashboard | each of those processes |
 | `<coordination-root>/runtime/knowledge-index/` | the cache that `agents-remember knowledge-index` keeps when it is called with `--coordination-root <coordination-root>` | that command |
 | `<coordination-root>/runtime/review-answers/`, `runtime/review-memos/`, `runtime/changeset-ranges/` and `runtime/capture-indexes/` | what the product keeps for the review page: prepared answers, memos, the ranges of change sets and the indexes of kept comparisons | the product's own processes |
@@ -63,15 +53,14 @@ More folders appear when the product is used:
 
 ## What `runtime_install` writes, removes and leaves
 
-The tool takes six arguments. This page names `dry_run` and `include_benchmarks`;
-[Tool details](../tool-details.md#runtime_install) describes all six, among them
-`install_provider_deps`, `no_cache`, `experiment` and `reconcile_shared_held_stores`.
+The tool takes four arguments. This page names `dry_run` and `include_benchmarks`;
+[Tool details](../tool-details.md#runtime_install) describes all four, including `experiment` and
+`reconcile_shared_held_stores`.
 
 **It writes:**
 
 - the coordination root and the folders of the tree above, where they are missing;
-- `<coordination-root>/docs/tool-details.md` and the files of the search providers, copied from
-  the package;
+- `<coordination-root>/docs/tool-details.md`, copied from the package;
 - the folder `<workspace-root>/.agents-remember/role-executions/`, and the line
   `.agents-remember/role-executions/` in `<workspace-root>/.gitignore`;
 - with `include_benchmarks=true`, the folder `<coordination-root>/benchmarks/` and the line
@@ -83,14 +72,15 @@ The tool takes six arguments. This page names `dry_run` and `include_benchmarks`
 - the folder `<coordination-root>/scripts`;
 - the files `<coordination-root>/AGENTS.md`, `<coordination-root>/system/AGENTS.md` and
   `<coordination-root>/tasks/AGENTS.md`;
-- a file under `<coordination-root>/docs/` that the package does not carry;
-- a file under `<coordination-root>/providers/` that the package does not carry, except in
-  `data/`, and with `install_provider_deps=false` also except in `runners/`.
+- a file under `<coordination-root>/docs/` that the package does not carry.
 
 **It leaves alone** the memory repositories, the task documents, the enclosures and, by default,
 the notes; with `reconcile_shared_held_stores=true`, it writes waiting messages into closed
 seats' launch receipts under `notes/reports/paseo-native-executions/`. It writes neither the
-user settings file nor the `paseoRuntime` block of the settings file.
+user settings file nor the `paseoRuntime` block of the settings file. Leftover `providers/`,
+`logs/providers/` and `logs/observer/providers/` folders from earlier installations are neither
+read nor deleted by `runtime_install`; they are reported as removed stores and removed only by
+`agents-remember removed-stores`.
 
 With `dry_run=true` the call changes nothing. It counts what it would create, copy and remove,
 says what it would do for the host, and writes no result file.
@@ -183,36 +173,6 @@ Agents Remember removes the folder when the enclosure's work has ended.
 
 The settings file and the user settings file stand under `XDG_CONFIG_HOME` when that variable is
 set.
-
-## Search provider folders
-
-The install writes the folder `<coordination-root>/providers/`. Every install copies the package's
-files of the two [search providers](../concepts.md#search-provider) `codegraphcontext` and `grepai`
-into it: Compose files, Docker build files, a patch and requirement files. The install also creates
-the folders `data/` and `runners/` in it, and the folders under
-`<coordination-root>/logs/providers/`. No part of the product starts, indexes or queries a
-provider.
-
-Two callers ask for the watcher stop, which stops the Docker containers of a search provider that
-run on the machine, and neither starts a provider:
-
-- `runtime_install`, before the install renews the files of the search providers;
-- the provider-degradation safety loop, which the dashboard's server
-  runs for as long as the dashboard is up: every 30 seconds it samples the Docker
-  state of the provider containers (the containers that carry the label of a search provider),
-  records the sample under
-  `<coordination-root>/logs/observer/providers/` and compacts that log, evaluates the recent
-  window as `healthy`, `degraded` or `critical`, and — on the transition into `critical`, and
-  only while the setting `providerDegradation.failSafeEnabled` is true — calls the same watcher
-  stop. It is not a revival: it starts nothing, installs nothing, indexes nothing and
-  queries nothing, and it is independent of any install or cleanup.
-  [providerDegradation](settings-json.md#providerdegradation) describes its settings.
-
-An install writes no provider block: the lifecycle document, the provider settings that it
-generates, declares no providers (`{"enabled": false, "providers": {}}`). With no provider declared, a
-stop selects nothing, stops nothing, and the safety loop still records the attempt and its result
-in the degradation event, the record of a change of state under
-`<coordination-root>/logs/observer/providers/`.
 
 ## Benchmarks
 

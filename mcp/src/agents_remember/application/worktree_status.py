@@ -598,8 +598,11 @@ def _terminal_cleanup_next_args(
     contract_path: Path,
     accepted_arguments: dict[str, object],
 ) -> dict[str, object]:
+    cleaned = {
+        key: value for key, value in accepted_arguments.items() if key != "teardown_providers"
+    }
     return {
         "contract_path": contract_path.as_posix(),
         "dry_run": False,
-        **accepted_arguments,
+        **cleaned,
     }

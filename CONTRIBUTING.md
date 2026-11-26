@@ -19,7 +19,7 @@ vulnerability as the [Security Policy](SECURITY.md) says, not in a public issue.
 | `mcp/certification-profile-v1.json` | This repository's certification profile. See [Certification](#certification). |
 | `dashboard/` | The dashboard's source: TypeScript and React, built with Vite. Git ignores its build output. |
 | `skills/` | The source of the skills that the tool server serves. |
-| `system/`, `providers/`, `benchmarks/` | The source of the runtime assets that the package carries. |
+| `system/`, `benchmarks/` | The source of the runtime assets that the package carries. |
 | `examples/mcp/` | Example settings files. |
 | `docs/` | The user documentation. `docs/design/` holds design pages for contributors. |
 | `docs/assets/` | The pictures and the video that `README.md` shows. |
@@ -136,7 +136,7 @@ source and run the script. Never edit a copy by hand.
 | --- | --- | --- |
 | `skills/` and its derived instruction facts | `mcp/src/agents_remember/package_data/runtime/skills/` | `mcp/.venv/bin/python scripts/renew-instructions.py` |
 | `docs/tool-details.md` | `mcp/src/agents_remember/package_data/runtime/docs/tool-details.md` | `mcp/.venv/bin/python scripts/renew-instructions.py` |
-| `benchmarks/`, `providers/`, `system/` | `package_data/benchmarks/`, `package_data/runtime/providers/` and `package_data/runtime/system/` under `mcp/src/agents_remember/` | `python3 scripts/sync-runtime.py` |
+| `benchmarks/`, `system/` | `package_data/benchmarks/` and `package_data/runtime/system/` under `mcp/src/agents_remember/` | `python3 scripts/sync-runtime.py` |
 | The Python models of the dashboard's data | `dashboard/src/types/projection.schema.json`, `dashboard/src/types/projection.ts` | `mcp/.venv/bin/python scripts/sync-projection-types.py` |
 | `dashboard/dist/`, the built dashboard | `mcp/src/agents_remember/package_data/dashboard/` and the file `dashboard.fingerprint` beside it | `python3 scripts/sync-dashboard.py` |
 
