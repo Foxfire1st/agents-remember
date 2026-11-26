@@ -37,6 +37,7 @@ from agents_remember.application.knowledge_writer.code_anchors import (
     AnchorResolutionError,
     CodeSnapshot,
 )
+from agents_remember.application.knowledge_writer.family_rows import reached_family_facts
 from agents_remember.application.knowledge_writer.file_publication import PublicationError
 from agents_remember.application.knowledge_writer.handoff import Problem, read_handoff
 from agents_remember.application.knowledge_writer.history_check import owner_history_problems
@@ -162,6 +163,7 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         trace_items=_trace_items(request.worklist),
         onboarding_sources=_onboarding_sources(request.worklist),
         onboarding_counted=_onboarding_counted(request.worklist),
+        reached_family_members=reached_family_facts(request.worklist),
         memory_base=request.memory_base,
         coordination_root=request.coordination_root,
         repo_name=request.repo_name,

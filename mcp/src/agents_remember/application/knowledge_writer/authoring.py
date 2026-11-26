@@ -46,6 +46,7 @@ from agents_remember.application.knowledge_writer.entry_handles import (
     assign_entries,
     ordered_entries,
 )
+from agents_remember.application.knowledge_writer.family_rows import ReachedFamilyFacts
 from agents_remember.application.knowledge_writer.handoff import (
     HANDLE_PREFIX,
     EntryRequest,
@@ -186,6 +187,7 @@ class Authoring(RepointRowAuthoring):
     # The persisted worklist's onboarding items' counted change by subject (MIK-R53 rule 2):
     # the gate's comparison when the writer's updated-row check cannot read the recorded base.
     onboarding_counted: Mapping[str, bool] = field(default_factory=dict)
+    reached_family_members: Mapping[str, ReachedFamilyFacts] = field(default_factory=dict)
     # The leaf's recorded memory base for a fresh card comparison.
     memory_base: str | None = None
     coordination_root: Path | None = None
