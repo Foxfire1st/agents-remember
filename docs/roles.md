@@ -25,7 +25,7 @@ The product has eight roles. A role agent holds exactly one of them.
 | Worker | Builds one task in the task's code worktree and writes one report. | one task |
 | Reviewer | Reviews one task against its requirement and records a verdict with its findings. It reviews the code change and the memory change. | one task |
 | Curator | Brings the memory of the code repository in line with the reviewed code change of one task. | one task |
-| Investigator | Looks into one question that belongs to no task and writes one report. It changes no code, no memory and no task document. | no task document, one sprint, or one sprint and one of its masters |
+| Investigator | Looks into one question that belongs to no task and writes one report. It changes no code, no memory and no task document. | no task document, one sprint, one standalone master, or one sprint and one of its masters |
 | Bootstrap | Sets up one code repository for a new user. It is the role of the first run. | no task document |
 
 Two names stand beside the roles:
@@ -139,7 +139,12 @@ coordinate, each in its own scope:
   requirement within its meaning, the checks around a landing, and the closeout and the landing
   of its tasks.
 
-A coordinating role agent sends upward only a question that needs your decision.
+A Manager sends upward only matters reserved for the Architect (such as first reports, qualifying
+skeletons, changes to what a requirement asks, rounds beyond the settings limit, step-ups with no
+configured model, a second infrastructure failure of the same kind, effects outside its worktree,
+scratch folder or task, closeout exceptions, and publication-owner actions) and questions that need
+your decision. An Orchestrator forwards those Architect matters unchanged alongside questions that
+need your decision; qualifying skeletons keep their direct route to the owning Architect.
 
 The Architect performs no step of a landing. The one exception is the closeout of a task when you
 told the Architect in its chat to coordinate the role agents itself: it then runs the closeout
@@ -266,7 +271,9 @@ A role agent sends a message to another role agent with `role_message`. It names
 `agent_id`, or by `role` together with the task documents.
 
 A role agent's own chat text reaches no other role agent. A role agent's results, and what it
-waits for, travel by `role_message`.
+waits for, travel by `role_message`, except that a Manager waiting on a working child or on an
+already-sent developer question records that wait in its end line and status file and sends no
+`role_message` for the wait; that end line declares a valid named wait.
 
 ### How a long message travels
 
@@ -343,8 +350,10 @@ reply, and it names the reply's message file in `messageFile`.
 
 ## Where a question for you arrives
 
-A role agent with a parent sends a question that needs your decision to its parent with
-`role_message` and keeps working. Each parent passes it upward: Worker, Manager, Orchestrator,
+A role agent with a parent sends a question that needs your decision to its parent—or, for a
+Manager whose Architect named an Orchestrator as its reporting recipient, to that recorded
+reporting recipient while its launch parent stays fixed—with `role_message` and keeps working.
+Each parent passes it upward: Worker, Manager, Orchestrator,
 Architect. You meet the question in the chat of the role agent at the top of that chain, which is
 the Architect unless you started another role agent from the role launcher. A role agent without
 a parent asks you in its own chat.
@@ -416,11 +425,9 @@ status `waiting for subagents` or `waiting for background`.
 
 ## Close a role agent
 
-- The role agent that started a Worker, a Reviewer or a Curator closes it with `retire_child`. The
-  call names the task document, the role and a reason. The host archives the role agent without
-  giving it a turn; a role agent in a running turn is archived only with `interrupt_turn`.
+- Use [`retire_child`](tool-details.md#retire_child) to close any other role agent within the caller's
+  scope. Open child seats must be retired first.
 - A message to an archived role agent is refused.
-- When the worktree of a task is finalized, cleaned up or abandoned, the product archives the role
-  agents of that task on the host.
-- The dashboard has no control that closes a role agent. Its role launcher resumes a closed
-  role agent with "Revive"; see [Dashboard](dashboard.md).
+- When a leaf is finalized, cleaned up or abandoned, the product archives its leaf role agents.
+- When the developer archives an agent in Paseo, AR records its retirement on the next host-state
+  refresh. The AR dashboard offers "Revive" for closed role agents. See [Dashboard](dashboard.md).

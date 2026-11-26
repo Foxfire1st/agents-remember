@@ -445,7 +445,8 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
 
     def test_an_archived_recipient_still_answers_the_sender_its_outcome(self) -> None:
         manager, worker, _located = self.hold_open_worker("archived message")
-        retire(self, manager, worker, interrupt_turn=True)
+        retired = retire(self, self.architect, worker, interrupt_turn=True)
+        self.assertEqual(retired["status"], "retired", retired)
 
         by_id = self.message(manager, agent_id=worker, text="read state")
 

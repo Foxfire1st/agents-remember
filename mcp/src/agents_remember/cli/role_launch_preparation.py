@@ -196,6 +196,7 @@ class RoleHandoverRequest:
     # catalog cannot say without a live call): the brief exclusion predicate reads
     # this, never the harness name alone.
     accepts_tool_servers: bool | None = None
+    owning_architect_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +221,7 @@ def prepare_role_handover(  # noqa: PLR0913 -- chat_started rides the rule-6 lau
     started_by: StartingAgent | None = None,
     chat_started: bool = False,
     step_up: str | None = None,
+    owning_architect_id: str | None = None,
 ) -> PreparedRoleHandover:
     """Prepare the canonical role handover and the exact launch inputs of one role."""
 
@@ -259,6 +261,7 @@ def prepare_role_handover(  # noqa: PLR0913 -- chat_started rides the rule-6 lau
             session_options=session_options,
             harness_id=agent_id,
             accepts_tool_servers=handover_accepts,
+            owning_architect_id=owning_architect_id,
         )
     )
     return PreparedRoleHandover(
@@ -732,25 +735,13 @@ def _compile_handover(request: RoleHandoverRequest) -> dict[str, Any]:
                 else None
             ),
             "ownerRelation": _owner_relation(
-                started_by, role=context.role, context=context, chat_started=chat_started
+                started_by,
+                role=context.role,
+                context=context,
+                chat_started=chat_started,
+                owning_architect_id=request.owning_architect_id,
             ),
-            "developerQuestions": (
-                "Because another agent started this role, send what needs the "
-                "developer's decision to that parent with role_message on "
-                f"agents-remember-task, addressed to agent {started_by.agent_id}. "
-                "This rule takes precedence over generic own-chat guidance for this case. "
-                "Say what you hold back, and what you recommend and why. "
-                "Keep working on everything independent of the answer; do not end your turn "
-                "on the question or hold a wait for the developer. When no independent work "
-                "remains, record your state in your report and say you await your parent's "
-                "message; put no question to the developer in your own chat."
-                if started_by is not None
-                else (
-                    "Put every question for the developer in your own chat: write it as your reply "
-                    "in this session and end your turn. The developer reads this chat in the "
-                    "dashboard and answers in it. Never send a developer question to another agent."
-                )
-            ),
+            "developerQuestions": _developer_questions(started_by, context.role),
             "developerQuestionRoute": (
                 {"mode": "parent", "agentId": started_by.agent_id}
                 if started_by is not None
@@ -957,12 +948,41 @@ def _entry_mode(started_by: StartingAgent | None, chat_started: bool) -> str:
     return "chat-role-start" if chat_started else "dashboard-role-start"
 
 
+def _developer_questions(started_by: StartingAgent | None, role: LauncherRole) -> str:
+    if started_by is None:
+        return (
+            "Put every question for the developer in your own chat: write it as your reply "
+            "in this session and end your turn. The developer reads this chat in the "
+            "dashboard and answers in it. Never send a developer question to another agent."
+        )
+    if role in {"orchestrator", "manager"}:
+        return (
+            "Send developer questions with role_message on agents-remember-task to the "
+            "reporting recipient recorded in your report. Otherwise use your launch "
+            "parent's agent ID. Say what you hold back and what you recommend and why. "
+            "Continue work that does not depend on the answer. Record pending decisions "
+            "through your role's question procedure."
+        )
+    return (
+        "Because another agent started this role, send what needs the "
+        "developer's decision to that parent with role_message on "
+        f"agents-remember-task, addressed to agent {started_by.agent_id}. "
+        "This rule takes precedence over generic own-chat guidance for this case. "
+        "Say what you hold back, and what you recommend and why. "
+        "Keep working on everything independent of the answer; do not end your turn "
+        "on the question or hold a wait for the developer. When no independent work "
+        "remains, record your state in your report and say you await your parent's "
+        "message; put no question to the developer in your own chat."
+    )
+
+
 def _owner_relation(
     started_by: StartingAgent | None,
     *,
     role: LauncherRole,
     context: RoleLaunchContext,
     chat_started: bool = False,
+    owning_architect_id: str | None = None,
 ) -> str:
     """Whom this role answers to: the agent that started it, or nobody but the developer.
 
@@ -998,17 +1018,24 @@ def _owner_relation(
             "is not the address of a return."
         )
     if role in {"orchestrator", "manager"}:
+        direct_skeleton = (
+            f" Address a qualifying direct skeleton to your owning Architect, "
+            f"agent ID {owning_architect_id}, with role_message."
+            if role == "manager" and owning_architect_id is not None
+            else ""
+        )
+        relay = (
+            " Forward Architect matters unchanged as your role instructs."
+            if role == "orchestrator"
+            else ""
+        )
         return (
             f"Agent {started_by.agent_id} ({started_by.role} · {started_by.subject}) started this "
-            "role and is its parent in Paseo. Send that agent only what needs the developer's "
-            "decision, as your role text defines it, "
-            f"with {ROLE_MESSAGE_TOOL}, {addressed}. Send one further "
-            "message with the path of your report when the whole assignment is finished or "
-            "cannot be finished. Decide everything else yourself and record it in your "
-            "rulings record, list of requirement sentences to change, and status file; send "
-            "no other assignment questions, forwarded role messages or landing notices. "
-            "The selected AR sprint/master/leaf is work scope; the parent is the agent "
-            "named here and no other."
+            "role and is its parent in Paseo. Send Architect matters and developer questions "
+            f"with {ROLE_MESSAGE_TOOL} through your role's assigned reporting route. Follow your "
+            "role for permission notices and closeout results. Send the final report path "
+            f"{addressed.rstrip('.')}.{relay}{direct_skeleton} "
+            "The selected AR sprint/master/leaf is work scope."
         )
     if role in LEAF_ROLES:
         return (

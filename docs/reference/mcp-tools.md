@@ -577,9 +577,9 @@ section describes the tools.
 | --- | --- | --- |
 | `role_start` | Start one role agent for one selection of task documents. A role agent that calls it becomes the parent of the role agent it starts. Repeating `request_id` reconciles the same role agent and never starts a second. | `role`, `request_id`, the document references that the role requires (`sprint_document_ref`, `master_document_ref`, `task_document_ref`), optional `agent`, `model`, `effort`, `feature_values`, `step_up`, `replaces_agent_id`, `replaces_interrupt_turn=false` |
 | `role_start_set` | Start the Worker, the Reviewer and the Curator of one task in one call. Only the Manager of the task's master can call it. The Worker opens; the Reviewer and the Curator are held, unless `reviewer_message` opens the Reviewer. Repeating `request_id` reconciles the same three role agents and opens no held role agent. The tool does not prescribe the order in which the instructions of the roles start the stages. | `request_id`, the three document references, optional `reviewer_message`, the choices for each role in `worker` / `reviewer` / `curator`, `replaces`, `replaces_interrupt_turn=false` |
-| `user_settings_init` | Preview or create the user settings file with one harness for all roles or a harness for each named role. An existing file is read and never overwritten. The target `host-authority` is refused, because the preparation of the host writes the `paseoRuntime` block. | `target="role-settings"`, `harness` or `roles`, `dry_run=false` |
+| `user_settings_init` | Preview or create the user settings file with one harness for all roles or a harness for each named role. An existing file is read and never overwritten. The target `host-authority` is refused, because the preparation of the host writes the `paseoRuntime` block. | `target` (required; use `"role-settings"`), optional `harness` or `roles`, `dry_run=false` |
 | `role_message` | Send one text message to one role agent; with `wait`, return its reply. | `text`, `agent_id` or `role` with the document references, optional `body`, `attach`, `wait=false`, `timeout_seconds=300`, `withdraw_held_message_id` |
-| `retire_child` | Retire one role agent of a task without giving it a turn. Only the role agent that started it can call it; the launch record names the caller and the reason. | `task_document_ref`, `role`, optional `reason`, `agent_id`, `interrupt_turn=false` |
+| `retire_child` | Archive a role agent by ID within the caller's scope and record the retirement. | `agent_id`, `role`, optional `sprint_document_ref`, `master_document_ref`, `task_document_ref`, `reason`, `interrupt_turn=false` |
 
 [Tool details](../tool-details.md) explains `role_start_set` and `retire_child` at length. The
 section "user_settings_init" of the [settings reference](settings-json.md) describes the file
@@ -616,8 +616,11 @@ at most eight Investigators that are not closed; a further start is refused
 Starts run one at a time. A call waits up to 60 seconds for another start to end; then it is
 refused, and its `nextAction` says to call again with the same arguments. Only the role agent that
 started an execution repeats its `request_id`. A request that has a stored answer is answered
-from it. A role agent that finished, was canceled or was rejected is reconciled and never started
-again; a repeat for an archived role agent is refused.
+from it. An explicitly retired role agent is never started again; a non-step-up `rejected`
+launch, a closing leaf receipt, or a receipt without a saved replay request is reconciled and
+never started again. A `stopped` launch (including one observed as archived on the host) or a
+`rejected` step-up launch that still holds a saved replay request and is neither explicitly
+retired nor closing can restart on a repeat of its `request_id`.
 
 `step_up` takes one sentence of reason. The start then uses the alternative launch choices that
 `orchestration.roles.<role>.stepUp` names in the user settings file; the
@@ -645,12 +648,16 @@ each copy. A missing requirement file does not stop the start: its row in `INDEX
 
 ### One role agent for each role of a task
 
-A task holds one role agent for each role. A start with a new `request_id` for a role that has a
-holder is refused and names the holder. A start with `replaces_agent_id` names the holder, retires
-it first and then starts the successor; the successor's handover names the report paths of the
-role agent it replaces. A role agent replaces only a holder that it started itself. A holder that
-is in a turn is replaced only with `replaces_interrupt_turn=true`. In `role_start_set`, `replaces`
-names the holder for each role.
+A task holds one role agent for each role. A start with a new `request_id` for an occupied role
+names the holder. For an ordinary leaf replacement, name the holder with `replaces_agent_id`
+within `retire_child` scope; a holder in a turn or with running subagents requires
+`replaces_interrupt_turn=true`. For a step-up leaf replacement (explicit `step_up` or automatic
+step-up), only the holder's starter may replace it, and the start is refused with HTTP 409 if
+the holder is in a turn, waiting on a permission prompt, or has running provider subagents, even
+when `replaces_interrupt_turn=true`. The successor's handover names the former holder's report
+paths. In `role_start_set`, `replaces` names each holder. Starting a Manager or Orchestrator
+requires its earlier execution to be closed. The start records eligible retirements, and child
+seats continue.
 
 ### The answer of a start
 

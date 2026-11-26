@@ -109,7 +109,8 @@
 //            -> {serverId, agentId, found: boolean, archived: boolean, alreadyArchived?: boolean,
 //                archivedAt?: string}
 //            Archives a live agent. An agent that is already archived, or that the runtime does
-//            not have, is not an error.
+//            not have, is not an error. After an error, a connected lookup that still finds the
+//            live agent returns the failure code `paseo_archive_refused`.
 //
 //   AGENT is {id, provider, model, thinkingOptionId, title, labels, workspaceId, cwd, status,
 //   archivedAt, createdAt}: what the runtime reports as applied, `thinkingOptionId` being the
@@ -951,11 +952,14 @@ async function archiveAgent({ api, daemon }, input) {
     result = await api.agents.ref(agentId).archive()
   } catch (error) {
     // Another caller may have archived or removed the agent between the lookup and this call.
-    // What the runtime holds now decides: archived or gone is not an error; anything else is.
+    // A connected read distinguishes a live, unchanged agent from an uncertain outcome.
     if (daemon.getConnectionState().status !== 'connected') throw error
     const after = await findAgent(api, daemon, agentId)
+    if (daemon.getConnectionState().status !== 'connected') throw error
     if (!after) return { serverId, agentId, found: false, archived: false }
-    if (!nonEmpty(after.archivedAt)) throw error
+    if (!nonEmpty(after.archivedAt)) {
+      throw failure('paseo_archive_refused', describe(error).message)
+    }
     return { ...archived, alreadyArchived: true, archivedAt: after.archivedAt }
   }
   return { ...archived, alreadyArchived: false, archivedAt: result.archivedAt }

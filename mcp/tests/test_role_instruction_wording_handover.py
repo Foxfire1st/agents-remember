@@ -51,6 +51,7 @@ from agents_remember.models.role_capsules.types import (
     compute_content_digest,
 )
 from agents_remember.models.role_launcher import RoleSelection
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.tasks import TaskDocument
 from mcp.server.fastmcp import FastMCP
@@ -227,6 +228,7 @@ class HandoverTextWordingTests(unittest.TestCase):
         started_by: StartingAgent | None,
         *,
         chat_started: bool = False,
+        owning_architect_id: str | None = None,
     ) -> dict[str, Any]:
         context, workspace = self.launch_of(role)
         request_id = uuid.uuid4()
@@ -241,11 +243,18 @@ class HandoverTextWordingTests(unittest.TestCase):
                 request_id=request_id,
                 started_by=started_by,
                 chat_started=chat_started,
+                owning_architect_id=owning_architect_id,
             )
         )
 
-    def compiled(self, role: str, started_by: StartingAgent | None) -> tuple[str, dict[str, Any]]:
-        prepared = self.prepared(role, started_by)
+    def compiled(
+        self,
+        role: str,
+        started_by: StartingAgent | None,
+        *,
+        owning_architect_id: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        prepared = self.prepared(role, started_by, owning_architect_id=owning_architect_id)
         return prepared["prompt"], prepared["handover"]
 
     @staticmethod
@@ -303,7 +312,18 @@ class HandoverTextWordingTests(unittest.TestCase):
                 )
                 self.assertEqual(projection["host"]["developerQuestionRoute"], expected_route)
                 self.assertEqual(complete["host"]["developerQuestionRoute"], expected_route)
-                if routed:
+                if routed and role in {"manager", "orchestrator"}:
+                    assert parent is not None
+                    self.assertIn(
+                        "reporting recipient recorded in your report. Otherwise use your launch "
+                        "parent's agent ID.",
+                        question,
+                    )
+                    self.assertEqual(handover["host"]["parent"]["agentId"], parent.agent_id)
+                    self.assertIn("role_message on agents-remember-task", question)
+                    self.assertNotIn("addressed to the return address", question)
+                    self.assertIn("Continue work that does not depend on the answer", question)
+                elif routed:
                     assert parent is not None
                     self.assertIn(
                         "send what needs the developer's decision to that parent",
@@ -352,8 +372,8 @@ class HandoverTextWordingTests(unittest.TestCase):
             StartingAgent("2f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "orchestrator", "SPRINT"),
             StartingAgent("3f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "manager", "MASTER"),
         )
-        final = "Send one further message with the path of your report when the whole assignment is finished or cannot be finished."
-        # No role may start the free agent, so a parented Bootstrap handover cannot exist.
+        # MIK-R196: no role may start the free agent, so a parented Bootstrap handover cannot
+        # exist and is not a shape this wording test can ask the product for.
         for role in (one for one in LAUNCHER_ROLES if one != "bootstrap"):
             for parent in (None, *parents):
                 with self.subTest(role=role, parent=parent.role if parent else None):
@@ -380,14 +400,17 @@ class HandoverTextWordingTests(unittest.TestCase):
                             f"Agent {parent.agent_id} ({parent.role} · {parent.subject}) started this role and is its parent in Paseo.",
                             relation,
                         )
+                        self.assertIn("Send Architect matters and developer questions", relation)
+                        self.assertIn("assigned reporting route", relation)
+                        self.assertIn("permission notices and closeout results", relation)
                         self.assertIn(
-                            "what needs the developer's decision, as your role text defines it",
-                            relation,
+                            "Send the final report path addressed to the return address", relation
                         )
-                        self.assertIn(final, relation)
-                        self.assertIn("addressed to the return address", relation)
+                        if role == "orchestrator":
+                            self.assertIn("Forward Architect matters unchanged", relation)
                         self.assertNotIn("addressed to its agent id", relation)
                         self.assertNotIn("questions about the assignment and your result", relation)
+                        self.assertNotIn("Send that agent only what needs", relation)
                         self.assertNotIn("questions about the assignment and your result", prompt)
                     elif role in {"worker", "reviewer", "curator"}:
                         self.assertIn("Send no routine result to the parent.", relation)
@@ -408,6 +431,38 @@ class HandoverTextWordingTests(unittest.TestCase):
                             "developer's decision, and your result",
                             relation,
                         )
+
+    def test_manager_first_prompt_addresses_skeleton_only_with_verified_architect(self) -> None:
+        sprint = TaskDocumentRef(repository="repo", path="sprint/task.json")
+        parent = StartingAgent(str(uuid.uuid4()), "orchestrator", "SPRINT", sprint_ref=sprint)
+        architect_id = str(uuid.uuid4())
+        expected_return = {
+            "role": "orchestrator",
+            "sprint_document_ref": sprint.model_dump(mode="json"),
+        }
+        for owning_architect_id in (None, architect_id):
+            with self.subTest(owning_architect_id=owning_architect_id):
+                prompt, handover = self.compiled(
+                    "manager", parent, owning_architect_id=owning_architect_id
+                )
+                projected = json.loads(
+                    prompt.split("AR owner assignment and canonical task handover:\n", 1)[1]
+                )["host"]
+                self.assertEqual(projected["parent"], handover["host"]["parent"])
+                self.assertEqual(projected["parent"]["agentId"], parent.agent_id)
+                self.assertEqual(projected["parent"]["returnAddress"], expected_return)
+                self.assertNotIn("ownerRelation", projected)
+                relation = handover["host"]["ownerRelation"]
+                self.assertIn("Send Architect matters and developer questions", relation)
+                self.assertIn("addressed to the return address role orchestrator", relation)
+                if owning_architect_id is None:
+                    self.assertNotIn("owning Architect, agent ID", relation)
+                else:
+                    self.assertIn(
+                        "Address a qualifying direct skeleton to your owning Architect, "
+                        f"agent ID {architect_id}, with role_message.",
+                        relation,
+                    )
 
     def test_the_first_message_names_no_forbidden_host_string(self) -> None:
         parent = StartingAgent("1f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "architect", "Projects")

@@ -4302,6 +4302,7 @@ consumers = [
   "mcp/tests/test_l84_unique_detail_pointers.py",
   "mcp/tests/test_mik_r196_bootstrap_delivery.py",
   "mcp/tests/test_native_retire.py",
+  "mcp/tests/test_paseo_launch_outcomes.py",
   "mcp/tests/test_paseo_role_answers_l111.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",

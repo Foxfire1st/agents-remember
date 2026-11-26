@@ -767,8 +767,7 @@ ARCHITECT_ACTION_CLAUSES = {
     "changed by that act: its status note, counts, order state and **In work now** section. Include the "
     "task, stage, agents and time since that state began. Leave product-mirrored stage fields with "
     "their existing owner; do not write a contradictory second status.",
-    "40:3": "After receiving a report, check whether its sender is still in a turn. If it ended with unfinished "
-    "authorized work and no valid named wait or stop, send a continuation at once.",
+    "40:3": "Check report senders\u2019 turns. Send continuations immediately for ended turns with unfinished authorized work and no valid wait or stop. A Manager\u2019s end line naming the working child and awaited stage declares a named wait.",
     "10:0": "If your harness offers helpers (sub-agents), they run on your own seat's model unless the developer names another.",
     "40:0": "Identify stalls from task progress. These include fifteen minutes without an active turn, or a "
     "ready task left unstarted.",

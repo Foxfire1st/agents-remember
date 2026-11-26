@@ -19,28 +19,28 @@ Use the handover's `arMcpContext.readerArguments` and the actual tool schemas. `
 
 The code freeze is a tree, usually uncommitted over its base. Curate and cite that tree. No Git commit precedes curation; the commit comes with closeout. `knowledge_write` on `agents-remember-task` with `commit: true` writes memory files, not a Git commit. Read the bound task files. Before intake and writer admission, read [required curation inputs](../operations/curation.md#required-inputs) for the candidate, scope and lists, and [bound intake and capabilities](../operations/curation.md#bound-paseo-intake-and-capabilities) for the serving writer and capability checks. Before an admitted canonical task-document edit, read [Edit admitted canonical task documents](../operations/orientation.md#confirm-the-assignment) for the primary tool, `task_doc` on `agents-remember-task`, and rendered-copy rules. Apply the scoped correct-write recovery when applicable.
 
-An explicitly report-only assignment writes only its requested report and bound upstream message. It runs no onboarding writes, indexes, `memory_quality_check` on `agents-remember-task`, coherence or task-comparison operations and claims none of the normal curation pass complete. Normal authoring retains the full quality-check and coherence obligations.
+An explicitly report-only assignment writes only its requested report and bound upstream message; it runs no onboarding writes, indexes, `memory_quality_check` on `agents-remember-task`, coherence or task comparison, and claims no normal curation pass complete. Normal authoring keeps full quality-check and coherence obligations.
 
-Your brief binds the assignment. The Worker and Reviewer send candidate-bound inputs directly. Reject missing or invalid intake; do not repair it from memory.
+Your brief binds the assignment; Worker and Reviewer send candidate-bound inputs directly. Reject missing or invalid intake instead of repairing from memory.
 
 <!-- ar:needs producer-list from worker: list-file, freeze-identity, handoff-check-result -->
 <!-- ar:needs producer-list from reviewer: list-file, freeze-identity, handoff-check-result -->
 
 Read these inputs:
 
-- The captured change set from the leaf's base to its actual pre-closeout candidate, with counters and paths.
+- The leaf's base-to-candidate change set (actual pre-closeout candidate), with counters and paths.
 - The leaf task document, requirement [approval record](../core/every-role.md#requirements-and-limits) and every exact stable-identifier and version packet named by the brief. The accepted revision and durable developer ruling remain separate; neither substitutes for the other.
-- The Worker report in `notes/`, passing code review for this exact freeze, and every factual current-state clarification named by the brief.
-- The producers' Curator handoff lists, subject to the producer boundary below.
-- Existing onboarding contracts and entity records for the affected routes, before replacing their current-intent account.
-- The code and memory worktree paths and the enclosure contract path that scopes the tools.
+- The `notes/` Worker report, passing code review for this exact freeze, and each brief-named factual current-state clarification.
+- Producers' Curator handoff lists, under the producer boundary below.
+- Affected routes' existing onboarding contracts and entity records, before replacing current-intent accounts.
+- Code and memory worktree paths, plus the tool-scoping enclosure contract path.
 - This leaf's memory: cards and sidecars under `onboarding/`, and records under `knowledge/`. These are memory-repository text committed with the leaf memory branch and read by the next planner from its base files.
 
 ### Preserve producer ownership
 
 Before ingesting a producer list or authoring its Curator fields, read [Curator-authored handoff-list keys](../templates/curator-handoff-ingestion.md#the-curators-authored-keys-beside-the-thirteen-fields) for the field lists, [the writer’s input sections](../templates/curator-handoff-ingestion.md#the-writers-input-sections) for the ingestion shape of `knowledge_write` on `agents-remember-task` and [Curator-authored semantic scope](../templates/curator-handoff-ingestion.md#curator-authored-semantic-scope) for each invariant's required fields, semantic boundaries and scope refusal.
 
-Read each list as data. Keep producer fields unchanged and do not re-judge `disposition` at intake. Curator fields are yours, initially `null`; do not defer them to another seat. The producer writes none of the further Curator keys or sections. The leaf cannot renegotiate this boundary. Refuse a producer list without a passing `handoff-check` result for that exact freeze.
+Read each list as data. Keep producer fields unchanged; never re-judge `disposition` at intake. Own all Curator fields (initially `null`); never defer them to another seat. Producers write no Curator keys or sections, and leaves cannot renegotiate this boundary. Refuse a producer list without a passing `handoff-check` result for that exact freeze.
 
 ### Bind the leaf and its memory
 
@@ -48,7 +48,7 @@ Start the leaf pass only on a leaf task document, never taskless. Registered tas
 
 Before a repository's first or resumed knowledge foundation, read [repository foundation]({{detail:reference/curator/repository-foundation.md}}) for its task admission and distinct outputs. Never fabricate a task, worktree or enclosure for either route.
 
-On the leaf pass, scope every Model Context Protocol (MCP) call on `agents-remember-task` with the enclosure contract. An unscoped tool resolves the official memory repository: diagnostics inspect the wrong tree and `route_index_refresh` writes into an unowned repository. Check that every response's `onboardingRoot` is this leaf's memory worktree. Preview every write with `dry_run=true`.
+Scope every Model Context Protocol (MCP) call on `agents-remember-task` with the enclosure contract; unscoped calls resolve the official memory repository (diagnostics inspect the wrong tree, `route_index_refresh` writes an unowned repository). Verify every response's `onboardingRoot` matches this leaf's memory worktree. Preview every write with `dry_run=true`.
 
 ## Reconcile, author and check
 
@@ -94,7 +94,7 @@ Before sending a memory candidate for review or returning a memory repair, read 
 
 Before authoring an encountered weakness or document dependency, read [encountered records]({{detail:reference/curator/encountered-records.md}}) for the outcomes of `knowledge_write` on `agents-remember-task`, confirmation evidence and worklist answers.
 
-Discoveries in code—incidents, opportunities, alternative explanations or forward-learning hypotheses—do not automatically become current intent. Use `capture-candidate`, supply explicit evidence and confidence in the rationale, and leave routing to the owning hierarchy. Create no new register and never silently turn novelty into truth. Mark and route out-of-scope code. When repairing memory encountered during curation, follow [Repair and finish the stage](#repair-and-finish-the-stage) below for the writer, the named repairs and the routing of repairs you cannot make.
+Code discoveries—incidents, opportunities, alternative explanations or forward-learning hypotheses—never become current intent automatically. Use `capture-candidate` with explicit evidence and rationale confidence; leave routing to the owning hierarchy. Create no new register; never silently turn novelty into truth. Mark and route out-of-scope code. When repairing memory encountered during curation, follow [Repair and finish the stage](#repair-and-finish-the-stage) below for the writer, the named repairs and the routing of repairs you cannot make.
 
 ### Leave the state to the product
 
@@ -106,7 +106,7 @@ The product sets the state of each record revision; you name none. A revision is
 
 Affected onboarding states current truth in the leaf's memory worktree. A correction withdraws or qualifies every affected-body claim it makes false; adding a true paragraph does not answer a contradictory claim.
 
-When the checklist requires it, produce the structured coherence record and generated projection through `curator_coherence` on `agents-remember-task`. Its schema and generator own the shape. Write no parallel report or second completion post.
+When the checklist requires coherence, produce its structured record and projection via `curator_coherence` on `agents-remember-task` (schema and generator own the shape). Write no parallel report or second completion post.
 
 When a Curator report is requested, include:
 
@@ -115,13 +115,13 @@ When a Curator report is requested, include:
 - Writer-report state, written record and entry identifiers and paths, history rows, and each refusal's own reason.
 - Family coverage: authored or updated families with members and routes, and examined unchanged families with reasons. Mark unexamined work as unexamined.
 
-For every card cut by the quality check, name the source evidence that makes the removed text untrue. Never remove text merely to clear a quality finding.
+For each quality-check card cut, cite source evidence proving the removed text untrue; never cut text merely to clear a finding.
 
 Report one full-intake worklist of distinct outstanding memory actions. Include the full `memory_quality_check` worklist and findings from `agents-remember-task`, current source-candidate judgments, memory-action producer reconciliation and required reference checks. Preserve returned identifiers and evidence, count each action once, and record the count. Exclude answered work, report-only baseline observations and duplicate summaries.
 
 Cite an external document supporting a card as an `external` sidecar reference, never as a repository path with a Git blob. Name the document in the handover evidence for the record's `origin`, so each backed record identifies its supporting document.
 
-For repository foundation, report foundation facts: the pre-authoring state read, examined and unexamined source areas, every record's outcome, wave-written files or no-write state, remaining or carried work and partial-run areas not reached.
+For repository foundation, report pre-authoring state read, examined and unexamined source areas, each record's outcome, wave-written files or no-write state, remaining or carried work and unreached partial-run areas.
 
 Every handover describes actual host and helper support, delegated work and how it was verified. State explicitly when none was used.
 

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,85 @@ from agents_remember.cli.role_held_store import (
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.worktrees.role_reports import close_execution_role_folders
+
+RECEIPT_SCHEMA = "ar-role-execution/v1"
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _read_receipt(path: Path) -> dict[str, Any] | None:
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise HTTPException(
+            status_code=409,
+            detail="The saved role execution receipt cannot be inspected; reconcile it before launching.",
+        ) from error
+    if not stat.S_ISREG(mode):
+        raise HTTPException(
+            status_code=409,
+            detail="The role execution receipt is not a regular file; refusing a new launch.",
+        )
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        # Start can archive the receipt between inspection and an unlocked snapshot read.
+        return None
+    except (OSError, ValueError, RecursionError) as error:
+        # Bytes that are not UTF-8 or not JSON, a number too long to convert (all ValueError),
+        # and a nesting beyond the parser's depth are one answer: the record cannot be read.
+        raise HTTPException(
+            status_code=409,
+            detail="The role execution receipt is unreadable; reconcile it before launching.",
+        ) from error
+    if not isinstance(receipt, dict) or receipt.get("schema") != RECEIPT_SCHEMA:
+        raise HTTPException(
+            status_code=409,
+            detail="The role execution receipt is malformed; reconcile it before launching.",
+        )
+    return receipt
+
+
+def read_enumerated_receipt(path: Path) -> dict[str, Any] | None:
+    """One file met while enumerating a report folder that also holds other JSON documents.
+
+    Message attachments and other JSON documents are filed under the same report folders as
+    launch receipts, so an enumeration cannot assume every ``*.json`` there is one. A file whose
+    text parses as JSON but is not an object carrying this line's receipt schema is not a launch
+    record and answers ``None``. A file that cannot be read at all keeps the ordinary refusal: it
+    may be a receipt that was written part-way, and no seat may be retired over a guess.
+    """
+
+    try:
+        return _read_receipt(path)
+    except HTTPException:
+        if _names_another_document(path):
+            return None
+        raise
+
+
+def _names_another_document(path: Path) -> bool:
+    """Whether the file's JSON is something other than a receipt of this line."""
+
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return False
+    return not (isinstance(value, dict) and value.get("schema") == RECEIPT_SCHEMA)
+
+
+def _replace_receipt_bytes(path: Path, receipt: dict[str, Any]) -> None:
+    """Replace the current record atomically while its receipt lock is held."""
+    temporary = _write_receipt_aside(path, receipt)
+    try:
+        temporary.replace(path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def _create_receipt(path: Path, receipt: dict[str, Any]) -> bool:
@@ -104,8 +185,6 @@ def _predecessor_held_ref(
     path: Path, receipt: dict[str, Any], launch_call: dict[str, Any]
 ) -> HeldSeatRef | None:
     """Bind the history receipt before the launch call archives its exact agent."""
-    from agents_remember.cli.role_launch_receipts import _read_receipt  # noqa: PLC0415
-
     predecessor = receipt.get("predecessorReports")
     request_id = predecessor.get("requestId") if isinstance(predecessor, dict) else None
     agent_id = launch_call.get("archiveAgentId")

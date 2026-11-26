@@ -547,6 +547,9 @@ class ReplacedExecutionTests(RepeatTestCase):
             # The winner's receipt names this file; it is there, byte for byte.
             self.assertEqual(self.binding_bytes(theirs), saved)
             self.assertEqual(self.receipt(theirs), winner)
+            # Finish this fixture's reserved predecessor before the next independent race.
+            self.assertEqual(self.dispatch(theirs)[0], 200)
+            self.free_seat_for("manager")
             self.receipt_path(theirs).unlink()
         with self.subTest("this launch wrote the file first and the winner's receipt names it"):
             mine = self.request("manager")

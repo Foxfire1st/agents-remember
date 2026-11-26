@@ -86,8 +86,8 @@ Before preparing a review handoff, read [Keep requirement revisions and attempts
 After that handoff and a current-lineage proof, the Manager closes the leaf out directly:
 
 1. `worktree_closeout_preview`;
-2. the approval stop: the developer's commit approval for standalone or final work, or the recorded delegated series authority;
-3. `worktree_closeout_apply`, with an explicit message for each enabled leg and that authority as its intent note.
+2. The approval stop is the [Manager's standing leaf authority](../roles/manager.md#make-decisions-within-your-authority) or the developer's commit approval for final work. For a routine leaf, the standing authority answers the clean preview’s approval question.
+3. `worktree_closeout_apply` uses that authority as its intent note and an explicit message for each enabled leg.
 
 Before apply, confirm the [required curation evidence](../operations/closeout.md#bind-the-accepted-inputs-and-evidence), including the Curator's coherence validation when the checklist requires it. The apply checks task intent, lineage and the knowledge gate and records transaction evidence per leg. No release by an Orchestrator is needed.
 
@@ -149,11 +149,11 @@ Before coordinating build and landing order, read [Let dependencies determine th
 
 An atomic block exposes no intermediate leaf to super. For a closeout retry, follow [Recover an unfinished closeout](../operations/coordination.md#recover-an-unfinished-closeout) for the apply result and retry inputs.
 
-### Retire leaf agents
+### Retire agents
 
 Cleanup: the worker/reviewer/curator agents of a leaf are archived on the host when the leaf is finalized, cleaned up or abandoned; their reports stay. Manager/orchestrator seats are excluded.
 
-Before retiring a seat you started, follow [starter retirement](../core/every-role.md#start-and-configure-role-agents) for the starter’s `retire_child` duty and the refusal for another caller.
+Before retiring or replacing a seat, follow [role scope](../core/every-role.md#start-and-configure-role-agents) for `retire_child` and replacement authority.
 
 ## The exit
 - When the master reaches its completion boundary, prepare the master-handover packet with the

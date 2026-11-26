@@ -49,7 +49,7 @@ def assert_coordination_steps(
             (
                 "40:3",
                 "continuing unfinished work after a report",
-                "send a continuation at once",
+                "Send continuations immediately for ended turns with unfinished authorized work",
             ),
         ),
         "orchestrator": (

@@ -87,7 +87,7 @@ For a Worker, Curator or Reviewer whose required Manager notice fails delivery, 
 
 When the master line moves, run the supported sync of your leaf.
 
-- When no path changed on both sides, run the focused tests once more and tell the Manager. The tools derive the mechanical checks again, and the Manager's closeout preview decides. Send no new freeze to the Reviewer and begin no round. Request no Reviewer confirmation or receipt.
+- When no path changed on both sides, rerun focused tests and report the code and memory pair to the Manager. The tools derive mechanical checks again. For a changed pair, the Manager gets the Curator’s refreshed read before routine closeout. Send no new freeze to the Reviewer and begin no round. Request no Reviewer confirmation or receipt.
 - When a path changed on both sides or a focused test fails, repair exactly that and send the same Reviewer one look at the repair.
 
 Route memory-file conflicts to the Curator. Ask the Manager only for a sync step the operation reserves to it.

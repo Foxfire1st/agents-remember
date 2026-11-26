@@ -42,7 +42,7 @@ Start another role with `role_start` once, naming the role, a chosen request ide
 
 Keep the per-start override route. After a start with overrides, the starter checks and sets the seat's features. If the seat differs from the resolved choices, record a product issue rather than remove the overrides.
 
-The agent that started a seat retires the agent in it with `retire_child`; the tool refuses any other caller.
+Follow the shared `retire_child` instruction for the scope that governs retirement and replacement.
 
 ## Handle a developer-declared takeover
 
@@ -101,7 +101,7 @@ A silent turn end is not an artifact handover. The host treats a Worker, Reviewe
 
 No role watches, polls, nudges or runs a timer loop on its own initiative. This ban has no per-seat exception. Roles wait passively for messages and answer a waking message before ending the turn again.
 
-Architect, Orchestrator, Manager: After receiving a report, check whether its sender is still in a turn. If it ended with unfinished authorized work and no valid named wait or stop, send a continuation at once.
+Architect, Orchestrator, Manager: Check report senders’ turns. Send continuations immediately for ended turns with unfinished authorized work and no valid wait or stop. A Manager’s end line naming the working child and awaited stage declares a named wait.
 
 Collect helpers and continue ordinary work. Use the helper-wait procedure declared by your launch; otherwise preserve the harness's native collection within the turn. If your harness offers helpers (sub-agents), they run on your own seat's model unless the developer names another. On any harness, end a turn that waits for your helpers with `WAITING FOR SUBAGENTS:` and each helper's progress, and a turn that waits for a process you started with `WAITING FOR BACKGROUND:` and, for each process, what it is, its process id or log file and when it should end; `check in <N> minutes` (1 to 30, default 3) sets the host's check. Answer the host's progress check in your own chat; a wake by your harness continues your own work. Collect completed work, then declare another wait or continue. While waiting, send no parent progress message with `role_message` on `agents-remember-task` and create no watcher, polling loop or second wake mechanism.
 

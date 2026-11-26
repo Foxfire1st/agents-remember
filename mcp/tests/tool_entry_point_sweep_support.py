@@ -730,6 +730,7 @@ class EntryPointWorld:
                 "task_document_ref": self.leaf_ref,
             },
             "retire_child": {
+                "agent_id": "00000000-0000-4000-8000-000000000002",
                 "task_document_ref": self.leaf_ref,
                 "role": "worker",
             },

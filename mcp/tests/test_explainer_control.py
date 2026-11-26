@@ -599,27 +599,40 @@ class ManagerStartWriterTests(_World):
         self.assertEqual(read_record_architect(self.record_file()), ARCHITECT)
 
     def test_an_orchestrator_starter_records_its_architect_parent(self) -> None:
-        self.write_receipt(
-            _receipt_path(
-                self.config,
-                RoleSelection(role="orchestrator", sprintDocumentRef=self.sprint),
-            ),
-            agentId=ORCHESTRATOR,
-            role="orchestrator",
-            parentAgentId=ARCHITECT,
+        orchestrator_receipt = _receipt_path(
+            self.config,
+            RoleSelection(role="orchestrator", sprintDocumentRef=self.sprint),
         )
-        self.write_receipt(
+        architect_sessions = (
             self.config.coordination_root
             / "notes"
             / "reports"
             / EXECUTIONS_DIRECTORY
             / "architect"
             / "sessions"
-            / f"{uuid.uuid4()}.json",
-            agentId=ARCHITECT,
-            role="architect",
         )
+        for architect in (OTHER_ARCHITECT, ARCHITECT):
+            self.write_receipt(
+                architect_sessions / f"{uuid.uuid4()}.json",
+                agentId=architect,
+                role="architect",
+            )
         starter = StartingAgent(ORCHESTRATOR, "orchestrator", MASTER, sprint_ref=self.sprint)
+        self.write_receipt(
+            orchestrator_receipt,
+            agentId=str(uuid.uuid4()),
+            role="orchestrator",
+            parentAgentId=OTHER_ARCHITECT,
+        )
+        self.assertIsNone(remember_master_architect(self.config, self.request, starter))
+        self.assertFalse(self.record_file().exists())
+
+        self.write_receipt(
+            orchestrator_receipt,
+            agentId=ORCHESTRATOR,
+            role="orchestrator",
+            parentAgentId=ARCHITECT,
+        )
 
         record = remember_master_architect(self.config, self.request, starter)
 

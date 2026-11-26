@@ -520,7 +520,9 @@ def _orchestrator_parent(config: McpRuntimeConfig, started_by: StartingAgent) ->
     except (ValueError, TaskDocumentRefError):
         return None
     receipt = _readable_receipt(path)
-    parent = None if receipt is None else receipt.get("parentAgentId")
+    if receipt is None or receipt.get("agentId") != started_by.agent_id:
+        return None
+    parent = receipt.get("parentAgentId")
     return parent if isinstance(parent, str) and parent else None
 
 

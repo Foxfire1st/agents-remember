@@ -132,11 +132,11 @@ The recipient reads the message and, when a filed message includes a `body` or a
 <!-- ar:roles architect,orchestrator,manager -->
 ## Recover an unfinished closeout
 
-Read the result of `worktree_closeout_apply` on `agents-remember-task` for the state reached and any blocker. If the call is interrupted, check the existing per-leg transaction evidence. After correcting a blocker, rerun `worktree_closeout_apply` with the approval and explicit messages for the enabled legs.
+Read the result of `worktree_closeout_apply` on `agents-remember-task` for the state reached and any blocker. If interrupted, check the per-leg transaction evidence. After correcting a blocker, rerun `worktree_closeout_apply` with the applicable authority and explicit messages for enabled legs.
 
 For a direct landing, read `worktree_status` on `agents-remember-task` for the current generation and advertised actions. Use `worktree_operation_control` with that generation for an advertised direct-landing action. Read saved journal records for audit.
 
-The Manager applies closeout under the recorded authority; no release by an Orchestrator is needed. When an Orchestrator coordinates the sprint, send it the apply's result or refusal with the leaf, master and sprint references, blockers and acceptance facts. Report facts only; do not rank other masters.
+The Manager applies under its standing leaf authority without Orchestrator release. Send the coordinating Orchestrator the result or refusal, leaf, master and sprint references, blockers and acceptance facts. Report facts only. Do not rank other masters.
 
 ## Apply task edits and rebuild projections
 
@@ -150,7 +150,7 @@ Never whitelist task operations, patch a stale queue row, or treat queue or oper
 
 When invoked, reassess from canonical AR task facts and actual evidence. Create no background polling or second scheduler. Paseo turn and status data describe execution; they are not another requirements, review, curation or acceptance ledger.
 
-Questions from children follow your role's developer-question rule. Permission notices follow the procedure below.
+Developer questions from children follow your role's developer-question rule. Permission notices follow the procedure below.
 
 ## Relay a child's permission notice
 
