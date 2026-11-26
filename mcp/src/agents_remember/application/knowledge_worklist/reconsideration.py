@@ -258,10 +258,10 @@ class _Evaluation:
         return self._record_file_trigger(target) or self._row_trigger(target), {}
 
     def _record_file_trigger(self, target: str) -> dict[str, Any] | None:
+        if not self.inputs.base.record_file_changed(self.inputs.candidate, target):
+            return None
         before = self.inputs.base.record_file(target)
         after = self.inputs.candidate.record_file(target)
-        if before == after:
-            return None
         paths = [None if one is None else one[0] for one in (before, after)]
         return {
             "trigger": RECORD_FILE,
