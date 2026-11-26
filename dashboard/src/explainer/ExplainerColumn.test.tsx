@@ -7,13 +7,21 @@ import { act, cleanup, fireEvent, render, waitFor, type RenderResult } from '@te
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { frameTrayStore, type ComposerEdge } from '../cockpit/frameTrayChannel';
+import { PASEO_TRANSIENT_OPEN_RETRY_DELAYS_MS } from '../cockpit/paseoFrameControl';
+import { publishReviewPublication } from '../data/reviewMemoryWatch';
 import { seatStore } from '../tray/traySeats';
 import { shownChatId } from '../tray/shownChat';
 import { sendNow } from '../tray/TrayPanel';
 import { trayStore } from '../tray/trayStore';
 import { ExplainerColumn } from './ExplainerColumn';
 import { resetExplainerSeats } from './ExplainerTaskDocument';
-import { askFirstRequest, placeholderExplainerTargetId, resetFirstRequest, pendingFirstRequest } from './request';
+import {
+  askFirstRequest,
+  clearFirstRequest,
+  placeholderExplainerTargetId,
+  resetFirstRequest,
+  pendingFirstRequest,
+} from './request';
 import {
   ADDRESS,
   BUILD,
@@ -418,6 +426,175 @@ describe('on Send (rule 4)', () => {
     fireEvent.click(send);
     expect(server.posts()).toHaveLength(1);
   });
+
+  it('transitions from Operations placeholder through build to live seat and recovers from transient agent-not-found on an early supported ready without reloading the iframe', async () => {
+    const frameOrigin = 'https://host.example';
+    const capabilities = [
+      'open-agent',
+      'ping',
+      'page',
+      'shown-on-display',
+      'navigated',
+      'on-chat',
+      'load-failed',
+      'pick',
+    ];
+    const starting = explainerState({
+      seat: 'none',
+      build: {
+        attempt: 'a1',
+        state: 'running',
+        startedAt: '2026-10-19T14:31:00Z',
+        steps: [{ name: 'Start the explainer in Paseo', state: 'running' }],
+        failedStep: null,
+        reason: null,
+      },
+    });
+    const live = explainerState({
+      seat: 'live',
+      agentId: 'a-exp',
+      workspaceId: 'wks-paseo',
+      generation: 1,
+    });
+    let stateCalls = 0;
+    const buildBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (address: string, init?: RequestInit) => {
+        const url = new URL(String(address), 'http://dashboard.test');
+        if (url.pathname === '/api/role-launch/frame') {
+          return new Response(
+            JSON.stringify({
+              available: true,
+              frameBaseUrl: frameOrigin,
+              serverId: 's',
+              projectsWorkspaceId: 'wks_projects',
+            }),
+            { headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (url.pathname === BUILD && (init?.method ?? 'GET') === 'POST') {
+          buildBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+          return new Response(JSON.stringify({ attempt: 'a1', state: starting }), {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (url.pathname === STATE) {
+          stateCalls += 1;
+          const body =
+            stateCalls === 1
+              ? explainerState({ seat: 'none' })
+              : stateCalls === 2
+                ? starting
+                : live;
+          return new Response(JSON.stringify(body), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({}), { headers: { 'Content-Type': 'application/json' } });
+      }),
+    );
+
+    vi.useFakeTimers();
+    const flush = async (ms = 0) => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    };
+
+    let panel: RenderResult | null = null;
+    try {
+      panel = render(<ExplainerColumn address={ADDRESS} task={TASK} active={true} />);
+      await flush();
+
+      expect(panel.getByTestId('explainer-placeholder')).toBeTruthy();
+      expect(panel.getByTestId('explainer-column').dataset.phase).toBe('placeholder');
+
+      fireEvent.click(panel.getByTestId('explainer-explain'));
+      expect(panel.getByTestId('explainer-first-request')).toBeTruthy();
+      act(() => {
+        trayStore.getState().setText('Explain this change.');
+      });
+      fireEvent.click(panel.getByTestId('explainer-send'));
+      await flush();
+
+      expect(buildBodies).toHaveLength(1);
+      expect(panel.getByTestId('explainer-build')).toBeTruthy();
+
+      // Seat comes live while staying inside Operations.
+      act(() => {
+        publishReviewPublication({
+          repo: ADDRESS.repository,
+          master: ADDRESS.master,
+          leaf: ADDRESS.leaf,
+          kind: 'environment',
+          environmentStamp: 'env-live-1',
+        });
+      });
+      await flush();
+
+      expect(panel.getByTestId('explainer-column').dataset.phase).toBe('live');
+      expect(panel.getByTestId('explainer-frame-holder').getAttribute('aria-hidden')).toBeNull();
+      const frame = panel.container.querySelector('iframe');
+      expect(frame).not.toBeNull();
+      const posts = vi.fn();
+      frame!.contentWindow!.postMessage = posts as unknown as Window['postMessage'];
+      const openCalls = () =>
+        posts.mock.calls.filter(([message]) => (message as { type?: string }).type === 'ar.open');
+      const deliver = (data: Record<string, unknown>) => {
+        act(() => {
+          window.dispatchEvent(
+            new MessageEvent('message', {
+              data: { source: 'ar-plugin', ...data },
+              origin: frameOrigin,
+              source: frame!.contentWindow,
+            }),
+          );
+        });
+      };
+
+      // 1. Ready with open capability triggers the first ar.open for the newly started seat.
+      deliver({ type: 'ready', capabilities });
+      expect(openCalls()).toEqual([
+        [{ type: 'ar.open', agentId: 'a-exp', workspaceId: 'wks-paseo' }, frameOrigin],
+      ]);
+
+      // 2. Transient agent-not-found arrives while the newly created seat finishes registering.
+      deliver({ type: 'error', code: 'agent-not-found', agentId: 'a-exp' });
+      expect(panel.getByTestId('paseo-frame-agent-problem').textContent).toContain('gone');
+
+      // 3. Before the 250ms retry timer fires, a supported same-frame ready immediately posts ar.open #2 on the same iframe.
+      await flush(PASEO_TRANSIENT_OPEN_RETRY_DELAYS_MS[0] - 50);
+      expect(openCalls()).toHaveLength(1);
+      deliver({ type: 'ready', capabilities });
+      expect(openCalls()).toEqual([
+        [{ type: 'ar.open', agentId: 'a-exp', workspaceId: 'wks-paseo' }, frameOrigin],
+        [{ type: 'ar.open', agentId: 'a-exp', workspaceId: 'wks-paseo' }, frameOrigin],
+      ]);
+      expect(panel.container.querySelector('iframe')).toBe(frame);
+      expect(panel.getByTestId('paseo-frame').getAttribute('data-generation')).toBe('1');
+      expect(panel.getByTestId('explainer-column').dataset.phase).toBe('live');
+
+      // The cancelled timer does not fire a duplicate open.
+      await flush(PASEO_TRANSIENT_OPEN_RETRY_DELAYS_MS[0]);
+      expect(openCalls()).toHaveLength(2);
+
+      // 4. Shown settles the chat and clears the problem.
+      deliver({ type: 'shown', agentId: 'a-exp' });
+      expect(panel.queryByTestId('paseo-frame-agent-problem')).toBeNull();
+
+      // 5. A subsequent ready on the same iframe sends no third ar.open and keeps the same iframe instance.
+      deliver({ type: 'ready', capabilities });
+      expect(openCalls()).toHaveLength(2);
+      expect(panel.container.querySelector('iframe')).toBe(frame);
+      expect(panel.getByTestId('paseo-frame').getAttribute('data-generation')).toBe('1');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      panel?.unmount();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('later requests (rule 5)', () => {
@@ -633,5 +810,50 @@ describe('nothing starts a model turn (rule 10)', () => {
     view(false);
     await act(async () => {});
     expect(server.calls).toEqual([]);
+  });
+
+  it('refreshes on review.explainer.changed and shows the live chat without toggling active', async () => {
+    const server = backend({
+      [STATE]: [
+        { body: explainerState() },
+        { body: explainerState({ seat: 'live', agentId: 'a-exp-live', workspaceId: 'wks_live' }) },
+      ],
+    });
+    const panel = view(true);
+    await waitFor(() => expect(panel.getByTestId('explainer-placeholder')).toBeTruthy());
+    expect(server.count('GET', STATE)).toBe(1);
+
+    // Open the first-request form as if Explain was pressed before the seat started elsewhere.
+    act(() => askFirstRequest(ADDRESS));
+    await panel.findByTestId('explainer-first-request');
+
+    // A publication event arrives while the column stays active: it refreshes and displays the live chat.
+    act(() => {
+      publishReviewPublication({
+        repo: ADDRESS.repository,
+        master: ADDRESS.master,
+        leaf: ADDRESS.leaf,
+        kind: 'environment',
+        environmentStamp: 'env-live-1',
+      });
+    });
+
+    await waitFor(() => expect(panel.getByTestId('explainer-column').dataset.phase).toBe('live'));
+    expect(server.count('GET', STATE)).toBe(2);
+    expect(panel.queryByTestId('explainer-first-request')).toBeNull();
+    expect(panel.getByTestId('explainer-frame-holder').getAttribute('aria-hidden')).toBeNull();
+  });
+
+  it('clears the first-request form when cleared from another surface', async () => {
+    backend({ [STATE]: { body: explainerState() } });
+    const panel = view(true);
+    await waitFor(() => expect(panel.getByTestId('explainer-placeholder')).toBeTruthy());
+
+    act(() => askFirstRequest(ADDRESS));
+    await panel.findByTestId('explainer-first-request');
+
+    act(() => clearFirstRequest(ADDRESS));
+    await waitFor(() => expect(panel.queryByTestId('explainer-first-request')).toBeNull());
+    expect(panel.getByTestId('explainer-placeholder')).toBeTruthy();
   });
 });

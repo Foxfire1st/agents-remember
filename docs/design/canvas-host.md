@@ -106,19 +106,86 @@ boundary instead of claiming them.
 
 ## Readiness before a revision becomes ready
 
-`canvas/readiness.py` checks the exact files of the next revision before they are published and
-before the frame's ready pointer moves to them: the entrypoint is one UTF-8 document, every
-reference stays inside this revision and names an admitted asset, every `data-evidence` reference
-resolves in the admitted evidence packet (the comparison, the claims of the explanation and the
-basis of each claim, stored with the revision), and declared motion is paired with a
-`prefers-reduced-motion: reduce` rule. The check starts no browser and no model, and says
-nothing about how good the explanation is.
+Before a revision is published and before the frame's ready pointer moves to it, the product runs
+both a static check (`canvas/readiness.py`) and a model-free Chromium load (`canvas/prospective.py`,
+`canvas/canvas-prospective-load.mjs`, `canvas/canvas-dom-inventory.mjs`) over the exact bytes about
+to be published. Neither check runs a model, and neither judges explanation quality.
 
-Two callers run the check. `render`, the explainer's tool (the function `render_and_publish` in
-`canvas/explainer_server.py`), runs it on the draft together with one browser load, and publishes only when the check is ready
-and the load reports `loaded`; otherwise it returns its report and publishes nothing. `Presenter.publish` runs
-it and refuses with `readiness-failed` and the named failing check. In both cases the last ready
-revision stays in place.
+Two callers run readiness. `render`, the explainer's tool (`render_and_publish` in
+`canvas/explainer_server.py`), collects draft assets, carries referenced kit files automatically,
+runs the Chromium load and static readiness checks, computes the revision inventory, and publishes
+only when static readiness is ready and the Chromium load reports `loaded`; otherwise it returns its
+report and publishes nothing. `Presenter.publish` runs static readiness and refuses with
+`readiness-failed` and the named failing check. In both cases the last ready revision stays in
+place.
+
+### Every `render()` check and its purpose
+
+| Check | Protection | Owning modules | What it checks and enforces |
+| --- | --- | --- | --- |
+| `grants/input` integrity and digests | Honesty | `canvas/explainer_server.py`, `canvas/presenter_tools.py` | Verifies the draft folder matches `instructions/grants.json` and checks the SHA-256 digest of `evidence.json` and the assignment input before loading (`grants-unreadable`, `input-unreadable`, `input-changed`), so a page is always judged against the bound packet. |
+| `O_NOFOLLOW`, path and symlink asset walk | Isolation | `canvas/presenter_assets.py`, `canvas/presenter_files.py` | Walks `drafts/assets/` through held directory descriptors opened with `O_NOFOLLOW`, refusing symbolic links, path escapes, backslashes, and unsafe paths (`escaped-asset`, `unsafe-asset-path`). |
+| `no-working-assets` and `entrypoint` | Access | `canvas/presenter_assets.py`, `canvas/readiness.py` | Refuses an empty `drafts/assets/` folder (`no-working-assets`) and confirms `index.html` (`entrypoint`) exists, is non-empty, and decodes as UTF-8 text. |
+| `claim-map-invalid`, `part-map` and basis resolution | Honesty | `canvas/explainer_claims.py`, `canvas/readiness.py`, `canvas/parts.py`, `application/review_evidence_adapter.py` | Validates `drafts/assets/claim-map.json` against `ClaimMap` (`claim-map-invalid`), derives `part-map` from `data-part` (refusing invalid or duplicate part IDs and unknown or unmapped `data-evidence-claim` values), and verifies every claim's bases resolve against the bound comparison's trees, collections, and supplemental receipts. |
+| `intended-claim-required` | Honesty | `application/review_evidence_adapter.py`, `application/review_frame_store.py` | On a planned binding, refuses claims resting solely on requirement-packet, task-document, or reference receipts unless classified `intended` (refusing `recorded-fact` or `mechanical-signal`), so planned behavior is never stated as recorded code fact. |
+| `binding-moved` | Honesty | `canvas/explainer_server.py`, `application/review_frame_store.py` | Re-reads `binding.json` under the frame lock immediately before publication and refuses `binding-moved` when the workspace binding moved after the draft was prepared. |
+| Typed `FrameManifest` validators (`ar-review-frame-manifest/v2`) | Honesty, Isolation | `models/knowledge/review_frame.py`, `application/review_frame_store.py` | Enforces strict `ar-review-frame-manifest/v2` validation (`extra="forbid"`, unique relative asset paths, entrypoint membership, SHA-256 `artifact_digest`, valid `parent_revision` and `asset_ancestry`, matching task/comparison binding and evidence packet, valid `part_map` and `supplemental` receipts) on publication and readback. |
+| `admitted-assets` | Isolation, Access | `canvas/readiness.py`, `canvas/kit_references.py` | Parses HTML/SVG (`href`, `xlink:href`, `src`, `poster`, `srcset`, inline `<style>`/`<script>` and `style` attributes), CSS (`url()`, `@import`), and non-kit JS/MJS (`import`, `export ... from`, literal `import(...)`) relative to each referrer with POSIX path normalization. Contained `../` segments that normalize inside the revision root (such as `../kit/<library>/<version>/...` from a nested file) are admitted; paths escaping above the revision root, external URLs, missing assets, and unknown or modified files under `drafts/assets/kit/` (verified by byte size and SHA-256 against `kit/manifest.json`) are refused. Referenced `kit/<library>/<version>/...` files are carried automatically with their licences and companions. |
+| `evidence-references` static scan and browser DOM citation check | Honesty | `canvas/readiness.py`, `canvas/canvas-prospective-load.mjs`, `canvas/prospective.py` | Statically verifies every `data-evidence` attribute in HTML/SVG against the admitted evidence packet, and checks `[data-evidence]`, `[data-evidence-claim]`, and `[data-claim]` in the rendered Chromium DOM over a bounded post-load window so dynamically inserted, empty, or unresolved references and claims fail publication. |
+| `media-controls` static HTML media check | Safety, Access | `canvas/readiness.py` | Refuses any HTML `<audio>` or `<video>` element with `autoplay` or `loop`, or without reader `controls`. |
+| Visible-content paint check | Access | `canvas/canvas-prospective-load.mjs`, `canvas/prospective.py` | Loads the draft once in Chromium at 1280×720 under ordinary browser defaults and checks by paint suppression that visible text, controls, or graphics reach the rendered viewport. No reduced-motion or quiet-mode check applies to explainer pages: CSS, Web Animations, canvas, `requestAnimationFrame`, and controlled video motion publish without refusal or remark. |
+| Served CSP, sandbox, policy headers and task-wide 512 MiB cap | Isolation, Safety | `canvas/policy.py`, `canvas/canvas-prospective-load.mjs`, `application/review_frame_store.py` | Serves staged assets from a loopback server carrying the production CSP (`sandbox allow-scripts`, `default-src 'none'`, `connect-src 'none'`, session-prefix allowlists) and COOP/CORP/Permissions-Policy headers, failing on console errors, `pageerror`s, failed requests, or requests outside the revision. Publication enforces the 512 MiB task-wide store ceiling across every physical byte in the frame area (including revision metadata and any persisted `revisions/<n>/inventory.json`) while leaving per-revision file count and byte size unbounded by default; when a legal revision fits without room left for `inventory.json`, publication still succeeds without the sidecar and records that the inventory was left out because the task's storage limit was reached. |
+| Interactive sweep | Access (report-only) | `canvas/canvas-interactive-report.mjs`, `canvas/prospective.py` | Exercises initially present controls across four viewport/input passes (`1280-click`, `1280-keyboard`, `390-click`, `390-keyboard`) and saves screenshots under `renders/run-NNN/interactions/`. Never refuses publication; when the load process's time window is nearly reached, stops resumably and records unreached passes and controls in `unvisited` and `notReached`, never `errors`, so a repeated `render()` of the same draft visits only what remains. |
+| Revision inventory | Diagnostic (report-only) | `canvas/inventory.py`, `application/review_frame_inventory.py` | Computes figure counts, techniques, kit libraries, code excerpt counts, and unused draft assets from the live DOM (with a static HTML fallback) and persists `revisions/<n>/inventory.json` beside `manifest.json`. Strictly diagnostic and report-only; never refuses publication. |
+
+### Revision inventory
+
+Every `render()` computes a non-refusing `inventory` object (`canvas/inventory.py`) from the browser
+load's live DOM scan (with a static HTML fallback when no browser DOM inventory is supplied), asset
+reachability from `index.html`, and observed browser-loaded assets:
+
+- `figures`: `total`, `byKind` (`svg`, `canvas`, `driven`), and `byTechnique` (normalized lowercase
+  kebab-case counts from `data-technique`).
+- `kitLibraries`: sorted distinct shipped kit library IDs referenced from reachable draft files or
+  observed as loaded in the browser (dormant unreachable modules and unreferenced pinned kit copies
+  do not count as used).
+- `codeExcerpts`: `highlighted` and `plain` code block counts.
+- `unusedAssets`: sorted draft asset paths unreachable from `index.html` and unobserved by browser
+  loads, excluding `index.html`, `claim-map.json`, licence and notice files (`LICENSE*`, `LICENCE*`,
+  `NOTICE*`, `LICENSES/`), and non-JS/non-CSS companion files of used kit libraries.
+- `incomplete`: present and `true` when the bounded DOM scan hit its node cap or could not finish
+  (the dashboard one-line summary appends `· incomplete` so consumers see partial reporting while
+  page eligibility stays unaffected).
+
+`inventory` appears in `render()`'s answer (within its token bound) and in
+`renders/run-NNN/report.json`. On publication it is persisted beside `manifest.json` at
+`revisions/<n>/inventory.json` (`application/review_frame_inventory.py`), keeping the revision
+manifest schema unchanged; `inventory.json` is neither an admitted asset nor served to the
+sandboxed `iframe`. The task meter (`application/review_frame_usage.py`) counts every physical byte
+in the task frame area, including revision metadata and any persisted `inventory.json`, and physical
+bytes never exceed the configured task limit. When a legal revision fits but `inventory.json` does
+not fit in the remaining room, nothing is evicted and the revision publishes without the sidecar:
+`render()`'s answer and report carry `inventoryOmitted` stating plainly that the inventory was left
+out because the task's storage limit was reached, and the dashboard displays that revision without a
+`shows:` summary alongside that plain reason line. Otherwise, the dashboard formats the persisted
+inventory as a concise one-line summary (`shows: …`) beside `interactions checked` in the
+explanation header.
+
+### Render reply bound and overflow
+
+`render()` packs its reply within a 1,000-token bound
+(`mcp/src/agents_remember/mcp/registration/explainer_tools.py`, `canvas/explainer_answer_bounds.py`):
+
+- **Identity fields are never trimmed**: `state`, `run`, `report` (`renders/run-NNN/report.json`),
+  `picture`, `interactions` (`folder`, `count`), `publication` (`state`, `revision`, `coverage`,
+  `workspace`, `refusal`), optional `resumedFrom`, optional `browser`, optional `inventoryOmitted`,
+  and `errorsTotal`.
+- **Optional sections pack in order** within the remaining budget: `summary`, `inventory`,
+  `kitAssets`, and whole `errors` entries (individual error strings are never cut mid-text).
+- **Clean overflow to `report.json`**: any section or remaining errors that do not fit stay in
+  `renders/run-NNN/report.json`, and the reply records exact pointers in `moved` (naming each
+  spilled `part`, the target report path in `to`, `total` for `kitAssets`, and `shown`/`total` for
+  `errors`).
 
 ## The canvas host's protocol (`canvas/protocol.py`)
 
@@ -188,12 +255,17 @@ keeps the durable attempt records readable and publishes through the confined fr
   the workspace's `stages/` folder: reading, the chosen changes, the chosen parts, the
   self-contained explanations, the essay, and the visual plan. A planned binding follows the same
   stages.
-- **the workspace's inputs** are the task document and the requirement packets it names, copied
-  into `inputs/`. The `reports.md` manifest lists the source path and SHA-256 digest of each
-  readable report for the selected leaf. Read the reports in place. The empty notice names the
-  report root. `stages/` and `inputs/` are outside `drafts/`, so neither is published, rendered or
-  checked as page content. The text carries the content; a visual is made only where it helps a
-  part of the essay, and the page reads in full without its animations.
+- **the workspace's inputs and shipped references** include `inputs/` (the task document and the
+  requirement packets it names, plus `reports.md` listing the source path and SHA-256 digest of each
+  readable report for the selected leaf to read in place; its empty notice names the report root),
+  `kit/` (the pinned offline presentation kit), `starters/` (`README.md` and four standalone passing
+  kit starters), `exemplar/` (the synthetic reference page combining all four kit libraries),
+  `reference/`, `revisions/`, `stages/`, `drafts/`, `renders/`, and `scratch/`. Everything outside
+  `drafts/assets/` (such as `stages/`, `inputs/`, `starters/`, and `exemplar/`) is working or
+  reference material and is never published, rendered, or checked as page content. The page reads in
+  full without its animations, and the central mechanism of the change is shown by at least one
+  figure the reader drives (for a planned binding, the intended mechanism, marked intended), with
+  quoted code highlighted via the kit.
 - **the authoring attempt** (`canvas/presenter_store.py`), the durable record of one authoring run
   through `Presenter`, records caller, comparison binding, evidence
   digest, design identity, instruction composition, launch provenance, execution, session and
@@ -217,15 +289,22 @@ keeps the durable attempt records readable and publishes through the confined fr
   refuses `no-confined-harness`. The product supplies none: the explainer does not author through
   `Presenter`, it authors in its own workspace. The deterministic local
   harness in `canvas/presenter_host.py` is selected only by explicit callers such as tests.
-- **render** (`canvas/presenter_tools.py`) loads the explainer's draft in Chromium at 1280×720
-  without a model. Each run writes its own folder `renders/run-NNN/` in the explainer's
-  workspace, with `report.json`, `page.png` and `interactions/`; the reply names the folder and
-  carries no picture. The load answers `loaded`, `failed` or `unavailable`, and only `loaded`
-  lets a revision become ready. Before publication the static readiness check refuses an
+- **render** (`canvas/presenter_tools.py`, `canvas/explainer_server.py`,
+  `mcp/src/agents_remember/mcp/registration/explainer_tools.py`) carries referenced kit
+  files automatically (listed in `kitAssets`), loads the explainer's draft in Chromium at 1280×720
+  without a model under ordinary browser defaults, computes the non-refusing `inventory` (persisted
+  at `revisions/<n>/inventory.json` on publication), and runs the report-only interactive sweep.
+  Each run writes its own folder `renders/run-NNN/` in the
+  explainer's workspace, with `report.json`, `page.png` and `interactions/`; the reply stays within
+  its 1,000-token bound (keeping identity fields intact and spilling `summary`, `inventory`,
+  `kitAssets`, or whole `errors` cleanly to `renders/run-NNN/report.json` with exact pointers in
+  `moved`, see [Render reply bound and overflow](#render-reply-bound-and-overflow)) and carries no
+  picture. The load answers `loaded`, `failed` or `unavailable`, and only
+  `loaded` lets a revision become ready. Before publication the static readiness check refuses an
   autoplaying or looping `audio`/`video` element and one without controls; the frame store admits
-  `.webm` and `.mp4` assets as `video/webm` and `video/mp4`, and the page's figures rules apply to
-  a video as to any other figure: it plays on the reader's act, never loops, and reduced motion
-  shows its still frame with its steps listed. The node script of the load imports the Playwright module that
+  `.webm` and `.mp4` assets as `video/webm` and `video/mp4`, and a video plays on the reader's act
+  without looping and pairs with a still form and listed steps. No reduced-motion or quiet-mode
+  check applies to explainer pages. The node script of the load imports the Playwright module that
   `AR_PLAYWRIGHT` names, and the load runs on the Node the product installs for the host. The
   module and its Chromium are the product's own (`canvas/explainer_browser.py`): when either is
   missing at that first load, the load fetches both into `<data>/agents-remember/explainer-browser`
@@ -262,10 +341,11 @@ selector of the result and draws none of the lines.
 
 ## Supported boundaries and remaining limits
 
-The pinned offline kit is described in [canvas-kit.md](canvas-kit.md); selecting an entry carries
-its required notices into the immutable revision. The render path prospectively loads the page's
-exact selected assets in Chromium before publication. No standalone witness proves every kit
-entry's features.
+The pinned offline kit is described in [canvas-kit.md](canvas-kit.md); referencing an entry under
+`kit/<library>/<version>/...` carries its files and required notices into the immutable revision
+automatically. The render path prospectively loads the page's exact selected assets in Chromium
+before publication, and the test suite runs all four shipped starters and the exemplar through the
+same readiness, prospective load, and inventory checks.
 
 Native conversation, status, cancel, explicit resume and replacement name actual host identities.
 An uncertain create repeats its immutable idempotent request. A passive read of the history
@@ -274,9 +354,9 @@ resumes no session: when the host refuses a transcript as `presenter-transcript-
 `unavailable`. Retention is bounded, not complete-history archival.
 
 The first admitted document load receives `ar-canvas-binding/v1` from its mounted panel: a message
-with the session, the revision, the comparison, the protocol version `1` and `effects`, which is
-`false` when the dashboard's effects are off or the system asks for reduced motion. The panel
-sends it again when `effects` changes. Authored
+with the session, the revision, the comparison, and protocol version `1`. An explainer page is
+viewed apart from the dashboard, so the dashboard's reduced-motion setting and quiet (`effects`)
+switch stay on the dashboard application and are not sent to explainer pages. Authored
 pages mark bases with `data-evidence` and use the narrow `open-evidence` protocol. A second load
 revokes instead of sending another binding. Exact destination rendering remains with the mounted
 review's supported selectors; a destination that no selector matches opens nothing.
@@ -298,5 +378,5 @@ folder `dashboard/`.
 creates `mcp/.venv` with `scripts/bootstrap-mcp-venv.sh` and installs the dashboard's dependencies
 with `npm --prefix dashboard ci`.
 
-- Python: `mcp/.venv/bin/python -m pytest mcp/tests/test_canvas_host.py mcp/tests/test_canvas_presenter.py mcp/tests/test_canvas_serving.py mcp/tests/test_canvas_readiness.py`
+- Python: `mcp/.venv/bin/python -m pytest mcp/tests/test_canvas_host.py mcp/tests/test_canvas_presenter.py mcp/tests/test_canvas_serving.py mcp/tests/test_canvas_readiness.py mcp/tests/test_canvas_kit_references.py mcp/tests/test_canvas_motion.py mcp/tests/test_canvas_starters_exemplar.py`
 - Dashboard, from `dashboard/`: `npx vitest run src/panels/review/canvas src/panels/review/explainer`, `npx tsc -b`, `npx eslint src/panels/review/canvas src/panels/review/explainer`.

@@ -75,6 +75,10 @@ from agents_remember.serving.explainer_comparison import (
     _resolve_contract_for,
     _SendRequest,
 )
+from agents_remember.serving.explainer_inventory import (
+    manifest_inventory_lines,
+    revision_inventory_lines,
+)
 from agents_remember.serving.explainer_move_watch import move_notice_watch
 from agents_remember.serving.explainer_watcher import (
     CapturedComparison,
@@ -170,6 +174,8 @@ class ExplainerApplicationPorts:
         [Path, WorktreeContract, int | None], ReviewTrees | ReviewRefusal | None
     ]
     watcher: WatcherApplicationPorts
+    revision_inventory: Callable[[Path, int], dict[str, Any] | None] | None = None
+    revision_inventory_omitted_reason: Callable[[Path, int], str | None] | None = None
 
 
 __all__ = [
@@ -500,11 +506,23 @@ def _revisions(
     except ValueError:
         return []
     agreed = _agreed_number(config, scope)
-    return [
-        revision_row_of(manifest, agreed=agreed)
-        for number in retained_revision_numbers(frame.frame_dir)
-        if (manifest := application.revision_manifest(frame.frame_dir, number)) is not None
-    ]
+    rows: list[dict[str, Any]] = []
+    for number in retained_revision_numbers(frame.frame_dir):
+        manifest = application.revision_manifest(frame.frame_dir, number)
+        if manifest is None:
+            continue
+        inventory, inventory_omitted = revision_inventory_lines(
+            frame.frame_dir, manifest.revision, application
+        )
+        rows.append(
+            revision_row_of(
+                manifest,
+                agreed=agreed,
+                inventory=inventory,
+                inventory_omitted=inventory_omitted,
+            )
+        )
+    return rows
 
 
 def _selected_on_screen(
@@ -701,7 +719,15 @@ def stale_view(
         # Only a planned comparison is compared against the series contract's tips.
         contract = None if kept else composition.contract(scope)
         stale = _stale_answer(composition, scope, manifest, contract, selector=selector)
-        return {"stale": stale, "explanation": _explanation_view(manifest)}
+        inventory, inventory_omitted = manifest_inventory_lines(
+            lambda: _task_folder(deps.config, scope), scope.leaf_id, application, manifest
+        )
+        return {
+            "stale": stale,
+            "explanation": _explanation_view(
+                manifest, inventory=inventory, inventory_omitted=inventory_omitted
+            ),
+        }
 
     if not kept or composition.stale_answers is None:
         return produce()
@@ -724,10 +750,15 @@ def _moved(
     return notice.as_record()
 
 
-def _explanation_view(manifest: FrameManifest | None) -> dict[str, Any] | None:
+def _explanation_view(
+    manifest: FrameManifest | None,
+    *,
+    inventory: str | None = None,
+    inventory_omitted: str | None = None,
+) -> dict[str, Any] | None:
     if manifest is None:
         return None
-    return {
+    view: dict[str, Any] = {
         "revision": manifest.revision,
         "binding": serialize_frame_binding(manifest.binding),
         "comparison": manifest.binding.comparison_reference,
@@ -738,6 +769,11 @@ def _explanation_view(manifest: FrameManifest | None) -> dict[str, Any] | None:
         "focus": manifest.focus,
         "coverage": coverage_summary(manifest.interaction_coverage),
     }
+    if inventory is not None:
+        view["inventory"] = inventory
+    elif inventory_omitted is not None:
+        view["inventoryOmitted"] = inventory_omitted
+    return view
 
 
 def _last_render_view(workspace: Path) -> dict[str, Any] | None:
@@ -822,6 +858,9 @@ def _state_payload(
         None if state.binding is None else serialize_frame_binding(state.binding.binding)
     )
     has_identity = state.present or state.generation > 0
+    inventory, inventory_omitted = manifest_inventory_lines(
+        lambda: _task_folder(deps.config, scope), scope.leaf_id, application, manifest
+    )
     return {
         "state": "ok",
         "binding": serialized_binding,
@@ -836,12 +875,16 @@ def _state_payload(
             "generation": state.generation or None,
         },
         "agentId": state.agent_id if has_identity else None,
-        "workspaceId": str(state.workspace) if has_identity else None,
+        "workspaceId": (state.workspace_id or None) if has_identity else None,
         "workspace": str(state.workspace),
         "generation": state.generation,
         "retired": state.retired is not None,
         "retiredAt": None if state.retired is None else state.retired.get("at"),
-        "explanation": _explanation_view(manifest),
+        "explanation": _explanation_view(
+            manifest,
+            inventory=inventory,
+            inventory_omitted=inventory_omitted,
+        ),
         # Rule 4: the review page's own empty block repeats the last render's words when it ended
         # unavailable for a missing browser; a published page clears it (canvas.presenter_tools).
         "lastRender": _last_render_view(state.workspace),

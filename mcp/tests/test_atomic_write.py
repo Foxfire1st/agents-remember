@@ -165,6 +165,37 @@ class DirectoryFsyncTests(unittest.TestCase):
             self.assertEqual(path.read_text(encoding="utf-8"), "outer\n")
             self.assertEqual(_leftovers(root), [])
 
+    @unittest.skipIf(sys.platform == "win32", "descriptor paths use /proc/pid/fd on Linux")
+    def test_overlapping_writes_through_distinct_descriptor_paths_keep_in_flight_temps(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fd_a = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            fd_b = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                proc_dir = Path(f"/proc/{os.getpid()}/fd")
+                if not (proc_dir / str(fd_a)).is_dir():
+                    self.skipTest("/proc/<pid>/fd is unavailable on this platform")
+                path_a = proc_dir / str(fd_a) / "state.json"
+                path_b = proc_dir / str(fd_b) / "state.json"
+                real_replace = os.replace
+                nested: list[str] = []
+
+                def overlapping(source: object, target: object) -> None:
+                    if not nested:
+                        nested.append("inner")
+                        atomic_write.atomic_write_text(path_b, "inner\n")
+                    real_replace(source, target)  # type: ignore[arg-type]
+
+                with mock.patch.object(atomic_write.os, "replace", overlapping):
+                    atomic_write.atomic_write_text(path_a, "outer\n")
+                self.assertEqual((root / "state.json").read_text(encoding="utf-8"), "outer\n")
+                self.assertEqual(_leftovers(root), [])
+            finally:
+                os.close(fd_b)
+                os.close(fd_a)
+
     def test_a_leftover_that_cannot_be_removed_does_not_fail_the_publish(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

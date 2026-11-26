@@ -29,11 +29,10 @@ from typing import TYPE_CHECKING, Any
 from agents_remember.application.review_frame_store import (
     READY_POINTER,
     FrameRefused,
-    begin_draft,
     frame_scope,
     frames_area,
     publish_revision,
-    read_draft,
+    task_lock,
 )
 from agents_remember.canvas.explainer_access import (
     require_binding,
@@ -68,6 +67,15 @@ from agents_remember.canvas.explainer_paths import (
     copy_revision,
     leaf_lock_resource,
 )
+from agents_remember.canvas.explainer_staging import (
+    DraftStagingRequest,
+    prune_finished_staging,
+    safe_build_inventory,
+    stage_and_begin_draft,
+)
+from agents_remember.canvas.explainer_staging import (
+    record_published_inventory as _record_published_inventory,
+)
 from agents_remember.canvas.explainer_state import (
     BUSY,
     ExplainerBinding,
@@ -75,6 +83,8 @@ from agents_remember.canvas.explainer_state import (
     read_binding,
 )
 from agents_remember.canvas.explainer_target import ExplainerTargetReads
+from agents_remember.canvas.kit_references import carry_kit_assets
+from agents_remember.canvas.paths import PathRefused
 from agents_remember.canvas.presenter_assets import collect_assets
 from agents_remember.canvas.presenter_files import ensure_child, open_binary
 from agents_remember.canvas.presenter_store import (
@@ -85,11 +95,13 @@ from agents_remember.canvas.readiness import check_page
 
 if TYPE_CHECKING:  # annotation-only: the authoring class loads when a tool is actually called
     from agents_remember.canvas.presenter_tools import AuthoringTools
-from agents_remember.kernel.file_lock import LockAcquisitionTimeout, exclusive_file_lock
+from agents_remember.kernel.file_lock import (
+    LockAcquisitionTimeout,
+    exclusive_file_lock,
+)
 from agents_remember.models.knowledge.review_evidence import EvidencePacket
 from agents_remember.models.knowledge.review_frame import (
     FrameAsset,
-    FrameAuthoring,
     FrameBinding,
     FrameInteractionCoverage,
     FrameLimits,
@@ -467,15 +479,14 @@ def run_errors(report: Mapping[str, Any]) -> list[str]:
         for item in (report.get("readiness") or {}).get("failed", [])
     ]
     found += [f"load: {error}" for error in report.get("errors") or []]
+    found += [f"media-controls: {error}" for error in report.get("media_faults") or []]
     if report.get("pictureError"):
         found.append(f"picture: {report['pictureError']}")
     interactive = report.get("interactive") or {}
     found += [f"interaction: {error}" for error in interactive.get("errors") or []]
     found += [f"picture: {error}" for error in interactive.get("pictureErrors") or []]
     for one in interactive.get("passes") or []:
-        name = f"{one.get('width')}-{one.get('method')}" + (
-            "" if one.get("effects") else "-effects-off"
-        )
+        name = f"{one.get('width')}-{one.get('method')}"
         found += [f"pass {name}: {error}" for error in one.get("errors") or []]
         found += [
             f"pass {name}: control {control.get('index')}: {control.get('error')}"
@@ -505,6 +516,21 @@ def run_summary(report: Mapping[str, Any]) -> dict[str, int]:
     }
 
 
+def _record_publication_refusal(report: dict[str, Any], error: Exception) -> dict[str, Any]:
+    reason = (
+        "path-held"
+        if isinstance(error, PathRefused)
+        else getattr(error, "reason", None) or "publication-refused"
+    )
+    detail = getattr(error, "detail", str(error))
+    report["publication"] = {"state": "refused", "refusal": reason, "detail": detail}
+    if reason == "binding-moved":
+        report["state"] = "refused"
+        report["refusal"] = reason
+        report["detail"] = detail
+    return report
+
+
 def _render_and_publish(
     workspace: Path,
     *,
@@ -516,9 +542,11 @@ def _render_and_publish(
     authoring = explainer_authoring(workspace)
     drafts = workspace / DRAFTS_DIRECTORY
     limits = FrameLimits()
-    assets = collect_assets(drafts, limits)
+    draft_assets = collect_assets(drafts, limits)
+    assets, kit_result = carry_kit_assets(draft_assets)
+    carried_paths = sorted(kit_result.carried)
     packet = with_authored_claims(
-        EvidencePacket.model_validate_json(authoring.read("evidence.json")), assets
+        EvidencePacket.model_validate_json(authoring.read("evidence.json")), draft_assets
     )
     report = authoring.render(packet=packet, assets=assets)
     readiness = check_page(assets, entrypoint="index.html", packet=packet)
@@ -529,8 +557,24 @@ def _render_and_publish(
             "failed": len(readiness.failures),
         },
     }
-    if task_root is None or not readiness.ready or report.get("state") != "loaded":
+    report["kitAssets"] = carried_paths
+    if kit_result.kit_problems:
+        report["kitProblems"] = list(kit_result.kit_problems)
+    inventory = safe_build_inventory(draft_assets, report=report, carried_paths=carried_paths)
+    if inventory is not None:
+        report["inventory"] = inventory
+    if (
+        task_root is None
+        or not readiness.ready
+        or report.get("state") != "loaded"
+        or report.get("media_faults")
+    ):
         return report
+    if kit_result.kit_problems:
+        return _record_publication_refusal(
+            report,
+            ExplainerRefused("kit-problem", "; ".join(kit_result.kit_problems)),
+        )
     part_map = (
         ()
         if readiness.part_map is None or readiness.part_map.implicit
@@ -550,63 +594,55 @@ def _render_and_publish(
     scope = frame_scope(task_root, packet.comparison.leaf_id, EXPLAINER_FRAME)
     draft_binding = FrameBinding.from_packet(packet.comparison)
     source_cb = binding or (lambda: _binding_for_publish(workspace, draft_binding))
-    # The request names the page's bytes, so rendering the same page again (to resume its interaction
-    # run, or to read it again) is the same draft: its first authoring is kept, never refused. The
-    # request is content identity, not session identity: a reopened seat (a new session) that renders
-    # the same bytes is the same request too, answered unchanged. begin_draft still refuses a request
-    # whose focus, assets or folder differ.
-    earlier = read_draft(scope, request_id)
+    # Reading the earlier draft, allocating staging, and beginning the draft happen under one
+    # re-entrant task lock so concurrent renders and staging prunes never race.
     try:
-        begin_draft(
+        stage_and_begin_draft(
+            workspace,
             scope,
-            request_id=request_id,
-            authoring=(
-                earlier.authoring
-                if earlier is not None
-                else FrameAuthoring(
-                    request_id=request_id,
-                    session_id=seat or None,
-                    started_at=moment,
-                    finished_at=moment,
-                )
+            DraftStagingRequest(
+                drafts=drafts,
+                request_id=request_id,
+                seat=seat,
+                moment=moment,
+                focus=packet.scope,
+                assets=assets,
+                carried_kit=kit_result.carried,
+                draft_digest=digest,
+                limits=limits,
             ),
-            focus=packet.scope,
-            assets=assets,
-            working_directory=drafts.resolve(),
-            limits=limits,
-            now=moment,
         )
-        publication = publish_revision(
-            scope,
-            request_id=request_id,
-            entrypoint="index.html",
-            evidence=packet,
-            supplemental=packet.supplemental,
-            created_at=moment,
-            limits=limits,
-            part_map=part_map,
-            binding_source=source_cb,
-            interaction_coverage=coverage,
-        )
-    except (FrameRefused, ExplainerRefused) as error:
-        reason = getattr(error, "reason", None) or "publication-refused"
-        detail = getattr(error, "detail", str(error))
-        report["publication"] = {"state": "refused", "refusal": reason, "detail": detail}
-        if reason == "binding-moved":
-            report["state"] = "refused"
-            report["refusal"] = reason
-            report["detail"] = detail
-        return report
-    manifest = publication.manifest
-    report["publication"] = {
-        "state": "published" if publication.published else "unchanged",
-        "revision": None if manifest is None else manifest.revision,
-        "binding": None if manifest is None else manifest.binding.comparison_reference,
-        "coverage": coverage_summary(
-            coverage if manifest is None else manifest.interaction_coverage
-        ),
-        "partMap": [part.model_dump(mode="json") for part in part_map],
-    }
+        with exclusive_file_lock(task_lock(scope), "review frame store"):
+            publication = publish_revision(
+                scope,
+                request_id=request_id,
+                entrypoint="index.html",
+                evidence=packet,
+                supplemental=packet.supplemental,
+                created_at=moment,
+                limits=limits,
+                part_map=part_map,
+                binding_source=source_cb,
+                interaction_coverage=coverage,
+                advisory_inventory=inventory,
+            )
+            manifest = publication.manifest
+            report["publication"] = {
+                "state": "published" if publication.published else "unchanged",
+                "revision": None if manifest is None else manifest.revision,
+                "binding": None if manifest is None else manifest.binding.comparison_reference,
+                "coverage": coverage_summary(
+                    coverage if manifest is None else manifest.interaction_coverage
+                ),
+                "partMap": [part.model_dump(mode="json") for part in part_map],
+            }
+            if manifest is not None:
+                _record_published_inventory(
+                    scope, publication, inventory, limits.task_bytes, report
+                )
+            prune_finished_staging(workspace, scope)
+    except (FrameRefused, ExplainerRefused, PathRefused) as error:
+        return _record_publication_refusal(report, error)
     if publication.published and manifest is not None:
         # The workspace's revisions/ states what is published: the new revision is copied in from
         # the task at once, never left for the next build to find (the Manager's 16:40Z ruling).
@@ -653,7 +689,7 @@ def _pass_name(one: Mapping[str, Any]) -> str:
     """The runner's own name for a pass (canvas-interactive-report.mjs passName)."""
 
     method = str(one.get("method") or "")
-    return f"{one.get('width')}-{method if one.get('effects') else f'effects-off-{method}'}"
+    return f"{one.get('width')}-{method}"
 
 
 def _coverage_key(coverage: FrameInteractionCoverage) -> str:

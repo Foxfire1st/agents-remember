@@ -3,6 +3,7 @@
 // this; every hook here is one block of that state, so none of them grows past a screen.
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 
+import { subscribeReviewPublication } from '../data/reviewMemoryWatch';
 import { usePublishShownChat, type ShownChat } from '../tray/shownChat';
 import { pickKindWords } from '../tray/trayModel';
 import { trayImageStore, trayStore, useTray } from '../tray/trayStore';
@@ -41,6 +42,7 @@ import {
   askFirstRequest,
   clearFirstRequest,
   onFirstRequest,
+  onFirstRequestCleared,
   pendingFirstRequest,
   placeholderExplainerTargetId,
   registerExplainerTarget,
@@ -122,6 +124,14 @@ export function useExplainerRead(address: ExplainerAddress, active: boolean) {
     };
   }, [target, active, attempt]);
   const refresh = useCallback(() => setAttempt((current) => current + 1), []);
+  useEffect(() => {
+    if (!active || !target.repository || !target.master || !target.leaf) return;
+    return subscribeReviewPublication(
+      { repo: target.repository, master: target.master, leaf: target.leaf },
+      refresh,
+      () => undefined,
+    );
+  }, [active, target, refresh]);
   return { read, setRead, refresh };
 }
 
@@ -193,6 +203,12 @@ function useFirstRequestAsks(address: ExplainerAddress, setForm: SetForm): void 
       if (sameExplainerAddress(body.address, target)) applyFirstRequestAsk(body, setForm);
     });
   }, [target, setForm]);
+  useEffect(() => {
+    if (!target.leaf) return;
+    return onFirstRequestCleared((clearedAddress) => {
+      if (sameExplainerAddress(clearedAddress, target)) setForm(null);
+    });
+  }, [target, setForm]);
 }
 
 /**
@@ -238,9 +254,13 @@ function usePublishedSeat(address: ExplainerAddress, read: ExplainerRead | null,
 
 function useColumnForm(address: ExplainerAddress, read: ExplainerRead | null, state: ExplainerState | null, active: boolean) {
   const [form, setForm] = useState<FormState | null>(null);
+  const seat = state?.seat ?? null;
   useFirstRequestAsks(address, setForm);
   const picks = useTray((tray) => tray.picks);
-  usePickOpensForm(address, picks.length, state?.seat ?? null, active, setForm);
+  usePickOpensForm(address, picks.length, seat, active, setForm);
+  useEffect(() => {
+    if (seat === 'live' || seat === 'closed') setForm(null);
+  }, [seat]);
   usePublishedSeat(address, read, active);
   return { form, setForm, picks };
 }

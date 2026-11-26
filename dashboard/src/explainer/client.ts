@@ -476,7 +476,10 @@ function stateValue(answer: Record<string, unknown>, seat: ExplainerSeatKind | n
   return {
     seat,
     agentId: firstString(sources.flatMap((src) => (src ? [src.agentId, src.agent_id] : []))),
-    workspaceId: firstString(sources.flatMap((src) => (src ? [src.workspaceId, src.workspace] : []))),
+    workspaceId: firstString([
+      ...sources.map((src) => src?.workspaceId),
+      ...sources.map((src) => src?.workspace),
+    ]),
     generation: firstFiniteNumber(sources.map((src) => src?.generation), 0),
     retiredAt: retiredAtOf(answer, explainer),
     binding: bindingOf(answer, explainer),
@@ -499,7 +502,9 @@ export function parseExplainerState(answer: unknown): ExplainerRead {
 function stateCandidate(answer: Record<string, unknown>): Record<string, unknown> {
   if (isRecord(answer.state)) return answer.state;
   if (isRecord(answer.seat) && ('agentId' in answer.seat || 'workspace' in answer.seat || 'workspaceId' in answer.seat)) {
-    return answer.seat;
+    return nonEmptyText(answer.workspaceId) && !nonEmptyText(answer.seat.workspaceId)
+      ? { ...answer.seat, workspaceId: answer.workspaceId }
+      : answer.seat;
   }
   return answer;
 }

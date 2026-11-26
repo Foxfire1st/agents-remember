@@ -1,7 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resetFirstRequest } from '../../../explainer/request';
+import { publishReviewPublication } from '../../../data/reviewMemoryWatch';
+import { ExplainerColumn } from '../../../explainer/ExplainerColumn';
+import { askFirstRequest, resetFirstRequest } from '../../../explainer/request';
 import { resetTray } from '../../../explainer/testSupport';
+import { EXPLANATION_BUILD_POLL_MS, ExplanationRequest } from './ExplanationRequest';
 import { ExplanationSwitch } from './ExplanationSwitch';
 import { ExplanationView } from './ExplanationView';
 import {
@@ -18,6 +21,7 @@ import {
 } from './ExplanationView.test-utils';
 
 afterEach(() => {
+  cleanup();
   resetTray();
   resetFirstRequest();
   vi.useRealTimers();
@@ -469,5 +473,127 @@ describe('a stuck build can be ended, and its reason kept (MIK-R211 v2 rules 4 a
 
     await screen.findByTestId('explainer-build-failure');
     expect(screen.queryByTestId('explainer-build-cancel')).toBeNull();
+  });
+
+  it('polls build progress while sending from ExplanationRequest and transitions the right-rail column to live', async () => {
+    vi.useFakeTimers();
+    let phase: 'empty' | 'running' | 'live' = 'empty';
+    let resolveBuild!: (response: Response) => void;
+    const buildPromise = new Promise<Response>((resolve) => {
+      resolveBuild = resolve;
+    });
+    const runningBuild = {
+      state: 'running',
+      requestId: 'req-inflight',
+      step: 'checkout-code',
+      steps: [
+        { name: 'workspace', state: 'done' },
+        { name: 'checkout-code', state: 'running', counts: { kind: 'bytes', done: 50, total: 100 } },
+      ],
+      failedStep: null,
+    };
+    const liveState = {
+      ...PENDING,
+      seat: { state: 'live', agentId: 'a-exp-live', generation: 1 },
+      agentId: 'a-exp-live',
+      workspaceId: 'wks_paseo_live',
+      generation: 1,
+      build: null,
+      explainer: {
+        seat: 'live',
+        agentId: 'a-exp-live',
+        workspaceId: 'wks_paseo_live',
+        generation: 1,
+        present: true,
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        if (url.startsWith(`${BASE}/state`)) {
+          if (phase === 'empty') return Promise.resolve(json(PENDING));
+          if (phase === 'running') return Promise.resolve(json({ ...PENDING, build: runningBuild }));
+          return Promise.resolve(json(liveState));
+        }
+        if (url === `${BASE}/build` && (init?.method ?? 'GET').toUpperCase() === 'POST') {
+          phase = 'running';
+          return buildPromise;
+        }
+        if (url === '/api/role-launch/frame') {
+          return Promise.resolve(
+            json({
+              available: true,
+              frameBaseUrl: 'https://host.example',
+              serverId: 's',
+              projectsWorkspaceId: 'wks_projects',
+            }),
+          );
+        }
+        return Promise.resolve(json({}));
+      }),
+    );
+
+    const onBuilt = vi.fn();
+    render(
+      <>
+        <ExplanationRequest
+          target={props.target}
+          task="L181"
+          onBuilt={onBuilt}
+          onCancel={vi.fn()}
+        />
+        <ExplainerColumn address={props.target} task="L181" active />
+      </>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Right rail has its first-request form open while the centre form is shown.
+    act(() => askFirstRequest(props.target));
+    expect(screen.getByTestId('explainer-first-request')).toBeTruthy();
+
+    // Pressing Send in the centre form starts polling /state even before POST /build resolves.
+    fireEvent.click(screen.getByTestId('explanation-request-send'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(EXPLANATION_BUILD_POLL_MS);
+    });
+    expect(screen.getByTestId('explainer-build')).toBeTruthy();
+
+    // Build finishes with a live seat and publication notifies the right rail without toggling active.
+    phase = 'live';
+    resolveBuild(
+      json({
+        state: 'ok',
+        attempt: 'build:req-inflight',
+        seat: { agentId: 'a-exp-live', workspaceId: 'wks_paseo_live', state: 'live', generation: 1 },
+        agentId: 'a-exp-live',
+        workspaceId: 'wks_paseo_live',
+        generation: 1,
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByTestId('explainer-first-request')).toBeNull();
+    expect(onBuilt).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      publishReviewPublication({
+        repo: props.target.repository,
+        master: props.target.master,
+        leaf: props.target.leaf,
+        kind: 'environment',
+        environmentStamp: 'env-started-1',
+      });
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('explainer-column').dataset.phase).toBe('live');
+    expect(screen.getByTestId('explainer-frame-holder').getAttribute('aria-hidden')).toBeNull();
   });
 });

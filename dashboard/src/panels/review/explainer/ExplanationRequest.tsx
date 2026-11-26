@@ -405,9 +405,13 @@ function useBuildRead(
   setSent: (build: ExplainerBuild | null) => void,
   setRefusal: (detail: string) => void,
   onBuilt: () => void,
+  sending = false,
 ): void {
   const running = build?.state === 'running';
+  const polling = running || sending;
   const live = useRef(true);
+  const sendingRef = useRef(sending);
+  sendingRef.current = sending;
   const onBuiltRef = useRef(onBuilt);
   onBuiltRef.current = onBuilt;
   const sentRef = useRef(setSent);
@@ -418,7 +422,7 @@ function useBuildRead(
   addressRef.current = address;
 
   useEffect(() => {
-    if (!running) return undefined;
+    if (!polling) return undefined;
     live.current = true;
     const timer = setInterval(() => {
       void readExplainerState(addressRef.current)
@@ -426,6 +430,7 @@ function useBuildRead(
           if (!live.current) return;
           const next = state.build ?? null;
           if (!next) return;
+          if (sendingRef.current && next.state !== 'running') return;
           sentRef.current(next);
           if (next.state !== 'running') onBuiltRef.current();
         })
@@ -437,7 +442,7 @@ function useBuildRead(
       live.current = false;
       clearInterval(timer);
     };
-  }, [running]);
+  }, [polling]);
 }
 
 /** The tray's picks as the form's references. */
@@ -620,7 +625,7 @@ export function ExplanationRequest({
   });
   const planned = isPlannedRequest(binding, comparison);
   const view = requestViewOf(sent, fromRead, planned);
-  useBuildRead(address, view.build, setSent, setRefusal, onBuilt);
+  useBuildRead(address, view.build, setSent, setRefusal, onBuilt, sending);
   const stop = useRequestStop(address, view.build, setSent, onBuilt, resetRequestId);
   const sendable = !sending && canSend(references, message);
 
@@ -659,7 +664,10 @@ export function ExplanationRequest({
           sendable={sendable}
           sending={sending}
           planned={planned}
-          onCancel={onCancel}
+          onCancel={() => {
+            clearFirstRequest(address);
+            onCancel();
+          }}
           onSend={() => {
             stop.clear();
             send();

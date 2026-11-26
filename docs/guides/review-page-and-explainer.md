@@ -463,8 +463,11 @@ with the tools of its harness. It holds:
 - two detached Git worktrees, one of the code and one of the memory, at the after side of the
   comparison;
 - the evidence that Agents Remember prepared for that comparison;
-- the explainer's instructions and the [presentation kit](../concepts.md#presentation-kit), the
-  set of libraries that a page of the explainer may load;
+- the explainer's instructions and the [presentation kit](../concepts.md#presentation-kit) in
+  `kit/`, the set of offline libraries that a page of the explainer may load by reference;
+- `starters/` (`README.md` and four standalone working starters, one per kit library) and
+  `exemplar/` (a synthetic reference page showing all four kit libraries and six interactive
+  techniques, marked as made-up rather than recorded evidence);
 - the task document and the requirement packets it names in `inputs/`, with `reports.md` listing
   the source paths and SHA-256 digests of the selected leaf's reports for reading in place;
 - the reference files of the task;
@@ -472,22 +475,37 @@ with the tools of its harness. It holds:
 
 The explainer works in stages and leaves a file for each in `stages/`: what it read, the files and
 changes it chose, their parts, one self-contained explanation per part, the essay with its
-evidence, and the visual plan. It writes and makes each visual only after the essay is complete,
-then builds the page from the essay and the assets. `stages/` and `inputs/` are working material.
-The published revision contains the page and its assets. The render check takes page assets from
-`drafts/assets/` and checks claims against `instructions/evidence.json`. The text
-carries the content; a visual is made only where it helps a part of the essay, and the page reads
-in full without its animations.
+evidence, and the visual plan. It designs and builds each figure after the essay is complete, then
+assembles the page from the essay and the assets. `stages/`, `inputs/`, `starters/` and `exemplar/`
+are working and reference material and are never published. The render check takes page assets from
+`drafts/assets/`, carries any referenced `kit/<library>/<version>/...` files with their licences
+and companions automatically without copying them into `drafts/assets/kit/`, and checks claims
+against `instructions/evidence.json`. The page reads in full without its animations, and at least
+one interactive figure the reader drives shows the central mechanism of the change (or, for a
+planned binding, the intended mechanism marked as intended), with quoted code highlighted via the
+kit.
 
 The explainer writes the claims of its page into the file `drafts/assets/claim-map.json`, the
 claim map. The claim map lists each claim with its id, its statement and the bases it rests on, such
-as a file in a tree of the comparison, a knowledge record or a judgment row. The product
-reads the claim map when the explainer publishes. Each time the explainer checks its draft, the
-report and the pictures of that check go into a folder `renders/run-NNN/`.
+as a file in a tree of the comparison, a knowledge record or a judgment row. When the explainer
+calls `render`, the product checks the draft before publishing: it verifies grants and input
+digests, walks `drafts/assets/` safely without following symbolic links, confirms `index.html` and
+contained relative asset/kit references, validates `claim-map.json`, part ownership, claim bases,
+and `intended` authority on planned bindings, checks HTML media controls, static plus live DOM
+citations over a bounded post-load window, and visible rendered paint under production CSP/sandbox
+headers (no reduced-motion or quiet-mode check applies to explainer pages, and the dashboard's
+quiet switch does not apply to them), and re-checks the workspace binding under lock alongside
+strict manifest validation and the 512 MiB task total (see
+[Every `render()` check and its purpose](../design/canvas-host.md#every-render-check-and-its-purpose)).
+The interactive sweep and revision inventory (`inventory.json`) are report-only and never refuse
+publication; unreached passes or controls stay in `unvisited`/`notReached` rather than `errors`.
+Each run writes `renders/run-NNN/report.json`, `page.png`, and `interactions/`. `render` keeps its
+reply within a 1,000-token bound: identity fields are never trimmed, while `summary`, `inventory`,
+`kitAssets`, and whole `errors` pack in order and spill cleanly to `renders/run-NNN/report.json`
+with exact pointers in `moved` when the bound is reached.
 
 A page may carry a video rendered from code, as `.webm` or `.mp4`. It plays only on the reader's
-act, has controls, and never loops or autoplays; with reduced motion it shows a still frame with
-its steps listed.
+act, has controls, and never loops or autoplays, paired with a still form and listed steps.
 
 The workspace is bound to the comparison it was built for: its worktrees and its evidence are
 those of that comparison. That comparison is the binding of the
@@ -598,7 +616,9 @@ no page. To get a page, ask for it in words, for example "Explain this change se
 publish the page."
 
 Above a published page stands one line: "✦ Written by the explainer", the time, "revision N",
-"interactions checked: …", "bound to #n", and "global" or "focused". The focus of the revision
+"interactions checked: …", when an inventory was recorded "shows: …" (a one-line summary of the
+page's figures by kind and technique, kit libraries used, highlighted or plain code excerpts, and
+any unused assets), "bound to #n", and "global" or "focused". The focus of the revision
 follows in parentheses, for example "global (the change set of <task>)". "bound to #n" names the
 binding of the revision: the comparison that the revision explains. A global revision explains
 the whole change set. A focused revision explains the part you asked about. The button
@@ -669,8 +689,12 @@ A press on the binding shows that revision. Global revisions stand before focuse
 revisions. It pairs the revision on screen with the latest other one, and the button then reads
 "Stop comparing · #a and #b".
 
-The number of revisions of a task has no limit. The limit is the size of all its revisions
-together, the task's total. The page offers the removal of revisions in one case only. When the
+The number of revisions of a task has no limit, and a revision's file count has no default limit.
+The limit is the physical size of all its revisions and metadata together, the task's 512 MiB total
+(when a legal revision fits without room left for the advisory `inventory.json` sidecar, the
+revision publishes without the sidecar and the page shows one plain line explaining that the
+inventory was left out because the task's storage limit was reached). The page
+offers the removal of revisions in one case only. When the
 explainer publishes and the task's total is full, the page says "A new revision was refused: <reason>" and "The task total is
 full. Removing old revisions is your choice alone; the agreed revision is pinned and is never
 offered." You then press "Remove old revisions", tick revisions and press "Remove N

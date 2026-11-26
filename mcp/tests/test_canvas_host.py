@@ -34,6 +34,7 @@ from agents_remember.application.review_frame_store import frame_scope, reopen_f
 from agents_remember.canvas.evidence import resolve_evidence_reference
 from agents_remember.canvas.policy import (
     ASSET_PATH_PREFIX,
+    LIMITS,
     asset_headers,
     document_headers,
     frame_sandbox,
@@ -205,6 +206,9 @@ def test_every_response_carries_its_policy_headers() -> None:
     assert asset["X-Content-Type-Options"] == "nosniff"
     assert asset["Content-Security-Policy"] == "default-src 'none'; sandbox"
     assert "Set-Cookie" not in asset
+    assert LIMITS["assets-per-revision"]["value"] is None
+    assert LIMITS["bytes-per-revision"]["value"] is None
+    assert LIMITS["bytes-per-task"]["value"] == 512 * 1024 * 1024
 
 
 def test_the_envelope_is_bound_to_its_session_revision_and_comparison() -> None:

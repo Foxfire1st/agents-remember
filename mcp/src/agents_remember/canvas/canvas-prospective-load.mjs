@@ -3,12 +3,12 @@
  * Load one prospective revision in Chromium without a model (MIK-R104 rule 14).
  *
  * `--dir <staged assets> --entry <entrypoint>`: this serves ONLY that directory from a random
- * loopback port, opens it with `prefers-reduced-motion: reduce` in force, and prints one JSON
- * object. It is not a `file://` load: a file URL answers with no headers at all, so the CSP, the
- * sandbox and the CORP/CORS arrangement the page really executes under would be untested. The
- * headers below mirror `mcp/src/agents_remember/canvas/policy.py` (scripts enabled, the shipped v2
- * arrangement under D331); asset paths live under the same `/canvas/page/` prefix the page is
- * served from, so the allowlist is the same expression it is in production.
+ * loopback port, opens it in Chromium at 1280x720, and prints one JSON object. It is not a
+ * `file://` load: a file URL answers with no headers at all, so the CSP, the sandbox and the
+ * CORP/CORS arrangement the page really executes under would be untested. The headers below mirror
+ * `mcp/src/agents_remember/canvas/policy.py` (scripts enabled, the shipped v2 arrangement);
+ * asset paths live under the same `/canvas/page/` prefix the page is served from, so the
+ * allowlist is the same expression it is in production.
  *
  * The response is a report, not a verdict the caller has to trust: `agents_remember.canvas.
  * prospective` re-checks that a "loaded" answer names no fault of its own.
@@ -19,6 +19,7 @@ import { readFile, stat } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { interactiveReport } from "./canvas-interactive-report.mjs";
+import { collectDomInventory } from "./canvas-dom-inventory.mjs";
 
 const PREFIX = "/canvas/page/prospective/";
 // When this load began: its caller's time limit counts from here.
@@ -114,6 +115,13 @@ const directory = resolve(flag("dir", "."));
 const entrypoint = flag("entry", "index.html");
 const foreign = new Set();
 const absent = new Set();
+const loadedAssets = new Set();
+
+function recordLoadedAsset(rawPath) {
+  if (typeof rawPath !== "string") return;
+  const cleaned = rawPath.split(/[?#]/, 1)[0].replace(/^\/+/, "");
+  if (cleaned) loadedAssets.add(cleaned);
+}
 
 function answer(request, response) {
   const pathname = decodeURIComponent(
@@ -141,6 +149,7 @@ function answer(request, response) {
     .then((body) => {
       const media =
         MEDIA[extname(file).toLowerCase()] || "application/octet-stream";
+      recordLoadedAsset(target);
       response.writeHead(
         200,
         target === entrypoint ? documentHeaders(origin) : assetHeaders(media),
@@ -156,27 +165,36 @@ function answer(request, response) {
 async function observe(page) {
   return page.evaluate(() => {
     const references = [...document.querySelectorAll("[data-evidence]")].map(
-      (element) => element.getAttribute("data-evidence").trim(),
+      (element) => (element.getAttribute("data-evidence") || "").trim(),
     );
     const claimIds = [
       ...document.querySelectorAll("[data-evidence-claim]"),
-    ].map((element) => element.getAttribute("data-evidence-claim").trim());
-    const unresolved = [...references, ...claimIds]
+    ].map((element) => (element.getAttribute("data-evidence-claim") || "").trim());
+    const directClaimIds = [
+      ...document.querySelectorAll("[data-claim]"),
+    ].map((element) => (element.getAttribute("data-claim") || "").trim());
+    const allClaimIds = [...claimIds, ...directClaimIds];
+    const unresolved = [...references, ...allClaimIds]
       .filter((reference) => !reference)
       .map(() => "(empty)");
-    const playing = [...document.querySelectorAll("audio, video")].filter(
-      (media) => !media.paused && !media.ended,
-    ).length;
+    const mediaElements = [...document.querySelectorAll("audio, video")].map(
+      (element) => ({
+        tag: element.tagName.toLowerCase(),
+        autoplay: Boolean(element.autoplay || element.hasAttribute("autoplay")),
+        loop: Boolean(element.loop || element.hasAttribute("loop")),
+        controls: Boolean(element.controls || element.hasAttribute("controls")),
+        id: element.id || "",
+        src: element.getAttribute("src") || "",
+      }),
+    );
     const body = document.body;
     return {
       unresolved,
-      // Read the rendered DOM, keeping data-evidence basis references and data-evidence-claim
-      // claim IDs in separate inventories for the Python caller to resolve against its packet.
+      // Read the rendered DOM, keeping data-evidence basis references and claim IDs
+      // in separate inventories for the Python caller to resolve against its packet.
       references: references.filter(Boolean),
-      claimIds: claimIds.filter(Boolean),
-      playing,
-      reduce: matchMedia("(prefers-reduced-motion: reduce)").matches,
-      animations: document.getAnimations ? document.getAnimations().length : 0,
+      claimIds: allClaimIds.filter(Boolean),
+      mediaElements,
       title: document.title,
       rendered: Boolean(
         body &&
@@ -186,10 +204,34 @@ async function observe(page) {
   });
 }
 
+function mediaControlFaults(elements) {
+  const problems = [];
+  if (elements.some((item) => item.autoplay)) {
+    problems.push("the page autoplays media a reader cannot stop");
+  }
+  if (elements.some((item) => item.loop)) {
+    problems.push("the page loops media a reader cannot stop");
+  }
+  const missing = elements.find((item) => !item.controls);
+  if (missing) {
+    const attrs = [
+      missing.id ? `id="${missing.id}"` : "",
+      missing.src ? `src="${missing.src}"` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const label = `<${missing.tag}${attrs ? ` ${attrs}` : ""}>`;
+    problems.push(
+      `the page plays audio or video without controls a reader can use: ${label}`,
+    );
+  }
+  return problems;
+}
+
 /** Measure painted information, keeping backgrounds and occluding overlays in place.
  * Presence, layout and computed CSS cannot establish that text or graphics reach the screen.
- * Suppressing their paint must change the actual reduced-motion viewport. Empty boxes and a
- * covering overlay alone do not qualify. This observes pixels, not the explanation's quality.
+ * Suppressing their paint must change the rendered viewport. Empty boxes and a covering overlay
+ * alone do not qualify. This observes pixels, not the explanation's quality.
  */
 async function visibleContent(page) {
   const stable = await page.addStyleTag({
@@ -211,21 +253,29 @@ async function visibleContent(page) {
   }
 }
 
-/** Keep both reference attributes in separate inventories through the load window. */
+/** Keep evidence and claim attributes in separate inventories through the load window. */
 async function watchReferences(page) {
   return page.evaluateHandle(() => {
     const references = new Set();
     const claimIds = new Set();
+    let hasEmpty = false;
     const collect = () => {
       for (const element of document.querySelectorAll("[data-evidence]")) {
-        const value = element.getAttribute("data-evidence").trim();
+        const value = (element.getAttribute("data-evidence") || "").trim();
         if (value) references.add(value);
+        else hasEmpty = true;
       }
       for (const element of document.querySelectorAll(
         "[data-evidence-claim]",
       )) {
-        const value = element.getAttribute("data-evidence-claim").trim();
+        const value = (element.getAttribute("data-evidence-claim") || "").trim();
         if (value) claimIds.add(value);
+        else hasEmpty = true;
+      }
+      for (const element of document.querySelectorAll("[data-claim]")) {
+        const value = (element.getAttribute("data-claim") || "").trim();
+        if (value) claimIds.add(value);
+        else hasEmpty = true;
       }
     };
     collect();
@@ -234,7 +284,7 @@ async function watchReferences(page) {
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ["data-evidence", "data-evidence-claim"],
+      attributeFilter: ["data-evidence", "data-evidence-claim", "data-claim"],
     });
     return {
       finish() {
@@ -243,6 +293,7 @@ async function watchReferences(page) {
         return {
           references: [...references],
           claimIds: [...claimIds],
+          unresolved: hasEmpty ? ["(empty)"] : [],
         };
       },
     };
@@ -289,58 +340,122 @@ async function observeInBrowser(origin) {
   const errors = [];
   const failed = [];
   const outside = new Set();
-  try {
-    const context = await browser.newContext({ reducedMotion: "reduce" });
-    const page = await context.newPage();
+  const pushUniqueError = (entry) => {
+    if (!errors.includes(entry)) errors.push(entry);
+  };
+  const attachListeners = (page) => {
     page.on("console", (message) => {
-      if (message.type() === "error") errors.push(`console: ${message.text()}`);
+      if (message.type() === "error") pushUniqueError(`console: ${message.text()}`);
     });
-    page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
+    page.on("pageerror", (error) => pushUniqueError(`pageerror: ${error.message}`));
     page.on("requestfailed", (request) => {
-      failed.push(
-        `${request.url()} ${request.failure()?.errorText ?? "failed"}`,
-      );
+      const entry = `${request.url()} ${request.failure()?.errorText ?? "failed"}`;
+      if (!failed.includes(entry)) failed.push(entry);
     });
     page.on("request", (request) => {
       const url = request.url();
       if (!url.startsWith(`${origin}${PREFIX}`) && !url.startsWith("data:"))
         outside.add(url);
     });
-    const response = await page.goto(`${origin}${PREFIX}`, {
-      waitUntil: "load",
-      timeout: 20000,
+    page.on("response", (response) => {
+      const status = response.status();
+      if (!((status >= 200 && status < 300) || status === 304)) return;
+      const url = response.url();
+      if (!url.startsWith(`${origin}${PREFIX}`)) return;
+      try {
+        const pathname = decodeURIComponent(new URL(url).pathname);
+        if (!pathname.startsWith(PREFIX)) return;
+        const rest = pathname.slice(PREFIX.length);
+        const target = rest === "" || rest.endsWith("/") ? entrypoint : rest;
+        recordLoadedAsset(target);
+      } catch {
+        // Ignore malformed response URLs.
+      }
     });
-    if (!response || !response.ok()) {
-      errors.push(
-        `document answered ${response ? response.status() : "no response"}`,
-      );
+  };
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 720 },
+    });
+    let initialSeen;
+    let postSeen;
+    let initialVisible;
+    let watched = { references: [], claimIds: [], unresolved: [] };
+    let domInventory;
+    try {
+      const page = await context.newPage();
+      attachListeners(page);
+      const response = await page.goto(`${origin}${PREFIX}`, {
+        waitUntil: "load",
+        timeout: 20000,
+      });
+      if (!response || !response.ok()) {
+        pushUniqueError(
+          `document answered ${response ? response.status() : "no response"}`,
+        );
+      }
+      const references = await watchReferences(page);
+      const observeStart = Date.now();
+      // Measure initial rendered eligibility, DOM inventory, and citations BEFORE any synthetic control clicks.
+      await page.waitForTimeout(150);
+      initialSeen = await observe(page);
+      initialVisible = await visibleContent(page);
+      domInventory = await collectDomInventory(page);
+      const screenshotIndex = process.argv.indexOf("--screenshot");
+      if (screenshotIndex !== -1)
+        await page.screenshot({ path: process.argv[screenshotIndex + 1] });
+      // Keep the bounded post-load reference observation window at least 2000 ms for delayed JS.
+      const remaining = 2000 - (Date.now() - observeStart);
+      if (remaining > 0) await page.waitForTimeout(remaining);
+      postSeen = await observe(page);
+      watched = await references.evaluate((watch) => watch.finish());
+      await references.dispose();
+    } finally {
+      await context.close();
     }
-    const references = await watchReferences(page);
-    // One bounded load observation, including delayed DOM work; no claim about arbitrary future JS.
-    await page.waitForTimeout(2000);
-    const seen = await observe(page);
-    const watched = await references.evaluate((watch) => watch.finish());
-    seen.references = watched.references;
-    seen.claimIds = watched.claimIds;
-    await references.dispose();
-    seen.visible = await visibleContent(page);
-    const screenshotIndex = process.argv.indexOf("--screenshot");
-    if (screenshotIndex !== -1)
-      await page.screenshot({ path: process.argv[screenshotIndex + 1] });
+
+    const evidenceReferences = [
+      ...new Set([
+        ...initialSeen.references,
+        ...postSeen.references,
+        ...watched.references,
+      ]),
+    ];
+    const claimIds = [
+      ...new Set([
+        ...initialSeen.claimIds,
+        ...postSeen.claimIds,
+        ...watched.claimIds,
+      ]),
+    ];
+    const unresolvedReferences = [
+      ...new Set([
+        ...initialSeen.unresolved,
+        ...postSeen.unresolved,
+        ...watched.unresolved,
+      ]),
+    ];
     const foreignRequests = [...new Set([...foreign, ...outside])];
-    // Reduced motion asks for a page a person can use: no media playing, and something visible.
-    const reducedMotionOk = seen.reduce && seen.playing === 0 && seen.visible;
+    const mediaElements = [
+      ...(initialSeen.mediaElements || []),
+      ...(postSeen.mediaElements || []),
+    ];
+    const mediaFaults = mediaControlFaults(mediaElements);
+    const visibleContentOk = Boolean(initialVisible);
     const faults = [
       errors.length ? `${errors.length} console or load error(s)` : "",
       foreignRequests.length
         ? `${foreignRequests.length} request(s) outside the revision`
         : "",
       absent.size ? `${absent.size} asset(s) the revision does not carry` : "",
-      seen.unresolved.length
-        ? `${seen.unresolved.length} unresolved evidence reference(s)`
+      unresolvedReferences.length
+        ? `${unresolvedReferences.length} unresolved evidence reference(s)`
         : "",
-      seen.rendered ? "" : "the document rendered no body",
-      reducedMotionOk ? "" : "the page is not usable with reduced motion",
+      mediaFaults.length ? `${mediaFaults.length} media-control fault(s)` : "",
+      initialSeen.rendered ? "" : "the document rendered no body",
+      visibleContentOk
+        ? ""
+        : "the document painted no visible text, controls, or graphics",
     ].filter(Boolean);
     return {
       state: faults.length ? "failed" : "loaded",
@@ -351,14 +466,18 @@ async function observeInBrowser(origin) {
         ...[...absent].map((path) => `${path} was requested but not served`),
       ],
       foreignRequests,
-      reducedMotionOk,
-      unresolvedReferences: seen.unresolved,
-      evidenceReferences: seen.references,
-      claimIds: seen.claimIds,
+      visibleContentOk,
+      unresolvedReferences,
+      evidenceReferences,
+      claimIds,
+      mediaElements,
+      mediaFaults,
+      loadedAssets: [...loadedAssets].sort(),
+      domInventory,
       detail: `${faults.length ? `faults: ${faults.join(", ")}` : "no fault observed"}; page title ${JSON.stringify(
-        seen.title,
-      )}, ${seen.animations} running animation(s) under reduce`,
-      note: "served from a loopback static server with the policy headers; reduced motion set on the browser context; references observed through a 2000 ms post-load window; visible text, controls or graphics checked by paint suppression",
+        initialSeen.title,
+      )}`,
+      note: "served from a loopback static server with the policy headers; references observed through a bounded post-load window; visible text, controls or graphics checked by paint suppression before synthetic interactions",
     };
   } finally {
     await browser.close();

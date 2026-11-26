@@ -107,10 +107,22 @@ def render_answer(report: dict[str, Any]) -> dict[str, Any]:
         },
         "publication": {
             key: publication[key]
-            for key in ("state", "revision", "coverage", "workspace", "refusal")
+            for key in (
+                "state",
+                "revision",
+                "coverage",
+                "workspace",
+                "refusal",
+                "inventoryOmitted",
+            )
             if key in publication
         },
         **({"resumedFrom": interactive["resumedFrom"]} if interactive.get("resumedFrom") else {}),
+        **(
+            {"inventoryOmitted": report["inventoryOmitted"]}
+            if isinstance(report.get("inventoryOmitted"), str) and report["inventoryOmitted"]
+            else {}
+        ),
     }
     if report.get("browser"):
         # What the load ran on, and whether this call fetched it: the answer's identity items.
@@ -118,34 +130,53 @@ def render_answer(report: dict[str, Any]) -> dict[str, Any]:
     return _packed(answer, report, path)
 
 
+def _optional_sections(report: dict[str, Any], path: Any) -> list[tuple[str, Any, dict[str, Any]]]:
+    sections: list[tuple[str, Any, dict[str, Any]]] = []
+    if report.get("summary") is not None:
+        sections.append(("summary", report["summary"], {"part": "summary", "to": path}))
+    if report.get("inventory") is not None:
+        sections.append(("inventory", report["inventory"], {"part": "inventory", "to": path}))
+    kit_assets = report.get("kitAssets")
+    if isinstance(kit_assets, list):
+        sections.append(
+            ("kitAssets", kit_assets, {"part": "kitAssets", "total": len(kit_assets), "to": path})
+        )
+    return sections
+
+
 def _packed(answer: dict[str, Any], report: dict[str, Any], path: Any) -> dict[str, Any]:
-    """Add the summary, then whole errors, while the answer stays within render's bound."""
+    """Add summary, inventory, carried kit assets, and whole errors within render's token bound."""
 
     bound = EXPLAINER_ANSWER_BOUNDS["render"]
     errors = list(report.get("allErrors") or [])
-    summary = report.get("summary")
-    # What a `moved` entry costs at most, kept free so naming the moved part never passes the bound.
     most = len(errors)
-    reserve = answer_tokens(
-        {
-            "moved": [
-                {"part": "summary", "to": path},
-                {"part": "errors", "shown": most, "total": most, "to": path},
-            ]
-        }
-    )
-    answer = {**answer, "errorsTotal": len(errors)}
+    answer = {**answer, "errorsTotal": most}
     moved: list[dict[str, Any]] = []
-    if summary is not None:
-        if answer_tokens({**answer, "summary": summary}) + reserve <= bound:
-            answer["summary"] = summary
+    sections = _optional_sections(report, path)
+    errors_moved = [{"part": "errors", "shown": most, "total": most, "to": path}] if errors else []
+    for index, (key, value, moved_entry) in enumerate(sections):
+        remaining = [entry for _, _, entry in sections[index + 1 :]]
+        candidate = {
+            **answer,
+            key: value,
+            "errors": [],
+            "moved": [*moved, *remaining, *errors_moved],
+        }
+        if answer_tokens(candidate) <= bound:
+            answer[key] = value
         else:
-            moved.append({"part": "summary", "to": path})
+            moved.append(moved_entry)
     shown: list[str] = []
     for error in errors:  # whole errors only: one never arrives cut
-        if answer_tokens({**answer, "errors": [*shown, error]}) + reserve > bound:
+        next_shown = [*shown, error]
+        candidate = {
+            **answer,
+            "errors": next_shown,
+            "moved": _moved(moved, next_shown, errors, path),
+        }
+        if answer_tokens(candidate) > bound:
             break
-        shown.append(error)
+        shown = next_shown
     while True:  # tokens do not add exactly across joined JSON: the whole answer is what is held
         packed = {**answer, "errors": shown, "moved": _moved(moved, shown, errors, path)}
         if answer_tokens(packed) <= bound or not shown:

@@ -15,6 +15,7 @@ import {
   defaultComparePair,
   defaultShownRevision,
   hasWork,
+  inventoryOmittedText,
   isPinned,
   movedLine,
   orderRevisions,
@@ -294,6 +295,90 @@ describe('native serializer compatibility and revision ordering (MIK-R106 v2; MI
     expect(standfirstText(state({ explanation: saved }), 8)).toContain(
       'revision 8 · interactions checked: all 5 passes · bound to',
     );
+    // Inventory appears beside interactions checked from either the revision row or saved explanation.
+    const invLine = '4 figures (2 SVG, 1 canvas, 4 driven; code-morph, step-through) · kit: ar-video, shiki · code: 3 highlighted';
+    const withInvRow = revision({
+      revision: 10,
+      binding: binding('recorded', 10, '#10'),
+      coverage: 'all 5 passes',
+      inventory: invLine,
+    });
+    expect(standfirstText(state(), 10, [withInvRow])).toContain(
+      `revision 10 · interactions checked: all 5 passes · shows: ${invLine} · bound to #10`,
+    );
+    expect(
+      standfirstText(
+        state({
+          explanation: {
+            revision: 11,
+            at: null,
+            entrypoint: null,
+            comparison: null,
+            coverage: 'all 5 passes',
+            inventory: '0 figures · kit: none · 1 unused asset',
+          },
+        }),
+        11,
+      ),
+    ).toContain(
+      'revision 11 · interactions checked: all 5 passes · shows: 0 figures · kit: none · 1 unused asset · bound to',
+    );
+    expect(
+      parseState({ state: 'ok', explanation: { revision: 9, inventory: invLine } }).explanation
+        ?.inventory,
+    ).toBe(invLine);
+    expect(
+      parseRevisions({
+        state: 'ok',
+        revisions: [
+          {
+            revision: 10,
+            binding: { comparison_owner: 'recorded', comparison_number: 10, comparison_reference: 'r/10' },
+            at: '2026-10-19T13:10:00Z',
+            kind: 'global',
+            inventory: invLine,
+            agreed: false,
+            pinned: false,
+          },
+        ],
+      }).revisions[0].inventory,
+    ).toBe(invLine);
+    const omittedReason = "inventory left out because the task's storage limit was reached";
+    expect(
+      parseState({ state: 'ok', explanation: { revision: 12, inventoryOmitted: omittedReason } })
+        .explanation?.inventoryOmitted,
+    ).toBe(omittedReason);
+    const omittedRows = parseRevisions({
+      state: 'ok',
+      revisions: [
+        {
+          revision: 12,
+          binding: { comparison_owner: 'recorded', comparison_number: 12, comparison_reference: 'r/12' },
+          at: '2026-10-19T13:20:00Z',
+          kind: 'global',
+          inventoryOmitted: omittedReason,
+          agreed: false,
+          pinned: false,
+        },
+      ],
+    }).revisions;
+    expect(omittedRows[0].inventoryOmitted).toBe(omittedReason);
+    expect(inventoryOmittedText(state(), 12, omittedRows)).toBe(omittedReason);
+    expect(standfirstText(state(), 12, omittedRows)).not.toContain('shows:');
+    expect(
+      inventoryOmittedText(
+        state({
+          explanation: {
+            revision: 12,
+            at: null,
+            entrypoint: null,
+            comparison: null,
+            inventoryOmitted: omittedReason,
+          },
+        }),
+        12,
+      ),
+    ).toBe(omittedReason);
     expect(EXPLAINER_FRAME_ID).toBe('explainer');
     expect(
       stateUrl(

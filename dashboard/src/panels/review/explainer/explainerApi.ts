@@ -37,6 +37,12 @@ import {
   type ExplainerBuild,
 } from '../../../explainer/client';
 import { readCategories, readGrades } from './explainerGradeParser';
+import {
+  attachOptionalRevisionFields,
+  readRevisionInventory,
+  readRevisionKind,
+  type RevisionInventoryFields,
+} from './explainerRevisionInventory';
 import { firstText, isRecord, text } from './explainerValues';
 import { readPlannedPage, type PlannedPage } from './planned/plannedPage';
 
@@ -140,14 +146,14 @@ export interface ExplanationClaim {
 }
 
 /** The saved page: one revision of one frame, bound to one comparison. */
-export interface SavedExplanation {
+export interface SavedExplanation extends RevisionInventoryFields {
   revision: number;
   /** When it was written, ISO 8601. */
   at: string | null;
   entrypoint: string | null;
   comparison: string | null;
   binding?: ExplainerBinding | null;
-  /** What its interaction check reached, as the revision states it: "2 of 5 passes" (MIK-R211 v5). */
+  /** What its interaction check reached, as the revision states it: "2 of 4 passes". */
   coverage?: string;
 }
 
@@ -258,14 +264,14 @@ export type ExplainerStaleBadge = Pick<
 >;
 
 /** One retained revision (MIK-R103 v2 rules 1, 8). */
-export interface ExplainerRevision {
+export interface ExplainerRevision extends RevisionInventoryFields {
   revision: number;
   binding: ExplainerBinding;
   at: string;
   kind: 'global' | 'focused';
   /** What a focused revision explains; absent for a global one. */
   focus?: string;
-  /** What its interaction check reached, as the revision states it: "2 of 5 passes" (MIK-R211 v5). */
+  /** What its interaction check reached, as the revision states it: "2 of 4 passes". */
   coverage?: string;
   /** `intentReview.agreedRevision` names it: pinned, never offered for removal. */
   agreed: boolean;
@@ -704,6 +710,7 @@ function readExplanation(answer: Record<string, unknown>): SavedExplanation | nu
       comparison: firstText([raw.comparison, binding?.reference]),
       ...(binding ? { binding } : {}),
       ...(coverage ? { coverage } : {}),
+      ...readRevisionInventory(raw),
     };
   }
   const revision = number(answer.readyRevision);
@@ -877,32 +884,6 @@ export function parseState(answer: Record<string, unknown>): ExplainerState {
   return result;
 }
 
-function readRevisionKind(row: Record<string, unknown>): 'global' | 'focused' {
-  if (text(row.kind) === 'focused') return 'focused';
-  const focus = text(row.focus)?.trim() ?? '';
-  if (
-    focus &&
-    !focus.startsWith('the change set of ') &&
-    focus !== 'explain this change set end to end'
-  ) {
-    return 'focused';
-  }
-  return 'global';
-}
-
-function attachOptionalRevisionFields(result: ExplainerRevision, row: Record<string, unknown>) {
-  const focus = text(row.focus);
-  const coverage = text(row.coverage);
-  const bytes = number(row.bytes);
-  if (focus) result.focus = focus;
-  if (coverage) result.coverage = coverage;
-  if (row.removed === true) result.removed = true;
-  if (bytes !== null) result.bytes = bytes;
-  if (Array.isArray(row.parts)) result.parts = readParts(row.parts);
-  if (Array.isArray(row.claims)) result.claims = readClaims(row.claims);
-  if (row.stale !== undefined) result.stale = readStale(row);
-}
-
 function parseRevisionRow(row: unknown): ExplainerRevision[] {
   if (!isRecord(row)) return [];
   const revNum = number(row.revision);
@@ -916,7 +897,12 @@ function parseRevisionRow(row: unknown): ExplainerRevision[] {
     agreed: row.agreed === true,
     pinned: row.pinned === true,
   };
-  attachOptionalRevisionFields(result, row);
+  attachOptionalRevisionFields(result, row, {
+    readNumber: number,
+    readParts,
+    readClaims,
+    readStale,
+  });
   return [result];
 }
 

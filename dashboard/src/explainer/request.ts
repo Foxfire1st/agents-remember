@@ -34,6 +34,7 @@ interface KnownExplainerTarget {
 
 let current: FirstRequestBody | null = null;
 const listeners = new Set<(body: FirstRequestBody) => void>();
+const clearListeners = new Set<(address: ExplainerAddress) => void>();
 const knownExplainers = new Map<string, KnownExplainerTarget>();
 let activeColumnAddress: ExplainerAddress | null = null;
 
@@ -121,6 +122,7 @@ export function pendingFirstRequest(address: ExplainerAddress): FirstRequestBody
 /** His Cancel, or his Send: the ask is done with. */
 export function clearFirstRequest(address: ExplainerAddress): void {
   if (current && sameExplainerAddress(current.address, address)) current = null;
+  for (const listener of clearListeners) listener(address);
 }
 
 export function onFirstRequest(listener: (body: FirstRequestBody) => void): () => void {
@@ -128,10 +130,18 @@ export function onFirstRequest(listener: (body: FirstRequestBody) => void): () =
   return () => listeners.delete(listener);
 }
 
+export function onFirstRequestCleared(listener: (address: ExplainerAddress) => void): () => void {
+  clearListeners.add(listener);
+  return () => {
+    clearListeners.delete(listener);
+  };
+}
+
 /** Tests only: forget every ask and listener this module holds. */
 export function resetFirstRequest(): void {
   current = null;
   listeners.clear();
+  clearListeners.clear();
   knownExplainers.clear();
   activeColumnAddress = null;
 }
