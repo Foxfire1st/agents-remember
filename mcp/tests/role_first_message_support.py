@@ -600,7 +600,11 @@ class FirstMessageMatrixBase(unittest.TestCase):
 
         key = f"ar-role-launch:{request.request_id}"
         for command, payload in self.runtime.calls:
-            if command == "agent-create" and payload.get("idempotencyKey") == key:
+            if (
+                command == "agent-create"
+                and payload.get("idempotencyKey") == key
+                and "prompt" in payload
+            ):
                 return payload["prompt"]
         raise AssertionError(f"no first message was sent for {request.request_id}")
 

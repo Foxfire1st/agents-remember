@@ -778,7 +778,8 @@ class PrerequisiteSyncCuratorTests(RoleToolsTestCase):
         self.assertEqual(self.enclosures.start_calls, [])
         creates = [payload for command, payload in self.runtime.calls if command == "agent-create"]
         opens = [payload for command, payload in self.runtime.calls if command == "workspace-open"]
-        self.assertEqual(len(creates), 1)
+        self.assertEqual(len(creates), 2)
+        self.assertEqual({call["agentId"] for call in creates}, {result["agentId"]})
         self.assertEqual(len(opens), 1)
         self.assertEqual(Path(opens[0]["cwd"]).resolve(), contract.worktree_group.resolve())
         self.assertEqual(set(self.runtime.agents), {result["agentId"]})
@@ -789,7 +790,7 @@ class PrerequisiteSyncCuratorTests(RoleToolsTestCase):
             ("memoryRoot", contract.memory_worktree),
         ):
             self.assertEqual(Path(self.prepared_workspace[field]).resolve(), expected.resolve())
-        self.assertIn(str(report_path), creates[0]["prompt"])
+        self.assertIn(str(report_path), creates[-1]["prompt"])
 
     def test_manager_starts_curator_for_actual_prerequisite_memory_reconciliation(self) -> None:
         """The documented exception reaches the exact conflicted enclosure without healing it."""

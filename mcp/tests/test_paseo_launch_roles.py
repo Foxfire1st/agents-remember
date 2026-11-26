@@ -125,7 +125,7 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                 status, public = self.dispatch(request)
 
                 self.assertEqual((status, public["status"]), (200, "running"))
-                opened, created = self.runtime.launch_calls()
+                opened, created_empty, created = self.runtime.launch_calls()
                 task = self.master if role == "manager" else self.leaf
                 expected_workspace: dict[str, Any] = (
                     {
@@ -149,32 +149,37 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                     self.runtime.workspaces[self.runtime.workspace_key(expected_workspace)],
                 )
                 definition, note = self.given_to_agent(request, agent_id, task_labels)
+                expected_base_agent = {
+                    "agentId": agent_id,
+                    "idempotencyKey": f"ar-role-launch:{request.request_id}",
+                    "workspaceId": workspace_id,
+                    "provider": "codex",
+                    "model": "gpt-a",
+                    "thinkingOptionId": "low",
+                    "title": title,
+                    "labels": {
+                        "ar.role": role,
+                        "ar.request-id": str(request.request_id),
+                        **task_labels,
+                    },
+                    "systemPrompt": note,
+                    "mcpServers": {"agents-remember-task": definition},
+                    "toolPolicy": {
+                        "preapproved": [
+                            {"kind": "mcp", "server": "agents-remember-task", "tool": name}
+                            for name in tools_for_role(role)
+                        ]
+                    },
+                }
+                self.assertEqual(created_empty, ("agent-create", expected_base_agent))
                 self.assertEqual(
                     created,
                     (
                         "agent-create",
                         {
-                            "agentId": agent_id,
-                            "idempotencyKey": f"ar-role-launch:{request.request_id}",
-                            "workspaceId": workspace_id,
-                            "provider": "codex",
-                            "model": "gpt-a",
-                            "thinkingOptionId": "low",
-                            "title": title,
-                            "labels": {
-                                "ar.role": role,
-                                "ar.request-id": str(request.request_id),
-                                **task_labels,
-                            },
+                            **expected_base_agent,
                             "prompt": self.first_message(request),
-                            "systemPrompt": note,
-                            "mcpServers": {"agents-remember-task": definition},
-                            "toolPolicy": {
-                                "preapproved": [
-                                    {"kind": "mcp", "server": "agents-remember-task", "tool": name}
-                                    for name in tools_for_role(role)
-                                ]
-                            },
+                            "skipToolServerWait": True,
                         },
                     ),
                 )
@@ -199,7 +204,7 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                 )
                 self.runtime.agents.clear()
         # The receipt and artifact were stored before each runtime call.
-        self.assertEqual(len(observed), 8)
+        self.assertEqual(len(observed), 12)
         for _command, saved, payload, stored in observed:
             self.assertEqual(saved["status"], "starting")
             self.assertEqual(saved["replayRequest"]["agent"]["agentId"], saved["agentId"])
@@ -239,6 +244,10 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
             sorted(
                 {f"reports/{saved['requestId']}.handover.txt" for _, saved, _, _ in observed}
                 | {f"reports/{saved['requestId']}.handover.json" for _, saved, _, _ in observed}
+                | {
+                    f"coordination/runtime/server-bindings/fake-{saved['agentId']}.json"
+                    for _, saved, _, _ in observed
+                }
                 | task_documents
             ),
         )

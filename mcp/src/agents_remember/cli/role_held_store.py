@@ -456,6 +456,19 @@ def _closed_messages(
     return list(saved.values())
 
 
+def _is_same_request_binding_retry(current: dict[str, Any], receipt: dict[str, Any]) -> bool:
+    """Whether ``receipt`` records an L51-R2 retry advancing ``agentId`` within one request."""
+    if current.get("requestId") != receipt.get("requestId"):
+        return False
+    if current.get("status") not in {"starting", "unknown", "held"}:
+        return False
+    confirmation = receipt.get("bindingConfirmation")
+    if not isinstance(confirmation, dict) or confirmation.get("retried") is not True:
+        return False
+    archived = confirmation.get("archivedAgentIds")
+    return isinstance(archived, list) and current.get("agentId") in archived
+
+
 def preserve_held_closure(
     current: dict[str, Any], receipt: dict[str, Any], prior_generation: int | None
 ) -> None:
@@ -465,7 +478,7 @@ def preserve_held_closure(
     if (current.get("requestId"), current.get("agentId")) != (
         receipt.get("requestId"),
         receipt.get("agentId"),
-    ):
+    ) and not _is_same_request_binding_retry(current, receipt):
         raise HeldSeatClosed(agent_id, "receipt-moved")
     if receipt_generation(current) != expected:
         raise HeldSeatClosed(agent_id, "generation-changed")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import unittest
 import uuid
 from contextlib import nullcontext
@@ -55,6 +56,12 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, l
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.tools.role_tool_scope import tools_for_role
+from agents_remember.serving.server_bindings import (
+    BoundIdentityPayload,
+    ServerBindingRecord,
+    bindings_directory,
+    process_start,
+)
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document import TaskEnclosureRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
@@ -622,7 +629,7 @@ def _bridge_whose_first_creation_gets_no_answer(
 
     answers = [PaseoBridgeFailure("paseo_bridge_timeout", "no answer in time")]
 
-    def bridge(_config: McpRuntimeConfig, command: str, payload: dict[str, Any]) -> Any:
+    def bridge(config: McpRuntimeConfig, command: str, payload: dict[str, Any]) -> Any:
         if command == "role-profiles":
             return {"profiles": [], "readAt": "fixture"}
         if command == "catalog":
@@ -636,6 +643,29 @@ def _bridge_whose_first_creation_gets_no_answer(
         if answers:
             raise answers.pop()
         agents[payload["agentId"]] = payload
+        env = ((payload.get("mcpServers") or {}).get("agents-remember-task") or {}).get("env") or {}
+        if env.get("AR_PASEO_AGENT_ID") and env.get("AR_REQUEST_ID"):
+            pid = os.getpid()
+            record = ServerBindingRecord(
+                pid=pid,
+                processStart=process_start(pid),
+                parentPid=os.getppid(),
+                parentProcessStart=process_start(os.getppid()),
+                ancestors=[],
+                startedAt="2026-10-02T05:00:00+00:00",
+                configPath=str(config.config_path),
+                bindingState="bound",
+                binding=BoundIdentityPayload(
+                    agentId=str(env["AR_PASEO_AGENT_ID"]),
+                    requestId=str(env["AR_REQUEST_ID"]),
+                    role=str(env.get("AR_ROLE") or "worker"),
+                ),
+            )
+            directory = bindings_directory(config)
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / f"fake-{payload['agentId']}.json").write_text(
+                record.model_dump_json(exclude_none=True), encoding="utf-8"
+            )
         agent = {"id": payload["agentId"], "provider": "codex", "workspaceId": "wks"}
         return {"serverId": "srv", "existing": False, "agent": agent}
 

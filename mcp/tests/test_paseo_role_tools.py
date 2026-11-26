@@ -550,7 +550,10 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
         )
         self.assertNotIn("parentAgentId", receipt)
         created = [p for command, p in self.runtime.calls if command == "agent-create"]
-        self.assertEqual([payload["agentId"] for payload in created], [started["agentId"]])
+        self.assertEqual(
+            [payload["agentId"] for payload in created],
+            [started["agentId"], started["agentId"]],
+        )
         self.assertNotIn("parentAgentId", created[0])
         # The same chat may not message the agent it started; the developer speaks with it
         # in the dashboard.

@@ -201,7 +201,8 @@ class FreeSeatDeliveryTests(_FreeSeatWorld):
         created = self.created_agents()
 
         self.assertEqual(answer["ok"], True, answer)
-        self.assertEqual(len(created), 1)
+        self.assertEqual(len(created), 2)
+        self.assertEqual(len({call["agentId"] for call in created}), 1)
         # The identity the host created, not a reused or invented one.
         self.assertEqual(answer["agentId"], created[0]["agentId"])
         self.assertEqual(
@@ -282,7 +283,8 @@ class FreeSeatOverrideTests(_FreeSeatWorld):
 
         self.assertEqual(answer["ok"], True, answer)
         created = self.created_agents()
-        self.assertEqual(len(created), 1)
+        self.assertEqual(len(created), 2)
+        self.assertEqual(len({call["agentId"] for call in created}), 1)
         self.assertEqual((created[0]["provider"], created[0]["model"]), ("codex", "gpt-a"))
         recorded = _read_receipt(
             _receipt_path(

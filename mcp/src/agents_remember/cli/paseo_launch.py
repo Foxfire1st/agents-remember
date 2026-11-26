@@ -26,7 +26,7 @@ import os
 import sys
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -119,6 +119,16 @@ class LaunchOutcome:
     # The agent of a refused launch that exists in the runtime and is still to be archived.
     lost_agent_id: str | None = None
     workspace_preparation: str | None = None
+    binding_confirmation: dict[str, Any] | None = None
+    effective_launch_call: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LaunchExecutionPolicy:
+    """How ``run_launch_call`` runs creation or held-seat opening with L51-R2 confirmation."""
+
+    mode: Literal["create", "open-held"] = "create"
+    on_retry_agent: Callable[[str], Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -619,6 +629,7 @@ def run_launch_call(
     call: dict[str, Any],
     *,
     before_create: Callable[[], bool] | None = None,
+    execution: LaunchExecutionPolicy | None = None,
 ) -> LaunchOutcome:
     """Run a stored launch call and classify what the runtime answered."""
 
@@ -635,6 +646,7 @@ def run_launch_call(
         raise ValueError("The saved launch call is incomplete and cannot be repeated.")
     predecessor = call.get("archiveAgentId")
     predecessor_settled = not predecessor
+    policy = execution or LaunchExecutionPolicy()
     try:
         if predecessor:
             _archive_launch_predecessor(config, predecessor)
@@ -650,10 +662,21 @@ def run_launch_call(
                 predecessor_settled=predecessor_settled,
             )
         role_launch_progress.starting()
-        created = bridge_call(config, "agent-create", agent_create_input(call, workspace_id))
-        return replace(
-            _created_outcome(created, agent_id, workspace_id),
-            workspace_preparation=opened.get("preparation"),
+        from agents_remember.cli.role_launch_confirmation import (  # noqa: PLC0415
+            ConfirmedLaunchRequest,
+            execute_confirmed_launch,
+        )
+
+        return execute_confirmed_launch(
+            config,
+            call,
+            ConfirmedLaunchRequest(
+                workspace_id=workspace_id,
+                bridge=bridge_call,
+                predecessor_settled=predecessor_settled,
+                workspace_preparation=opened.get("preparation"),
+                execution=policy,
+            ),
         )
     except PaseoBridgeFailure as error:
         if error.code == NATIVE_ANTIGRAVITY_REPLAY_MISSING:
