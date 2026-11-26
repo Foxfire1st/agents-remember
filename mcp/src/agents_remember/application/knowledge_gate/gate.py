@@ -174,6 +174,8 @@ class GateTrees:
     frozen: tuple[str, ...] = ()
     """The memory commit of the leaf's completed closeout, when its contract records one: a history
     file closed there is frozen for the validator though no base holds it."""
+    coordination_root: Path | None = None
+    repo_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -389,6 +391,8 @@ def _evaluate(
         cache_directory=default_base_cache_directory(contract.coordination_root),
         leaf_memory_head=lines.leaf_head,
         frozen=closed_out_memory(contract),
+        coordination_root=contract.coordination_root,
+        repo_name=contract.repo_name,
     )
     result = judge(document, path, trees, contract.leaf_id or None)
     return replace(result, findings=(*unreadable, *result.findings)) if unreadable else result
@@ -431,6 +435,7 @@ def judge(
 
     findings: list[GateFinding] = []
     advisory: list[GateFinding] = []
+    context: GateContext | GateFinding | None = None
     if document.get("state") != "complete":
         findings += [
             GateFinding(
@@ -442,13 +447,27 @@ def judge(
             for one in document.get("incomplete") or ({"input": "worklist", "detail": "-"},)
         ]
     else:
-        item_findings, advisory = _item_findings(document.get("items") or (), trees, owner)
+        context = _candidate(trees, owner)
+        item_findings, advisory = _item_findings(
+            document.get("items") or (), trees, owner, context=context
+        )
         findings += item_findings
     refusing, reports = validation_findings(trees)
     if document.get("state") == "complete":
         # Entry currentness is judged only for a complete worklist; an incomplete run has
         # already refused with its own findings.
         refusing = [*refusing, *_entry_currentness(trees, owner)]
+        if isinstance(context, GateContext):
+            # Deferred: ``deferrals`` imports this module's types, so a module-scope import cycles.
+            from agents_remember.application.knowledge_gate.deferrals import (  # noqa: PLC0415
+                deferral_gate_findings,
+            )
+
+            deferral_refusing, deferral_reports = deferral_gate_findings(
+                trees, owner, context=context
+            )
+            refusing = [*refusing, *deferral_refusing]
+            reports = [*reports, *deferral_reports]
     return GateResult(
         owner=owner,
         worklist=document,
@@ -526,14 +545,18 @@ def _held_candidate(
 
 
 def _item_findings(
-    items: Sequence[Mapping[str, Any]], trees: GateTrees, owner: str | None
+    items: Sequence[Mapping[str, Any]],
+    trees: GateTrees,
+    owner: str | None,
+    *,
+    context: GateContext | GateFinding | None = None,
 ) -> tuple[list[GateFinding], list[GateFinding]]:
-    context = _candidate(trees, owner)
-    if isinstance(context, GateFinding):
-        return [context], []
-    where = _writable_history(context, owner, trees) if owner else "knowledge/history"
+    resolved = _candidate(trees, owner) if context is None else context
+    if isinstance(resolved, GateFinding):
+        return [resolved], []
+    where = _writable_history(resolved, owner, trees) if owner else "knowledge/history"
     try:
-        refusing, advisory = _decided(items, context, where)
+        refusing, advisory = _decided(items, resolved, where)
     except GitReadFailed as error:  # never decided on a read that did not happen (never memoised)
         return [_unreadable("git", error)], []
     findings: list[GateFinding] = []

@@ -32,6 +32,46 @@ export interface ReaderAddress {
 
 export type InvariantState = 'stale' | 'unverifiable' | 'unrealized' | 'current';
 export type EntryState = 'current' | 'stale' | 'unverifiable';
+export type DependentState = 'current' | 'stale' | 'unverifiable' | 'deferred';
+export type DeferralState = 'open' | 'due' | 'orphaned';
+
+export interface DependentDeferralView {
+  id: string;
+  passage: string;
+  reason: string;
+  condition: { task?: string; file?: string; note?: string };
+  fileBlob?: string;
+  owner: string;
+  createdAt: string;
+  createdByLeaf: string;
+  age: string;
+  state: DeferralState;
+}
+
+export interface DependentMovedLinkView {
+  position?: number;
+  kind?: string;
+  path?: string;
+  id?: string;
+  state?: string;
+  reason?: string;
+  recordedRevision?: number;
+  revision?: number;
+  recordedBlob?: string;
+  observedBlob?: string;
+  movedBy?: string;
+  movingCommit?: string;
+  movingCommitUnknown?: string;
+}
+
+export interface DependentPartView {
+  document: string;
+  state: DependentState;
+  deferred: boolean;
+  stalenessState?: 'current' | 'stale' | 'unverifiable';
+  deferrals?: DependentDeferralView[];
+  movedLinks?: DependentMovedLinkView[];
+}
 
 export interface ReaderSelection {
   repo: string;
@@ -326,6 +366,7 @@ export interface RecordViewAnswer extends ReaderAnswer {
   };
   decision?: DecisionView | null;
   facet?: Record<string, unknown>;
+  dependent?: DependentPartView;
   timeline: Timeline;
 }
 

@@ -52,6 +52,8 @@ from agents_remember.models.knowledge_files.canonical import canonical_text, par
 
 _MECHANICAL_ANCHOR: Final = frozenset({"blob", "content"})
 _ENTRY_LISTS: Final = ("realizes", "proves")
+_OMIT_WHEN_EMPTY_LISTS: Final = ("deferrals",)
+_KEYED_LISTS: Final = (*_ENTRY_LISTS, *_OMIT_WHEN_EMPTY_LISTS)
 _ABSENT: Final = object()
 
 
@@ -186,7 +188,7 @@ def _keyed(document: Any, key: str) -> dict[str, Any]:
     if not isinstance(document, dict):
         return {}
     value = document.get(key)
-    if key in _ENTRY_LISTS:
+    if key in _KEYED_LISTS:
         return {str(item["id"]): item for item in value or []}
     return dict(value or {})
 
@@ -200,9 +202,12 @@ def _merge_json(
     documents = [one for one in (base, ours, theirs) if isinstance(one, dict)]
     keys = sorted({key for document in documents for key in document})
     for key in keys:
-        if key == "references" or key in _ENTRY_LISTS:
+        if key == "references" or key in _KEYED_LISTS:
             items = _merge_collection(path, key, (base, ours, theirs), conflicts)
-            if key in _ENTRY_LISTS:
+            if key in _OMIT_WHEN_EMPTY_LISTS:
+                if items:
+                    merged[key] = [items[identifier] for identifier in sorted(items)]
+            elif key in _ENTRY_LISTS:
                 if items or any(isinstance(one, dict) and key in one for one in (ours, theirs)):
                     merged[key] = [items[identifier] for identifier in sorted(items)]
             else:

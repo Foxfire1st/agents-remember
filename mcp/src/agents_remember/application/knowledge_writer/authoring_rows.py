@@ -24,6 +24,7 @@ from agents_remember.application.knowledge_writer.code_anchors import (
     AnchorResolutionError,
     CodeSnapshot,
 )
+from agents_remember.application.knowledge_writer.deferrals import apply_record_row_deferrals
 from agents_remember.application.knowledge_writer.family_effect import family_effect_refusal
 from agents_remember.application.knowledge_writer.handoff import (
     HANDLE_PREFIX,
@@ -158,6 +159,7 @@ class HistoryRowAuthoring:
         memory_base: str | None
         """The leaf's recorded memory base commit for card comparison."""
         handles: dict[str, str]
+        _deferral_ops: dict[str, Any]
 
         def problem(self, where: str, message: str) -> None: ...
 
@@ -366,6 +368,9 @@ class HistoryRowAuthoring:
             "reason": self._reason_with_evidence(subject, request.reason),
             "items": list(request.items),
         }
+        if request.deferral_ids is not None:
+            self.problem(where, "'deferralIds' applies only to a dependent record row")
+            return None
         if found[1] == "invariant":
             return self._invariant_row(request, row, found[2], where)
         if found[1] == "family":
@@ -399,6 +404,7 @@ class HistoryRowAuthoring:
                 ("examined", request.examined),
                 ("considered", request.considered),
                 ("ref", request.ref),
+                ("deferralIds", request.deferral_ids),
             )
             if value
         ]
@@ -523,6 +529,7 @@ class HistoryRowAuthoring:
                 ("because", request.because),
                 ("examined", request.examined),
                 ("ref", request.ref),
+                ("deferralIds", request.deferral_ids),
             )
             if value
         ]
@@ -667,6 +674,8 @@ class HistoryRowAuthoring:
             row["effect"] = request.effect
         if request.because:
             row["because"] = [self.resolve(one, where) for one in request.because]
+        if not apply_record_row_deferrals(self, request, row, where, existing=existing):
+            return None
         try:
             RecordRow.model_validate(row)
         except ValidationError as error:
@@ -745,6 +754,7 @@ class HistoryRowAuthoring:
                 ("because", request.because),
                 ("examined", request.examined),
                 ("ref", request.ref),
+                ("deferralIds", request.deferral_ids),
             )
             if value
         ]
@@ -787,6 +797,7 @@ class HistoryRowAuthoring:
                 ("effect", request.effect),
                 ("because", request.because),
                 ("examined", request.examined),
+                ("deferralIds", request.deferral_ids),
             )
             if value
         ]
@@ -855,6 +866,7 @@ class HistoryRowAuthoring:
                 ("because", request.because),
                 ("examined", request.examined),
                 ("ref", request.ref),
+                ("deferralIds", request.deferral_ids),
             )
             if value
         ]

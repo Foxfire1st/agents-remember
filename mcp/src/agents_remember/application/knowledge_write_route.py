@@ -312,6 +312,7 @@ class WaveTarget:
     wave: str
     task: str
     coordination_root: Path | None = None
+    repo_name: str | None = None
 
 
 def leaf_write_report(
@@ -356,6 +357,7 @@ def leaf_write_report(
             authorization=authorization,
             decisions=leaf_decisions(contract),
             coordination_root=contract.coordination_root,
+            repo_name=contract.repo_name,
             questions=LeafQuestions(contract, config=config, command=command),
             worklist=worklist,
             code_base=contract.code_base_commit or None,
@@ -503,6 +505,7 @@ def crossing_write_report(
             commit=submission.commit,
             authorization=authorization,
             coordination_root=contract.coordination_root,
+            repo_name=contract.repo_name,
             code_base=record.code.resultHead,
             stamp=write_stamp(owner, contract.coordination_root),
         ),
@@ -534,6 +537,7 @@ def wave_write_report(target: WaveTarget, submission: WriteSubmission) -> WriteR
             commit=submission.commit,
             authorization=str(submission.authorization_ref or "").strip(),
             coordination_root=target.coordination_root,
+            repo_name=target.repo_name,
             stamp=write_stamp(owner, target.coordination_root),
         )
     )

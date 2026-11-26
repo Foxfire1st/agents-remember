@@ -6,7 +6,7 @@ Before starting a baseline or fix-verification, read the [shared catalog review 
 
 ## Scope and demotion
 
-OM-2, OM-4 and OM-5 apply only to converted, text-format memory. Only a developer ruling may demote them.
+OM-2, OM-4, OM-5 and OM-6 apply only to converted, text-format memory. Only a developer ruling may demote them.
 
 ## Standing criteria
 
@@ -55,3 +55,17 @@ For a reconsidered revision written after a `raise`, check all three:
 - The alternative's status matches the developer's recorded answer.
 - A link repointed in `records` names the code addressed by the condition.
 - The `changed` row cites the answer.
+
+### OM-6 — Dependent-document confirmations and lifted deferrals
+
+Every confirmation of a dependent document that `memory_quality_check` flags in its report-only findings — a document already stale at the leaf's base that the leaf did not edit — and every lifted deferral (`deferral_lifted`) requires an explicit signed verdict from the Reviewer in the memory lane.
+
+For each flagged confirmation and each lifted deferral, the Reviewer reads the whole dependent document and states in the memory verdict:
+
+- whether the Reviewer read the whole document;
+- whether the document holds against the current code;
+- for a lifted deferral, whether lifting without editing the document is justified.
+
+Attach both the base and candidate `staleOnly=true` receipts from `knowledge_read` (`view="dependent"`) on `agents-remember-task` to the memory verdict.
+
+Block the memory round if any flagged confirmation or lifted deferral lacks a holding whole-document check, if lifting without editing is unjustified, or if a deferred document was confirmed without editing it.

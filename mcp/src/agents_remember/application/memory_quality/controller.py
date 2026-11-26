@@ -79,6 +79,7 @@ from agents_remember.memory_quality.curator_checklist import (
     split_commit_owned_findings,
     write_curator_checklist,
 )
+from agents_remember.memory_quality.dependent_flags import DependentFlagScope
 from agents_remember.memory_quality.final_certification import final_catalog_readiness
 from agents_remember.memory_quality.final_certification.catalog import (
     ReadinessProjectionInput,
@@ -457,6 +458,12 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
             write_report=not execution.publish_curator_report,
             knowledge_base=converted_check_base(scope, execution.config.coordination_root),
             landing_base=(None if leaf_request is None else leaf_base_port(leaf_request)),
+            dependent_scope=DependentFlagScope(
+                owner=(None if scope.contract is None else scope.contract.leaf_id),
+                code_base=(None if scope.contract is None else scope.contract.code_base_commit),
+                coordination_root=execution.config.coordination_root,
+                repo_name=scope.repo_id,
+            ),
         ),
         include_report_only_findings=execution.publish_curator_report,
     )

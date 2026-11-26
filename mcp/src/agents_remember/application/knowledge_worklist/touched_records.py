@@ -39,7 +39,11 @@ from agents_remember.models.knowledge_files.history import (
     RECORD_ROW_SUBJECT_PATTERN,
     ReconsiderationRow,
 )
-from agents_remember.models.knowledge_files.records import record_status
+from agents_remember.models.knowledge_files.records import (
+    DependentRecord,
+    KnowledgeRecord,
+    record_status,
+)
 
 __all__ = ["TOUCHED_RECORD_KIND", "TOUCHED_RECORD_PREFIXES", "touched_record_items"]
 
@@ -125,6 +129,29 @@ def _raise_mark_only(base_raw: bytes, candidate_raw: bytes) -> bool:
     return all(base[key] == edited[key] for key in base if key != "status")
 
 
+def _deferral_only_dependent_change(
+    base_record: KnowledgeRecord,
+    candidate_record: KnowledgeRecord,
+    base_md: bytes | None,
+    candidate_md: bytes | None,
+) -> bool:
+    """Whether a dependent record changed only in its deferrals (plus revision/writer)."""
+
+    if not (
+        isinstance(base_record, DependentRecord) and isinstance(candidate_record, DependentRecord)
+    ):
+        return False
+    if base_md != candidate_md:
+        return False
+    return (
+        base_record.document == candidate_record.document
+        and base_record.stands_on == candidate_record.stands_on
+        and base_record.confirmed == candidate_record.confirmed
+        and base_record.origin == candidate_record.origin
+        and base_record.deferrals != candidate_record.deferrals
+    )
+
+
 def touched_record_items(
     base: KnowledgeSide, candidate: KnowledgeSide, owner: str | None = None
 ) -> list[dict[str, Any]]:
@@ -163,17 +190,20 @@ def touched_record_items(
             continue  # the leaf's own open raise mark for its raise row raises nothing
         base_record = base_indexed.record
         record = found.record
+        facts: dict[str, Any] = {
+            "baseRevision": base_record.revision,
+            "revision": record.revision,
+            "baseStatus": record_status(base_record),
+            "status": record_status(record),
+        }
+        if _deferral_only_dependent_change(base_record, record, base_md, candidate_md):
+            facts["deferralOnly"] = True
         items.append(
             {
                 "id": item_id(ITEM_KIND, record_id, [base_record.revision, record.revision]),
                 "kind": ITEM_KIND,
                 "subject": record_id,
-                "facts": {
-                    "baseRevision": base_record.revision,
-                    "revision": record.revision,
-                    "baseStatus": record_status(base_record),
-                    "status": record_status(record),
-                },
+                "facts": facts,
             }
         )
     return items

@@ -65,6 +65,7 @@ from agents_remember.application.knowledge_worklist.route_conditions import (
 from agents_remember.memory.knowledge_index import Entry
 from agents_remember.models.knowledge.item_verdict import ItemVerdict
 from agents_remember.models.knowledge_files.history import (
+    DEFERRAL_RECORD_DISPOSITIONS,
     FamilyRow,
     HistoryFile,
     InvariantRow,
@@ -545,6 +546,15 @@ def record_row_open(item: Mapping[str, Any], context: GateContext) -> str | None
             f"{facts.get('revision')} in K_C; name {subject} again in the hand-off's "
             "'history' and let the writer record the current revision"
         )
+    if facts.get("deferralOnly") is True:
+        if row.disposition not in DEFERRAL_RECORD_DISPOSITIONS:
+            allowed = ", ".join(DEFERRAL_RECORD_DISPOSITIONS)
+            return (
+                f"row {row.id} is a {row.disposition} row, but {subject} changed only its "
+                f"deferrals and takes one of ({allowed}); name {subject} again with a "
+                "deferral disposition through the writer"
+            )
+        return None
     expected = _expected_record_disposition(facts)
     if row.disposition != expected:
         return (

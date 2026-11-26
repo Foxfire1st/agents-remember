@@ -33,7 +33,10 @@ from agents_remember.application.knowledge_worklist.base_cache import default_ba
 from agents_remember.application.knowledge_writer.authoring import Authoring, DecisionResolver
 from agents_remember.application.knowledge_writer.base_side import BaseCode
 from agents_remember.application.knowledge_writer.carry import carry_entries
-from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
+from agents_remember.application.knowledge_writer.code_anchors import (
+    AnchorResolutionError,
+    CodeSnapshot,
+)
 from agents_remember.application.knowledge_writer.file_publication import PublicationError
 from agents_remember.application.knowledge_writer.handoff import Problem, read_handoff
 from agents_remember.application.knowledge_writer.history_check import owner_history_problems
@@ -103,6 +106,8 @@ class WriteRequest:
     coordination_root: Path | None = None
     """Where requirement endpoints' owning tasks live (``tasks/<repository>/<path>``); without it
     every endpoint is reported unresolved; newly changed unresolved links refuse when it is given."""
+    repo_name: str | None = None
+    """Repository name under ``coordination_root/tasks/`` for scoping task-fact lookups."""
     worklist: Mapping[str, Any] | None = None
     """The leaf's persisted worklist (MIK-R08): a ``still_rejected`` row refreshes the links whose
     trigger fired on its item (MIK-R14), and a row names the items it answers (MIK-R07).
@@ -159,6 +164,8 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         onboarding_counted=_onboarding_counted(request.worklist),
         memory_base=request.memory_base,
         coordination_root=request.coordination_root,
+        repo_name=request.repo_name,
+        base_code_blobs=_base_code_blobs(request, snapshot),
         stamp=request.stamp,
     )
     authoring.run(document)
@@ -254,6 +261,19 @@ def _crossing_problems(document: Any) -> list[Problem]:
         if record.record_id is None
     )
     return problems
+
+
+def _base_code_blobs(request: WriteRequest, snapshot: CodeSnapshot) -> Mapping[str, str] | None:
+    """Blobs at ``request.code_base`` for detecting document edits, or ``None`` if unavailable."""
+
+    if not request.code_base:
+        return None
+    if snapshot.commit is not None and snapshot.commit == request.code_base:
+        return snapshot.blobs
+    try:
+        return CodeSnapshot.at_commit(request.code_root, request.code_base).blobs
+    except (AnchorResolutionError, OSError):
+        return None
 
 
 def _load(request: WriteRequest) -> tuple[MemoryState, Problem | None]:

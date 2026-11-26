@@ -36,7 +36,11 @@ from typing import Annotated, ClassVar, Final, Literal, get_args
 
 from pydantic import Field, model_validator
 
-from agents_remember.models.knowledge_files.ids import RECORD_PREFIXES, RecordKind
+from agents_remember.models.knowledge_files.ids import (
+    DEFERRAL_ID_PATTERN,
+    RECORD_PREFIXES,
+    RecordKind,
+)
 from agents_remember.models.knowledge_files.shapes import (
     Anchor,
     DecisionAdmission,
@@ -455,6 +459,44 @@ class Confirmation(FileModel):
     statement: Text | None = None
 
 
+DeferralId = Annotated[str, Field(pattern=DEFERRAL_ID_PATTERN)]
+
+
+class DeferralCondition(FileModel):
+    """When a dependent deferral comes due: a target leaf, a watched file, or both, plus a note."""
+
+    task: Label | None = None
+    file: RepositoryPath | None = None
+    note: Text | None = None
+
+    @model_validator(mode="after")
+    def _require_task_or_file(self) -> DeferralCondition:
+        if self.task is None and self.file is None:
+            raise ValueError("a deferral condition requires at least one of 'task' or 'file'")
+        return self
+
+
+class DependentDeferral(FileModel):
+    """One explicit deferral on a dependent record: why it is wrong, who owns it, and when due."""
+
+    id: DeferralId
+    passage: Text
+    reason: Text
+    condition: DeferralCondition
+    fileBlob: GitBlobId | None = None
+    owner: Label
+    createdAt: Label
+    createdByLeaf: Label
+
+    @model_validator(mode="after")
+    def _require_file_blob_with_file(self) -> DependentDeferral:
+        if self.condition.file is not None and self.fileBlob is None:
+            raise ValueError("a deferral with 'condition.file' must carry 'fileBlob'")
+        if self.condition.file is None and self.fileBlob is not None:
+            raise ValueError("a deferral without 'condition.file' must omit 'fileBlob'")
+        return self
+
+
 def _dependent_link_key(link: DependentLink) -> str:
     """One link's identity for the distinctness check: its kind and what it stands on."""
 
@@ -468,8 +510,9 @@ class DependentRecord(_Record):
 
     ``document`` is a tracked file of the code repository; at most one record names it. Each
     ``stands_on`` link records what stood at the anchor at the last confirmation. ``confirmed``
-    names the task, role and code commit of that confirmation. The record holds no text of the
-    document and no summary of it. Whether the document is stale is derived, never stored.
+    names the task, role and code commit of that confirmation. ``deferrals`` is omitted when empty
+    so records without deferrals stay byte-identical. The record holds no text of the document and
+    no summary of it. Whether the document is stale is derived, never stored.
     """
 
     record_kind: ClassVar[RecordKind] = "dependent"
@@ -480,12 +523,17 @@ class DependentRecord(_Record):
     document: RepositoryPath
     stands_on: tuple[DependentLink, ...] = Field(min_length=1)
     confirmed: Confirmation
+    deferrals: tuple[DependentDeferral, ...] | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def _require_distinct_links(self) -> DependentRecord:
         keys = [_dependent_link_key(one) for one in self.stands_on]
         if len(set(keys)) != len(keys):
             raise ValueError("a dependent's 'stands_on' must not repeat a link")
+        if self.deferrals is not None:
+            deferral_ids = [one.id for one in self.deferrals]
+            if len(set(deferral_ids)) != len(deferral_ids):
+                raise ValueError("a dependent's 'deferrals' must not repeat an id")
         return self
 
 
