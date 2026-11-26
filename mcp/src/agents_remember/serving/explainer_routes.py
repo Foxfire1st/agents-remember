@@ -22,6 +22,7 @@ from agents_remember.canvas.explainer_maintenance import (
 )
 from agents_remember.canvas.explainer_paths import (
     EXPLAINER_FRAME,
+    read_workspace_id,
     receipt_id_segment,
     repository_path,
 )
@@ -232,14 +233,16 @@ async def handle_build(
         read_model._SEND_SELECTION.reset(token)
     if outcome.built or not outcome.current:
         move_notice_watch(deps.config, application.watcher).clear(LeafSelection.of(scope))
-    seat_record = {**outcome.as_record(), "state": outcome.seat}
+    workspace_id = read_workspace_id(outcome.workspace) or str(outcome.workspace)
+    seat_record = {**outcome.as_record(), "state": outcome.seat, "workspaceId": workspace_id}
     return JSONResponse(
         {
             "state": "ok",
             "attempt": f"build:{named.request_id}",
             "seat": seat_record,
             "agentId": outcome.agent_id,
-            "workspaceId": str(outcome.workspace),
+            "workspaceId": workspace_id,
+            "workspace": str(outcome.workspace),
             "generation": outcome.generation,
             "binding": serialize_frame_binding(outcome.binding),
         }

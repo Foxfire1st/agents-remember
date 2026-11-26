@@ -106,16 +106,22 @@ FRAME_HEADERS: dict[str, str] = {
 #: The closed limit table (rule 8). ``enforced_by`` says what actually holds the bound.
 LIMITS: dict[str, dict[str, object]] = {
     "assets-per-revision": {
-        "value": 64,
+        "value": None,
         "unit": "files",
-        "enforced_by": "browser",
-        "where": "admission refuses a revision beyond the store's own file ceiling",
+        "enforced_by": "store",
+        "where": "unbounded per explainer revision under FrameLimits(); bounded only by the 512 MiB task store cap",
     },
     "bytes-per-revision": {
-        "value": 16 * 1024 * 1024,
+        "value": None,
         "unit": "bytes",
-        "enforced_by": "browser",
-        "where": "publication refuses and one asset read is bounded before it is served",
+        "enforced_by": "store",
+        "where": "unbounded per explainer revision under FrameLimits(); bounded only by the 512 MiB task store cap",
+    },
+    "bytes-per-task": {
+        "value": 512 * 1024 * 1024,
+        "unit": "bytes",
+        "enforced_by": "store",
+        "where": "the task store enforces a 512 MiB ceiling across all revisions of a task",
     },
     "messages-per-second": {
         "value": 20,

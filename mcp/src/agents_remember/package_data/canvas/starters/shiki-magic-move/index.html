@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code morph starter — Shiki Magic Move</title>
+  <link rel="stylesheet" href="kit/shiki/4.5.0/magic-move.css">
+  <style>
+    :root {
+      --bg: oklch(0.160 0.02 250);
+      --raised: oklch(0.200 0.02 250);
+      --well: oklch(0.115 0.012 245);
+      --rule: oklch(0.300 0.02 250);
+      --ink: oklch(0.920 0.03 90);
+      --muted: oklch(0.700 0.02 250);
+      --spine: oklch(0.850 0.13 200);
+      --current: oklch(0.820 0.16 75);
+      --new: oklch(0.880 0.16 165);
+      --gone: oklch(0.670 0.22 25);
+      --current-wash: oklch(0.820 0.16 75 / 0.14);
+      --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .page {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 32px 24px 48px;
+    }
+
+    .section-label {
+      margin: 0 0 8px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--spine);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.45rem;
+      line-height: 1.3;
+      font-weight: 650;
+    }
+
+    .lede {
+      margin: 0 0 24px;
+      max-width: 78ch;
+      font-size: 1.04rem;
+      color: var(--muted);
+    }
+
+    figure {
+      margin: 0;
+      background: var(--raised);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      padding: 16px;
+    }
+
+    .figure-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .figure-meta {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .segmented {
+      display: inline-flex;
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      background: var(--well);
+      padding: 2px;
+      gap: 2px;
+    }
+
+    .segmented button {
+      min-height: 40px;
+      padding: 6px 14px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .segmented button:hover {
+      color: var(--ink);
+    }
+
+    .segmented button[aria-pressed="true"],
+    .segmented button[aria-selected="true"] {
+      background: var(--current-wash);
+      border-color: var(--current);
+      color: var(--ink);
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--current);
+      outline-offset: 2px;
+    }
+
+    .morph-stage {
+      background: var(--well);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      padding: 16px;
+      min-height: 210px;
+      overflow-x: auto;
+    }
+
+    .morph-stage pre,
+    .morph-stage .shiki-magic-move-container {
+      margin: 0;
+      background: transparent !important;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--ink);
+    }
+
+    .still-snippets {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .still-block {
+      background: var(--well);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      padding: 12px 16px;
+    }
+
+    .still-block.is-selected {
+      border-color: var(--current);
+      box-shadow: inset 0 0 0 1px var(--current);
+    }
+
+    .still-block h2 {
+      margin: 0 0 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    .still-block.is-selected h2 {
+      color: var(--current);
+    }
+
+    .still-block pre {
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .state-line {
+      margin: 12px 0 4px;
+      font-size: 13px;
+      color: var(--ink);
+    }
+
+    .state-tag {
+      display: inline-block;
+      margin-right: 8px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      border: 1px solid var(--rule);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--current);
+    }
+
+    .key-hint {
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    figcaption {
+      margin-top: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 560px) {
+      .page { padding: 20px 14px 32px; }
+      figure { padding: 12px; }
+      .segmented button { min-height: 44px; }
+      .morph-stage { padding: 12px; }
+      .morph-stage .shiki-magic-move-container {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page" data-part="main" data-part-title="Code morph starter">
+    <p class="section-label">Starter · Code morph</p>
+    <h1>Switch a hunk between before and after</h1>
+    <p class="lede">
+      Shiki Magic Move slides kept tokens into place while removed tokens fade out and new tokens fade in.
+      Before scripts run, both snippets render as a complete stacked still form (Before above After).
+    </p>
+
+    <figure id="fig-code-morph" data-technique="code-morph">
+      <div class="figure-bar">
+        <span class="figure-meta">src/queue/retry.ts · synthetic starter snippet</span>
+        <div class="segmented" role="group" aria-label="Snippet revision">
+          <button type="button" id="tab-before" aria-pressed="false" tabindex="-1" data-state="before">Before</button>
+          <button type="button" id="tab-after" aria-pressed="true" tabindex="0" data-state="after">After</button>
+        </div>
+      </div>
+
+      <div id="still-snippets" class="still-snippets">
+        <div class="still-block" data-state="before">
+          <h2>Before — uncapped exponential backoff</h2>
+          <pre><code>export function computeRetryDelay(attempt: number, baseMs: number): number {
+  const backoff = baseMs * Math.pow(2, attempt - 1);
+  return Math.round(backoff);
+}</code></pre>
+        </div>
+        <div class="still-block is-selected" data-state="after">
+          <h2>After — lease-capped full jitter</h2>
+          <pre><code>export function computeRetryDelay(
+  attempt: number,
+  baseMs: number,
+  leaseMs: number,
+  random = Math.random,
+): number {
+  const ceiling = Math.floor(leaseMs * 0.8);
+  const capped = Math.min(ceiling, baseMs * Math.pow(2, attempt - 1));
+  return Math.round(random() * capped);
+}</code></pre>
+        </div>
+      </div>
+
+      <div id="morph-stage" class="morph-stage" hidden aria-label="Highlighted code morph"></div>
+
+      <p id="morph-status" class="state-line" aria-live="polite">
+        <span class="state-tag">After</span>
+        Delay is capped at 80% of the queue lease and sampled with full jitter.
+      </p>
+      <p class="key-hint">Keys: Left and Right arrows switch between Before and After while the switch has focus.</p>
+      <figcaption>Synthetic starter example using kit/shiki/4.5.0/shiki-kit.js and magic-move.css.</figcaption>
+    </figure>
+  </main>
+
+  <script type="module">
+    import { createHighlighter } from './kit/shiki/4.5.0/shiki-kit.js';
+
+    const STATES = {
+      before: {
+        label: 'Before',
+        summary: 'Exponential backoff grows without a ceiling and can outlive the queue lease.',
+        code: [
+          'export function computeRetryDelay(attempt: number, baseMs: number): number {',
+          '  const backoff = baseMs * Math.pow(2, attempt - 1);',
+          '  return Math.round(backoff);',
+          '}',
+        ].join('\n'),
+      },
+      after: {
+        label: 'After',
+        summary: 'Delay is capped at 80% of the queue lease and sampled with full jitter.',
+        code: [
+          'export function computeRetryDelay(',
+          '  attempt: number,',
+          '  baseMs: number,',
+          '  leaseMs: number,',
+          '  random = Math.random,',
+          '): number {',
+          '  const ceiling = Math.floor(leaseMs * 0.8);',
+          '  const capped = Math.min(ceiling, baseMs * Math.pow(2, attempt - 1));',
+          '  return Math.round(random() * capped);',
+          '}',
+        ].join('\n'),
+      },
+    };
+
+    const ANIMATED_OPTIONS = {
+      duration: 360,
+      stagger: 0,
+      delayMove: 0.1,
+      delayLeave: 0,
+      delayEnter: 0.25,
+      delayContainer: 0.1,
+      easing: 'cubic-bezier(0.65, 0, 0.35, 1)',
+      animateContainer: true,
+    };
+
+    const switchBtns = [...document.querySelectorAll('#fig-code-morph .segmented button[data-state]')];
+    const stillBox = document.getElementById('still-snippets');
+    const stillBlocks = [...stillBox.querySelectorAll('.still-block[data-state]')];
+    const stage = document.getElementById('morph-stage');
+    const statusLine = document.getElementById('morph-status');
+
+    let activeKey = 'after';
+    let morphEl = null;
+
+    function highlightStillBlock(block, highlighter) {
+      const key = block.dataset.state;
+      const entry = STATES[key];
+      const pre = block.querySelector('pre');
+      const codeEl = pre ? pre.querySelector('code') : null;
+      if (!entry || !pre || !codeEl) return;
+      const { tokens } = highlighter.codeToTokens(entry.code, { lang: 'typescript', theme: 'github-dark' });
+      codeEl.textContent = '';
+      tokens.forEach((lineTokens, lineIdx) => {
+        if (lineIdx > 0) codeEl.appendChild(document.createTextNode('\n'));
+        for (const token of lineTokens) {
+          const span = document.createElement('span');
+          span.textContent = token.content;
+          if (token.color) span.style.color = token.color;
+          codeEl.appendChild(span);
+        }
+      });
+      pre.setAttribute('data-highlighted', 'shiki');
+    }
+
+    function syncStillSelection(key) {
+      for (const block of stillBlocks) {
+        block.classList.toggle('is-selected', block.dataset.state === key);
+      }
+    }
+
+    function renderStatus(key) {
+      const entry = STATES[key];
+      statusLine.textContent = '';
+      const tag = document.createElement('span');
+      tag.className = 'state-tag';
+      tag.textContent = entry.label;
+      statusLine.append(tag, document.createTextNode(entry.summary));
+    }
+
+    function selectState(key, focusBtn = false) {
+      if (!STATES[key]) return;
+      activeKey = key;
+      for (const btn of switchBtns) {
+        const selected = btn.dataset.state === key;
+        btn.setAttribute('aria-pressed', String(selected));
+        btn.tabIndex = selected ? 0 : -1;
+        if (selected && focusBtn) btn.focus();
+      }
+      syncStillSelection(key);
+      renderStatus(key);
+      if (morphEl) {
+        morphEl.options = ANIMATED_OPTIONS;
+        morphEl.code = STATES[key].code;
+      }
+    }
+
+    for (const btn of switchBtns) {
+      btn.addEventListener('click', () => selectState(btn.dataset.state));
+      btn.addEventListener('keydown', (event) => {
+        const keys = ['before', 'after'];
+        const currentIndex = keys.indexOf(activeKey);
+        if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+          event.preventDefault();
+          const delta = event.key === 'ArrowRight' ? 1 : -1;
+          selectState(keys[(currentIndex + delta + keys.length) % keys.length], true);
+        } else if (event.key === 'Home') {
+          event.preventDefault();
+          selectState(keys[0], true);
+        } else if (event.key === 'End') {
+          event.preventDefault();
+          selectState(keys[keys.length - 1], true);
+        }
+      });
+    }
+
+    const highlighter = await createHighlighter();
+    for (const block of stillBlocks) highlightStillBlock(block, highlighter);
+
+    morphEl = document.createElement('shiki-magic-move');
+    morphEl.highlighter = highlighter;
+    morphEl.lang = 'typescript';
+    morphEl.theme = 'github-dark';
+    morphEl.options = ANIMATED_OPTIONS;
+    morphEl.code = STATES[activeKey].code;
+    stage.appendChild(morphEl);
+
+    stillBox.hidden = true;
+    stage.hidden = false;
+    syncStillSelection(activeKey);
+    renderStatus(activeKey);
+  </script>
+</body>
+</html>

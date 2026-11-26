@@ -118,9 +118,9 @@ describe('the mounted revision frame preserves forwarding bounds', () => {
   });
 });
 
-describe('the current frame receives the dashboard effects policy', () => {
+describe('the current frame receives its binding without dashboard effects', () => {
   it.each([true, false])(
-    'starts with effects=%s and follows both toggle directions without changing its binding',
+    'sends the binding once without an effects field even when dashboard effects start as %s and toggle',
     async (initial) => {
       if (initial) delete document.documentElement.dataset.effects;
       else document.documentElement.dataset.effects = 'off';
@@ -159,28 +159,17 @@ describe('the current frame receives the dashboard effects policy', () => {
         revision: 8,
         comparison: 'review-comparison:task/leaf/9',
       };
-      await waitFor(() => expect(bindings()).toEqual([{ ...expected, effects: initial }]));
+      await waitFor(() => expect(bindings()).toEqual([expected]));
+      expect('effects' in bindings()[0]).toBe(false);
       act(() => {
         if (initial) document.documentElement.dataset.effects = 'off';
         else delete document.documentElement.dataset.effects;
       });
-      await waitFor(() =>
-        expect(bindings()).toEqual([
-          { ...expected, effects: initial },
-          { ...expected, effects: !initial },
-        ]),
-      );
       act(() => {
         if (initial) delete document.documentElement.dataset.effects;
         else document.documentElement.dataset.effects = 'off';
       });
-      await waitFor(() =>
-        expect(bindings()).toEqual([
-          { ...expected, effects: initial },
-          { ...expected, effects: !initial },
-          { ...expected, effects: initial },
-        ]),
-      );
+      expect(bindings()).toEqual([expected]);
       expect(screen.getByTestId('explanation-frame')).toBe(frame);
       expect(fetch).toHaveBeenCalledTimes(1);
       mounted.unmount();

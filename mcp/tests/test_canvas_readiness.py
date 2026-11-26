@@ -1,8 +1,8 @@
 """The model-free readiness check of one prospective revision (MIK-R104 rule 14).
 
 Each case protects a distinct way a page can fail to load as itself: reaching the network, naming an
-asset that is not the revision's, citing evidence the packet does not carry, or moving without a
-reduced-motion rule. The inert-script note is asserted separately because scripts are disabled by
+asset that is not the revision's, citing evidence the packet does not carry, or playing media without
+reader controls. The inert-script note is asserted separately because scripts are disabled by
 policy (rule 8), not by a page defect.
 """
 
@@ -37,7 +37,7 @@ def test_an_admitted_self_contained_page_is_ready() -> None:
         "admitted-assets",
         "evidence-references",
         "part-map",
-        "reduced-motion",
+        "media-controls",
     }
     # A page without parts is one part holding every claim; its staleness is whole-page.
     assert report.part_map is not None
@@ -97,12 +97,11 @@ def test_an_evidence_reference_must_be_one_the_admitted_packet_carries() -> None
     assert "does not carry" in report.failures[0].detail
 
 
-def test_a_page_that_moves_without_a_reduced_motion_rule_is_not_ready() -> None:
+def test_css_motion_passes_static_readiness_while_html_media_controls_stay_enforced() -> None:
     moving = _assets()
     moving["app.css"] = b"@keyframes pulse{to{opacity:.4}} .a{animation:pulse 1s infinite}"
     report = check_page(moving, entrypoint="index.html", packet=packet(record()))
-    assert not report.ready
-    assert "reduced-motion" in {check.name for check in report.failures}
+    assert report.ready, report.diagnostics()
 
     cared = _assets()
     cared["app.css"] = (
@@ -115,6 +114,18 @@ def test_a_page_that_moves_without_a_reduced_motion_rule_is_not_ready() -> None:
     report = check_page(loud, entrypoint="index.html", packet=packet(record()))
     assert not report.ready
     assert "autoplays" in report.failures[0].detail
+
+    # HTML media checks and static evidence regexes stay scoped to markup, never scanning JS bundles.
+    scripted = _assets(
+        **{
+            "app.js": (
+                b"const tpl = '<video autoplay loop src=\"x.webm\"></video>';"
+                b"const attr = 'data-evidence=\"not-admitted\"';"
+            )
+        }
+    )
+    scripted["index.html"] = b"<!doctype html><script src='app.js'></script><p>ok</p>"
+    assert check_page(scripted, entrypoint="index.html", packet=packet(record())).ready
 
 
 def test_a_video_is_a_figure_a_reader_drives() -> None:

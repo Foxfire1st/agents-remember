@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { taskEntry, taskSummary } from '../test/fixtures/wire';
 import { RoleChatsPane } from './RoleChats';
 import { PaseoChatFrame } from './PaseoChatFrame';
-import { PASEO_CONTROL_TIMEOUT_MS, PASEO_UNAVAILABLE_QUIET_MS } from './paseoFrameControl';
+import {
+  PASEO_CONTROL_TIMEOUT_MS,
+  PASEO_UNAVAILABLE_QUIET_MS,
+} from './paseoFrameControl';
 import { tasklessRequestStorageKey } from './roleLaunchModel';
 import {
   paseoAgentTarget,
@@ -418,10 +421,7 @@ describe('embedded frame and its control channel', () => {
     expect(queryByTestId('paseo-frame-agent-problem')).toBeNull();
   });
 
-  it.each([
-    ['agent-archived', 'archived'],
-    ['agent-not-found', 'gone'],
-  ])('says the agent is %s and leaves the frame where it is', async (code, word) => {
+  it('says the agent is archived and leaves the frame where it is without retrying', async () => {
     stubBackend([AVAILABLE]);
     const { container, getByTestId, queryByTestId, rerender } = render(
       <PaseoChatFrame active scope="architect" target={ARCHITECT} />,
@@ -430,9 +430,12 @@ describe('embedded frame and its control channel', () => {
     const frame = frameElement(container);
     const posts = watchPosts(frame);
     deliver(frame, plugin({ type: 'ready' }));
-    deliver(frame, plugin({ type: 'error', code, agentId: ARCHITECT.agentId, message: 'x' }));
+    deliver(
+      frame,
+      plugin({ type: 'error', code: 'agent-archived', agentId: ARCHITECT.agentId, message: 'x' }),
+    );
 
-    expect(getByTestId('paseo-frame-agent-problem').textContent).toContain(word);
+    expect(getByTestId('paseo-frame-agent-problem').textContent).toContain('archived');
     await settle(PASEO_CONTROL_TIMEOUT_MS * 2);
     expect(frameElement(container)).toBe(frame);
     expect(frame.getAttribute('src')).toBe(PROJECTS_URL);

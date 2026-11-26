@@ -33,6 +33,9 @@ export const PASEO_CONTROL_TIMEOUT_MS = 10_000;
  */
 export const PASEO_UNAVAILABLE_QUIET_MS = 150;
 
+/** Progressive delays before retrying `ar.open` after a transient `agent-not-found` refusal. */
+export const PASEO_TRANSIENT_OPEN_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1_000, 1_500, 2_000, 2_500];
+
 export type PaseoControlState = "waiting" | "ready" | "unavailable";
 
 /** The frame element's source; a new generation is a new element, so the same URL loads again. */
@@ -104,6 +107,9 @@ export class PaseoFrameControl {
   // latest and never an intermediate. A lone selection loads when the window expires. The
   // ready report, Retry, host return, or a new deadline preempts the window.
   private settleTimer: number | null = null;
+  // Bounded automatic retry state for transient `agent-not-found` refusals on the active target.
+  private retryTimer: number | null = null;
+  private retryCount = 0;
   // The tray's part of the channel (frameTrayChannel.ts): linked while a plug-in that picks is
   // ready, so the tray's wishes go out as `ar.tray` / `ar.tray-space` when they change.
   private trayLink: FrameTrayLink | null = null;
@@ -131,6 +137,7 @@ export class PaseoFrameControl {
     this.refused = null;
     this.closeRequest();
     this.clearSettle();
+    this.clearRetry(true);
     this.selectedAgentIds.clear();
     this.tellChat(undefined);
     this.setControl("waiting");
@@ -143,6 +150,7 @@ export class PaseoFrameControl {
     this.linkTray(null);
     this.clearDeadline();
     this.clearSettle();
+    this.clearRetry(true);
     this.available = null;
     this.pending = null;
     this.loading = false;
@@ -167,9 +175,18 @@ export class PaseoFrameControl {
       this.scope = scope;
       this.seenAgent = null;
       this.wanted = null;
+      this.clearRetry(true);
       this.pane.setAgentProblem(null);
     }
-    if (!target || this.seenAgent === target.agentId) return;
+    if (!target) {
+      this.clearRetry(true);
+      return;
+    }
+    const sameTarget =
+      this.seenAgent === target.agentId &&
+      (this.wanted?.workspaceId ?? undefined) === (target.workspaceId ?? undefined);
+    if (sameTarget) return;
+    this.clearRetry(true);
     this.seenAgent = target.agentId;
     this.wanted = target;
     this.settled = null;
@@ -264,6 +281,8 @@ export class PaseoFrameControl {
     this.loading = false;
     this.clearDeadline();
     this.clearSettle();
+    const hadTransientRetry = this.retryTimer !== null;
+    this.clearRetry(!hadTransientRetry);
     this.closeRequest();
     this.abilities = capabilities;
     this.pane.setPluginNotice(pluginNoticeText(capabilities, this.available!.provisionCommand));
@@ -272,6 +291,16 @@ export class PaseoFrameControl {
       this.setControl("unavailable");
       this.sync();
       return;
+    }
+    if (
+      hadTransientRetry &&
+      this.wanted &&
+      this.settled === this.wanted.agentId &&
+      this.shown !== this.wanted.agentId
+    ) {
+      this.settled = null;
+      this.refused = null;
+      this.seenAgent = this.wanted.agentId;
     }
     this.setControl("ready");
     if (capabilities) this.post({ type: "ar.hello", capabilities: DASHBOARD_ABILITIES });
@@ -335,8 +364,10 @@ export class PaseoFrameControl {
   private onShown(agentId: string | undefined, drawn: boolean): void {
     if (!agentId || agentId !== this.pending) return;
     this.clearDeadline();
+    this.clearRetry(true);
     this.settled = agentId;
     this.shown = agentId;
+    if (!drawn && this.seenAgent === agentId) this.seenAgent = null;
     this.closeRequest();
     this.pane.setAgentProblem(null);
     this.tellChat(drawn ? agentId : null);
@@ -364,11 +395,48 @@ export class PaseoFrameControl {
 
   private onError(message: Extract<PaseoPluginMessage, { type: "error" }>): void {
     if (!this.pending || (message.agentId && message.agentId !== this.pending)) return;
+    const failedAgent = this.pending;
     this.clearDeadline();
-    this.settled = this.pending;
-    this.refused = this.pending;
+    this.clearRetry();
+    this.settled = failedAgent;
+    this.refused = failedAgent;
+    if (this.seenAgent === failedAgent) this.seenAgent = null;
     this.closeRequest();
     this.pane.setAgentProblem(agentProblemText(message.code, message.message));
+    if (message.code === "agent-not-found") this.scheduleTransientRetry(failedAgent);
+    else this.retryCount = 0;
+  }
+
+  private scheduleTransientRetry(agentId: string): void {
+    if (!this.available || this.control !== "ready" || this.wanted?.agentId !== agentId || this.shown === agentId) return;
+    const delay = PASEO_TRANSIENT_OPEN_RETRY_DELAYS_MS[this.retryCount];
+    if (delay === undefined) return;
+    const expectedScope = this.scope;
+    const expectedWorkspace = this.wanted.workspaceId ?? undefined;
+    this.retryCount += 1;
+    this.retryTimer = window.setTimeout(() => this.onTransientRetry(expectedScope, agentId, expectedWorkspace), delay);
+  }
+
+  private onTransientRetry(expectedScope: string | null, expectedAgent: string, expectedWorkspace: string | undefined): void {
+    this.retryTimer = null;
+    const sameWanted =
+      this.wanted?.agentId === expectedAgent &&
+      (this.wanted.workspaceId ?? undefined) === expectedWorkspace;
+    if (!this.available || this.control !== "ready" || this.pending !== null || this.scope !== expectedScope || !sameWanted || this.shown === expectedAgent) {
+      return;
+    }
+    this.settled = null;
+    this.refused = null;
+    this.seenAgent = this.wanted!.agentId;
+    this.ask(this.wanted!);
+  }
+
+  private clearRetry(resetCount = false): void {
+    if (this.retryTimer !== null) {
+      window.clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+    if (resetCount) this.retryCount = 0;
   }
 
   /**
@@ -464,7 +532,9 @@ export class PaseoFrameControl {
   }
 
   private fallBack(): void {
+    if (this.pending && this.seenAgent === this.pending) this.seenAgent = null;
     this.clearSettle();
+    this.clearRetry(true);
     this.closeRequest();
     this.setControl("unavailable");
     this.sync();

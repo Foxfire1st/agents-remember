@@ -326,10 +326,11 @@ four Git trees, the code and the memory before and after, and names each recorde
 The user asks questions on the page. The first request creates the task's explainer, an agent
 that answers with a chat reply or with a page of its own. The explainer works in stages: the
 reading, the files and changes it chose, their parts, one self-contained explanation per part, the
-essay with its evidence, then each visual, then the page. Each stage leaves a file; the text
-carries the content and a visual supports a part of the essay. Each published page is a numbered
-revision; to publish one, the explainer loads it in a browser that the product fetches itself at
-the first explanation, so nothing is installed by hand
+essay with its evidence, the visual plan, and the page. Each stage leaves a file; the page reads in
+full without its animations while showing the central mechanism of the change through at least one
+interactive figure the reader drives, using the shipped offline presentation kit where needed. Each
+published page is a numbered revision; to publish one, the explainer loads it in a browser that the
+product fetches itself at the first explanation, so nothing is installed by hand
 ([what the explainer needs](guides/review-page-and-explainer.md#what-the-explainer-needs-before-it-can-publish)). On request the explainer grades the blocks of the change set, and the page sorts by its
 grades. The explainer changes no code, no memory and no task document.
 

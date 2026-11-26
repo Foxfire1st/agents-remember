@@ -5,9 +5,9 @@ of it inside one folder, so removing it is one folder delete plus the Git worktr
 
 ``<coordination>/explainer/<repository>/<task>/<leaf>/``
     the workspace: ``binding.json``, ``state/``, ``instructions/``, ``reference/``, ``inputs/``,
-    ``planned/`` (a planned binding), ``kit/``, ``revisions/<n>/``, ``trees/code/``,
-    ``trees/memory/``, ``drafts/assets/``, ``stages/``, ``renders/`` and ``scratch/``. Nothing of
-    the leaf lies beside the folder;
+    ``planned/`` (a planned binding), ``kit/``, ``starters/``, ``exemplar/``, ``revisions/<n>/``,
+    ``trees/code/``, ``trees/memory/``, ``drafts/assets/``, ``stages/``, ``renders/`` and
+    ``scratch/``. Nothing of the leaf lies beside the folder;
 
 ``<leaf>/state/``
     the side files: the request ledger, the seat attempts and the leaf's one lock. Grades, the
@@ -36,6 +36,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.review_frame_paths import FRAMES_DIRECTORY, SEAT_COUNTER_NAME
 from agents_remember.canvas.explainer_worktrees import remove_checkout
 from agents_remember.canvas.paths import PathRefused, guard_path, path_segment
 from agents_remember.kernel.authority import require_repo
@@ -49,6 +50,7 @@ EXPLAINER_FRAME = "explainer"
 __all__ = [
     "BINDING_NAME",
     "DRAFTS_DIRECTORY",
+    "EXEMPLAR_DIRECTORY",
     "EXPLAINER_DIRECTORY",
     "EXPLAINER_FRAME",
     "GENERATION_SUFFIX",
@@ -65,6 +67,7 @@ __all__ = [
     "SCRATCH_DIRECTORY",
     "SEAT_COUNTER_NAME",
     "STAGES_DIRECTORY",
+    "STARTERS_DIRECTORY",
     "STATE_DIRECTORY",
     "binding_path",
     "cleanup_workspace_tree",
@@ -119,13 +122,12 @@ INPUTS_DIRECTORY = "inputs"
 STATE_DIRECTORY = "state"
 REFERENCE_DIRECTORY = "reference"
 KIT_DIRECTORY = "kit"
+STARTERS_DIRECTORY = "starters"
+EXEMPLAR_DIRECTORY = "exemplar"
 REVISIONS_DIRECTORY = "revisions"
 RENDERS_DIRECTORY = "renders"
-#: The lock's file name inside ``state/`` and the task-side seat counter's (MIK-R211 v5 rule 12).
+#: The lock's file name inside ``state/``.
 LOCK_NAME = "leaf"
-SEAT_COUNTER_NAME = "seat-generation"
-#: The task's frame area, as ``application/review_frame_store.py`` names it.
-FRAMES_DIRECTORY = "review-frames"
 
 
 def explainer_base(config: McpRuntimeConfig) -> Path:
@@ -231,18 +233,28 @@ def guard_explainer_path(
     return target_path
 
 
-def copy_folder(source: Path, destination: Path, *, root: Path) -> int:
+def copy_folder(
+    source: Path,
+    destination: Path,
+    *,
+    root: Path,
+    skip_top_level: Sequence[str] = (),
+) -> int:
     """Copy one folder's files into ``destination`` as plain writable files; answer how many.
 
     Modes are not carried: a published revision may be read-only in the task, and its copy in the
     workspace is the explainer's to change (MIK-R211 v5 rule 3). A symlink is not followed.
     """
 
+    skip = set(skip_top_level)
     copied = 0
     for item in sorted(source.rglob("*")):
         if item.is_symlink() or not item.is_file():
             continue
-        target = destination / item.relative_to(source)
+        relative = item.relative_to(source)
+        if skip and relative.parts and relative.parts[0] in skip:
+            continue
+        target = destination / relative
         guard_explainer_path(target, root=root, label="explainer copied document")
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(item, target)

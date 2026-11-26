@@ -41,13 +41,20 @@ function statePhase(state: ExplainerState): ExplainerPhase {
   return 'placeholder';
 }
 
+function activeSeatPhase(state: ExplainerState | null): 'live' | 'closed' | null {
+  if (state?.seat === 'live' || state?.seat === 'closed') return state.seat;
+  return null;
+}
+
 /**
  * The phase the column is in. `formOpen` is his Explain or ⊕ with no live seat (MIK-R106 rule 3);
- * a running build takes precedence while it runs.
+ * a running build or an existing live/closed seat takes precedence over a stale form flag.
  */
 export function phaseOf(read: ExplainerRead | null, formOpen: boolean): ExplainerPhase {
   const state = read?.kind === 'state' ? read.value : null;
   if (state?.build?.state === 'running') return 'building';
+  const activeSeat = activeSeatPhase(state);
+  if (activeSeat) return activeSeat;
   if (formOpen) return 'first-request';
   return state ? statePhase(state) : 'placeholder';
 }

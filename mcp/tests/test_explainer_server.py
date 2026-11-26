@@ -738,7 +738,6 @@ def test_render_replies_with_its_report_file_and_publishes_rereading_the_binding
         {
             "width": 1280,
             "method": "click",
-            "effects": True,
             "complete": False,
             "errors": [],
             "controls": [

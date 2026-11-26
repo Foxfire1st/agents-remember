@@ -76,11 +76,11 @@ def test_the_capability_text_is_read_from_the_package_data_copy(tmp_path: Path) 
     assert loaded.canonical_path == CANONICAL_PATH
     assert installed.resolve() == (PACKAGE_ROOT / PACKAGED_PATH).resolve()
     assert installed.read_text(encoding="utf-8") == loaded.text
-    # The staged essay-first text. It carries the reading, choices, parts, explanations, essay,
-    # visuals and page as stages, each with its file; the self-contained explanation; the rule that
-    # text carries the content; and the planned variant. The first-reads order, workspace
-    # instructions, render run folders, grading and the architect report all remain.
-    assert loaded.words == 1500
+    # The staged explainer text: reading (including starters/ and exemplar/), change and part
+    # selection, self-contained explanations, full-reading essay, figure design before page build,
+    # driven central-mechanism visuals, kit highlighting, inline evidence marks, automatic kit
+    # carrying, and the planned variant.
+    assert loaded.words == 1446
     assert loaded.words <= loaded.word_budget == 1500
     assert len(loaded.digest) == 64 and loaded.revision == f"sha256:{loaded.digest}"
     for clause in REQUIRED_WORDING:
@@ -95,14 +95,21 @@ def test_the_capability_text_is_read_from_the_package_data_copy(tmp_path: Path) 
     ):
         assert stage in loaded.text
     assert "A self-contained explanation" in loaded.text
-    assert "The text carries the content; pictures support it." in loaded.text
     assert "A planned binding follows the same stages" in loaded.text
+    assert "starters/" in loaded.text
+    assert "exemplar/" in loaded.text
+    assert "the central mechanism of the change is shown by" in loaded.text
+    assert "at least one figure the reader drives" in loaded.text
+    assert "Highlight quoted code with the kit" in loaded.text
+    assert "evidence marks" in loaded.text and "line rhythm" in loaded.text
+    assert "kit/<library>/<version>/..." in loaded.text
+    assert "no reduced-motion or quiet-mode check applies to it" in loaded.text
+    assert "The essay is complete before any picture exists." not in loaded.text
+    assert "The text carries the content; pictures support it." not in loaded.text
 
-    # The capsule carries the effects-off rule in whatever words its own revision uses (D566:
-    # "Reduced motion and effects off show each figure's final, labelled state..."). A copy with
-    # that sentence removed still loads inside the cap, and its count falls by exactly the
-    # sentence's words -- the contract is the count and the budget, not one revision's phrasing.
-    start = loaded.text.index("Reduced motion and effects off")
+    # Removing a non-required sentence still loads inside the cap, and its count falls by exactly
+    # that sentence's words -- the contract is the count and the budget, not one revision's phrasing.
+    start = loaded.text.index("An explainer page is viewed apart from the")
     sentence = loaded.text[start : loaded.text.index(".", start) + 1]
     draft = tmp_path / PACKAGED_PATH
     draft.parent.mkdir(parents=True)

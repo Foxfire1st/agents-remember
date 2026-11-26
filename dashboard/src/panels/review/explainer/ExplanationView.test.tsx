@@ -51,6 +51,7 @@ import {
 afterEach(() => {
   resetTray();
   resetFirstRequest();
+  document.documentElement.removeAttribute('data-effects');
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
@@ -186,6 +187,131 @@ describe('a saved page', () => {
     const menu = within(header).getByTestId('revision-controls') as HTMLDetailsElement;
     expect(menu.open).toBe(false);
     expect(within(menu).getByTestId('revision-selector')).toBeTruthy();
+  });
+
+  it('displays persisted revision inventory beside interactions checked and keeps dashboard quiet toggles separate from the mounted iframe', async () => {
+    const coverage = '5 of 5 controls';
+    const inventory =
+      '6 figures (1 SVG, 2 canvas, 6 driven; before-and-after, code-excerpt, code-morph, sandbox, step-through, trace-a-path) · kit: ar-video, motion-canvas, open-generative-ui, shiki · code: 5 highlighted';
+    server({
+      state: {
+        ...SAVED_STATE,
+        explanation: { ...SAVED_STATE.explanation, coverage, inventory },
+      },
+      revisions: {
+        ...REVISIONS,
+        revisions: REVISIONS.revisions.map((row) =>
+          row.revision === 8 ? { ...row, coverage, inventory } : row,
+        ),
+      },
+    });
+    const mounted = render(<ExplanationView {...props} />);
+    const frame = (await screen.findByTestId('explanation-frame')) as HTMLIFrameElement;
+
+    const standfirst = text(screen.getByTestId('explanation-standfirst'));
+    expect(standfirst).toContain(`interactions checked: ${coverage}`);
+    expect(standfirst).toContain(`shows: ${inventory}`);
+    expect(standfirst).toContain(`interactions checked: ${coverage} · shows: ${inventory}`);
+
+    const frameWindow = frame.contentWindow!;
+    const frameDoc = frame.contentDocument!;
+    if (!frameDoc.documentElement) {
+      frameDoc.appendChild(frameDoc.createElement('html'));
+    }
+    const frameRoot = frameDoc.documentElement;
+    const postSpy = vi.spyOn(frameWindow, 'postMessage');
+    const port = {
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      postMessage: (challenge: unknown) => {
+        port.onmessage?.({ data: challenge } as MessageEvent);
+      },
+      close: vi.fn(),
+    };
+    try {
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            source: frameWindow,
+            data: { schema: 'ar-canvas-document/v1', session: 's1', phase: 'entered' },
+            ports: [port as unknown as MessagePort],
+          }),
+        );
+        fireEvent.load(frame);
+      });
+      const bindingMessages = () =>
+        postSpy.mock.calls
+          .map(([message]) => message as Record<string, unknown>)
+          .filter((message) => message.schema === 'ar-canvas-binding/v1');
+
+      await waitFor(() =>
+        expect(bindingMessages()).toEqual([
+          {
+            schema: 'ar-canvas-binding/v1',
+            protocolVersion: 1,
+            session: 's1',
+            revision: 8,
+            comparison: 'review-comparison:task/leaf/9',
+          },
+        ]),
+      );
+      expect('effects' in bindingMessages()[0]).toBe(false);
+      expect(frameRoot.dataset.effects).toBeUndefined();
+
+      act(() => {
+        document.documentElement.dataset.effects = 'off';
+      });
+      act(() => {
+        delete document.documentElement.dataset.effects;
+      });
+      expect(bindingMessages()).toHaveLength(1);
+      expect(frameRoot.dataset.effects).toBeUndefined();
+      expect(screen.getByTestId('explanation-frame')).toBe(frame);
+    } finally {
+      delete document.documentElement.dataset.effects;
+      mounted.unmount();
+    }
+    expect(port.close).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces an incomplete revision inventory marker in the standfirst', async () => {
+    const inventory =
+      '2 figures (1 SVG, 1 driven; before-and-after) · code: 1 highlighted · incomplete';
+    server({
+      state: {
+        ...SAVED_STATE,
+        explanation: { ...SAVED_STATE.explanation, inventory },
+      },
+      revisions: {
+        ...REVISIONS,
+        revisions: REVISIONS.revisions.map((row) =>
+          row.revision === 8 ? { ...row, inventory } : row,
+        ),
+      },
+    });
+    render(<ExplanationView {...props} />);
+    await screen.findByTestId('explanation-frame');
+    expect(text(screen.getByTestId('explanation-standfirst'))).toContain(`shows: ${inventory}`);
+    expect(screen.queryByTestId('explanation-inventory-omitted')).toBeNull();
+  });
+
+  it('shows a saved revision without an inventory and one plain reason line when storage-limit omitted it', async () => {
+    const reason = "inventory left out because the task's storage limit was reached";
+    server({
+      state: {
+        ...SAVED_STATE,
+        explanation: { ...SAVED_STATE.explanation, inventory: undefined, inventoryOmitted: reason },
+      },
+      revisions: {
+        ...REVISIONS,
+        revisions: REVISIONS.revisions.map((row) =>
+          row.revision === 8 ? { ...row, inventory: undefined, inventoryOmitted: reason } : row,
+        ),
+      },
+    });
+    render(<ExplanationView {...props} />);
+    await screen.findByTestId('explanation-frame');
+    expect(text(screen.getByTestId('explanation-standfirst'))).not.toContain('shows:');
+    expect(text(screen.getByTestId('explanation-inventory-omitted'))).toBe(reason);
   });
 
   it('draws its record and no stale list whatever the frame draws, and the badge holds the parts', async () => {

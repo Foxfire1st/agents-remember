@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 from agents_remember.application.review_frame_store import frame_scope, reopen_frame
 from agents_remember.canvas import presenter_tools, prospective
+from agents_remember.canvas.document import bound_document
 from agents_remember.canvas.explainer_answer_bounds import answer_tokens
 from agents_remember.canvas.explainer_browser import PLAYWRIGHT_VERSION, BrowserReady
 from agents_remember.canvas.presenter import Presenter, PresenterRefused
@@ -39,6 +40,7 @@ from agents_remember.canvas.prospective import (
     StaticProspectiveLoad,
     default_load_script,
 )
+from agents_remember.canvas.sessions import CanvasSession
 from agents_remember.mcp.registration.explainer_tools import render_answer
 from canvas_host_test_support import (
     AT,
@@ -61,7 +63,7 @@ CLEAN = {
     "state": "loaded",
     "errors": [],
     "foreignRequests": [],
-    "reducedMotionOk": True,
+    "visibleContentOk": True,
     "unresolvedReferences": [],
     "evidenceReferences": [],
     "detail": "",
@@ -127,7 +129,7 @@ def test_a_failed_load_refuses_publication_and_keeps_the_last_ready_revision(
         kind="browser",
         errors=("console: the chart script threw", "pageerror: explain is not defined"),
         foreign_requests=("https://cdn.example.com/chart.js",),
-        reduced_motion_ok=True,
+        visible_content_ok=True,
         unresolved_references=("code-candidate:src/gone.py",),
         detail="the page requested a foreign script and cited an unknown reference",
     )
@@ -263,7 +265,7 @@ def test_a_self_contradicting_load_is_downgraded_to_failed(tmp_path: Path) -> No
         "state": "loaded",
         "errors": ["console: the chart threw"],
         "foreignRequests": ["https://cdn.example.com/chart.js"],
-        "reducedMotionOk": False,
+        "visibleContentOk": False,
         "unresolvedReferences": ["code-candidate:src/gone.py"],
         "evidenceReferences": [],
         "detail": "ignored",
@@ -273,7 +275,7 @@ def test_a_self_contradicting_load_is_downgraded_to_failed(tmp_path: Path) -> No
     assert result.detail.startswith("the load called itself loaded while naming")
     assert "console: the chart threw" in result.errors
     assert result.foreign_requests == ("https://cdn.example.com/chart.js",)
-    assert result.reduced_motion_ok is False
+    assert result.visible_content_ok is False
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the fake node relies on a POSIX shebang")
@@ -359,11 +361,11 @@ def test_the_child_receives_the_exact_staged_assets_and_cleans_up(tmp_path: Path
     assert not staged.exists()
 
 
-def test_a_page_invisible_under_reduce_is_not_a_pass(tmp_path: Path) -> None:
-    """L104-A5: reduced motion asks for a usable page, not for the absence of media playback.
+def test_an_invisible_page_is_not_a_pass(tmp_path: Path) -> None:
+    """A prospective load requires visible painted content.
 
-    The loader reports `reducedMotionOk: false` when nothing of the document is visible under the
-    preference; a child that still calls itself loaded is downgraded, so the ready pointer cannot move
+    The loader reports `visibleContentOk: false` when nothing of the document reaches the rendered
+    viewport; a child that still calls itself loaded is downgraded, so the ready pointer cannot move
     over a page a person cannot see.
     """
 
@@ -371,14 +373,14 @@ def test_a_page_invisible_under_reduce_is_not_a_pass(tmp_path: Path) -> None:
         "state": "loaded",
         "errors": [],
         "foreignRequests": [],
-        "reducedMotionOk": False,
+        "visibleContentOk": False,
         "unresolvedReferences": [],
         "evidenceReferences": [],
-        "detail": "0 running animation(s) under reduce, INVISIBLE under reduce",
+        "detail": "the document painted no visible text, controls, or graphics",
     }
     result = _load_with(tmp_path, f"import json\nprint(json.dumps({answer!r}))\n")
     assert result.state == "failed"
-    assert "reduced motion" in result.detail or "usable" in result.detail
+    assert "visible" in result.detail
 
 
 def test_rendered_reference_inventory_is_checked_against_the_actual_packet(tmp_path):
@@ -433,8 +435,8 @@ def test_rendered_reference_inventory_is_checked_against_the_actual_packet(tmp_p
     assert "401" not in script_text  # the browser keeps every reference it sees
 
 
-def test_interactive_observations_never_change_the_reduced_motion_gate(tmp_path: Path) -> None:
-    """D565/D518: full-motion errors remain report-only, including runner failures."""
+def test_interactive_observations_never_change_the_prospective_gate(tmp_path: Path) -> None:
+    """Interactive sweep errors remain report-only, including runner failures."""
     script = tmp_path / "runner.mjs"
     script.write_text("// the fake node chooses the observation by invocation mode\n")
     interactive = {
@@ -914,3 +916,48 @@ def test_a_published_render_clears_the_page_failure_the_last_one_left(
     authoring.render(packet=packet(record()), assets={"index.html": PAGE})
 
     assert not (state / "last-render.json").exists()
+
+
+def test_dom_inventory_and_loaded_assets_survive_round_trip(tmp_path: Path) -> None:
+    """DOM inventory and loaded asset paths survive parsing without motion gating."""
+
+    answer = {
+        **CLEAN,
+        "loadedAssets": ["index.html", "kit/shiki/4.5.0/magic-move.css"],
+        "domInventory": {
+            "figures": {
+                "total": 2,
+                "byKind": {"svg": 1, "canvas": 0, "driven": 1},
+                "byTechnique": {},
+            },
+            "codeExcerpts": {"highlighted": 1, "plain": 0},
+        },
+    }
+    result = _load_with(tmp_path, f"import json\nprint(json.dumps({answer!r}))\n")
+    assert result.state == "loaded"
+    assert result.visible_content_ok is True
+    assert result.dom_inventory == answer["domInventory"]
+    assert result.loaded_assets == ("index.html", "kit/shiki/4.5.0/magic-move.css")
+
+
+def test_bound_document_omits_effects_flag_and_dataset_bridge() -> None:
+    """The document bootstrap delivers ar-canvas-binding/v1 without any dashboard effects bridge."""
+
+    session = CanvasSession(
+        session="s" * 24,
+        repository_id="repo",
+        master="master",
+        leaf_id="leaf",
+        frame_id="frame",
+        revision=1,
+        comparison="review-comparison:m/l/1",
+        evidence_digest="sha256:" + "0" * 64,
+        entrypoint="index.html",
+        created_at=0.0,
+        expires_at=1800.0,
+    )
+    rendered = bound_document(b"<!doctype html><p>hi</p>", session).decode("utf-8")
+    assert '"schema": "ar-canvas-binding/v1"' in rendered
+    assert "dataset.effects" not in rendered
+    assert "d.effects" not in rendered
+    assert '"effects"' not in rendered

@@ -153,6 +153,8 @@ consumers = [
   "mcp/tests/test_canvas_host.py",
   "mcp/tests/test_canvas_kit.py",
   "mcp/tests/test_canvas_kit_assets.py",
+  "mcp/tests/test_canvas_kit_references.py",
+  "mcp/tests/test_canvas_motion.py",
   "mcp/tests/test_canvas_parts.py",
   "mcp/tests/test_canvas_presenter.py",
   "mcp/tests/test_canvas_presenter_files.py",
@@ -162,6 +164,7 @@ consumers = [
   "mcp/tests/test_canvas_prospective.py",
   "mcp/tests/test_canvas_readiness.py",
   "mcp/tests/test_canvas_serving.py",
+  "mcp/tests/test_canvas_starters_exemplar.py",
   "mcp/tests/test_capsule_delivery.py",
   "mcp/tests/test_capsule_experiment_install.py",
   "mcp/tests/test_capsule_launch_wiring.py",
@@ -296,6 +299,7 @@ consumers = [
   "mcp/tests/test_explainer_server.py",
   "mcp/tests/test_explainer_service.py",
   "mcp/tests/test_explainer_shared_preparation.py",
+  "mcp/tests/test_explainer_staging_and_checks.py",
   "mcp/tests/test_explainer_staleness.py",
   "mcp/tests/test_explainer_surface.py",
   "mcp/tests/test_explainer_target.py",
@@ -928,10 +932,13 @@ replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_three_separ
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_canvas_motion.py",
+  "mcp/tests/test_canvas_starters_exemplar.py",
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_comparison_changeset.py",
   "mcp/tests/test_explainer_authored_claims.py",
   "mcp/tests/test_explainer_server.py",
+  "mcp/tests/test_explainer_staging_and_checks.py",
   "mcp/tests/test_file_briefs.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
@@ -1014,6 +1021,26 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/canvas_browser_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "canvas-host-and-presenter-cases"
+category = "unit-regression"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "shared Playwright package, Chromium browser-cache path, and subprocess environment discovery for canvas browser tests"
+introduced_by = "261124-EXP-L1"
+lifetime = "permanent"
+permanence_rationale = "Both canvas motion and shipped-example browser suites need the same Playwright and Chromium discovery; keeping one shared helper prevents divergent skip or browser-path behavior across browser tests."
+replacement_contract = "contract:canvas-host-and-presenter-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_canvas_motion.py",
+  "mcp/tests/test_canvas_starters_exemplar.py",
+  "mcp/tests/test_explainer_staging_and_checks.py",
+]
+
+[[artifact]]
 path = "mcp/tests/canvas_host_test_support.py"
 kind = "shared-support"
 authority = "internal-canonical"
@@ -1034,6 +1061,8 @@ consumers = [
   "mcp/tests/test_canvas_host.py",
   "mcp/tests/test_canvas_kit.py",
   "mcp/tests/test_canvas_kit_assets.py",
+  "mcp/tests/test_canvas_kit_references.py",
+  "mcp/tests/test_canvas_motion.py",
   "mcp/tests/test_canvas_parts.py",
   "mcp/tests/test_canvas_presenter.py",
   "mcp/tests/test_canvas_presenter_host.py",
@@ -1042,6 +1071,7 @@ consumers = [
   "mcp/tests/test_canvas_prospective.py",
   "mcp/tests/test_canvas_readiness.py",
   "mcp/tests/test_canvas_serving.py",
+  "mcp/tests/test_canvas_starters_exemplar.py",
   "mcp/tests/test_developer_messages.py",
   "mcp/tests/test_explainer_authored_claims.py",
   "mcp/tests/test_explainer_confinement.py",
@@ -1052,6 +1082,7 @@ consumers = [
   "mcp/tests/test_explainer_server.py",
   "mcp/tests/test_explainer_service.py",
   "mcp/tests/test_explainer_shared_preparation.py",
+  "mcp/tests/test_explainer_staging_and_checks.py",
   "mcp/tests/test_explainer_staleness.py",
   "mcp/tests/test_explainer_terminal_failure.py",
   "mcp/tests/test_extra_harness_args.py",
@@ -1435,8 +1466,11 @@ permanence_rationale = "Shared setup keeps split explainer boundary tests on the
 replacement_contract = "contract:canvas-host-and-presenter-cases"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_canvas_motion.py",
+  "mcp/tests/test_canvas_starters_exemplar.py",
   "mcp/tests/test_explainer_authored_claims.py",
   "mcp/tests/test_explainer_server.py",
+  "mcp/tests/test_explainer_staging_and_checks.py",
 ]
 
 [[artifact]]
@@ -2614,6 +2648,8 @@ consumers = [
   "mcp/tests/test_canvas_host.py",
   "mcp/tests/test_canvas_kit.py",
   "mcp/tests/test_canvas_kit_assets.py",
+  "mcp/tests/test_canvas_kit_references.py",
+  "mcp/tests/test_canvas_motion.py",
   "mcp/tests/test_canvas_parts.py",
   "mcp/tests/test_canvas_presenter.py",
   "mcp/tests/test_canvas_presenter_files.py",
@@ -2623,6 +2659,7 @@ consumers = [
   "mcp/tests/test_canvas_prospective.py",
   "mcp/tests/test_canvas_readiness.py",
   "mcp/tests/test_canvas_serving.py",
+  "mcp/tests/test_canvas_starters_exemplar.py",
   "mcp/tests/test_capsule_delivery.py",
   "mcp/tests/test_capsule_experiment_install.py",
   "mcp/tests/test_capsule_launch_wiring.py",
@@ -2757,6 +2794,7 @@ consumers = [
   "mcp/tests/test_explainer_server.py",
   "mcp/tests/test_explainer_service.py",
   "mcp/tests/test_explainer_shared_preparation.py",
+  "mcp/tests/test_explainer_staging_and_checks.py",
   "mcp/tests/test_explainer_staleness.py",
   "mcp/tests/test_explainer_surface.py",
   "mcp/tests/test_explainer_target.py",
@@ -3691,9 +3729,12 @@ replacement_contract = "node:mcp/tests/test_knowledge_index.py::test_a_working_t
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_canvas_motion.py",
+  "mcp/tests/test_canvas_starters_exemplar.py",
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_explainer_authored_claims.py",
   "mcp/tests/test_explainer_server.py",
+  "mcp/tests/test_explainer_staging_and_checks.py",
   "mcp/tests/test_file_briefs.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_diff_report.py",
@@ -3856,10 +3897,13 @@ replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_three_separ
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_canvas_motion.py",
+  "mcp/tests/test_canvas_starters_exemplar.py",
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_comparison_changeset.py",
   "mcp/tests/test_explainer_authored_claims.py",
   "mcp/tests/test_explainer_server.py",
+  "mcp/tests/test_explainer_staging_and_checks.py",
   "mcp/tests/test_file_briefs.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",

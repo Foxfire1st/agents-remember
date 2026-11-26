@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Measured before and after starter — ar-video vocabulary</title>
+  <style>
+    :root {
+      --bg: oklch(0.160 0.02 250);
+      --raised: oklch(0.200 0.02 250);
+      --well: oklch(0.115 0.012 245);
+      --rule: oklch(0.300 0.02 250);
+      --ink: oklch(0.920 0.03 90);
+      --muted: oklch(0.700 0.02 250);
+      --spine: oklch(0.850 0.13 200);
+      --current: oklch(0.820 0.16 75);
+      --new: oklch(0.880 0.16 165);
+      --gone: oklch(0.670 0.22 25);
+      --current-wash: oklch(0.820 0.16 75 / 0.14);
+      --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .page {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 32px 24px 48px;
+    }
+
+    .section-label {
+      margin: 0 0 8px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--spine);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.45rem;
+      line-height: 1.3;
+      font-weight: 650;
+    }
+
+    .lede {
+      margin: 0 0 24px;
+      max-width: 78ch;
+      font-size: 1.04rem;
+      color: var(--muted);
+    }
+
+    figure {
+      margin: 0;
+      background: var(--raised);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      padding: 16px;
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--current);
+      outline-offset: 2px;
+    }
+
+    .figure-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .gap-headline {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .segmented {
+      display: inline-flex;
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      background: var(--well);
+      padding: 2px;
+      gap: 2px;
+    }
+
+    .segmented button,
+    .replay-btn {
+      min-height: 40px;
+      padding: 6px 12px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .segmented button:hover {
+      color: var(--ink);
+    }
+
+    .segmented button[aria-selected="true"] {
+      background: var(--current-wash);
+      border-color: var(--current);
+      color: var(--ink);
+    }
+
+    .replay-btn {
+      border-color: var(--rule);
+      background: var(--well);
+      color: var(--ink);
+      border-radius: 6px;
+    }
+
+    .replay-btn:hover {
+      border-color: var(--current);
+    }
+
+    .canvas-shell {
+      background: var(--well);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      overflow: hidden;
+      height: 220px;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .state-line {
+      margin: 12px 0 4px;
+      font-size: 13px;
+      color: var(--ink);
+    }
+
+    .key-hint {
+      margin: 0 0 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .still-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 13px;
+    }
+
+    .still-table th {
+      text-align: left;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--rule);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .still-table td {
+      padding: 8px;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .val-before {
+      font-family: var(--font-mono);
+      color: var(--gone);
+    }
+
+    .val-after {
+      font-family: var(--font-mono);
+      color: var(--new);
+    }
+
+    figcaption {
+      margin-top: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 560px) {
+      .page { padding: 20px 14px 32px; }
+      figure { padding: 12px; }
+      .segmented button, .replay-btn { min-height: 44px; }
+      .still-table thead { display: none; }
+      .still-table, .still-table tbody, .still-table tr, .still-table td {
+        display: block;
+        width: 100%;
+      }
+      .still-table tr {
+        padding: 8px 0;
+        border-bottom: 1px solid var(--rule);
+      }
+      .still-table td {
+        border: 0;
+        padding: 2px 0;
+      }
+      .still-table td::before {
+        content: attr(data-label) ": ";
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--muted);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page" data-part="main" data-part-title="Measured before and after starter">
+    <p class="section-label">Starter · Measured before and after</p>
+    <h1>Compare two measured values on one scale</h1>
+    <p class="lede">
+      Each frame is a pure function of time (<code>Frame = f(t)</code>) using the <code>ar-video</code> palette
+      and <code>ease.outCubic</code>. The figure plays once in view or on Replay without looping, paired with a tabular still form in the markup.
+    </p>
+
+    <figure id="fig-measured-outcome" data-technique="before-and-after">
+      <div class="figure-bar">
+        <span class="gap-headline">840 ms → 42 ms (20x faster)</span>
+        <div class="controls">
+          <div class="segmented" role="tablist" aria-label="Axis scale">
+            <button type="button" role="tab" aria-selected="true" tabindex="0" data-scale="linear">Linear scale</button>
+            <button type="button" role="tab" aria-selected="false" tabindex="-1" data-scale="log">Log scale</button>
+          </div>
+          <button type="button" id="btn-replay" class="replay-btn">Replay</button>
+        </div>
+      </div>
+
+      <div class="canvas-shell" id="canvas-shell">
+        <canvas id="measured-canvas" width="880" height="220" aria-hidden="true"></canvas>
+      </div>
+
+      <p id="measured-status" class="state-line" aria-live="polite">
+        Linear scale: 840 ms before → 42 ms after (20x faster). Synthetic starter fixture.
+      </p>
+      <p class="key-hint">Keys: Left and Right arrows switch scale while a scale tab has focus; Enter activates Replay.</p>
+
+      <table class="still-table">
+        <thead>
+          <tr>
+            <th>State</th>
+            <th>Value</th>
+            <th>Delta</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td data-label="State">Before</td>
+            <td data-label="Value" class="val-before">840 ms</td>
+            <td data-label="Delta">baseline</td>
+            <td data-label="Source">synthetic starter fixture</td>
+          </tr>
+          <tr>
+            <td data-label="State">After</td>
+            <td data-label="Value" class="val-after">42 ms</td>
+            <td data-label="Delta">20x faster (−798 ms)</td>
+            <td data-label="Source">synthetic starter fixture</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <figcaption>Synthetic starter comparison rendered with kit/ar-video/23fd71bf/ar-video-vocabulary.js.</figcaption>
+    </figure>
+  </main>
+
+  <script type="module">
+    import { clamp, col, ease, lerp, tween } from './kit/ar-video/23fd71bf/ar-video-vocabulary.js';
+
+    const BEFORE_MS = 840;
+    const AFTER_MS = 42;
+    const MAX_MS = 1000;
+    const DURATION_MS = 900;
+
+    const figure = document.getElementById('fig-measured-outcome');
+    const shell = document.getElementById('canvas-shell');
+    const canvas = document.getElementById('measured-canvas');
+    const statusLine = document.getElementById('measured-status');
+    const replayBtn = document.getElementById('btn-replay');
+    const scaleTabs = [...document.querySelectorAll('#fig-measured-outcome [role="tab"]')];
+
+    let scaleMode = 'linear';
+    let rafId = null;
+
+    function ratioFor(ms, mode) {
+      if (mode === 'log') {
+        const minLog = Math.log10(10);
+        const maxLog = Math.log10(MAX_MS);
+        return clamp((Math.log10(Math.max(10, ms)) - minLog) / (maxLog - minLog), 0, 1);
+      }
+      return clamp(ms / MAX_MS, 0, 1);
+    }
+
+    function drawFrame(t) {
+      const rect = shell.getBoundingClientRect();
+      const width = Math.max(300, Math.round(rect.width || 880));
+      const height = 220;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+      }
+
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      const padX = width < 480 ? 14 : 24;
+      const labelW = width < 480 ? 64 : 84;
+      const valueW = width < 480 ? 66 : 82;
+      const trackX = padX + labelW;
+      const trackW = Math.max(80, width - trackX - valueW - padX);
+
+      ctx.fillStyle = col('well');
+      ctx.fillRect(0, 0, width, height);
+
+      // Subtle axis ticks and scale label.
+      const ticks = scaleMode === 'log' ? [10, 100, 1000] : [0, 500, 1000];
+      ctx.font = '11px ui-monospace, Menlo, Consolas, monospace';
+      ctx.fillStyle = col('muted');
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+      ctx.fillText(scaleMode === 'log' ? 'LOG SCALE (10–1000 ms)' : 'LINEAR SCALE (0–1000 ms)', trackX, 16);
+
+      ctx.strokeStyle = col('grid', 0.6);
+      ctx.lineWidth = 1;
+      for (const tick of ticks) {
+        const x = Math.round(trackX + ratioFor(tick, scaleMode) * trackW) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(x, 38);
+        ctx.lineTo(x, 174);
+        ctx.stroke();
+        ctx.fillStyle = col('muted');
+        ctx.textAlign = tick === 1000 ? 'right' : 'left';
+        ctx.fillText(`${tick} ms`, x + (tick === 1000 ? -2 : 2), 182);
+      }
+
+      const pBefore = tween(t, 0, 1, ease.outCubic);
+      const pAfter = tween(t, 0.08, 1, ease.outCubic);
+
+      const rows = [
+        { label: 'Before', targetMs: BEFORE_MS, prog: pBefore, tone: 'alarm', y: 54 },
+        { label: 'After', targetMs: AFTER_MS, prog: pAfter, tone: 'mint', y: 118 },
+      ];
+
+      for (const row of rows) {
+        const currentMs = lerp(0, row.targetMs, row.prog);
+        const barW = Math.max(2, ratioFor(row.targetMs, scaleMode) * trackW * row.prog);
+
+        ctx.fillStyle = col('panel');
+        ctx.fillRect(trackX, row.y, trackW, 34);
+
+        ctx.fillStyle = col(row.tone, 0.9);
+        ctx.fillRect(trackX, row.y, barW, 34);
+
+        ctx.font = '600 13px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = col('ink');
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+        ctx.fillText(row.label, padX, row.y + 17);
+
+        ctx.font = '600 13px ui-monospace, Menlo, Consolas, monospace';
+        ctx.fillStyle = col(row.tone);
+        ctx.textAlign = 'right';
+        ctx.fillText(`${Math.round(currentMs)} ms`, width - padX, row.y + 17);
+      }
+    }
+
+    function stopAnim() {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+    }
+
+    function updateStatus(note = '') {
+      const prefix = scaleMode === 'log' ? 'Log scale' : 'Linear scale';
+      statusLine.textContent = `${prefix}: ${BEFORE_MS} ms before → ${AFTER_MS} ms after (20x faster).${note ? ` ${note}` : ''}`;
+    }
+
+    function playOnce() {
+      stopAnim();
+      const start = performance.now();
+      const step = (now) => {
+        const t = clamp((now - start) / DURATION_MS, 0, 1);
+        drawFrame(t);
+        if (t < 1) {
+          rafId = requestAnimationFrame(step);
+        } else {
+          rafId = null;
+          updateStatus();
+        }
+      };
+      rafId = requestAnimationFrame(step);
+    }
+
+    function setScale(mode, focusTab = false) {
+      if (mode !== 'linear' && mode !== 'log') return;
+      scaleMode = mode;
+      for (const tab of scaleTabs) {
+        const selected = tab.dataset.scale === mode;
+        tab.setAttribute('aria-selected', String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+        if (selected && focusTab) tab.focus();
+      }
+      stopAnim();
+      drawFrame(1);
+      updateStatus();
+    }
+
+    for (const tab of scaleTabs) {
+      tab.addEventListener('click', () => setScale(tab.dataset.scale));
+      tab.addEventListener('keydown', (event) => {
+        const modes = ['linear', 'log'];
+        const idx = modes.indexOf(scaleMode);
+        if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+          event.preventDefault();
+          const next = modes[(idx + (event.key === 'ArrowRight' ? 1 : -1) + modes.length) % modes.length];
+          setScale(next, true);
+        }
+      });
+    }
+
+    replayBtn.addEventListener('click', playOnce);
+
+    new ResizeObserver(() => {
+      if (rafId === null) drawFrame(1);
+    }).observe(shell);
+
+    drawFrame(0);
+    let played = false;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!played && entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+            played = true;
+            io.disconnect();
+            playOnce();
+          }
+        }
+      },
+      { threshold: [0, 0.6, 1] },
+    );
+    io.observe(figure);
+  </script>
+</body>
+</html>

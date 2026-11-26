@@ -650,7 +650,7 @@ class PaseoExplainerHost:
         if view.get("archivedAt"):
             return SEAT_ARCHIVED
         status = str(view.get("status") or "")
-        if status in {"running", "idle"} or view.get("turnActive") is True:
+        if status in {"running", "idle", "initializing"} or view.get("turnActive") is True:
             return SEAT_LIVE
         if status == "closed" and _ran_a_turn(view):
             return SEAT_CLOSED

@@ -15,6 +15,10 @@ from agents_remember.application.master_architect_record import leaf_execution_r
 from agents_remember.application.review_candidate_resolution import recorded_leaf_contract
 from agents_remember.application.review_evidence_adapter import prepare_evidence
 from agents_remember.application.review_explainer_receipts import compose_receipts
+from agents_remember.application.review_frame_inventory import (
+    revision_inventory,
+    revision_inventory_omitted_reason,
+)
 from agents_remember.application.review_frame_store import (
     FrameRefused,
     frame_scope,
@@ -197,4 +201,6 @@ def explainer_application_ports(
         missing_tree=_missing_tree,
         reopen_review_trees=reopen_review_trees,
         watcher=watcher_application_ports(turn_end_captured, coverage),
+        revision_inventory=revision_inventory,
+        revision_inventory_omitted_reason=revision_inventory_omitted_reason,
     )
