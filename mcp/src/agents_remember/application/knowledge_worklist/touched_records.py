@@ -33,6 +33,7 @@ from agents_remember.application.knowledge_worklist.registry import (
     register_item_kind,
     subject_row,
 )
+from agents_remember.memory.conversion.state_conversion import state_conversion_only
 from agents_remember.models.knowledge_files.history import (
     RECORD_PREFIXES,
     RECORD_ROW_PREFIXES,
@@ -180,7 +181,9 @@ def touched_record_items(
         candidate_path, candidate_raw = candidate_located
         base_md = base.files.get(_markdown_path(base_path))
         candidate_md = candidate.files.get(_markdown_path(candidate_path))
-        if base_raw == candidate_raw and base_md == candidate_md:
+        if base_md == candidate_md and (
+            base_raw == candidate_raw or state_conversion_only(base_raw, candidate_raw)
+        ):
             continue
         if (
             base_md == candidate_md

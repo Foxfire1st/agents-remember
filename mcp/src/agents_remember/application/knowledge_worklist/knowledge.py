@@ -19,6 +19,7 @@ from dataclasses import dataclass, replace
 from functools import cached_property
 from typing import Any
 
+from agents_remember.memory.conversion.state_conversion import state_conversion_only
 from agents_remember.memory.knowledge_index import (
     MemoryTreeSnapshot,
     parse_tree,
@@ -137,6 +138,17 @@ class KnowledgeSide:
         if indexed is None:
             return None
         return indexed.path, self.files[indexed.path]
+
+    def record_file_changed(self, candidate: KnowledgeSide, record_id: str) -> bool:
+        """Whether ``record_id``'s file differs in path or beyond state conversion in ``candidate``."""
+
+        before = self.record_file(record_id)
+        after = candidate.record_file(record_id)
+        if before == after:
+            return False
+        if before is None or after is None or before[0] != after[0]:
+            return True
+        return not state_conversion_only(before[1], after[1])
 
     def revision(self, record_id: str) -> int | None:
         """The record's stored revision, whatever its kind (MIK-R124 rule 5).
