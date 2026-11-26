@@ -207,7 +207,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                     ),
                     (
                         "roles/architect.md",
-                        "Name the Orchestrator's agent ID to the existing Manager in one message. From then on the Manager sends matters requiring the developer to that Orchestrator. This changes its reporting recipient, not its fixed launch parent.",
+                        "Name the Orchestrator's agent ID to the existing Manager in one message. The Orchestrator becomes its reporting recipient. Its launch parent stays fixed.",
                     ),
                 ),
             ),
@@ -245,7 +245,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                 (
                     (
                         "roles/architect.md",
-                        "Keep the conversation with the developer, the plan and its order, the requirements and their text, and the decision on what needs the developer. Hand the Manager or Orchestrator the role starts and messages, the order of the day, operational problems, ordinary requirement interpretation within the intended promise and operational rulings, checks before and after a landing, and paired closeout within its delegated authority.",
+                        "Hand the Manager its [execution decisions and routine closeout](manager.md#make-decisions-within-your-authority). Delegate sprint execution and its authority to the Orchestrator.",
                     ),
                 ),
             ),
@@ -254,7 +254,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                 (
                     (
                         "roles/architect.md",
-                        "Read the coordinating agent's rulings record, list of requirement sentences to change, and status file on your own; it sends no routine ruling or landing notice. Bring the requirement texts in line with its rulings within the intended promise. New or dropped scope and changes to that promise still need the developer's decision.",
+                        "Read the coordinating agent's rulings, requirement-change list and status file yourself. They send no status-only notices. Align requirement text with those rulings within the promise. Send new or dropped scope and promise changes to the developer. In a case ruling, name only the outcome that needs you. Leave each decision that belongs to the Manager with the Manager.",
                     ),
                 ),
             ),
@@ -451,11 +451,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                     ),
                     (
                         "roles/orchestrator.md",
-                        "Send these with `role_message` on `agents-remember-task` to the parent agent ID in your handover. Forward only questions requiring the developer and the permission notices described under [Questions received from children](#questions-received-from-children). Send no other role messages or landing notices to the Architect. Ordinary requirement readings and operational rulings stay with you; do not ask the Architect to perform them.",
-                    ),
-                    (
-                        "roles/orchestrator.md",
-                        "Send one further message with your report path when the whole assignment is finished or cannot be finished. Send no other messages to the Architect.",
+                        "Use `role_message` on `agents-remember-task` to the parent agent ID in your handover. Forward the Manager's matters for the Architect unchanged. Send developer questions and [permission notices](#questions-received-from-children) on the same route. Send your report path when the whole assignment is finished or cannot be finished. Send no status-only messages or other landing notices.",
                     ),
                 ),
             ),
@@ -511,7 +507,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                 (
                     (
                         "roles/manager.md",
-                        "Read each leaf's reports and task records yourself. Before directing handovers, repair loops, review rounds, memory passes or relays, read [leaf coordination procedures](../operations/coordination.md) for stage timing, review records, message delivery and relay limits. Inspect the complete changed-file diff, both verdicts and the Worker's report of the requirement's listed final checks before deciding the gate. Reviews supply evidence; you decide the gate and retain closeout, integration, status, acceptance writes and landing order. Relay no freeze, finding, verdict or memory change. Preserve stable requirement and finding identifiers. Distinguish implementation, review, curation and publication status.",
+                        "Read each leaf's reports and task records yourself. Before directing leaf stages or relays, read [leaf coordination procedures](../operations/coordination.md) for timing, records, delivery and relay limits. Inspect the complete changed-file diff, both verdicts and the Worker's report of the requirement's listed final checks before deciding the gate. You decide the gate and retain closeout, integration, status, acceptance writes and landing order. Relay no freeze, finding, verdict or memory change. Preserve stable requirement and finding identifiers. Distinguish implementation, review, curation and publication status.",
                     ),
                     (
                         "roles/manager.md",
@@ -528,13 +524,13 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                 (
                     (
                         "roles/manager.md",
-                        "Decide leaf order, agent starts and replacements, operational problems, ordinary requirement interpretation within the intended promise, and checks before and after landing. Decide paired closeout and integration within your delegated authority.",
+                        "Leaf order, seat starts and replacements, operational problems, ordinary requirement readings within the promise, checks before and after landing, and integration within delegated authority.",
                     ),
                     (
                         "roles/manager.md",
-                        "You own the task's construction: step order, evidence form, which existing test or command demonstrates a property, and sandbox or scratch instruments that change no product source. After a harness, loader or capture fault, you may order one rerun on the same operands. A second failure of one cause goes upward with the attempts already made.",
+                        "One rerun on the same operands after infrastructure failure.",
                     ),
-                    ("roles/manager.md", "you decide the gate"),
+                    ("roles/manager.md", "You decide the gate"),
                     (
                         "roles/manager.md",
                         "Assign a check or investigation belonging to no leaf to an Investigator on your master and sprint if commanded. Never select a leaf for this role. Send the scoped concern as your first `role_message` on `agents-remember-task` to the returned agent identifier.",
@@ -555,7 +551,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                 (
                     (
                         "roles/manager.md",
-                        "When another agent started you, send your parent or instructed reporting recipient only matters that require the developer:",
+                        "**Send to the developer**",
                     ),
                     (
                         "roles/manager.md",
@@ -570,24 +566,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                     ("roles/manager.md", "a blocker none of your own decisions can remove."),
                     (
                         "roles/manager.md",
-                        (
-                            "Send these with `role_message` on `agents-remember-task` to the instructed "
-                            "reporting-recipient identifier in your report when one is recorded; otherwise use the parent "
-                            "agent identifier in your handover. If you have neither, put the developer question in your "
-                            "own chat. When the Orchestrator owns coordination, do not bypass it to the Architect except "
-                            "for the skeleton handover above. Ordinary requirement readings and operational rulings remain "
-                            "yours; keep the work going. Apart from the skeleton handover above, forward only questions "
-                            "requiring the developer and the permission notices below."
-                        ),
-                    ),
-                    (
-                        "roles/manager.md",
-                        (
-                            "Apart from that skeleton handover, send no other role messages or landing notices to that "
-                            "recipient, except the closeout-result notice below and one further message naming your report "
-                            "path when the whole assignment is finished or cannot be finished. Address that final message "
-                            "to the parent's role with its task references."
-                        ),
+                        "Use `role_message` on `agents-remember-task` for these matters and permission notices. Address the reporting recipient recorded in your report, otherwise your handover's parent identifier. Without either, put developer questions in your own chat. Route Architect matters through an assigned Orchestrator, except direct skeleton handovers. Send the closeout result as specified below and the report path when your assignment ends. Send no status-only messages. Address that final message to the parent's role with its task references.",
                     ),
                 ),
             ),
@@ -596,7 +575,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                 (
                     (
                         "roles/manager.md",
-                        "If the Architect that started you names an Orchestrator's agent identifier in a message when a second master starts, record the instruction and recipient identifier in your durable report. Send developer-needed matters to that Orchestrator from then on. This changes your reporting recipient, not your fixed launch parent. No other message changes whom you report to.",
+                        "If your launching Architect names an Orchestrator\u2019s agent identifier when a second master starts, record the instruction and identifier in your report. Use it as your reporting recipient. Your launch parent stays fixed. Only that instruction changes your recipient.",
                     ),
                 ),
             ),
@@ -614,7 +593,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                 (
                     (
                         "roles/manager.md",
-                        "If an upward message cannot be delivered, record the matter in your status file and continue all work independent of the developer\N{RIGHT SINGLE QUOTATION MARK}s decision. Do not decide the developer\N{RIGHT SINGLE QUOTATION MARK}s question yourself.",
+                        "If an upward message cannot be delivered, record it in your status file and continue independent work. Leave developer decisions with the developer.",
                     ),
                 ),
             ),
@@ -1128,6 +1107,17 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                 self.assertIn("`agents-remember-task`", text)
                 self.assertIn("selected memory root", text)
                 self.assertIn("memory_quality_check", text)
+                self.assertIn(
+                    "`memoryRoot` and `repositoryRoot` set to the paired leaf worktrees, "
+                    '`codeTreeId="working-tree"`, `view="dependent"` and `staleOnly=true`.',
+                    text,
+                )
+                self.assertIn(
+                    "Match the code and memory candidates before and after the read.", text
+                )
+                self.assertIn(
+                    "response `memoryTree.treeKey`, final `counts.total` and receipt", text
+                )
                 self.assertIn("prepare", text)
                 self.assertIn("publish", text)
                 self.assertIn("validate", text)

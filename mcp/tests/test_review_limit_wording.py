@@ -156,7 +156,7 @@ STAGE_PARTS = {
         "the sync to the master's line",
         "you repair, and you go on",
         "Your report names what you repaired",
-        "tell that parent what and whom you await with `role_message` on `agents-remember-task`",
+        "Report an outside-authority block and record a working-child wait",
         *STOPS,
     ),
 }
@@ -175,7 +175,7 @@ _CURATOR_REPAIR = "Correct your own faulty-input refusal through the same writer
 _CURATOR_NOTICE = "Work from step to step and wave to wave in one turn, collecting helpers' results. End only at the handover, a named wait or a nearly full context. Outside a helper wait that your launch directs you to handle with the Agent Client Protocol, if you have a parent and remain unfinished, report what you await and from whom to that parent with `role_message` on `agents-remember-task`. That helper wait follows your shared instructions."
 _CURATOR_STOPS = "Stop for open permission prompts, correct-input refusals other than of a covered write, unowned state, requirement-meaning questions or effects outside worktree, scratch and task."
 _MANAGER_REPAIR = "Repair what your own work or instrument breaks and continue. This includes a mistaken record, wrong agent address or misread report. If a refusal identifies faulty input, correct it through the same tool. Name the repair in your report."
-_MANAGER_NOTICE = "Outside a helper wait that your launch directs you to handle with the Agent Client Protocol, if you have a parent and end a turn with your stage unfinished, send what you await, and from whom, to that parent through `role_message` on `agents-remember-task`. That helper wait follows your shared instructions."
+_MANAGER_NOTICE = "When ending blocked outside your authority, notify your reporting recipient. While a child works, record its seat and awaited stage in your end line and status file. Send no message for this wait. Follow the shared helper waits."
 _MANAGER_STOPS = "A covered correct write follows the recovery in your shared instructions. Otherwise you stop for: - an open permission prompt; - a refusal by a product guard or an AR tool that stands with a correct input, or that names a state you do not own; - a question about a requirement's meaning beyond your own interpretation authority; - an effect outside your own worktree, your scratch folder and your task."
 
 STAGE_CONTRACTS = {
@@ -408,11 +408,11 @@ STAGE_CONTRACTS = {
             _MANAGER_REPAIR,
             "Name the repair in your report.",
         ),
-        "tell that parent what and whom you await with `role_message` on `agents-remember-task`": (
+        "Report an outside-authority block and record a working-child wait": (
             "role",
             "## Correct your own work and respect stops",
             _MANAGER_NOTICE,
-            "Outside a helper wait that your launch directs you to handle with the Agent Client Protocol, if you have a parent and end a turn with your stage unfinished, send what you await, and from whom, to that parent through `role_message` on `agents-remember-task`.",
+            "Send no message for this wait.",
         ),
         "You stop for an open permission prompt": (
             "role",

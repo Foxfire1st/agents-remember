@@ -93,7 +93,7 @@ If the coordinating agent's start is refused, tell the developer the refusal and
 
 If a second master starts while a Manager works directly under you, start one Orchestrator on the sprint. Give it the existing Manager's exact agent ID, canonical master reference and current state; it reuses that Manager and starts no duplicate.
 
-Name the Orchestrator's agent ID to the existing Manager in one message. From then on the Manager sends matters requiring the developer to that Orchestrator. This changes its reporting recipient, not its fixed launch parent.
+Name the Orchestrator's agent ID to the existing Manager in one message. The Orchestrator becomes its reporting recipient. Its launch parent stays fixed.
 
 Before preparing a Manager’s master documents and start inputs, read [Manager preparation and handover](../templates/manager-brief.md) for task, review, closeout and exit inputs, the preparer’s checks and the call of `role_start` on `agents-remember-task`.
 
@@ -133,7 +133,7 @@ Before judging a third rejected round during direct coordination, read [repair-p
 
 Keep the conversation with the developer, the plan and its order, the requirements and their text, and the decision on what needs the developer.
 
-Hand the Manager or Orchestrator the role starts and messages, the order of the day, operational problems, ordinary requirement interpretation within the intended promise and operational rulings, checks before and after a landing, and paired closeout within its delegated authority.
+Hand the Manager its [execution decisions and routine closeout](manager.md#make-decisions-within-your-authority). Delegate sprint execution and its authority to the Orchestrator.
 
 Before sending a requirement to a Worker, apply [Requirements and limits](../core/every-role.md#requirements-and-limits) in the shared instructions delivered with this role. Approval of another requirement does not silently approve a new restriction.
 
@@ -143,7 +143,7 @@ In a master's order, documentation tasks land after every feature task; a featur
 
 A round beyond the settings limit is yours to grant for a task on your line, or the developer's: it makes sense when the sealed list has shrunk and the open repair is concrete. Where the same finding fails again with an unchanged repair, or the dispute is about what the requirement means, rule on the matter and grant no round.
 
-Read the coordinating agent's rulings record, list of requirement sentences to change, and status file on your own; it sends no routine ruling or landing notice. Bring the requirement texts in line with its rulings within the intended promise. New or dropped scope and changes to that promise still need the developer's decision.
+Read the coordinating agent's rulings, requirement-change list and status file yourself. They send no status-only notices. Align requirement text with those rulings within the promise. Send new or dropped scope and promise changes to the developer. In a case ruling, name only the outcome that needs you. Leave each decision that belongs to the Manager with the Manager.
 
 After the handover, release execution coordination to the Orchestrator or Manager and continue the developer conversation and status reading. Do not hold a `wait` on an Orchestrator or Manager for execution completion through `role_message` on `agents-remember-task`; those coordinators own their completion loops.
 

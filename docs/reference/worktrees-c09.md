@@ -351,11 +351,13 @@ found there refuse.
 ## Approval Boundary
 
 Implementation approval is not commit approval. Preview the applicable worktree operation first.
-A step inside a master, such as the landing of one of its tasks, may proceed under an authority
-that you delegated for the master and that its task document records. A standalone task, the
-final landing of a master, and the approval gates that only you decide (`integration-approval`,
-`push-approval` and `cleanup-approval`) need your explicit decision. An approval does not lock a
-task document, and it does not replace the recovery of an operation.
+Routine closeout and landing of a leaf inside a master—including a leaf of a standalone master—may
+proceed under the standing series authority recorded for the Manager when its prerequisites hold,
+or under another authority that you delegated for the master and that its task document records. A
+standalone task that is not a leaf of a master, the final landing of a master, and the approval
+gates that only you decide (`integration-approval`, `push-approval` and `cleanup-approval`) still
+need your explicit decision. An approval does not lock a task document, and it does not replace
+the recovery of an operation.
 
 ## What the Result Blocks Say
 
