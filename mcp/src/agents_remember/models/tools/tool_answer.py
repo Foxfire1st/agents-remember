@@ -256,6 +256,7 @@ RUNTIME_INSTALL_ANSWER_FIELDS = frozenset(
         "providerWatcherRebind",
         "recoveryActions",
         "removedPartStores",
+        "sharedHeldStores",
         "log",
     }
 )

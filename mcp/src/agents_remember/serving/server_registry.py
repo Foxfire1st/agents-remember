@@ -108,20 +108,31 @@ def register_server(config: McpRuntimeConfig, role: str) -> Callable[[], None]:
 
 def _read_record(path: Path) -> _ServerRecord | None:
     try:
-        record = _ServerRecord.model_validate_json(path.read_bytes())
+        return _ServerRecord.model_validate_json(path.read_bytes())
     except (OSError, ValidationError):
         return None
-    if not _alive(record):
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            logger.warning("A dead server's runtime record could not be removed: %s", path)
-        return None
-    return record
+
+
+def _remove_dead_record(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("A dead server's runtime record could not be removed: %s", path)
 
 
 def server_inventory(config: McpRuntimeConfig) -> list[RunningServerPayload]:
     """Inspect all live records, removing dead records without writing a new inventory."""
+    return _server_inventory(config, remove_dead=_remove_dead_record)
+
+
+def preview_server_inventory(config: McpRuntimeConfig) -> list[RunningServerPayload]:
+    """Inspect all live records and leave the registry files as they are."""
+    return _server_inventory(config, remove_dead=None)
+
+
+def _server_inventory(
+    config: McpRuntimeConfig, *, remove_dead: Callable[[Path], None] | None
+) -> list[RunningServerPayload]:
     try:
         paths = sorted(_directory(config).glob("*.json"))
     except OSError as error:
@@ -132,6 +143,10 @@ def server_inventory(config: McpRuntimeConfig) -> list[RunningServerPayload]:
     for path in paths:
         record = _read_record(path)
         if record is None:
+            continue
+        if not _alive(record):
+            if remove_dead is not None:
+                remove_dead(path)
             continue
         build = ServingBuild(
             version="",

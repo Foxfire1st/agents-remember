@@ -12,6 +12,8 @@
     "isolatedModules": true,
     "moduleDetection": "force",
     "noEmit": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./tsconfig.app.tsbuildinfo",
     "jsx": "react-jsx",
     "verbatimModuleSyntax": true,
 

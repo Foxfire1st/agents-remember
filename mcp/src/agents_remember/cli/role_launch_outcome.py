@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from agents_remember.cli import role_launch_receipts as receipts
 from agents_remember.cli.paseo_launch import NATIVE_ANTIGRAVITY_REPLAY_MISSING, LaunchOutcome
+from agents_remember.cli.role_held_store import held_seat_ref, settle_held_store
 
 
 def publish_launch_outcome(
@@ -81,7 +82,11 @@ def _refused_outcome(
     )
     if not retry_step_up:
         receipt.pop("replayRequest", None)
-    receipts._write_receipt(path, receipt)
+    settle_held_store(
+        held_seat_ref(path, receipt),
+        receipt_updates=receipt,
+        remove_receipt_fields=() if retry_step_up else ("replayRequest",),
+    )
     return JSONResponse(
         receipts._public_execution(receipt), status_code=409 if native_replay_missing else 502
     )

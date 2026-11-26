@@ -28,7 +28,10 @@ from agents_remember.application.role_launch_context import (
     selection_binding,
 )
 from agents_remember.application.skill_resources.provider import durable_composition_corpus_root
-from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_reader
+from agents_remember.application.task_scoped_mcp import (
+    task_scoped_mcp_config_for_reader,
+)
+from agents_remember.cli import role_launch_enclosure
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import (
     launcher_options,
@@ -57,6 +60,7 @@ from agents_remember.cli.role_launch_assignments import (
     investigator_assignment,
 )
 from agents_remember.cli.role_launch_defaults import role_defaults
+from agents_remember.cli.role_launch_enclosure import prepare_role_folders as _prepare_role_folders
 from agents_remember.cli.role_launch_receipts import (
     _message_binding_projection_reference,
 )
@@ -234,12 +238,13 @@ def prepare_role_handover(  # noqa: PLR0913 -- chat_started rides the rule-6 lau
         # here: the brief keeps the server-choice sentence (no claim).
         handover_accepts = None
     workspace = _resolve_workspace(config, context)
-    _prepare_role_folders(context, workspace, request_id)
     if context.role in LEAF_ROLES:
         # Creating the enclosure records it in the leaf's task document. The handover describes
         # the documents as they stand now, so the same request compiles to the same binding again.
         context = _current_role_context(config, context)
-    _prepare_task_document_files(config, context, workspace)
+    with role_launch_enclosure.publication_scope(config.coordination_root, workspace):
+        _prepare_role_folders(context, workspace, request_id)
+        _prepare_task_document_files(config, context, workspace)
     ar_mcp_context = _ar_mcp_context(config, context, workspace)
     handover = _compile_handover(
         RoleHandoverRequest(
@@ -528,37 +533,6 @@ def _recorded_leaf_scope(receipt: dict[str, Any]) -> dict[str, Any] | None:
     return scope if isinstance(scope, dict) else None
 
 
-def _prepare_role_folders(
-    context: RoleLaunchContext, workspace: dict[str, str], request_id: uuid.UUID
-) -> None:
-    root = Path(workspace["path"])
-    if context.role not in LEAF_ROLES:
-        execution = root / ".agents-remember" / "role-executions" / str(request_id)
-        local = execution / "role-reports"
-        canonical = (
-            (context.effective_task.path.parent / "notes" / "reports")
-            if context.effective_task
-            else root / ".agents-remember" / "reports"
-        )
-        workspace.update(taskReportAccessRoot=local.as_posix(), taskReportRoot=canonical.as_posix())
-        scratch = execution / "scratch"
-    else:
-        workspace["taskReportAccessRoot"] = (
-            root / "role-reports" / context.role / str(request_id)
-        ).as_posix()
-        scratch = root / "scratch" / context.role / str(request_id)
-    workspace["taskReportRoot"] = (
-        Path(workspace["taskReportRoot"]) / context.role / str(request_id)
-    ).as_posix()
-    for path in (Path(workspace["taskReportAccessRoot"]), scratch):
-        if any(
-            parent.is_symlink() for parent in (path, *path.parents) if parent.is_relative_to(root)
-        ) or not path.resolve().is_relative_to(root):
-            raise ValueError(f"Role folder {path} must be a real directory inside {root}.")
-        path.mkdir(parents=True, exist_ok=True)
-    workspace["scratchRoot"] = scratch.as_posix()
-
-
 def _compose_compact_instructions(
     request: RoleHandoverRequest,
     delivery: CapsuleDelivery,
@@ -667,13 +641,14 @@ def _compile_handover(request: RoleHandoverRequest) -> dict[str, Any]:
                 "workspace scope only; it does not select a registered repository or trust packet."
             ),
         }
-    report_path = _role_report_path(context, workspace, request_id=request_id)
+    task_document_digest = _digest(task_reads)
+    with role_launch_enclosure.publication_scope(config.coordination_root, workspace):
+        report_path = _role_report_path(context, workspace, request_id=request_id)
+        instructions, instruction_record, link_roots = _compose_compact_instructions(
+            request, capsule.delivery, report_path
+        )
     if request_id is None:
         raise ValueError("A message binding requires its durable requestId.")
-    task_document_digest = _digest(task_reads)
-    instructions, instruction_record, link_roots = _compose_compact_instructions(
-        request, capsule.delivery, report_path
-    )
     effective_digest = instruction_record["semanticDigest"]
     canonical_report_path = (
         Path(workspace["taskReportRoot"])
@@ -704,7 +679,7 @@ def _compile_handover(request: RoleHandoverRequest) -> dict[str, Any]:
         "documents": task_reads,
         "taskDocumentFiles": document_files,
         "taskDocumentDigest": task_document_digest,
-        "workspace": workspace,
+        "workspace": {key: value for key, value in workspace.items() if key != "lifecycleId"},
         "repositoryContext": repository_context,
         "taskReportPath": report_path,
         "canonicalTaskReportPath": canonical_report_path,

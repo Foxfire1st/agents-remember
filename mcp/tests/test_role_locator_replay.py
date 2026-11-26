@@ -12,14 +12,24 @@ from typing import cast
 from unittest.mock import patch
 
 import pytest
+from agents_remember.application.role_launch_context import RoleLaunchContext
 from agents_remember.cli import role_launch_preparation, role_launch_receipts
 from agents_remember.cli.role_handover_artifacts import first_message
 from agents_remember.cli.role_handover_file import handover_file_reference
 from agents_remember.cli.role_handover_publication import publish_handover_files
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.observer.ulid import new_ulid
 from agents_remember.tasks import write_task_doc
 from agents_remember.worktrees import role_reports
 from agents_remember.worktrees.role_handover_locator import ensure_locator, locator_directory
-from agents_remember.worktrees.worktree_contract import WorktreeContract
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    WorktreeContract,
+    default_contract,
+    write_contract,
+)
 from fastapi import HTTPException
 
 pytest_plugins = ["test_capsule_replay_integrity"]
@@ -29,20 +39,58 @@ class HostReached(Exception):
     """End the fake host call without starting an agent."""
 
 
-def prepare(fixture, monkeypatch: pytest.MonkeyPatch, request_id: uuid.UUID):
-    context, workspace = fixture.launch_of("worker")
+def prepare(
+    config: McpRuntimeConfig,
+    context: RoleLaunchContext,
+    workspace: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    request_id: uuid.UUID,
+) -> role_launch_preparation.PreparedRoleHandover:
     assert context.task is not None
     write_task_doc(context.task.path.parent, context.task.document)
     monkeypatch.setattr(role_launch_preparation, "_resolve_workspace", lambda *_: workspace)
     return role_launch_preparation.prepare_role_handover(
-        fixture.config, context, agent_override=None, request_id=request_id
+        config, context, agent_override=None, request_id=request_id
     )
+
+
+def _active_enclosure(config: McpRuntimeConfig, context: RoleLaunchContext) -> WorktreeContract:
+    assert context.master is not None and context.task is not None
+    repo = config.repositories[context.task.ref.repository]
+    assert repo.memory_root is not None
+    contract = default_contract(
+        ContractTask(
+            name=context.master.path.parent.name,
+            repo_name=repo.repo_id,
+            coordination_root=config.coordination_root,
+            workflow_kind="light-task",
+            memory_mode="external",
+        ),
+        leaf=LeafIdentity(
+            worktree_name=context.task.path.stem,
+            leaf_id=context.task.document.id,
+            lifecycle_id=new_ulid(),
+        ),
+        code=RepoBranchPlan(repo.path, "main", "ar/locator-replay", "a" * 40),
+        memory=RepoBranchPlan(repo.memory_root, "main", "ar/locator-replay", "b" * 40),
+    )
+    write_contract(contract.contract_path, contract)
+    return contract
 
 
 @pytest.fixture
 def detailed_receipt(leaf_preparation, monkeypatch: pytest.MonkeyPatch):
     request_id = uuid.uuid4()
-    prepared = prepare(leaf_preparation, monkeypatch, request_id)
+    config = leaf_preparation.config
+    context, workspace = leaf_preparation.launch_of("worker")
+    enclosure = _active_enclosure(config, context)
+    workspace.update(
+        path=enclosure.worktree_group.as_posix(),
+        contractPath=enclosure.contract_path.as_posix(),
+        lifecycleId=enclosure.lifecycle_id,
+        taskReportAccessRoot=(enclosure.worktree_group / "role-reports").as_posix(),
+    )
+    prepared = prepare(config, context, workspace, monkeypatch, request_id)
     compiled = prepared.handover
     report = compiled["taskReportPath"]
     artifact, handover_file = publish_handover_files(
@@ -75,8 +123,8 @@ def detailed_receipt(leaf_preparation, monkeypatch: pytest.MonkeyPatch):
         path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns) for path in paths
     }
     receipt_path = Path(prepared.workspace["scratchRoot"]) / "replay.json"
-    role_launch_receipts._write_receipt(receipt_path, receipt)
-    return leaf_preparation.config, receipt_path, receipt, opening, frozen
+    assert role_launch_receipts._create_receipt(receipt_path, receipt)
+    return config, receipt_path, receipt, opening, frozen
 
 
 def test_detailed_receipt_rebuilds_only_its_lost_locator_before_host_replay(
@@ -142,8 +190,9 @@ def test_real_detailed_preparation_refuses_a_collision_before_artifact_writes(
     marker.write_bytes(b"Foreign bytes.\n")
     locator = locator_directory(str(request_id))
     ensure_locator(locator, foreign)
+    context, workspace = leaf_preparation.launch_of("worker")
     with pytest.raises(ValueError, match="does not lead to this request's report folder"):
-        prepare(leaf_preparation, monkeypatch, request_id)
+        prepare(leaf_preparation.config, context, workspace, monkeypatch, request_id)
     assert locator.resolve() == foreign
     assert marker.read_bytes() == b"Foreign bytes.\n"
     assert list(foreign.iterdir()) == [marker]

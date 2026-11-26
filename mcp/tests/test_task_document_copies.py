@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import unittest
 import uuid
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +20,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
+from agents_remember.cli import role_launch_enclosure
 from agents_remember.cli import role_launch_preparation as preparation
 from agents_remember.cli.role_launch_request_rules import missing_copies_receipt_warning
 from agents_remember.kernel.primitives.runtime_config import load_config
@@ -158,7 +160,7 @@ class TaskDocumentCopyTests(unittest.TestCase):
         for role in ("worker", "reviewer", "curator"):
             context = resolve_role_launch_context(self.config, self.selection(role))
 
-            def compiled(request):
+            def compiled(_request):
                 index = json.loads((group / "task-documents/INDEX.json").read_text())
                 self.assertEqual(len(index["documents"]), 1)
                 for row in index["documents"]:
@@ -184,6 +186,9 @@ class TaskDocumentCopyTests(unittest.TestCase):
                 patch.object(preparation, "_role_defaults", return_value=({}, [])),
                 patch.object(preparation, "resolve_agent_selection", return_value=("codex", {})),
                 patch.object(preparation, "_resolve_workspace", return_value=workspace),
+                patch.object(
+                    role_launch_enclosure, "publication_scope", return_value=nullcontext()
+                ),
                 patch.object(preparation, "_prepare_role_folders"),
                 patch.object(preparation, "_current_role_context", return_value=context),
                 patch.object(preparation, "_ar_mcp_context", return_value={}),

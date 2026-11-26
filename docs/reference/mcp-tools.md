@@ -88,7 +88,7 @@ that asks before a write can tell the reads apart.
 | `server_info` | Report the resolved configuration: the build, the roots, the allowed repositories, the build state of the running tool servers and dashboards, and, on a tool server that a role start launched, the tool server name and the agent binding. It does not list the tools. | none |
 | `context_packet` | Where the caller works and what needs action: the roots, the task, action lines only when needed, the serving build commit and the pair's two commits. | `repo_id`, `include_drift=false`, `include_freshness=false`, `task_context` for a task |
 | `read_ar_files` | Name which knowledge governs up to 20 paths. Compact replies keep each path, its existence and card status where applicable, and the `brief` pointer and saved freshness where available. When space permits, the reply can also give the governing card's memory-worktree location, record counts by state, action-asking records by ID, kind, state and card heading, and overviews once per call, nearest first. `openWeaknesses` and `dependentDocuments` count items per path when shown and are omitted at zero. For eligible files with recorded knowledge, a fuller short answer of the file's [brief](../concepts.md#brief) can include rule titles, state, proof, anchors and text, open weaknesses with their sentence, standing documents and families as space permits. The answer points to the brief for omitted content and reports whether a saved brief is missing, older or of unknown freshness. The next write covering the file or folder renews it. Read source, card and overview text with your own tools. | `repo_id`, `files` (a list of paths), `task_context` for a task |
-| `runtime_install` | Install or refresh the files that the package owns in the coordination root; safe to run again. The install mirrors the packaged documentation into `<coordination-root>/docs/` and the packaged files of the two [search providers](../concepts.md#search-provider) into `<coordination-root>/providers/`, creates the folders for tasks, memory repositories, worktrees, notes and logs, and creates `<workspace-root>/.agents-remember/role-executions/`. No part of the product starts, indexes or queries a search provider. The tool server serves the skills as resources from the package. The `host` part installs or updates the host that the `paseoRuntime` block of the settings file names and reports the outcome and an owed restart; the install never writes that block, names a missing block and never restarts a running host. With `dry_run=true` the install changes nothing. **Preserves** user data (`<coordination-root>/memory-repos/`, `<coordination-root>/providers/data/`, and `<coordination-root>/providers/runners/` when `install_provider_deps=false`) and **replaces** the managed documentation (`<coordination-root>/docs/`). `experiment` selects an experimental install for one call and is never a setting. | `dry_run=false`, `include_benchmarks=false`, `experiment` |
+| `runtime_install` | Install or refresh the files that the package owns in the coordination root; safe to run again. The install mirrors the packaged documentation into `<coordination-root>/docs/` and the packaged files of the two [search providers](../concepts.md#search-provider) into `<coordination-root>/providers/`, creates the folders for tasks, memory repositories, worktrees, notes and logs, and creates `<workspace-root>/.agents-remember/role-executions/`. No part of the product starts, indexes or queries a search provider. The tool server serves the skills as resources from the package. The `host` part installs or updates the host that the `paseoRuntime` block of the settings file names and reports the outcome and an owed restart; the install never writes that block, names a missing block and never restarts a running host. With `dry_run=true` the install changes nothing. **Preserves** user data (`<coordination-root>/memory-repos/`, `<coordination-root>/providers/data/`, and `<coordination-root>/providers/runners/` when `install_provider_deps=false`) and **replaces** the managed documentation (`<coordination-root>/docs/`). `experiment` selects an experimental install for one call and is never a setting. | `dry_run=false`, `include_benchmarks=false`, `experiment`, `reconcile_shared_held_stores=false` |
 
 When the [route index](../concepts.md#route-index), the generated file `overview.index.json` that
 lists the files of a route that have a card, does not list a file but the file's card exists,
@@ -281,6 +281,15 @@ the check reports it with the merge parent. When the sync had parked uncommitted
 resolution leaves some of it out, `continue` answers `sync-resolution-incomplete` with a report of
 what is missing.
 The parked copy stays, and the sync finishes only when a later `continue` finds the work resolved.
+The continued code-side merge commit runs `git commit -m ...` carrying the `Commit-Check-Pass` stamp when a runnable pre-commit hook exists and `git commit --no-edit` when none does (never `--no-verify`), in its own
+process session under `orchestration.landing.commitCheckTimeoutSeconds` (default 900 seconds),
+streaming output to a retained log under the Git common directory. If the commit check fails,
+modifies a tracked file, or reaches the time limit (ending the process group after a 30-second
+grace and stopping or naming any escaped output holders), `worktree_sync` answers
+`sync-commit-check-failed` with the hook log path, judged files, any tracked files the hook
+modified, and—on a timeout—the time limit and any surviving escaped PIDs; `HEAD`, `MERGE_HEAD`,
+and the staged merge stay intact (any hook mutation to the index is rolled back) so the caller can
+repair and run `continue`, or end the sync with `cancel`.
 
 A sync that stopped can always be ended with `resolution_action: "cancel"`. Every branch returns
 to where it stood before the sync, and the uncommitted work that the sync had parked comes back.
@@ -322,8 +331,11 @@ See [Worktrees And Closeout](worktrees-c09.md) for the lifecycle and its gates.
 | `worktree_operation_control` | Execute one currently advertised task-addressed control for an exact generation in the operation journal. Only a direct landing leaves a generation there: a closeout and `worktree_integrate` run inside their own call and record nothing, so for `operation_kind` `closeout` or `integrate` the call is refused with `lifecycle-operation-retired`, when the journal has no record of that kind or the requested generation matches a record an older build wrote. The answer names `worktree_closeout_apply` or `worktree_integrate` and leaves the journal for audit. A mismatched generation returns `lifecycle-generation-changed` with the requested and observed generation. Retry/recover preserve accepted input; cancellation proves Git safety; retire/supersede are evidence-aware. | `contract_path`, `operation_kind` (`closeout`, `integrate`, `direct-landing`), `action` (`retry`, `recover`, `resume`, `cancel`, `retire`, `supersede`), `expected_generation`, nonblank `intent_note`, action-specific inputs, `dry_run=false` |
 | `direct_landing` | Grant-gated landing, from the master's branch, of a named task that holds a [direct-execution grant](../concepts.md#direct-execution), without an enclosure for that task. Verifies the code commit at the HEAD of the master's branch, or creates it from the task's uncommitted changes with `code_commit_message`; persists a durable direct-landing generation before Git mutation and recovers it through `worktree_operation_control`. | `contract_path` (the worktree contract of the master), `leaf_task_document_ref`, optional `code_commit` (verify) or `code_commit_message` (create), explicit enabled-leg messages, `intent_note`, optional gated `candidate_tree`, `leaf_id`, `dry_run=false` |
 | `direct_execution_grant` | Give, take back, or reclaim direct-execution grants before work starts. Only a caller bound to the Architect role can call it. The user gives the same record with the dashboard's switch "Direct execution"; `task_doc` has no operation that gives, changes, or removes a grant. | `task_document_ref`, `action` (`give`, `revoke`, or `reclaim` — reclaim takes back only abandoned tasks' grants with clean checkouts and reports what was preserved and why; started tasks keep their grants) |
-| `worktree_cleanup` | After the landing, archive/read back canonical lifecycle evidence, publish the external archive record, then remove worktrees, merged task branches, reports, and the enclosure. Archive-ready is not cleanup-completed; retry this exact public call with its archived `teardown_providers` value until surviving contract truth records completion. Bounded pre-locator exception: with no enclosure locator, no worktree folder, and no work branches, the call finishes with nothing to archive/delete, records the why in the surviving contract, and reads it back. This is non-terminal for task documents. | `contract_path`, `dry_run=false`, `teardown_providers=true` (also removes the containers, networks and folder `provider-runtime/` that a [search provider](../concepts.md#search-provider) left in the enclosure) |
-| `worktree_abandon` | Abandon an unintegrated generation through exact contract/journal/Git authority and preserve terminal archive proof before deletion. Archive-ready but incomplete abandon retries this exact public call with its archived `force` value until surviving contract truth records abandonment. Bounded pre-locator exception: with no enclosure locator, no worktree folder, and no work branches, the call finishes with nothing to archive/delete, records the why in the surviving contract, and reads it back. | `contract_path`, `dry_run=false`, `force=false` |
+| `worktree_cleanup` | After the landing, archive/read back canonical lifecycle evidence, publish the external archive record, close seats in the task folder, and copy out reports and messages. Remove worktrees and merged task branches before removing the whole task folder. Archive-ready is not cleanup-completed; retry this exact public call with its archived `teardown_providers` value until surviving contract truth records completion. Bounded pre-locator exception: with no enclosure locator, no worktree folder, and no work branches, the call finishes with nothing to archive/delete, records the why in the surviving contract, and reads it back. This is non-terminal for task documents. | `contract_path`, `dry_run=false`, `teardown_providers=true` (also removes the containers, networks and folder `provider-runtime/` that a [search provider](../concepts.md#search-provider) left in the enclosure) |
+| `worktree_abandon` | Abandon an unintegrated generation through exact contract/journal/Git authority and preserve terminal archive proof before deletion. Close seats in the task folder and copy out their reports and messages before removing the whole folder. Archive-ready but incomplete abandon retries this exact public call with its archived `force` value until surviving contract truth records abandonment. Bounded pre-locator exception: with no enclosure locator, no worktree folder, and no work branches, the call finishes with nothing to archive/delete, records the why in the surviving contract, and reads it back. | `contract_path`, `dry_run=false`, `force=false` |
+
+For a legacy series whose contract records its `enclosures/` directory as the worktree group,
+`worktree_cleanup` and `worktree_abandon` preserve that directory and its child enclosures.
 
 A closeout commits a tree only after two checks on it. First the knowledge gate and the validator
 judge the candidate trees. Then the code repository's own pre-commit hook runs on the staged tree:
@@ -352,18 +364,21 @@ Closeout and landing record the actual code/memory Git pair. A memory-content co
 create carries `Code-Commit` attribution; `memory.md` is an ignored computed cache, never an additional commit
 leg or admission/recovery authority. Missing or damaged cache data does not block those operations.
 
-An archive record alone does not make the enclosure locator terminal. While the locator is still
-live, a retry of the accepted `worktree_cleanup` or `worktree_abandon` with the same arguments
-reuses the archive and its record byte for byte and then makes the locator terminal. Only when the
-locator's state is `terminal-archived` does `worktree_status` read the archive and tell
-`archive-ready` from a completed cleanup; the same accepted call with its original arguments then
-finishes a removal that stopped part-way. This retry is not a `worktree_operation_control`
-action. A refused terminal request names the accepted call as its retry and never a second way to
-clean up. The identity of the archive request includes `cleanupArguments`:
-`{teardown_providers: <bool>}` for `worktree_cleanup` or `{force: <bool>}` for
-`worktree_abandon`. Status and conflict answers return that object and the exact `nextArgs`. A
-retry with a different value refuses; an argument that the retry leaves out takes its default,
-never the archived value.
+If a fresh `worktree_cleanup` with `teardown_providers=false` is blocked by live provider state
+before the archive is published, retry with `teardown_providers=true` to tear down that state.
+If the archive already records `teardown_providers=false`, ask the provider owner to settle the
+state and retry with that same value.
+
+Once the archive is published, retry the accepted `worktree_cleanup` or `worktree_abandon`
+directly with its recorded arguments. The archive fixes `cleanupArguments` even if publication
+was interrupted before the terminal receipt. The object holds `teardown_providers` for cleanup
+or `force` for abandon. Status and conflict answers give the recorded arguments and exact
+`nextArgs`. An omitted argument takes its default. A different value produces a conflict.
+
+While the locator is live, the accepted retry reuses the published archive bytes and any existing
+receipt, then makes the locator terminal. Once the locator is `terminal-archived`,
+`worktree_status` reads the archive and distinguishes `archive-ready` from completion. Use the
+same accepted call to finish a removal that stopped part-way.
 
 A task that was reopened or abandoned can start again at the same worktree contract; the new
 enclosure is then a successor. Its start first proves the archive of the earlier enclosure and
@@ -731,8 +746,8 @@ Code `recipient-busy` is refused outright only when the recipient already holds 
 that refusal names two ways on: wait for a delivery, or withdraw a waiting message. Every other
 refusal names one reason: `recipient-not-found`, `recipient-archived`, `recipient-ambiguous`,
 `recipient-cannot-be-resumed`, `scope-check-failed`, `caller-has-no-binding`,
-`no-paseo-runtime-configured`, `message-too-long`, or `host-unreachable` when the host does not
-answer and the recipient cannot be found.
+`no-paseo-runtime-configured`, `message-too-long`, `message-file-failed`, `settings-invalid`, or
+`host-unreachable` when the host does not answer and the recipient cannot be found.
 
 The full procedure of a sender for held answers and for a full store is
 [Message handover](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/reference/message-handover.md).

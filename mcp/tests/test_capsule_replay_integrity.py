@@ -293,7 +293,7 @@ def saved_launch(tmp_path: Path) -> tuple[McpRuntimeConfig, Path, dict[str, Any]
         workspace={"path": str(tmp_path)},
     )
     path = tmp_path / "receipt.json"
-    role_launch_receipts._write_receipt(path, receipt)
+    assert role_launch_receipts._create_receipt(path, receipt)
     config = McpRuntimeConfig(
         config_path=tmp_path / "settings.json",
         coordination_root=tmp_path,
@@ -331,6 +331,8 @@ def test_held_opening_refuses_changed_details_and_preserves_waiting_messages(
     saved_launch: tuple[McpRuntimeConfig, Path, dict[str, Any]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Requires the parent's validator hook in the delayed held-seat opening path."""
+    from agents_remember.cli.role_held_store import held_seat_ref  # noqa: PLC0415
+
     config, path, receipt = saved_launch
     receipt.update(status="held", heldSeat=True)
     folder = receipt["workspace"]["path"]
@@ -340,7 +342,8 @@ def test_held_opening_refuses_changed_details_and_preserves_waiting_messages(
         agent_id,
         role_held_messages.HeldMessage("Manager:", "sender", "Begin review.", "held-seat"),
     )
-    claimed = role_held_messages._claim_batch(folder, agent_id)
+    ref = held_seat_ref(path, receipt)
+    claimed = role_held_messages._claim_batch(ref)
     assert claimed is not None
     messages, claim = claimed
     batch = role_held_messages._DrainBatch(config, path, receipt, folder, agent_id, messages, claim)
@@ -365,4 +368,4 @@ def test_held_opening_refuses_changed_details_and_preserves_waiting_messages(
     assert "frozen instruction detail" in refused["detail"]
     assert calls == []
     assert role_held_messages.waiting_total(folder, agent_id) == 1
-    assert role_held_messages._claim_batch(folder, agent_id) is not None
+    assert role_held_messages._claim_batch(ref) is not None

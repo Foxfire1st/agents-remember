@@ -37,8 +37,8 @@ resolution of the repository's context reads the user settings file as its memor
 
 ## Settings file
 
-The tool server reads the settings file that `--config` names. Without `--config` it reads
-`~/.config/agents-remember/agents-remember-settings.json`. The tool server refuses three files as
+The tool server (`agents-remember-mcp`) requires `--config` naming an absolute path to the trusted
+settings file; there is no default path when `--config` is omitted. The tool server refuses three files as
 `--config`: the user settings file, a file whose path ends in `/system/settings.json`, and a
 file that lies inside the coordination root. The refusal of the last case reads
 `MCP settings must not live inside the coordinator root`; this refusal and two more of the
@@ -478,7 +478,7 @@ the next call without a restart.
 | `orchestration.harnesses.<id>` | accepted, except `extraArgs` | every start of a role agent |
 | `orchestration.loops.defaults.maxRounds` | accepted and not applied | `task_doc`, when a review round begins |
 | `orchestration.roleMessageLimit` | accepted | every `role_message` call |
-| `orchestration.landing.commitCheckTimeoutSeconds` | accepted | every landing commit check |
+| `orchestration.landing.commitCheckTimeoutSeconds` | accepted | every landing and continued code-sync commit check |
 
 ### Closing the user's file to writing
 
@@ -609,9 +609,9 @@ takes the first source that states a choice: the start, the
 [host profile](../concepts.md#host-profile), the settings, the host's default. For the harness
 the settings are the role's `harness`, then `orchestration.spawn.harness`, then the first harness
 id that the host offers: the built-in ids first, then the ids added under
-`orchestration.harnesses`. For the mode the order is the host profile, then the settings. When
-neither states a mode, a start on Claude states `default` and a start on Codex states `auto`,
-each only when the host offers it; a start on another harness states no mode. `role_start`
+`orchestration.harnesses`. For the mode the order is the start call, the host profile, then the
+settings. When none states a mode, the start takes the host's default mode for that harness when
+the host lists one, and Agents Remember picks no mode of its own. `role_start`
 accepts no mode. A choice bound to one harness and model is not carried to another: when a higher
 source chooses another harness or model, the start omits the lower choice and records the
 reason.
@@ -923,10 +923,13 @@ settings file:
 ### orchestration.landing
 
 `orchestration.landing.commitCheckTimeoutSeconds` (a positive whole number, default 900) bounds
-the seconds one run of the landing commit check may take. Every landing reads it, so a changed
-number holds for the next landing without a restart. The check reads the user settings file, the
-`system/settings.json` of the checkout it runs in and, in a linked worktree, that of the main
-checkout. A run past the bound is stopped with its child processes and refuses the landing.
+the seconds one run of a landing commit check or a continued code-side sync commit check
+(`worktree_sync` with `resolution_action: "continue"`) may take. Every check reads it, so a
+changed number holds for the next run without a restart. The check reads the user settings file,
+the `system/settings.json` of the checkout it runs in and, in a linked worktree, that of the main
+checkout. A run past the bound ends its process group after a 30-second grace, stops or names any
+escaped output holders, keeps the hook log under the Git common directory, and refuses the landing
+or answers `sync-commit-check-failed` while leaving the staged merge intact.
 
 ```json
 {
@@ -1120,10 +1123,11 @@ rendered copies; a rendered copy is never parsed back. A refusal of a read, a ch
 validation or a sync, a refused start, a product guard and a commit gate keep their stop, and a
 failed gate is repaired.
 
-**First tool call.** For a role agent on Claude Code the start hands the host a grant for the
-tool `server_info` on the tool server `agents-remember-task`, before the first message: the
-agent calls that one tool without a permission prompt. Every other
-tool stays under the permission mode of the agent, and the start writes no settings file of the
-harness.
-Only a role agent on Claude Code gets this grant. A global allow rule of your own can hide
-whether the narrower grant applies.
+**First tool call.** Before the first message, the start hands the host a per-tool grant on
+the tool server `agents-remember-task`, according to the harness: for a role agent on Claude
+Code, the tool `server_info`; for a role agent on Codex, each tool of its role's ordered tool
+roster, in that order (which the host keeps across resumes); for any other harness, no grant.
+An explainer seat receives its explainer tools in that grant on both Claude Code and Codex
+(alongside `server_info` on Claude Code and the full public roster on Codex). Every other tool
+stays under the permission mode of the agent, and the start writes no settings file of the
+harness. A global allow rule of your own can hide whether the narrower grant applies.

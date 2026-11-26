@@ -21,6 +21,7 @@ from agents_remember.cli.investigator_receipts import (
 )
 from agents_remember.cli.paseo_role_caller import _host_unreachable
 from agents_remember.cli.paseo_status import read_agent
+from agents_remember.cli.role_held_store import HeldSeatClosed, held_seat_ref
 from agents_remember.cli.role_launch_preparation import ROLE_START_TOOL
 from agents_remember.cli.role_launch_receipts import (
     _read_receipt,
@@ -58,20 +59,23 @@ def _resolve_recipient(
     )
     if recipient.agent_id == binding.agent_id:
         raise _not_found("The recipient this resolves to is the calling agent itself.")
-    if recipient.receipt.get("status") in _UNFINISHED_START_STATUSES:
-        # Until its start has answered, an agent may not have its first message; the
-        # product holds the message and delivers it when the start has answered
-        # running (MIK-R100 rule 4b), instead of refusing it as busy.
-        raise _Refused(
-            "recipient-busy",
-            f"Agent {recipient.agent_id} is not ready for a message: its start has not finished "
-            f"(execution status {recipient.receipt.get('status')}).",
-            "The message is held and delivered once the start of that agent has answered "
-            "running; nothing has to be sent again.",
-            recipientAgentId=recipient.agent_id,
-            holdReason="start-unfinished",
-        )
     return recipient
+
+
+def _unfinished_start(recipient: _Recipient) -> _Refused | None:
+    status = recipient.receipt.get("status")
+    if status not in _UNFINISHED_START_STATUSES:
+        return None
+    # The first message may still be waiting for the host to open the agent.
+    return _Refused(
+        "recipient-busy",
+        f"Agent {recipient.agent_id} is not ready for a message: its start has not finished "
+        f"(execution status {status}).",
+        "The message is held and delivered once the start of that agent has answered "
+        "running; nothing has to be sent again.",
+        recipientAgentId=recipient.agent_id,
+        holdReason="start-unfinished",
+    )
 
 
 def _not_found(detail: str, **fields: Any) -> _Refused:
@@ -149,6 +153,65 @@ def _readable_receipt(path: Path) -> dict[str, Any] | None:
         return _read_receipt(path)
     except HTTPException:
         return None
+
+
+def _locate_recipient_store(
+    config: McpRuntimeConfig,
+    call: RoleMessageCall,
+    agent_id: str,
+    *,
+    selected: _Recipient | None = None,
+) -> tuple[Path, dict[str, Any], str] | None:
+    """Find the current store and keep the launch generation selected by this send."""
+
+    if call.role is not None:
+        try:
+            selection = RoleSelection.model_validate(
+                {
+                    "role": call.role,
+                    "sprintDocumentRef": call.sprint_document_ref,
+                    "masterDocumentRef": call.master_document_ref,
+                    "taskDocumentRef": call.task_document_ref,
+                }
+            )
+            if selection.role in TASKLESS_ROLES:
+                candidates = _taskless_execution_receipts(config, selection)
+            else:
+                path = _receipt_path(config, selection)
+                receipt = _read_receipt(path)
+                candidates = [(path, receipt)] if receipt is not None else []
+        except (ValueError, TaskDocumentRefError, HTTPException):
+            return None
+    else:
+        # A history receipt never owns the current store.
+        candidates = [
+            (path, receipt)
+            for path, receipt in _line_receipts(config)
+            if path.parent.name != "history" and receipt.get("agentId") == agent_id
+        ]
+    for path, receipt in candidates:
+        if receipt.get("agentId") != agent_id:
+            continue
+        if selected is not None:
+            _check_store_selection(path, selected, receipt)
+        workspace = receipt.get("workspace")
+        folder = workspace.get("path") if isinstance(workspace, dict) else None
+        if isinstance(folder, str) and folder:
+            return path, receipt, folder
+    return None
+
+
+def _check_store_selection(path: Path, selected: _Recipient, receipt: dict[str, Any]) -> None:
+    prior = held_seat_ref(path, selected.receipt)
+    current = held_seat_ref(path, receipt)
+    if (prior.agent_id, prior.request_id, prior.workspace) != (
+        current.agent_id,
+        current.request_id,
+        current.workspace,
+    ):
+        raise HeldSeatClosed(prior.agent_id, "receipt-moved")
+    if prior.generation != current.generation:
+        raise HeldSeatClosed(prior.agent_id, "generation-changed")
 
 
 def _recipient_by_selection(

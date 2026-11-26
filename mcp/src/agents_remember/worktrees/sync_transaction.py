@@ -14,6 +14,10 @@ from agents_remember.worktrees.knowledge_validation import (
     PairedCode,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.commit_check_process import (
+    SyncCommitCheckStop,
+    format_sync_commit_check_summary,
+)
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.sync_omission_report import OmissionReportError, write_report
 from agents_remember.worktrees.sync_parked_omissions import journal_omissions, measure
@@ -61,6 +65,9 @@ from agents_remember.worktrees.sync_transaction_git import (
     start_side_merge,
     validate_memory_fast_forward,
     worktree_dirty_paths,
+)
+from agents_remember.worktrees.sync_transaction_git._code_merge_commit import (
+    BoundedSyncCommitError,
 )
 from agents_remember.worktrees.sync_transaction_parking import (
     WIP_PATH_SAMPLE_LIMIT,
@@ -898,6 +905,8 @@ def _finish_retained_merge(
     except SyncKnowledgeValidationError as error:
         return _knowledge_validation_refused(store, error, record, fetch)
     except SyncGitProofError as error:
+        if isinstance(error, BoundedSyncCommitError):
+            return _commit_check_stopped(store, error.stop, str(error), record, fetch)
         detail = str(error)
         try:
             stopped = commit_check_report(side) if isinstance(error, SyncMergeCommitError) else None
@@ -956,12 +965,12 @@ def _incomplete_resolution_summary(side: SyncSideRecord, detail: str) -> str:
 
 def _commit_check_stopped(
     store: SyncOperationStore,
-    report: dict[str, object],
+    report: SyncCommitCheckStop | dict[str, object],
     detail: str,
     record: SyncOperationRecord,
     fetch: dict[str, object],
 ) -> WorktreeCommandResult:
-    """Answer a continue stopped at the repository's commit check (MIK-R61 rule 12).
+    """Answer a continue stopped at the repository's commit check (MIK-R61 rule 12, L29-R1).
 
     The content merged but the commit -- and the pre-commit check it runs -- did not. The
     merge stays staged and the phase is unchanged, so repairing the named files, staging
@@ -969,27 +978,21 @@ def _commit_check_stopped(
     says whether the task changed it; cancel is named as the way back.
     """
 
-    staged = report.get("staged")
-    assert isinstance(staged, list)
-    task_changed = report.get("taskChanged")
-    assert isinstance(task_changed, dict)
-    lines = [
-        f"- {path}: {'changed by the task' if task_changed.get(path) else 'from the carried line'}"
-        for path in staged
-    ]
-    side = report.get("side", "the side")
-    worktree = ""
+    if isinstance(report, SyncCommitCheckStop):
+        stop = report
+    else:
+        staged = report.get("staged")
+        assert isinstance(staged, list)
+        task_changed = report.get("taskChanged")
+        assert isinstance(task_changed, dict)
+        stop = SyncCommitCheckStop(
+            side=str(report.get("side", "the side")),
+            staged=tuple(str(path) for path in staged),
+            task_changed={str(key): bool(value) for key, value in task_changed.items()},
+        )
     retained = _retained_side(record)
-    if retained.side == side:
-        worktree = retained.worktree
-    summary = (
-        f"The {side} merge is complete in content but its commit did not pass the repository's "
-        f"commit check: {detail}\nThe check judged the merged tree:\n"
-        + "\n".join(lines)
-        + f"\nRecovery: repair the named files in {worktree}, stage them (git add), then continue "
-        "with worktree_sync and resolution_action='continue'; or end the sync with "
-        "resolution_action='cancel'."
-    )
+    worktree = retained.worktree if retained.side == stop.side else ""
+    summary = format_sync_commit_check_summary(stop, detail, worktree)
     record = update_record(store, record, phase=record.phase)
     return manual_repair_result("sync-commit-check-failed", summary, record, fetch)
 

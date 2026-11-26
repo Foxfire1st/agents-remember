@@ -367,3 +367,68 @@ def test_refused_integration_leaves_every_worktree_and_branch_in_place(
     assert current.integration_status != "completed"
     assert current.cleanup == "pending"
     assert _leaf_document(closed).status != "Completed"
+
+
+def test_finalize_removes_unlisted_task_folder_contents(
+    tmp_path: Path, bound_worktree_services
+) -> None:
+    closed = _landed_leaf(tmp_path)
+    config = _public_config(tmp_path, closed)
+    assert _integrate_apply(config, closed)["ok"]
+    group = closed.worktree_group
+    (group / "reference").mkdir()
+    (group / "reference" / "copied.md").write_text("copy", encoding="utf-8")
+    (group / "unlisted").write_text("working file", encoding="utf-8")
+    elsewhere = tmp_path / "kept-by-link.txt"
+    elsewhere.write_text("outside the task", encoding="utf-8")
+    (group / "unlisted-link").symlink_to(elsewhere)
+    reports = group / "role-reports" / "worker"
+    reports.mkdir(parents=True)
+    (reports / "worker.md").write_text("worker's evidence", encoding="utf-8")
+    messages = group / "messages"
+    messages.mkdir()
+    (messages / "original.md").write_text("workspace text", encoding="utf-8")
+    leaf = resolve_terminal_leaf_doc(closed.task_root, closed.leaf_id)
+    assert leaf is not None
+    canonical = closed.task_root / "notes" / "messages" / leaf[0].stem
+    canonical.mkdir(parents=True)
+    (canonical / "original.md").write_text("canonical text", encoding="utf-8")
+
+    result = worktree_tools.lifecycle_finalize_task_tool(
+        config, contract_path=closed.contract_path.as_posix()
+    )
+
+    assert result["ok"] and not group.exists(), (
+        f"finished leaf folder was not fully removed: {result}"
+    )
+    assert group.parent.is_dir()
+    assert elsewhere.read_text(encoding="utf-8") == "outside the task"
+    assert (closed.task_root / "notes" / "reports" / "worker" / "worker.md").read_text(
+        encoding="utf-8"
+    ) == "worker's evidence"
+    assert (canonical / "original.md").read_text(encoding="utf-8") == "canonical text"
+    assert sorted(path.read_text(encoding="utf-8") for path in canonical.iterdir()) == [
+        "canonical text",
+        "workspace text",
+    ]
+
+
+def test_finalized_task_retries_checked_group_removal(
+    tmp_path: Path, bound_worktree_services
+) -> None:
+    closed = _landed_leaf(tmp_path)
+    config = _public_config(tmp_path, closed)
+    assert _integrate_apply(config, closed)["ok"]
+    contract_path = closed.contract_path.as_posix()
+    assert worktree_tools.lifecycle_finalize_task_tool(config, contract_path=contract_path)["ok"]
+    group = closed.worktree_group
+    assert not group.exists()
+    reports = group / "role-reports" / "worker"
+    reports.mkdir(parents=True)
+    (reports / "residue.md").write_text("evidence from the same generation", encoding="utf-8")
+
+    result = worktree_tools.lifecycle_finalize_task_tool(config, contract_path=contract_path)
+
+    assert result["ok"] and not group.exists(), result
+    kept = closed.task_root / "notes" / "reports" / "worker" / "residue.md"
+    assert kept.read_text(encoding="utf-8") == "evidence from the same generation"

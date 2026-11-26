@@ -37,8 +37,16 @@ from agents_remember.kernel.primitives.drift_snapshot import drift_snapshot_path
 from agents_remember.memory_quality.style.citations.source_index_cache import (
     TerminalNamespaceGuard,
 )
+from agents_remember.models.lifecycles.enclosure import TerminalWorktreeCleanupArguments
 from agents_remember.tasks import read_task_doc
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
+from agents_remember.worktrees.integration import terminal_enclosure_archive
+from agents_remember.worktrees.integration.lifecycle.lifecycle_enclosure_terminal import (
+    terminal_enclosure_archive_paths,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    inspect_lifecycle_operation_locator,
+)
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalResult,
     _blocker,
@@ -321,6 +329,36 @@ def test_an_empty_provider_reason_is_replaced_by_a_named_statement() -> None:
     ]
 
 
+def test_terminal_provider_results_keep_removals_and_refusals_distinct() -> None:
+    reason = "provider refused the removal"
+    refusals = [
+        {"provider": component, "reason": reason}
+        for component in ("containers[0]", "networks[0]", "providerRuntime")
+    ]
+    for case, row, expected in (
+        ("successful provider removal became a blocker", {"removed": True}, []),
+        ("provider removal preview became a blocker", {"removed": False, "would_remove": True}, []),
+        ("absent provider became a blocker", {"removed": False, "reason": "already-absent"}, []),
+        ("provider refusal reason changed", {"removed": False, "reason": reason}, refusals),
+    ):
+        preview = row.get("would_remove") is True
+        blockers = terminal_result_blockers(
+            TerminalResult(
+                providers={
+                    "state": "would-teardown" if preview else "torn-down",
+                    "containers": [{"container": "fixture-container", **row}],
+                    "networks": [{"network": "fixture-network", **row}],
+                    "providerRuntime": {"path": "/fixture/provider-runtime", **row},
+                },
+                worktrees={},
+                branches={},
+                directories={},
+                preview=preview,
+            )
+        )
+        assert blockers == expected, f"{case}: {blockers!r}"
+
+
 def test_remove_tree_answers_with_a_reason_whenever_it_reclaimed_nothing(
     tmp_path: Path,
 ) -> None:
@@ -487,3 +525,185 @@ def test_the_cleanup_preview_of_a_task_with_a_drift_snapshot_reports_no_blocker(
     assert snapshot.exists(), "the preview removed the drift snapshot it only planned to"
     assert closed.code_worktree.exists(), "the preview removed a worktree"
     assert load_contract(closed.contract_path).cleanup == "pending"
+
+
+def test_cleanup_preview_names_role_report_link_blocker(
+    tmp_path: Path, bound_worktree_services
+) -> None:
+    closed = _landed_leaf(tmp_path)
+    config = _landed_leaf_config(tmp_path, closed)
+    local_reports = closed.worktree_group / "role-reports"
+    local_reports.mkdir()
+    destination = tmp_path / "linked-evidence.txt"
+    destination.write_text("evidence outside task folder", encoding="utf-8")
+    bad_report = local_reports / "linked-evidence.txt"
+    bad_report.symlink_to(destination)
+
+    def cleanup(*, dry_run: bool):
+        return worktree_tools.worktree_cleanup_tool(
+            config,
+            contract_path=closed.contract_path.as_posix(),
+            dry_run=dry_run,
+        )
+
+    preview = cleanup(dry_run=True)
+    assert not preview["ok"] and str(bad_report) in str(preview.get("blockers")), (
+        f"cleanup preview hid the linked role report blocker: {preview}"
+    )
+    result = cleanup(dry_run=False)
+    assert not result["ok"] and str(bad_report) in str(result.get("blockers")), result
+    assert bad_report.is_symlink()
+    assert closed.code_worktree.exists()
+    assert load_contract(closed.contract_path).cleanup == "pending"
+
+
+def test_cleanup_skip_names_live_provider_in_task_folder(
+    tmp_path: Path, bound_worktree_services
+) -> None:
+    closed, config, state = _provider_skip_leaf(tmp_path)
+
+    for dry_run in (True, False):
+        result = worktree_tools.worktree_cleanup_tool(
+            config,
+            contract_path=closed.contract_path.as_posix(),
+            teardown_providers=False,
+            dry_run=dry_run,
+        )
+        assert not result["ok"] and str(state.parent) in str(result.get("blockers")), result
+        assert state.is_file()
+        assert closed.code_worktree.exists()
+        assert load_contract(closed.contract_path).cleanup == "pending"
+
+
+def _provider_skip_leaf(tmp_path: Path):
+    closed = _landed_leaf(tmp_path)
+    config = _landed_leaf_config(tmp_path, closed)
+    return closed, config, _seed_provider_state(closed)
+
+
+def _seed_provider_state(contract: WorktreeContract) -> Path:
+    runtime = contract.worktree_group / "provider-runtime"
+    runtime.mkdir(exist_ok=True)
+    state = runtime / "provider-state.json"
+    state.write_text('{"state": "prepared"}\n', encoding="utf-8")
+    return state
+
+
+def _fresh_terminal_archive_paths(contract: WorktreeContract) -> tuple[Path, Path]:
+    location = inspect_lifecycle_operation_locator(
+        contract.coordination_root, contract.contract_path
+    )
+    assert location.state == "addressable" and location.locator is not None, location
+    archive, receipt = terminal_enclosure_archive_paths(
+        contract.coordination_root, location.locator.publicationRequestId
+    )
+    assert not archive.exists() and not receipt.exists()
+    return archive, receipt
+
+
+def test_fresh_provider_skip_leaves_no_archive_and_allows_true_retry(
+    tmp_path: Path, bound_worktree_services
+) -> None:
+    closed, config, state = _provider_skip_leaf(tmp_path)
+    contract_path = closed.contract_path.as_posix()
+    archive, receipt = _fresh_terminal_archive_paths(closed)
+
+    blocked = worktree_tools.worktree_cleanup_tool(
+        config, contract_path=contract_path, dry_run=False, teardown_providers=False
+    )
+
+    assert not archive.exists() and not receipt.exists(), (
+        f"fresh provider skip published a terminal archive or receipt: {blocked}"
+    )
+    assert not blocked["ok"] and "teardown_providers=true" in str(blocked["blockers"]), blocked
+    assert "terminalArchive" not in blocked
+    assert state.is_file()
+
+    def teardown(contract: WorktreeContract, *, dry_run: bool) -> dict[str, object]:
+        runtime = contract.worktree_group / "provider-runtime"
+        return {"state": "torn-down", "providerRuntime": remove_tree(runtime, dry_run=dry_run)}
+
+    with mock.patch.object(bound_worktree_services.provider_lifecycle, "teardown", teardown):
+        retried = worktree_tools.worktree_cleanup_tool(
+            config, contract_path=contract_path, dry_run=False, teardown_providers=True
+        )
+
+    assert retried["ok"] and retried["state"] == "cleanup-completed", retried
+    assert retried["providers"]["providerRuntime"]["removed"] is True
+    assert retried["terminalArchive"]["cleanupArguments"] == {"teardown_providers": True}
+    assert not closed.worktree_group.exists()
+
+
+@pytest.mark.parametrize("interrupted", [False, True], ids=["published", "before-receipt"])
+def test_accepted_provider_skip_preserves_archive_and_retries_with_saved_arguments(
+    tmp_path: Path, bound_worktree_services, interrupted: bool
+) -> None:
+    closed = _landed_leaf(tmp_path)
+    config = _landed_leaf_config(tmp_path, closed)
+    contract_path = closed.contract_path.as_posix()
+    saved = {"teardown_providers": False}
+    archive, receipt = _fresh_terminal_archive_paths(closed)
+    interruption = (
+        mock.patch.object(
+            terminal_enclosure_archive,
+            "_publish_terminal_receipt",
+            side_effect=OSError("interrupted before publishing the terminal receipt"),
+        )
+        if interrupted
+        else nullcontext()
+    )
+    with interruption:
+        accepted = terminal_enclosure_archive.terminal_archive_required_result(
+            load_contract(closed.contract_path),
+            operation="worktree_cleanup",
+            arguments=TerminalWorktreeCleanupArguments(teardown_providers=False),
+            dry_run=False,
+        )
+    assert (accepted.returncode != 0) == interrupted, accepted.payload
+    assert receipt.is_file() != interrupted
+    archive_bytes = archive.read_bytes()
+    original_receipt = None if interrupted else receipt.read_bytes()
+    state = _seed_provider_state(closed)
+
+    changed = worktree_tools.worktree_cleanup_tool(
+        config, contract_path=contract_path, dry_run=False, teardown_providers=True
+    )
+    assert changed["status"] == "terminal-archive-request-conflict", changed
+    assert changed["observed"]["cleanupArguments"] == saved
+    assert archive.read_bytes() == archive_bytes
+    assert (receipt.read_bytes() if receipt.is_file() else None) == original_receipt
+
+    blocked = worktree_tools.worktree_cleanup_tool(
+        config, contract_path=contract_path, dry_run=False, teardown_providers=False
+    )
+
+    assert not blocked["ok"], blocked
+    reason = next(
+        (
+            row["reason"]
+            for row in blocked.get("blockers", [])
+            if row.get("directory") == "provider-runtime"
+        ),
+        None,
+    )
+    assert isinstance(reason, str), blocked
+    assert str(state.parent) in reason and "provider owner" in reason, blocked
+    assert "teardown_providers=false" in reason and "teardown_providers=true" not in reason
+    assert archive.read_bytes() == archive_bytes
+    receipt_bytes = receipt.read_bytes()
+    if original_receipt is not None:
+        assert receipt_bytes == original_receipt
+    assert state.is_file()
+    assert load_contract(closed.contract_path).cleanup == "pending"
+
+    state.unlink()
+    state.parent.rmdir()
+    retried = worktree_tools.worktree_cleanup_tool(
+        config, contract_path=contract_path, dry_run=False, teardown_providers=False
+    )
+
+    assert retried["ok"] and retried["state"] == "cleanup-completed", retried
+    assert retried["terminalArchive"]["cleanupArguments"] == saved
+    assert retried["providers"]["state"] == "skipped"
+    assert (archive.read_bytes(), receipt.read_bytes()) == (archive_bytes, receipt_bytes)
+    assert not closed.worktree_group.exists()

@@ -13,6 +13,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agents_remember_test_support.code_quality.causal_preflight import preflight_scope_units
+from agents_remember_test_support.code_quality.hook_scope_batch import (
+    HookBatchRequest,
+    HookScopeLineBuilders,
+    collect_hook_scope_batch,
+    write_hook_scope_batch,
+)
 from agents_remember_test_support.code_quality.scope import (
     GateScope,
     ScopeError,
@@ -174,6 +180,29 @@ def wrapper_scope_line(
     )
 
 
+def _pytest_scope_line(project_root: Path, scope: GateScope, *, targeted: bool) -> str:
+    if targeted:
+        units = (
+            f"{len(scope.test_paths)} derived test files; "
+            f"{len(scope.coverage_paths)} changed production modules offered to Coverage.py"
+        )
+        looked_at = "derived test subset covering changed modules"
+    else:
+        production = python_files_under(project_root, scope.coverage_paths)
+        tests = python_files_under(project_root, scope.test_paths)
+        units = (
+            f"{len(tests)} Python files present under test roots; "
+            f"{len(production)} on-disk product Python files offered to Coverage.py"
+        )
+        looked_at = "configured test roots on disk plus coverage over production package roots"
+    return scope_line(
+        "pytest",
+        looked_at,
+        "pyproject.toml [tool.pytest.ini_options] + [tool.coverage.run]",
+        units,
+    )
+
+
 def fixed_step_scope_line(
     name: str,
     project_root: Path,
@@ -182,8 +211,8 @@ def fixed_step_scope_line(
     python_executable: str = sys.executable,
     targeted: bool = False,
 ) -> str:
-    production = python_files_under(project_root, scope.coverage_paths)
-    tests = python_files_under(project_root, scope.test_paths)
+    # L29-R3: compute recursive python_files_under lazily only for steps that report
+    # on-disk root counts (radon-cc, radon-mi, and non-targeted pytest).
     if name in {"ruff", "ruff-format"}:
         return scope_line(
             name,
@@ -213,6 +242,7 @@ def fixed_step_scope_line(
     if name in {"evidence-lifecycle", "causal-preflight"}:
         return _evidence_scope_line(name)
     if name in {"radon-cc", "radon-mi"}:
+        production = python_files_under(project_root, scope.coverage_paths)
         return scope_line(
             name,
             "on-disk Python files recursively consumed from product package roots",
@@ -220,22 +250,7 @@ def fixed_step_scope_line(
             f"{len(production)} on-disk product Python files",
         )
     if name == "pytest":
-        return scope_line(
-            name,
-            (
-                "derived test subset covering changed modules"
-                if targeted
-                else "configured test roots on disk plus coverage over production package roots"
-            ),
-            "pyproject.toml [tool.pytest.ini_options] + [tool.coverage.run]",
-            (
-                f"{len(scope.test_paths)} derived test files; "
-                f"{len(scope.coverage_paths)} changed production modules offered to Coverage.py"
-                if targeted
-                else f"{len(tests)} Python files present under test roots; "
-                f"{len(production)} on-disk product Python files offered to Coverage.py"
-            ),
-        )
+        return _pytest_scope_line(project_root, scope, targeted=targeted)
     if name in {"file-size", "layering"}:
         return _structural_scope_line(name, scope)
     raise ScopeReportingError(f"no scope contract is registered for wrapper step {name!r}")
@@ -683,6 +698,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     tier = subparsers.add_parser("hook-tier")
     tier.add_argument("--tier", choices=("fast", "targeted", "full"), required=True)
+    batch = subparsers.add_parser("hook-batch")
+    batch.add_argument("--tier", choices=("fast", "targeted", "full"), required=True)
+    batch.add_argument("--output-dir", type=Path, required=True)
     fixed = subparsers.add_parser("fixed-step")
     fixed.add_argument(
         "--name",
@@ -719,6 +737,32 @@ def _randomized_report(args: argparse.Namespace, project_root: Path) -> int:
     return 0
 
 
+def _hook_batch_builders() -> HookScopeLineBuilders:
+    return HookScopeLineBuilders(
+        invocation_env=INVOCATION_ENV,
+        validate_invocation=validate_invocation_environment,
+        wrapper_line=wrapper_scope_line,
+        untracked_lines=untracked_scope_lines,
+        generated_line=generated_scope_line,
+        fixed_step_line=fixed_step_scope_line,
+    )
+
+
+def _hook_batch_report(args: argparse.Namespace, project_root: Path) -> int:
+    request = HookBatchRequest(
+        project_root=project_root,
+        tier=args.tier,
+        output_dir=args.output_dir,
+    )
+    lines = collect_hook_scope_batch(
+        request.project_root,
+        request.tier,
+        _hook_batch_builders(),
+    )
+    write_hook_scope_batch(request.output_dir, lines)
+    return 0
+
+
 def _quality_report(args: argparse.Namespace, project_root: Path) -> int:
     validate_quality_config(project_root)
     validate_invocation_environment()
@@ -737,6 +781,7 @@ _SIMPLE_COMMANDS: dict[str, Callable[[argparse.Namespace, Path], int]] = {
     "generated": _generated_report,
     "dashboard": _dashboard_report,
     "randomized-pytest": _randomized_report,
+    "hook-batch": _hook_batch_report,
 }
 
 

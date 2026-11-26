@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import shutil
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,9 +51,7 @@ from agents_remember.models.role_launcher import (
 )
 from agents_remember.models.tools.role_tool_scope import tools_for_role
 from agents_remember.worktrees import role_reports
-from agents_remember.worktrees.modules import cleanup as worktree_cleanup
-from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.terminal_validation import TerminalPreflight
+from agents_remember.worktrees.modules import terminal_group
 from agents_remember.worktrees.role_reports import collect_group_reports, remove_group_role_folders
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 from mcp.server.fastmcp import FastMCP
@@ -732,7 +731,8 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
         group = self.root / "completed-group"
         local = group / "role-reports" / "worker" / "request"
         local.mkdir(parents=True)
-        (local / "report.md").write_text("Completed report with retained evidence")
+        report = local / "report.md"
+        report.write_text("Completed report with retained evidence")
         canonical = self.root / "task" / "notes" / "reports" / "worker" / "request" / "report.md"
         contract = cast(
             WorktreeContract,
@@ -741,44 +741,26 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
                 worktree_group=group,
                 task_root=self.root / "task",
                 coordination_root=self.config.coordination_root,
-                code_worktree=group / "code",
-                code_work_branch="ar/fixture",
+                repo_name="demo",
             ),
         )
-        events = []
 
-        def collect(contract, *, dry_run):
-            events.append("collect")
-            return collect_group_reports(contract, dry_run=dry_run)
+        def remove(path, *, dry_run):
+            self.assertEqual(path, group)
+            self.assertFalse(dry_run)
+            self.assertEqual(canonical.read_text(), "Newly collected evidence")
+            shutil.rmtree(path)
+            return {"path": str(path), "removed": True}
 
-        def remove(contract, *, dry_run):
-            self.assertEqual(events, ["collect"])
-            self.assertEqual(canonical.read_text(), "Completed report with retained evidence")
-            events.append("remove")
-            return remove_group_role_folders(contract, dry_run=dry_run)
-
-        services = SimpleNamespace(
-            provider_lifecycle=SimpleNamespace(
-                remove_tree=lambda path, **_kwargs: {"path": str(path), "removed": False}
-            )
-        )
-        with (
-            patch.object(worktree_cleanup, "collect_group_reports", side_effect=collect),
-            patch.object(worktree_cleanup, "remove_group_role_folders", side_effect=remove),
-            patch.object(worktree_cleanup, "_terminal_mutation_authority", return_value=object()),
-            patch.object(worktree_cleanup, "_removed_worktrees", return_value={}),
-            patch.object(worktree_cleanup, "_deleted_branches", return_value={}),
-            patch.object(worktree_cleanup, "remove_drift_snapshot", return_value={"removed": True}),
-            patch.object(worktree_cleanup, "worktree_services", return_value=services),
-        ):
-            worktree_cleanup._cleanup_terminal_outputs(
-                WorktreeArgs(dry_run=False, teardown_providers=False),
-                contract,
-                cast(TerminalPreflight, SimpleNamespace(branches={})),
-            )
-        self.assertEqual(events, ["collect", "remove"])
-        self.assertFalse((group / "role-reports").exists())
+        services = SimpleNamespace(provider_lifecycle=SimpleNamespace(remove_tree=remove))
+        self.assertEqual(terminal_group.prepare_group_removal(contract), {})
         self.assertEqual(canonical.read_text(), "Completed report with retained evidence")
+        report.write_text("Newly collected evidence")
+        with patch.object(terminal_group, "worktree_services", return_value=services):
+            directories = terminal_group.remove_terminal_group(contract)
+        self.assertTrue(directories["worktree_group"]["removed"])
+        self.assertFalse(group.exists())
+        self.assertEqual(canonical.read_text(), "Newly collected evidence")
 
     def test_r71_public_reader_has_no_caller_path_or_mutating_operation(self) -> None:
         server = FastMCP("fixture")
@@ -1015,7 +997,7 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
                     "reportCollection": {"state": "collected-closed"},
                 }
                 path = self.root / f"receipt-{turns}" / "current.json"
-                role_launch_receipts._write_receipt(path, stored)
+                self.assertTrue(role_launch_receipts._create_receipt(path, stored))
                 role_launch_receipts._archive_receipt(path, stored)
                 archived = json.loads((path.parent / "history" / f"churn-{turns}.json").read_text())
                 self.assertNotIn("reportCollectionFiles", archived)

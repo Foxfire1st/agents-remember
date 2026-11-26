@@ -7,6 +7,7 @@ import stat
 import tempfile
 import unittest
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -22,10 +23,12 @@ from agents_remember.cli import (
     paseo_catalog,
     paseo_launch,
     paseo_status,
+    role_launch_enclosure,
     role_launch_preparation,
     role_launch_receipts,
     role_launch_routes,
     role_launch_workspace,
+    role_receipt_files,
 )
 from agents_remember.cli.paseo_launch import (
     RECOVERY_NOTE_LIMIT,
@@ -256,6 +259,9 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
         self.replace(paseo_status, "bridge_call", self.runtime)
         self.replace(role_launch_workspace, "worktree_status_tool", self.enclosures.status)
         self.replace(role_launch_workspace, "_start_leaf_enclosure", self.enclosures.start)
+        # The fake enclosure owns its directory but writes no on-disk contract.
+        self.replace(role_launch_enclosure, "publication_scope", return_value=nullcontext())
+        self.replace(role_receipt_files, "leaf_workspace_allows_creation", return_value=True)
         self.replace(role_launch_preparation, "_compile_handover", self.compile_handover)
         self.replace(
             role_launch_preparation, "_ar_mcp_context", lambda *_args: {"scopeKind": "test"}

@@ -8,6 +8,7 @@ import json
 import shutil
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -22,8 +23,8 @@ from agents_remember.application.tool_answer_log import (
 )
 from agents_remember.worktrees import outside_scratch
 from agents_remember.worktrees.modules import abandon as abandon_module
-from agents_remember.worktrees.modules import cleanup as cleanup_module
 from agents_remember.worktrees.modules import kept_tool_calls as kept_module
+from agents_remember.worktrees.modules import terminal_group
 from agents_remember.worktrees.modules.closeout import closeout_changed_paths
 from agents_remember.worktrees.modules.git import worktree_dirty
 from agents_remember.worktrees.modules.kept_tool_calls import KEEP_FAILED_REASON, keep_tool_calls
@@ -104,6 +105,13 @@ class ToolAnswerEnclosureTests(unittest.TestCase):
             logs = group / ENCLOSURE_LOGS_DIRNAME
             logs.mkdir(parents=True)
             (logs / "ar-tools-2026-10-08.jsonl").write_text("{}\n", encoding="utf-8")
+            contract = replace(
+                load_contract(self.world.contract),
+                worktree_group=group,
+                outside_scratch_root="",
+                outside_scratch_generation="",
+                outside_scratch_marker_sha256="",
+            )
             removed: list[tuple[str, bool]] = []
 
             class FakeLifecycle:
@@ -115,21 +123,9 @@ class ToolAnswerEnclosureTests(unittest.TestCase):
 
             services = mock.Mock()
             services.provider_lifecycle = FakeLifecycle()
-            # The fake contract names no leaf document; keeping its lines is
-            # proven on a real enclosure in KeptToolCallsTests.
-            with (
-                mock.patch.object(cleanup_module, "worktree_services", return_value=services),
-                mock.patch.object(kept_module, "kept_tool_calls_entry", return_value={}),
-            ):
-                directories = cleanup_module._removed_directories(
-                    SimpleNamespace(worktree_group=group, kind="leaf", task_root=Path(tmp)),
-                    dry_run=False,
-                )
-            self.assertIn(
-                (logs.as_posix(), False),
-                removed,
-                "cleanup never offered the enclosure logs/ to removal",
-            )
+            with mock.patch.object(terminal_group, "worktree_services", return_value=services):
+                directories = terminal_group.remove_terminal_group(contract)
+            self.assertEqual(removed, [(group.as_posix(), False)])
             self.assertIn("logs", directories)
             self.assertFalse(logs.exists(), "cleanup left the enclosure logs/ behind")
 
@@ -169,8 +165,8 @@ class _RecordingLifecycle:
         if self.on_remove is not None:
             self.on_remove(path)
         self.removed.append(path)
-        if not dry_run and path == self.logs and path.exists():
-            shutil.rmtree(path)
+        if not dry_run and path in {self.logs, self.logs.parent} and self.logs.exists():
+            shutil.rmtree(self.logs)
         return {"path": path.as_posix(), "removed": True}
 
 
@@ -224,11 +220,12 @@ class KeptToolCallsTests(unittest.TestCase):
         lifecycle = _RecordingLifecycle(self.logs)
         with (
             mock.patch.object(
-                cleanup_module, "worktree_services", return_value=self._services(lifecycle)
+                terminal_group, "worktree_services", return_value=self._services(lifecycle)
             ),
             mock.patch.object(outside_scratch, "removal_entry_for", return_value={}),
         ):
-            directories = cleanup_module._removed_directories(self.contract, dry_run=False)
+            directories = terminal_group.remove_terminal_group(self.contract)
+        self.assertIn(Path(self.contract.worktree_group), lifecycle.removed)
         self.assertFalse(self.logs.exists(), "cleanup left the enclosure logs/ behind")
         without_detail = [
             {key: value for key, value in row.items() if key != "detail"} for row in (own, refused)
@@ -288,9 +285,10 @@ class KeptToolCallsTests(unittest.TestCase):
         own = _line(self.own_task, "2026-11-19T10:00:00+00:00")
         self._write_day("2026-11-19", [own])
         lifecycle = _RecordingLifecycle(self.logs)
+        group = Path(self.contract.worktree_group)
         patches = (
             mock.patch.object(
-                cleanup_module, "worktree_services", return_value=self._services(lifecycle)
+                terminal_group, "worktree_services", return_value=self._services(lifecycle)
             ),
             mock.patch.object(outside_scratch, "removal_entry_for", return_value={}),
         )
@@ -301,8 +299,8 @@ class KeptToolCallsTests(unittest.TestCase):
                 kept_module, "atomic_write_text", side_effect=OSError(28, "No space left")
             ),
         ):
-            directories = cleanup_module._removed_directories(self.contract, dry_run=False)
-        self.assertNotIn(self.logs, lifecycle.removed, "the log was offered to removal")
+            directories = terminal_group.remove_terminal_group(self.contract)
+        self.assertNotIn(group, lifecycle.removed, "the group was offered to removal")
         self.assertTrue((self.logs / "ar-tools-2026-11-19.jsonl").is_file())
         self.assertFalse(self.kept.exists())
         entry = directories["logs"]
@@ -317,11 +315,47 @@ class KeptToolCallsTests(unittest.TestCase):
         )
 
         with patches[0], patches[1]:
-            retried = cleanup_module._removed_directories(self.contract, dry_run=False)
+            retried = terminal_group.remove_terminal_group(self.contract)
         self.assertFalse(self.logs.exists())
         self.assertEqual(len(self._kept_lines()), 1)
         self.assertEqual(retried["logs"]["removed"], True)
         self.assertNotIn("logs", [one.get("directory") for one in self._blockers(retried)])
+
+    def test_prepare_terminal_group_blocks_preview_and_apply_when_keep_fails(self) -> None:
+        self._write_day("2026-11-19", [_line(self.own_task, "2026-11-19T10:00:00+00:00")])
+        self.kept.mkdir(parents=True, exist_ok=True)
+        try:
+            preview = terminal_group.prepare_terminal_group(
+                self.contract, dry_run=True, teardown_providers=True
+            )
+            self.assertIn(
+                {"directory": "logs", "reason": KEEP_FAILED_REASON},
+                [
+                    {key: value for key, value in one.items() if key in {"directory", "reason"}}
+                    for one in preview.blockers
+                ],
+            )
+            self.assertTrue((self.logs / "ar-tools-2026-11-19.jsonl").is_file())
+        finally:
+            self.kept.rmdir()
+        with (
+            mock.patch.object(terminal_group, "archive_terminal_agents", return_value={}),
+            mock.patch.object(
+                kept_module, "atomic_write_text", side_effect=OSError(28, "No space left")
+            ),
+        ):
+            prepared = terminal_group.prepare_terminal_group(
+                self.contract, dry_run=False, teardown_providers=True
+            )
+        self.assertIn(
+            {"directory": "logs", "reason": KEEP_FAILED_REASON},
+            [
+                {key: value for key, value in one.items() if key in {"directory", "reason"}}
+                for one in prepared.blockers
+            ],
+        )
+        self.assertFalse(self.kept.exists())
+        self.assertTrue((self.logs / "ar-tools-2026-11-19.jsonl").is_file())
 
     def test_a_failed_keep_leaves_a_forced_abandon_its_enclosure(self) -> None:
         self._write_day("2026-11-19", [_line(self.own_task, "2026-11-19T10:00:00+00:00")])
