@@ -114,6 +114,7 @@ from agents_remember.application.published_intent import (
     select_knowledge_dataset,
 )
 from agents_remember.application.record_standing_answers import record_answer_standing
+from agents_remember.application.role_capsules.refusal_references import with_refusal_reference
 from agents_remember.application.worktree_code_state import (
     CODE_STATE_COMMIT,
     CODE_STATE_WORKING_TREE,
@@ -1664,6 +1665,8 @@ class WriteToolRequest:
 
 
 def _refused_write(code: str, detail: str) -> dict[str, Any]:
+    if code == "invalid-input":
+        detail = with_refusal_reference(detail, "knowledge-write-invalid-input")
     return {
         "ok": True,
         "operation": "knowledge_write",

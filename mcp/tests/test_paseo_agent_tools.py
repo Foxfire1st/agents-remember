@@ -42,6 +42,7 @@ from agents_remember.cli.role_handover_artifacts import (
     MAX_HANDOVER_ARTIFACT_BYTES,
     artifact_line,
     first_message,
+    legacy_prefix_artifact_line,
     restore_handover_artifact,
     write_handover_artifact,
 )
@@ -610,14 +611,14 @@ class HandoverArtifactTests(unittest.TestCase):
         # Nobody can write the file once it exists.
         self.assertEqual(stat.S_IMODE(written.st_mode), 0o444)
         line = (
-            f"AR handover artifact: {reference['path']} (SHA-256 {reference['sha256']}). It "
-            "holds everything below this line; read that file again whenever your assignment is "
+            f"AR handover artifact: {reference['path']} (SHA-256 {reference['sha256']}). It holds "
+            "the launch handover above this line; read that file again whenever your assignment is "
             "no longer in your context."
         )
         self.assertEqual(artifact_line(reference), line)
         self.assertNotIn("\n", line)
         message = first_message(reference, content)
-        self.assertEqual(message, f"{line}\n{content}")
+        self.assertEqual(message, f"{content}\n{line}")
 
         receipt = self.root / "worker-receipt.json"
         with self.subTest("the same request reuses it"):
@@ -640,10 +641,10 @@ class HandoverArtifactTests(unittest.TestCase):
         with self.subTest("a saved message that is not the artifact's is refused"):
             mismatches = {
                 "no artifact line": content,
-                "another content": f"{line}\n{content} changed",
+                "another content": f"{content} changed\n{line}",
                 "the line alone": line,
                 # The content alone would pass the digest; the line has to be the artifact's.
-                "another first line": f"AR handover artifact: elsewhere.\n{content}",
+                "another trailing line": f"{content}\nAR handover artifact: elsewhere.",
             }
             for label, saved in mismatches.items():
                 with (
@@ -1205,7 +1206,7 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             **saved["replayRequest"],
             "agent": {
                 **saved["replayRequest"]["agent"],
-                "prompt": first_message(reference, self.prompt),
+                "prompt": f"{legacy_prefix_artifact_line(reference)}\n{self.prompt}",
             },
         }
         legacy = {
@@ -1281,14 +1282,15 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
         self.assertIn(
             f" Assignment file: {reachable} (SHA-256 {digest}). ", created["systemPrompt"]
         )
+        last_line = created["prompt"].rpartition("\n")[2]
         self.assertEqual(
-            created["prompt"].partition("\n")[0],
+            last_line,
             artifact_line(
                 self.receipt(request)["handoverArtifact"], self.receipt(request)["handoverFile"]
             ),
         )
-        self.assertTrue(created["prompt"].startswith(f"AR handover artifacts: {reachable} "))
-        self.assertIn(f"; {complete} (SHA-256 ", created["prompt"].split("\n")[0])
+        self.assertTrue(last_line.startswith(f"AR handover artifacts: {reachable} "))
+        self.assertIn(f"; {complete} (SHA-256 ", last_line)
         self.assertEqual(
             self.receipt(request)["handoverArtifact"],
             {

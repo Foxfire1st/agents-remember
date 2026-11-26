@@ -34,6 +34,7 @@ from agent_evals.artifacts import EvidenceFile
 from agent_evals.fixtures import CaseBundle
 from agent_evals.text import capture_curator_text
 from agent_evals.trials import load_trial_text
+from agents_remember.application.role_capsules.shared_block import filter_shared_block
 from agents_remember.application.skill_resources.provider import shipped_composition_corpus
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -80,7 +81,10 @@ def test_native_first_message_carries_bound_text_for_both_arms(tmp_path, profile
     shared = None
     if arm == "new":
         code = Path(__file__).resolve().parents[2]
-        shared = (code / "skills/l-01-agent-lifecycles/core/every-role.md").read_text()
+        shared = filter_shared_block(
+            (code / "skills/l-01-agent-lifecycles/core/every-role.md").read_text(),
+            "curator",
+        )
         captured = capture_curator_text(code)
         assert captured["entries"]["curation"]["instructions"].count(shared) == 1
         bound = bind_text_details(captured, tmp_path / "new-text.md")
@@ -144,7 +148,10 @@ def test_native_first_message_carries_bound_text_for_both_arms(tmp_path, profile
 def test_current_capture_keeps_every_compiled_origin_after_the_shared_prefix(tmp_path):
     code = Path(__file__).resolve().parents[2]
     captured = capture_curator_text(code)
-    shared = (code / "skills/l-01-agent-lifecycles/core/every-role.md").read_text()
+    shared = filter_shared_block(
+        (code / "skills/l-01-agent-lifecycles/core/every-role.md").read_text(),
+        "curator",
+    )
     prefix = "## What every role acts on\n\n" + shared + "\n\n"
     for operation, entry in captured["entries"].items():
         compiled = _compiled("curator", operation)

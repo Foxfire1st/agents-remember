@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application.agent_binding import AgentBinding, read_agent_binding
+from agents_remember.application.role_capsules.refusal_references import with_refusal_reference
 from agents_remember.application.seat_retirement_scope import retirement_scope_refusal
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.cli.paseo_status import AgentReading, read_agent
@@ -111,7 +112,13 @@ def _retire_seat(
     seat = _RetireSeat(agent_id, path, receipt, selection)
     refusal = retirement_scope_refusal(config, caller, agent_id, selection)
     if refusal is not None:
-        raise _RetireTerminal(seat.answer(False, "outside-scope", refusal))
+        raise _RetireTerminal(
+            seat.answer(
+                False,
+                "outside-scope",
+                with_refusal_reference(refusal, "retire-child-outside-scope"),
+            )
+        )
     _require_resolved_launch(seat)
     archive = receipt.get("leafArchive")
     if isinstance(receipt.get("retiredBy"), dict) or (
@@ -288,7 +295,10 @@ def _require_interruptible(
         seat.answer(
             False,
             "agent-in-turn",
-            f"{detail} Nothing was archived. Set interrupt_turn=true to interrupt its work.",
+            with_refusal_reference(
+                f"{detail} Nothing was archived. Set interrupt_turn=true to interrupt its work.",
+                "retire-child-agent-in-turn",
+            ),
         )
     )
 
@@ -312,8 +322,11 @@ def _require_no_open_children(config: McpRuntimeConfig, seat: _RetireSeat) -> No
             seat.answer(
                 False,
                 "open-children",
-                f"Agent {seat.agent_id} still has open child seats: {agent_ids}. "
-                "Retire those children first or replace the seat. Nothing was archived.",
+                with_refusal_reference(
+                    f"Agent {seat.agent_id} still has open child seats: {agent_ids}. "
+                    "Retire those children first or replace the seat. Nothing was archived.",
+                    "retire-child-open-children",
+                ),
                 openChildren=open_children,
             )
         )

@@ -2,7 +2,7 @@
 
 The Reviewer uses this template to compare affected onboarding with code, using the Curator’s supplied handoff and curation-check result. The Curator, Orchestrator and developer can inspect the reported findings and readiness.
 
-Record the sidecar, overview, index and entity changes, and the complete curation-check result supplied by the [curation operation](../operations/curation.md#run-the-complete-curation-checks).
+Record the sidecar, overview, index and entity changes, and the complete curation-check result supplied by the [curation operation](../operations/curation.md#checks-and-gates).
 
 ## Rules
 

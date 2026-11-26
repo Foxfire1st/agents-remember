@@ -146,12 +146,12 @@ class RepeatTestCase(launch.PaseoLaunchTestCase):
         return self.receipt(self.request(role))
 
     def expected_first_message(self, request: Any, body: str) -> str:
-        """The sent message for one artifact body: the line names both files and its SHA."""
+        """The sent message for one artifact body: the body, then the suffix line naming both files."""
 
         digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
         reference = {**self.artifact(request), "sha256": digest}
         handover_file, _content = self.planned_handover(request)
-        return f"{artifact_line(reference, handover_file)}\n{body}"
+        return f"{body}\n{artifact_line(reference, handover_file)}"
 
 
 class RepeatAfterChangeTests(RepeatTestCase):

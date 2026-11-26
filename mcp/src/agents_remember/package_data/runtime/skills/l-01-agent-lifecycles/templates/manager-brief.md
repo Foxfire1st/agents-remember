@@ -103,7 +103,7 @@ Before applying task edits or responding to their projection effects, read [Appl
 
 ### Assign the review
 
-Before dispatching an independent review, read [the review intake and handover procedure](../operations/review.md#receive-the-intake-and-hand-over-the-leaf-verdict) for the first intake and peer handover sequence.
+Before dispatching an independent review, read [the review intake and handover procedure](../operations/review.md#focused-tests-and-handover) for the first intake and peer handover sequence.
 
 Before adjudicating its exact requirement attempt, read [Independently judge the exact manifestation](../core/acceptance.md#independently-judge-the-exact-manifestation) for independence and evidence-class acceptance.
 
@@ -153,7 +153,7 @@ An atomic block exposes no intermediate leaf to super. For a closeout retry, fol
 
 Cleanup: the worker/reviewer/curator agents of a leaf are archived on the host when the leaf is finalized, cleaned up or abandoned; their reports stay. Manager/orchestrator seats are excluded.
 
-Before retiring or replacing a seat, follow [role scope](../core/every-role.md#start-and-configure-role-agents) for `retire_child` and replacement authority.
+Before retiring or replacing a seat, follow [role scope](../core/authority.md#start-and-configure-a-role-agent) for `retire_child` and replacement authority.
 
 ## The exit
 - When the master reaches its completion boundary, prepare the master-handover packet with the

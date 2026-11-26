@@ -210,7 +210,7 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
 - `admission` is `{criteria, justification}` and is required for a new invariant.
 
 - `status` is only `retired`, written to retire the record; leave it out otherwise. Name no
-  state: [Leave the state to the product](../roles/curator.md#leave-the-state-to-the-product) says
+  state: [Curator](../roles/curator.md#curator) says
   what the product sets and which `status` words the writer refuses, also in a record's `fields`. A
   decision keeps its own `status` words (see [Decision records](#decision-records)).
 

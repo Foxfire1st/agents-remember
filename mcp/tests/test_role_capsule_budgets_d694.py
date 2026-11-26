@@ -6,6 +6,11 @@ from hashlib import sha256
 from pathlib import Path
 
 import pytest
+from agents_remember.application.role_capsules.wire_budget import (
+    COMPILED_CAPSULE_TOKEN_CEILINGS,
+    evaluate_wire_token_ceilings,
+)
+from agents_remember.errors import AuthorityError
 from agents_remember_test_support.testing.capsule_budget_d694 import (
     _current_area_findings,
     _source_findings,
@@ -29,6 +34,7 @@ from agents_remember_test_support.testing.capsule_budget_d695 import (
 from agents_remember_test_support.testing.capsule_budget_d695 import (
     load_current_budget_view as load_d695_view,
 )
+from agents_remember_test_support.testing.instruction_renewal import renewal_module
 from test_role_capsule_budgets import (
     CURRENT_BUDGETS_PATH,
     D695_CURRENT_BUDGETS_PATH,
@@ -195,48 +201,55 @@ def test_current_measurements_reject_staleness_and_population_drift(area: str) -
     )
 
 
-def test_current_growth_within_a_ceiling_has_no_individual_budget() -> None:
+def test_current_measurements_retire_word_ceilings_while_keeping_freshness() -> None:
     record = load_d695_view(D695_CURRENT_BUDGETS_PATH)
     assert "current_limits" not in record
-    actual = {"worker/implementation": 1}
-    record["derived"]["current_measurements"]["capsules"] = dict(actual)
-    for size in (2, record["current_capsule_ceilings_words"]["every_other_role"]):
-        actual["worker/implementation"] = size
-        record["derived"]["current_measurements"]["capsules"] = dict(actual)
-        assert not current_area_findings(record, "capsules", actual)
-
-
-def test_current_ceiling_failures_name_size_ceiling_and_developer() -> None:
-    record = load_d695_view(D695_CURRENT_BUDGETS_PATH)
-    for role, ceiling in record["current_capsule_ceilings_words"].items():
-        key = ("worker" if role == "every_other_role" else role) + "/orientation"
-        for size in (ceiling, ceiling + 1):
-            actual = {key: size}
-            record["derived"]["current_measurements"]["capsules"] = dict(actual)
-            findings = current_area_findings(record, "capsules", actual)
-            if size == ceiling:
-                assert not findings
-            else:
-                assert any(
-                    key in finding
-                    and str(size) in finding
-                    and str(ceiling) in finding
-                    and "developer's decision" in finding
-                    for finding in findings
-                )
-    for area, key, ceiling in (
-        ("step_details", "reference/example.md", record["current_step_ceiling_words"]),
-        ("digest", "core/every-role.md", record["current_digest_ceiling_words"]),
+    for field in (
+        "current_capsule_ceilings_words",
+        "current_step_ceiling_words",
+        "current_digest_ceiling_words",
     ):
-        record["derived"]["current_measurements"][area] = {key: ceiling + 1}
-        findings = current_area_findings(record, area, {key: ceiling + 1})
+        record.pop(field, None)
+    for area, key, large_words in (
+        ("capsules", "worker/implementation", 9_999),
+        ("step_details", "reference/example.md", 9_999),
+        ("digest", "core/every-role.md", 9_999),
+    ):
+        record["derived"]["current_measurements"][area] = {key: large_words}
+        assert not current_area_findings(record, area, {key: large_words})
+        stale = current_area_findings(record, area, {key: large_words + 1})
         assert any(
-            key in finding
-            and str(ceiling + 1) in finding
-            and str(ceiling) in finding
-            and "developer's decision" in finding
-            for finding in findings
+            key in finding and "stale" in finding and COMMAND in finding for finding in stale
         )
+
+
+def test_compiled_capsule_token_ceilings_enforce_all_matrix_keys() -> None:
+    assert set(COMPILED_CAPSULE_TOKEN_CEILINGS) == set(matrix_keys())
+    assert len(COMPILED_CAPSULE_TOKEN_CEILINGS) == 34
+    at_limit = dict(COMPILED_CAPSULE_TOKEN_CEILINGS)
+    assert evaluate_wire_token_ceilings(at_limit, COMPILED_CAPSULE_TOKEN_CEILINGS) == []
+    budgets_mod = renewal_module("budgets")
+    budgets_mod._check_ceilings(at_limit)
+    for key, ceiling in COMPILED_CAPSULE_TOKEN_CEILINGS.items():
+        measured = ceiling + 1
+        findings = evaluate_wire_token_ceilings({key: measured}, COMPILED_CAPSULE_TOKEN_CEILINGS)
+        assert len(findings) == 1
+        for expected in (key, str(measured), str(ceiling)):
+            assert expected in findings[0]
+    over = {
+        **at_limit,
+        "worker/implementation": COMPILED_CAPSULE_TOKEN_CEILINGS["worker/implementation"] + 1,
+    }
+    with pytest.raises(AuthorityError) as exc_info:
+        budgets_mod._check_ceilings(over)
+    message = str(exc_info.value)
+    for expected in (
+        "worker/implementation",
+        str(COMPILED_CAPSULE_TOKEN_CEILINGS["worker/implementation"] + 1),
+        str(COMPILED_CAPSULE_TOKEN_CEILINGS["worker/implementation"]),
+        "developer's decision",
+    ):
+        assert expected in message
 
 
 def _current_source_fixture(root: Path) -> tuple[dict, dict[str, int]]:
@@ -272,7 +285,6 @@ def _current_source_fixture(root: Path) -> tuple[dict, dict[str, int]]:
         }
         revisions[path] = "sha256:" + sha256(raw).hexdigest()
     return {
-        "current_step_ceiling_words": 2500,
         "derived": {
             "current_detail_population": [declared],
             "current_linked_template_population": [ordinary],

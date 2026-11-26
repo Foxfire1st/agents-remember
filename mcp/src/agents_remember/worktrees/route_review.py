@@ -21,6 +21,7 @@ from agents_remember.models.lifecycles.evidence_dependencies import (
     dependency,
     require_evidence_dependencies,
 )
+from agents_remember.models.role_capsules.refusal_references import with_refusal_reference
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.tasks import RouteReviewRecord
@@ -39,6 +40,8 @@ class RouteReviewError(ValueError):
 
     def __init__(self, status: str, detail: str) -> None:
         self.status = status
+        if status == "route-review-invalid":
+            detail = with_refusal_reference(detail, "route-review-invalid")
         super().__init__(detail)
 
 

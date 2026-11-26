@@ -37,8 +37,8 @@ from agents_remember.kernel.generated_copies import DECLARATION_PATH, parse_gene
 
 from .retired_leaf_handover_wording import RETIRED_LEAF_HANDOVER_WORDING
 
-#: The normal MIK curation pass remains complete on both canonical surfaces.
-COMPLETE_CURATION_RULE = "A named scoped check never substitutes for the full operation."
+#: The normal curation pass requires the full memory-quality check rather than a scoped check.
+COMPLETE_CURATION_RULE = "scoped checks never substitute"
 
 #: The declared generated skill copies ``scripts/sync-skills.py`` owns, relative to the
 #: repository root. A stale package copy serves the old sentence.
@@ -615,30 +615,21 @@ LOOP_GATE_REASON = (
 CURATION_POLICY_STATEMENTS: dict[str, tuple[str, ...]] = {
     "skills/l-01-agent-lifecycles/operations/curation.md": (
         COMPLETE_CURATION_RULE,
-        "After preparation succeeds, `publish` with one judgment per candidate "
-        "or none for an empty set, then `validate`",
-        "Run the complete curation check set and report each check as passed, failed, blocked "
-        "or not run, with its exact command and scope:",
-        "The full `memory_quality_check` operation on `agents-remember-task`.",
-        "Repair every Curator-actionable finding, or escalate it as blocked with its exact returned code.",
-        "Run the full operation at intake and after every repair until `curatorActionableCount=0` "
-        "and the raw `qualityChecklistStatus` is `ready-for-closeout`.",
-        "If coherence is then missing or stale, complete the authority gates below before closeout.",
+        "full `memory_quality_check`",
+        "rerun until `curatorActionableCount=0` + `qualityChecklistStatus=ready-for-closeout`",
+        "On `checklistStatus=coherence-required`, run `curator_coherence` `prepare`->`publish` "
+        "(1/candidate or empty)->`validate` before closeout",
+        "never re-validate post-closeout trees.",
     ),
     "skills/l-01-agent-lifecycles/roles/curator.md": (
-        (
-            "Before running curation checks, read [Run the complete curation "
-            "checks](../operations/curation.md#run-the-complete-curation-checks) "
-            "for their full scope with `memory_quality_check` on "
-            "`agents-remember-task`, intake and repair timing, results and "
-            "coherence continuation."
-        ),
-        (
-            "Before validating coherence, read [Authority "
-            "gates](../operations/curation.md#authority-gates) for the candidate "
-            "binding of `curator_coherence` on `agents-remember-task` and "
-            "before-closeout timing."
-        ),
+        "[coherence]({{detail:reference/curator/coherence-judgments.md}})",
+        "[exceptions]({{detail:reference/curator/exceptions-and-recovery.md}})",
+        "One Curator writer lane (no helper writers); own placement, admission, meaning, "
+        "checks and handover.",
+    ),
+    "skills/l-01-agent-lifecycles/reference/curator/exceptions-and-recovery.md": (
+        "Normal authoring keeps full quality-check and coherence obligations.",
+        "Report unsatisfied checks as blocked.",
     ),
 }
 

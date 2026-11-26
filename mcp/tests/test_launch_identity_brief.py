@@ -66,7 +66,7 @@ EXPECTED_PARENT_RULE = (
     "check its task folder and the folder named by the reported binding for writes, "
     "and start a replacement."
 )
-FIRST_READ_MARKER = "Each contentDigest records the document snapshot used for this launch."
+FIRST_READ_MARKER = "Each contentDigest is launch snapshot;"
 
 
 class LaunchIdentityBriefTests(unittest.TestCase):
@@ -254,16 +254,21 @@ class LaunchIdentityBriefTests(unittest.TestCase):
         )
 
         self.assertEqual(prompt.count(IDENTITY_SELF_CHECK_PARAGRAPH), 1)
-        ar_tools_line = f"AR tools, before your first tool call: {parts.ar_tools}"
+        ar_tools_line = f"AR tools: {parts.ar_tools}"
         first_read = first_read_paragraph(parts.first_read)
         self.assertIn(ar_tools_line, prompt)
         self.assertLess(prompt.index(ar_tools_line), prompt.index(IDENTITY_SELF_CHECK_PARAGRAPH))
-        self.assertLess(prompt.index(IDENTITY_SELF_CHECK_PARAGRAPH), prompt.index(first_read))
-        self.assertLess(prompt.index(first_read), prompt.index(parts.instructions))
-        self.assertLess(prompt.index(parts.instructions), prompt.index(HANDOVER_HEADING))
+        self.assertLess(
+            prompt.index(IDENTITY_SELF_CHECK_PARAGRAPH), prompt.index(parts.instructions)
+        )
+        self.assertLess(prompt.index(parts.instructions), prompt.index(first_read))
+        self.assertLess(prompt.index(first_read), prompt.index(HANDOVER_HEADING))
         self.assertEqual(projection["requestId"], request_id)
         self.assertEqual(projection["role"], "worker")
-        self.assertEqual(projection["selection"], handover["selection"])
+        self.assertEqual(
+            projection["selection"],
+            {k: v for k, v in handover["selection"].items() if v is not None},
+        )
 
     def test_compiled_first_messages_across_roles_include_identity_self_check(self) -> None:
         architect_parent = StartingAgent(
@@ -296,9 +301,7 @@ class LaunchIdentityBriefTests(unittest.TestCase):
                 )
                 prompt = prepared["prompt"]
                 handover = prepared["handover"]
-                ar_tools_line = (
-                    f"AR tools, before your first tool call: {handover['host']['arMcpUsage']}"
-                )
+                ar_tools_line = f"AR tools: {handover['host']['arMcpUsage']}"
 
                 self.assertEqual(prompt.count(IDENTITY_SELF_CHECK_PARAGRAPH), 1)
                 self.assertIn(ar_tools_line, prompt)
@@ -318,7 +321,10 @@ class LaunchIdentityBriefTests(unittest.TestCase):
                 projection = json.loads(prompt.split(f"{HANDOVER_HEADING}\n", 1)[1])
                 self.assertEqual(projection["requestId"], str(request_id))
                 self.assertEqual(projection["role"], role)
-                self.assertEqual(projection["selection"], handover["selection"])
+                self.assertEqual(
+                    projection["selection"],
+                    {k: v for k, v in handover["selection"].items() if v is not None},
+                )
                 if role in {"architect", "orchestrator", "manager"}:
                     self.assertIn(EXPECTED_PARENT_RULE, prompt)
 

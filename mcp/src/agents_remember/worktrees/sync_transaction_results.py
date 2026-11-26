@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agents_remember.models.role_capsules.refusal_references import with_refusal_reference
 from agents_remember.models.worktree import (
     SyncOmissionsProjection,
     SyncSource,
@@ -42,8 +43,11 @@ def memory_choice_required(
         2,
         {
             "state": "memory-sync-choice-required",
-            "summary": "Memory has local commits and the official line moved. Choose "
-            "merge-memory or skip-memory before any code mutation.",
+            "summary": with_refusal_reference(
+                "Memory has local commits and the official line moved. Choose "
+                "merge-memory or skip-memory before any code mutation.",
+                "memory-sync-choice-required",
+            ),
             **recovery_guidance(
                 "choose_memory_sync_recovery",
                 tool="worktree_sync",
@@ -125,7 +129,7 @@ def resolution_required(
             "state": "sync-resolution-required",
             "status": "agent-action-required",
             "resolutionOwner": "agent",
-            "summary": summary,
+            "summary": with_refusal_reference(summary, "sync-resolution-required"),
             "resolution": resolution,
             **(
                 {
@@ -294,7 +298,10 @@ def active_preview(
         0,
         {
             "state": "sync-active",
-            "summary": "A journaled sync is active; apply the same call to resume it.",
+            "summary": with_refusal_reference(
+                "A journaled sync is active; apply the same call to resume it.",
+                "sync-active",
+            ),
             "phase": record.phase,
             "nextTool": "worktree_sync",
             "nextArgs": {"contract_path": record.contractPath, "dry_run": False},

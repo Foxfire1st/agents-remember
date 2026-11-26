@@ -123,7 +123,7 @@ Pushing to the sprint line, opening pull requests and releasing belong to the de
 
 For a correct-input refusal of a covered write (`task_doc` edits (including an admitted task retirement or folder movement), `knowledge_write`, `citation_fix`, `citation_note_revision` and `curator_coherence` publication), follow [correct-write recovery](../reference/refused-write.md) for the same tool and input class before applying a stop. If no admitted route works, record the refusal, tell the owner, then make that write openly by hand and log it; never keep a blanket ban on writing it by hand. Read, check, validation and sync refusals, starts, other product guards and commit gates retain their stops.
 
-A role's capsule ceiling is its entry in `current_capsule_ceilings_words` of the [current budget record](../capsule-budgets-current.json), with the developer decision that set it; read the complete entry before you state it. Only the developer sets or raises a ceiling.
+A role's Turn-1 wire ceiling is its entry in `WIRE_TOKEN_CEILINGS`, and a compiled capsule's ceiling is its entry in `COMPILED_CAPSULE_TOKEN_CEILINGS`, both in `mcp/src/agents_remember/application/role_capsules/wire_budget.py`; read the complete entry before you state it. Only the developer sets or raises a ceiling.
 
 ## Remove scratch paths safely
 

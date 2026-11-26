@@ -13,6 +13,7 @@ from agents_remember.models.lifecycles.door import (
     DoorEvidenceFact,
     DoorProvenance,
 )
+from agents_remember.models.role_capsules.refusal_references import with_refusal_reference
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.worktrees.modules.git import (
     branch_commit,
@@ -223,7 +224,10 @@ def _review_provenance(
     if review.verdict == "block":
         raise CloseoutQueueError(
             "closeout-door-route-review-blocked",
-            f"independent route review blocks this candidate; see {review.verdictRef}",
+            with_refusal_reference(
+                f"independent route review blocks this candidate; see {review.verdictRef}",
+                "closeout-door-route-review-blocked",
+            ),
         )
     if review.candidateTree != candidate_tree and not clean_sync_keeps_route_review(
         contract, review, candidate_tree

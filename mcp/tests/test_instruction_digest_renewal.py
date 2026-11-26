@@ -333,22 +333,28 @@ def test_lf03_source_binding_does_not_claim_its_overlapping_evidence(tmp_path: P
     assert derived["evidence"]["LF0.3"]["0"]["lines"] == [7, 11]
 
 
-def test_au41_split_requires_its_clause_binding_without_widening_audience(tmp_path: Path) -> None:
+def test_in34_split_requires_its_clause_binding_without_widening_audience(tmp_path: Path) -> None:
     document = _repository_world(tmp_path)
     digest = tmp_path / LIFECYCLE / "core/every-role.md"
     digest.write_text(
-        digest.read_text().replace("request identifier. If", "request identifier.\n\nIf", 1)
+        digest.read_text().replace(
+            "narrowing, or count limit.", "narrowing.\n\nAdd no count limit.", 1
+        )
     )
-    binding = "AU4.1=core/every-role.md:27-31"
-    with pytest.raises(ValueError, match="place-04/clause/0") as caught:
+    binding = "IN3.4=core/every-role.md:21-25"
+    with pytest.raises(ValueError, match="place-17/clause/0") as caught:
         MODULE.plan(tmp_path, (binding,))
-    assert "AU4.1@clause:place-04:0=" in str(caught.value)
+    assert "IN3.4@clause:place-17:0=" in str(caught.value)
     derived, _ = MODULE.plan(
-        tmp_path, (binding, "AU4.1@clause:place-04:0=core/every-role.md:27-29")
+        tmp_path, (binding, "IN3.4@clause:place-17:0=core/every-role.md:21-23")
     )
-    assert derived["places"]["place-04"]["clauses"][1]["lines"] == [31, 31]
+    assert derived["places"]["place-17"]["clauses"][1]["lines"] == [25, 25]
     assert (
-        derived["units"]["AU4.1"]["audience"] == document["derived"]["units"]["AU4.1"]["audience"]
+        derived["places"]["place-17"]["clauses"][1]["audience"]
+        == document["derived"]["places"]["place-17"]["clauses"][1]["audience"]
+    )
+    assert (
+        derived["units"]["IN3.4"]["audience"] == document["derived"]["units"]["IN3.4"]["audience"]
     )
 
 

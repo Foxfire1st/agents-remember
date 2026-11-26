@@ -876,6 +876,42 @@
       "description": "Bootstrap report sections and setup-state fields.",
       "injected": false,
       "step_detail": false
+    },
+    "worker/sync-and-repairs": {
+      "source": "reference/worker/sync-and-repairs.md",
+      "description": "Leaf synchronization, repair limits, costly small repairs, final-check failure routes, measurement handovers, refused handovers, and out-of-scope observations.",
+      "injected": false,
+      "step_detail": true
+    },
+    "review/non-leaf-seams-and-catalogs": {
+      "source": "reference/review/non-leaf-seams-and-catalogs.md",
+      "description": "Non-leaf review seams, criteria matrix, and master, atomic-master, plan, and portfolio exit review procedures.",
+      "injected": false,
+      "step_detail": true
+    },
+    "review/rounds-and-late-findings": {
+      "source": "reference/review/rounds-and-late-findings.md",
+      "description": "Round-limit verification, record-only rechecks, post-seal routes, and protocol/forged-state reporting.",
+      "injected": false,
+      "step_detail": true
+    },
+    "review/advisory-reviews": {
+      "source": "reference/review/advisory-reviews.md",
+      "description": "Architect-commissioned advisory independent review procedures.",
+      "injected": false,
+      "step_detail": true
+    },
+    "curator/exceptions-and-recovery": {
+      "source": "reference/curator/exceptions-and-recovery.md",
+      "description": "Report-only assignments, foundation reports, card-cut evidence, external citations, memory-tool failures, and code-concern routing.",
+      "injected": false,
+      "step_detail": true
+    },
+    "coordination/shared/closeout-recovery": {
+      "source": "reference/coordination/shared/closeout-recovery.md",
+      "description": "Unfinished closeout recovery, task projection rebuilds, flat-mode paired closeout, Orchestrator recipient switch, and child permission notices.",
+      "injected": false,
+      "step_detail": true
     }
   },
   "composition_order": [
@@ -907,31 +943,31 @@
         "roles": [
           "curator"
         ],
-        "step": "before sending a memory candidate for review or returning a memory repair"
+        "step": "row: coherence/msg"
       },
       "bootstrap/foundation-state": {
         "roles": [
           "bootstrap"
         ],
-        "step": "before naming the next step in the conversation and report; before reading and reporting the knowledge foundation's state; before finishing; before reporting this state and naming the next step; before reporting the identity or naming the authoring owner; for setup’s state report and next step"
+        "step": "row: report, `memory_init`, cmds; before finishing; before reporting this state and naming the next step; before reporting the identity or naming the authoring owner; for setup’s state report and next step"
       },
       "bootstrap/failure-states": {
         "roles": [
           "bootstrap"
         ],
-        "step": "when a step returns a state you cannot name"
+        "step": "when hitting unfamiliar states (`memory_init`/`memory_baseline_status`/`user_settings_init`/`server_info`/`context_packet`/`runtime_install`)"
       },
       "curator/card-formats-and-citations": {
         "roles": [
           "curator"
         ],
-        "step": "before creating or maintaining cards or overviews; before maintaining the entity catalog; before writing card history; before checking or repairing citations; before filling it; before routing an item; before checking citations"
+        "step": "row: cards/style; before filling it; before routing an item; before writing card history; before checking citations"
       },
       "curator/worklist": {
         "roles": [
           "curator"
         ],
-        "step": "before answering the persisted leaf worklist"
+        "step": "row: intake/worklist"
       },
       "refused-write": {
         "roles": [
@@ -944,19 +980,19 @@
           "investigator",
           "bootstrap"
         ],
-        "step": "for a correct-input refusal of a covered write (`task_doc` edits (including an admitted task retirement or folder movement), `knowledge_write`, `citation_fix`, `citation_note_revision` and `curator_coherence` publication); before retiring or moving a task; before responding to a correct-input write refusal"
+        "step": "for correct-input refused covered writes; row: master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child; before responding to a correct-input write refusal"
       },
       "writing/technical-english-profile": {
         "roles": [
           "curator"
         ],
-        "step": "before drafting invariant statements, family guarantees or history reasons; before writing walkthrough prose, labels or narrated obligations"
+        "step": "row: cards/style; before writing walkthrough prose, labels or narrated obligations"
       },
       "writing/visual-explainers": {
         "roles": [
           "worker"
         ],
-        "step": "before you add an optional walkthrough to your freeze report"
+        "step": "row: task/report/list"
       },
       "criteria": {},
       "templates": {},
@@ -970,7 +1006,7 @@
           "reviewer",
           "investigator"
         ],
-        "step": "before responding to a full-store refusal; before locating a filed message or receipt; before delivering a developer question to a recipient or parent; before handing work to a waiting seat; before sending a message; before handing over work; before sending a handover; before sending a question or developer answer to its waiting child; before composing a message; before handling a full-store refusal"
+        "step": "row: process, claims, dev/child qs, `role_message`; row: coherence/msg; row: research/shortfalls/msg; row: master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child; row: `knowledge_read`/`context_packet`, `role_message`, sandbox, child qs; row: templates & msg; row: msg/sync/repairs; before sending a question or developer answer to its waiting child; before composing a message; before handling a full-store refusal"
       },
       "coordination/shared/child-questions": {
         "roles": [
@@ -978,39 +1014,37 @@
           "orchestrator",
           "manager"
         ],
-        "step": "before answering a child's question or returning the developer's answer; before handling a child's question or returning the developer's answer; before handling a child's question or the developer's answer to it; before delivering that ruling"
+        "step": "row: process, claims, dev/child qs, `role_message`; row: master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child; row: `knowledge_read`/`context_packet`, `role_message`, sandbox, child qs; before delivering that ruling"
       },
       "instruction-shortfall-review": {
         "roles": [
           "investigator"
         ],
-        "step": "before reviewing an instruction shortfall named by the concern"
+        "step": "row: research/shortfalls/msg"
       },
       "knowledge/use": {
         "roles": [
           "architect",
-          "orchestrator",
-          "manager",
           "worker",
           "curator",
           "reviewer",
           "investigator",
           "bootstrap"
         ],
-        "step": "before relying on storage or path eligibility, cross-repository allowances, or serving-build metadata; before diagnosing; before interpreting their resolution; before interpreting a knowledge read; for a record you need whole; before diagnosing a failing test; before gathering that evidence"
+        "step": "row: reqs/`task_doc`/`context_packet`/`knowledge_read`; row: settings, sandbox; row: knowledge/cli; row: knowledge readers; row: baseline/knowledge; before gathering that evidence"
       },
       "curator/repository-foundation": {
         "roles": [
           "manager",
           "curator"
         ],
-        "step": "before beginning a repository's first or resumed knowledge foundation; before a repository's first or resumed knowledge foundation"
+        "step": "before first/resumed knowledge foundation; row: exceptions/sync; row: `knowledge-bootstrap`"
       },
       "worker-turn-report": {
         "roles": [
           "worker"
         ],
-        "step": "before writing the freeze report"
+        "step": "row: task/report/list"
       },
       "knowledge/commands": {
         "roles": [
@@ -1023,24 +1057,30 @@
           "investigator",
           "bootstrap"
         ],
-        "step": "before retrieving its context again; before planning repository work; before using a knowledge command or its result; before using a knowledge-system command or interpreting its result; before using a knowledge command or interpreting its result; before using a knowledge command or acting on its result; before a knowledge-system command or check; for a false note whose targets remain current; before using the public gate commands or tools"
+        "step": "row: reqs/`task_doc`/`context_packet`/`knowledge_read`; row: report, `memory_init`, cmds; row: knowledge/cli; row: knowledge readers; row: master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child; row: `knowledge_read`/`context_packet`, `role_message`, sandbox, child qs; row: baseline/knowledge; for a false note whose targets remain current; before using the public gate commands or tools"
       },
       "leaf-task": {
         "roles": [
           "architect",
-          "manager"
+          "orchestrator",
+          "manager",
+          "worker"
         ]
       },
       "master-task": {
         "roles": [
           "architect",
-          "manager"
+          "orchestrator",
+          "manager",
+          "worker"
         ]
       },
       "requirement-packet": {
         "roles": [
           "architect",
-          "manager"
+          "orchestrator",
+          "manager",
+          "worker"
         ]
       },
       "tasks/document-authoring": {
@@ -1048,10 +1088,9 @@
           "architect",
           "orchestrator",
           "manager",
-          "worker",
-          "bootstrap"
+          "worker"
         ],
-        "step": "before making the change; before authoring a task document or requirement packet; before editing, skipping or previewing task-document fields, or using `task_doc append_decision`; before using `task_doc append_decision`; before editing, skipping or previewing task-document fields; when filling the task fields; before writing the proposed code examples; when authoring its fields and ordered sections through `task_doc`; before authoring a packet; before writing the planned structure"
+        "step": "row: reqs/`task_doc`/`context_packet`/`knowledge_read`; row: master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child; row: manager brief, stages (`role_start`), hand-off, seats (`retire_child`), master/decisions (`task_doc`), closeout; row: task/report/list; when filling the task fields; before writing the proposed code examples; when authoring its fields and ordered sections through `task_doc`; before authoring a packet; before writing the planned structure"
       },
       "curator-file-card-layout": {
         "roles": [
@@ -1082,53 +1121,52 @@
           "architect",
           "orchestrator",
           "manager",
-          "worker",
-          "bootstrap"
+          "worker"
         ],
-        "step": "before scoping work with the developer; before writing the design"
+        "step": "before writing the design"
       },
       "review-baseline": {
         "roles": [
           "reviewer"
         ],
-        "step": "before preparing a baseline review"
+        "step": "row: baseline/knowledge"
       },
       "coordination/shared/requirement-design": {
         "roles": [
           "architect",
           "orchestrator"
         ],
-        "step": "before grouping primary and additional same-topic packets; before authoring or amending a requirement and its task structure"
+        "step": "row: reqs/`task_doc`/`context_packet`/`knowledge_read`"
       },
       "coordination/architect/curator-measurement": {
         "roles": [
           "architect"
         ],
-        "step": "before running or discussing a Curator measurement; for measurement-loop changes"
+        "step": "row: meas., advisory, flat closeout; for measurement-loop changes"
       },
       "coordination/architect/developer-decisions": {
         "roles": [
           "architect"
         ],
-        "step": "before relaying a developer decision from question through instruction delivery"
+        "step": "row: process, claims, dev/child qs, `role_message`"
       },
       "coordination/architect/models-and-settings": {
         "roles": [
           "architect"
         ],
-        "step": "before selecting a seat model and its authorized settings"
+        "step": "row: models/sandbox (`role_start`), master, seats (`retire_child`), 3rd"
       },
       "coordination/architect/process-decisions": {
         "roles": [
           "architect"
         ],
-        "step": "before deciding or escalating a coordination issue"
+        "step": "row: process, claims, dev/child qs, `role_message`"
       },
       "coordination/architect/claim-verification": {
         "roles": [
           "architect"
         ],
-        "step": "before ruling on a reported claim"
+        "step": "row: process, claims, dev/child qs, `role_message`"
       },
       "coordination/shared/master-state": {
         "roles": [
@@ -1136,14 +1174,14 @@
           "orchestrator",
           "manager"
         ],
-        "step": "before updating the master after a start, handover or landing; before updating master state through completion"
+        "step": "row: models/sandbox (`role_start`), master, seats (`retire_child`), 3rd; row: master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child; row: manager brief, stages (`role_start`), hand-off, seats (`retire_child`), master/decisions (`task_doc`), closeout"
       },
       "coordination/shared/third-rejected-round": {
         "roles": [
           "architect",
           "manager"
         ],
-        "step": "before judging a third rejected round during direct coordination; before judging repair progress at a third rejected round, an earlier coder switch or a Reviewer replacement"
+        "step": "row: models/sandbox (`role_start`), master, seats (`retire_child`), 3rd; row: seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), switch (`worktree_closeout_*`)"
       },
       "coordination/shared/seat-recovery": {
         "roles": [
@@ -1151,7 +1189,7 @@
           "orchestrator",
           "manager"
         ],
-        "step": "before recovering idle, unfinished, stopped or unavailable-provider work"
+        "step": "row: models/sandbox (`role_start`), master, seats (`retire_child`), 3rd; row: seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), switch (`worktree_closeout_*`); row: manager brief, stages (`role_start`), hand-off, seats (`retire_child`), master/decisions (`task_doc`), closeout"
       },
       "sandbox-actors": {
         "roles": [
@@ -1164,80 +1202,128 @@
           "investigator",
           "bootstrap"
         ],
-        "step": "before configuring or inspecting a sandbox harness without changing user-owned configuration; before setting up or inspecting a sandbox harness; before configuring or inspecting a sandbox harness; before configuring or inspecting a sandbox harness, choosing its launch home or starting its actors"
+        "step": "row: models/sandbox (`role_start`), master, seats (`retire_child`), 3rd; row: settings, sandbox; row: exceptions/sync; row: research/shortfalls/msg; row: master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child; row: `knowledge_read`/`context_packet`, `role_message`, sandbox, child qs; row: sandbox/ask"
       },
       "curator/card-sentence-decisions": {
         "roles": [
           "curator"
         ],
-        "step": "before editing a card or its paired notes; before routing or refreshing a card"
+        "step": "row: cards/style; before routing or refreshing a card"
       },
       "curator/change-routing": {
         "roles": [
           "curator"
         ],
-        "step": "before routing a changed file or notes item"
+        "step": "row: write/route"
       },
       "curator/coherence-judgments": {
         "roles": [
           "curator"
         ],
-        "step": "before preparing a coherence judgment"
+        "step": "row: coherence/msg"
       },
       "curator/current-prose-and-history": {
         "roles": [
           "curator"
         ],
-        "step": "before updating current overview prose or answering changed-file history"
+        "step": "row: cards/style"
       },
       "curator/encountered-records": {
         "roles": [
           "curator"
         ],
-        "step": "before authoring an encountered weakness or document dependency"
+        "step": "row: write/route"
       },
       "curator/family-obligations": {
         "roles": [
           "curator"
         ],
-        "step": "before deciding family coverage or updating a family"
+        "step": "row: write/route"
       },
       "curator/governing-sources": {
         "roles": [
           "curator"
         ],
-        "step": "before explaining an assigned contract; before authoring a governing decision record; before choosing domain evidence"
+        "step": "row: cards/style; before choosing domain evidence"
       },
       "curator/knowledge-ingest": {
         "roles": [
           "curator"
         ],
-        "step": "before preparing or ingesting authored knowledge"
+        "step": "row: write/route"
       },
       "curator/publication-report": {
         "roles": [
           "curator"
         ],
-        "step": "before interpreting an ingest result or claiming publication; before interpreting final writer checks; before interpreting the ingest result"
+        "step": "row: write/route; before interpreting final writer checks; before interpreting the ingest result"
       },
       "curator/intent-reconciliation": {
         "roles": [
           "curator"
         ],
-        "step": "before promoting a historical oddity; before reconciling current intent, ruled intent and implementation"
+        "step": "row: intake/worklist"
       },
       "knowledge/serving-build": {
         "roles": [
           "worker",
           "curator"
         ],
-        "step": "before a command-line run that decides or writes; before calling a deciding or writing surface; for the Curator's command-line interface binding; before command-line interface (CLI) work; when the admitted binding is unavailable; before checking writer admission"
+        "step": "row: knowledge/cli; before calling a deciding or writing surface; for the Curator's command-line interface binding; before command-line interface (CLI) work; when the admitted binding is unavailable; before checking writer admission; before a command-line run that decides or writes"
       },
       "bootstrap-report": {
         "roles": [
           "bootstrap"
         ],
-        "step": "before writing the report"
+        "step": "row: report, `memory_init`, cmds"
+      },
+      "worker/sync-and-repairs": {
+        "roles": [
+          "architect",
+          "orchestrator",
+          "manager",
+          "worker",
+          "curator",
+          "reviewer",
+          "investigator",
+          "bootstrap"
+        ],
+        "step": "row: exceptions/sync; row: seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), switch (`worktree_closeout_*`); row: msg/sync/repairs"
+      },
+      "review/non-leaf-seams-and-catalogs": {
+        "roles": [
+          "reviewer"
+        ],
+        "step": "row: non-leaf/rounds"
+      },
+      "review/rounds-and-late-findings": {
+        "roles": [
+          "reviewer"
+        ],
+        "step": "row: non-leaf/rounds"
+      },
+      "review/advisory-reviews": {
+        "roles": [
+          "architect"
+        ],
+        "step": "before commissioning/routing advisory reviews via `role_start`; row: meas., advisory, flat closeout"
+      },
+      "curator/exceptions-and-recovery": {
+        "roles": [
+          "architect",
+          "orchestrator",
+          "manager",
+          "curator"
+        ],
+        "step": "row: exceptions/sync"
+      },
+      "coordination/shared/closeout-recovery": {
+        "roles": [
+          "architect",
+          "orchestrator",
+          "manager"
+        ],
+        "step": "row: meas., advisory, flat closeout; row: seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), switch (`worktree_closeout_*`); row: manager brief, stages (`role_start`), hand-off, seats (`retire_child`), master/decisions (`task_doc`), closeout"
       }
     },
     "core": {

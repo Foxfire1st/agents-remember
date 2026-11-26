@@ -41,53 +41,41 @@ ROLE_OPERATIONS: dict[CapsuleRole, CapsuleOperation] = {
 }
 
 MESSAGE_SECTIONS = {
-    "worker": "Send messages through the assigned routes",
-    "reviewer": "Messages and working files",
-    "curator": "Send messages and keep working files",
+    "worker": "Reference index",
+    "reviewer": "Reference index",
+    "curator": "Reference index",
 }
 MESSAGE_OPERATION_ROUTES = {
-    "worker": "Before responding to a full-store refusal, read [Handle a full-store refusal](../reference/message-handover.md#handle-a-full-store-refusal) for the pending handover, single retry and second-refusal report.",
-    "reviewer": "Before responding to a full-store refusal, read [Handle a full-store refusal](../reference/message-handover.md#handle-a-full-store-refusal) for the pending handover, single retry and second-refusal report.",
-    "curator": "Before responding to a full-store refusal, read [Handle a full-store refusal](../reference/message-handover.md#handle-a-full-store-refusal) for the pending handover, single retry and second-refusal report.",
+    "worker": (
+        "Send Reviewer report path (no pasted text), head/hash + next stretch via `role_message`."
+    ),
+    "reviewer": (
+        "Send verdict path directly to Worker via `role_message` "
+        "(no pasted text; block names sealed report + repair stretch)."
+    ),
+    "curator": (
+        "Send memory candidate to Reviewer via `role_message` (sibling role, leaf refs, whole IDs);"
+    ),
 }
 ROLE_OPERATION_ROUTES = {
     "worker": (
-        (
-            "Before writing the report, follow [Implementation outputs]"
-            "(../operations/implementation.md#outputs) "
-            "for report contents, checks and the freeze procedure."
-        ),
-        (
-            "Before deciding whether a handover was taken or responding to a provider, seat or busy "
-            "refusal, read [implementation boundaries](../operations/implementation.md#boundaries) "
-            "for consumption evidence and the owner\N{RIGHT SINGLE QUOTATION MARK}s recovery route."
-        ),
+        "[report]({{detail:templates/turn-report.md}}#shape)",
+        "[sync]({{detail:reference/worker/sync-and-repairs.md}})",
+        "[msg]({{detail:reference/message-handover.md}})",
     ),
     "reviewer": (
-        (
-            "Before inspecting the assigned packet or candidate, follow [the review intake "
-            "procedure](../operations/review.md#receive-the-intake-and-hand-over-the-leaf-verdict)"
-            " for the mode, handover scope and chat boundary."
-        ),
-        (
-            "Before recording an ordinary leaf code round, read [code review round "
-            "recording](../operations/review.md#record-code-review-rounds) for the "
-            "begin and result records through `task_doc` on "
-            "`agents-remember-task`. Before recording a memory round, requesting "
-            "an extra round or handling provider, seat or busy refusals, read "
-            "[review boundaries](../operations/review.md#boundaries) for the "
-            "recording owner, approval and recovery routes."
-        ),
+        "[rounds]({{detail:reference/review/rounds-and-late-findings.md}})",
+        "[verdict](../templates/verdict.md)",
+        "[msg]({{detail:reference/message-handover.md}})",
     ),
     "curator": (
-        "Before intake and writer admission, read [required curation inputs](../operations/curation.md#required-inputs) for the candidate, scope and lists, and [bound intake and capabilities](../operations/curation.md#bound-paseo-intake-and-capabilities) for the serving writer and capability checks.",
-        "The curation operation owns the workflow sequence.",
+        "[handover]({{detail:reference/curator/memory-handover.md}})",
+        "[exceptions]({{detail:reference/curator/exceptions-and-recovery.md}})",
+        "[msg]({{detail:reference/message-handover.md}})",
     ),
 }
 MEMORY_HANDOVER_SOURCE = "reference/curator/memory-handover.md"
-MEMORY_HANDOVER_ACTION = (
-    "Before sending a memory candidate for review or returning a memory repair, read"
-)
+MEMORY_HANDOVER_ACTION = "[handover]("
 MEMORY_DETAIL_FACETS = frozenset(
     {
         "identity and whole stretch",
@@ -96,6 +84,12 @@ MEMORY_DETAIL_FACETS = frozenset(
         "memory ordinary limit",
         "memory extra approval",
     }
+)
+CURATOR_CODE_CONCERN_FACETS = frozenset(
+    {"post-pass code finding", "code answer", "finding and answer report"}
+)
+WORKER_REFUSAL_FACETS = frozenset(
+    {"nonaction notice", "empty doubled refusal", "sender owes contents"}
 )
 
 
@@ -141,9 +135,16 @@ def instruction_owner(root: Path, role: str) -> str:
 
 
 def autonomy_surface(root: Path, role: str) -> str:
-    """Read the active seat's own autonomy duties."""
+    """Read the active seat's own autonomy duties alongside shared harness-autonomy owners."""
     instruction_owner(root, role)
-    return (root / f"roles/{role}.md").read_text()
+    sources = (
+        f"roles/{role}.md",
+        "core/authority.md",
+        "core/every-role.md",
+        "core/invariants.md",
+        "SKILL.md",
+    )
+    return "\n".join((root / source).read_text(encoding="utf-8") for source in sources)
 
 
 def instruction_surface(root: Path, source: str) -> str:
@@ -184,21 +185,17 @@ def _message_surface(root: Path, source: str, report_path: Path) -> str:
         MESSAGE_HANDOVER_ACTIONS[role],
         report_path,
     )
-    # The source route is checked above, including its exact target. Delivery has
-    # rebound links, so check its action while delivered_step checks the frozen file.
-    assert "Before responding to a full-store refusal, read" in instructions
+    assert normalized(route) in normalized(instructions)
     return text
 
 
 def _memory_surface(root: Path, report_path: Path) -> str:
     role_text = (root / "roles/curator.md").read_text()
-    section = re.search(r"(?ms)^## Reconcile, author and check\n(.*?)(?=^## |\Z)", role_text)
+    section = re.search(r"(?ms)^## Reference index\n(.*?)(?=^## |\Z)", role_text)
     assert section is not None
-    assert "{{detail:" + MEMORY_HANDOVER_SOURCE + "}}" in section[1]
     pointer = "{{detail:" + MEMORY_HANDOVER_SOURCE + "}}"
-    paragraph = next(part for part in section[1].split("\n\n") if pointer in part)
-    assert MEMORY_HANDOVER_ACTION in normalized(paragraph)
-    assert "Reuse it when returning a repair." in paragraph
+    assert pointer in section[1]
+    assert MEMORY_HANDOVER_ACTION + pointer + ")" in section[1]
     instructions, text = delivered_step(
         root,
         ("curator", "curation"),
@@ -206,10 +203,7 @@ def _memory_surface(root: Path, report_path: Path) -> str:
         MEMORY_HANDOVER_ACTION,
         report_path,
     )
-    assert (
-        "Before sending a memory candidate for review or returning a memory repair, read [memory handover]("
-        in instructions
-    )
+    assert "[handover](" in instructions
     return text
 
 
@@ -225,17 +219,18 @@ def _owner_section(root: Path, source: str, heading: str) -> str:
 
 def assert_memory_review_owner_link(handover: str, owner: Path) -> None:
     """Require the full emitted action, exact shipped owner, fragment and one occurrence."""
-    target = quote(owner.resolve().as_posix(), safe="/:@") + "#boundaries"
-    expected = (
-        "Before sending a memory candidate for review, read [Review boundaries](" + target + ")"
-    )
+    target = quote(owner.resolve().as_posix(), safe="/:@") + "#rounds"
+    expected = "Before sending a memory candidate for review, read [Review rounds](" + target + ")"
     assert handover.count(expected) == 1, ("memory review owner", expected)
-    links = re.findall(r"\[Review boundaries\]\(([^)\n]+)\)", handover)
+    links = re.findall(r"\[Review rounds\]\(([^)\n]+)\)", handover)
     assert links == [target], ("memory review owner", target, links)
 
 
 def _memory_review_surface(root: Path, report_path: Path) -> str:
-    route = "Before sending a memory candidate for review, read [Review boundaries](../../operations/review.md#boundaries)"
+    route = (
+        "Before sending a memory candidate for review, read "
+        "[Review rounds](../../operations/review.md#rounds)"
+    )
     assert route in (root / MEMORY_HANDOVER_SOURCE).read_text()
     with shipped_composition_corpus() as (shipped, _manifest):
         owner = shipped / "operations/review.md"
@@ -244,13 +239,12 @@ def _memory_review_surface(root: Path, report_path: Path) -> str:
         )
         handover = _memory_surface(root, report_path)
         assert_memory_review_owner_link(handover, owner)
-        return _owner_section(shipped, "operations/review.md", "Boundaries")
+        return _owner_section(shipped, "operations/review.md", "Rounds")
 
 
 def _curator_memory_surface(root: Path, source: str, name: str, report_path: Path) -> str:
     instruction_surface(root, source)
-    # P5-18: the Curator's one memory-handover pointer is in its role file, for every operation.
-    route = "Before sending a memory candidate for review or returning a memory repair, read [memory handover]({{detail:reference/curator/memory-handover.md}})"
+    route = "[handover]({{detail:reference/curator/memory-handover.md}})"
     assert (root / "roles/curator.md").read_text().count(route) == 1
     if source == "operations/curation.md":
         assert (
@@ -264,71 +258,98 @@ def _curator_memory_surface(root: Path, source: str, name: str, report_path: Pat
 
 def _worker_handover_surface(root: Path, source: str) -> str:
     role = (root / source).read_text()
-    referral = "Before handing over a frozen candidate, follow [Hand over the frozen candidate](../operations/implementation.md#hand-over-the-frozen-candidate)"
-    assert referral in role
-    assert "Preserve the producer data verbatim for that exact freeze." in role
-    instruction_surface(root, source)
-    return _owner_section(root, "operations/implementation.md", "Hand over the frozen candidate")
-
-
-# Full pointer sentences (P5-23: restored from fragments after the P5-15 content clauses).
-CURATION_REFUSED_HANDOVER_POINTER = (
-    "Before responding to a non-work reply, an empty or doubled-seat "
-    "refusal, an unreachable-Manager notice, or failed delivery of a "
-    "required Manager notice, read [Report a refused "
-    "handover](implementation.md#report-a-refused-handover) for the "
-    "seat/problem report, pending state, independent continuation and the "
-    "notice retry through `role_message` on `agents-remember-task`."
-)
-REFUSED_HANDOVER_POINTER = (
-    "Before responding to a non-work reply, empty or doubled-seat refusal, "
-    "or an unreachable-Manager notice, read [Repair defects and report a "
-    "refused "
-    "handover](implementation.md#repair-defects-and-report-a-refused-handover) "
-    "for its seat/problem report and the retry procedure through "
-    "`role_message` on `agents-remember-task`."
-)
+    assert "<!-- ar:gives freeze-handoff to reviewer:" in role
+    assert "<!-- ar:gives producer-list to curator:" in role
+    return instruction_surface(root, source)
 
 
 def _upward_notice_surface(root: Path, source: str) -> str:
     instruction_surface(root, source)
-    if source.startswith("roles/"):
-        role = _leaf_role(source)
-        operation = "operations/" + ROLE_OPERATIONS[role] + ".md"
-    else:
-        operation = source
-    if operation == "operations/curation.md":
-        section = _owner_section(root, operation, "Handoff / exit")
-        assert CURATION_REFUSED_HANDOVER_POINTER in section
-    elif operation != "operations/implementation.md":
-        assert REFUSED_HANDOVER_POINTER in (root / operation).read_text()
-    return _owner_section(
-        root, "operations/implementation.md", "Repair defects and report a refused handover"
+    assert (
+        "[sync]({{detail:reference/worker/sync-and-repairs.md}})"
+        in (root / "roles/worker.md").read_text()
     )
+    assert (
+        "[sync]({{detail:reference/worker/sync-and-repairs.md}}#synchronize-the-leaf)"
+        in (root / "roles/curator.md").read_text()
+    )
+    return _owner_section(root, "reference/worker/sync-and-repairs.md", "Report a refused handover")
+
+
+def _reviewer_detail_surface(root: Path, source: str, name: str) -> str | None:
+    if name == "post-pass concern":
+        rounds = (root / "reference/review/rounds-and-late-findings.md").read_text()
+        assert (
+            "../curator/exceptions-and-recovery.md#memory-tool-failures-code-concerns-and-sync-conflicts"
+            in rounds
+        )
+        return _owner_section(
+            root,
+            "reference/curator/exceptions-and-recovery.md",
+            "Memory-tool failures, code concerns, and sync conflicts",
+        )
+    if name in {"reopen or refute answer", "extra round beyond the limit"}:
+        instruction_surface(root, source)
+        return (root / "reference/review/rounds-and-late-findings.md").read_text()
+    if name == "preceding result":
+        instruction_surface(root, source)
+        return (root / "templates/verdict.md").read_text()
+    return None
+
+
+def _worker_detail_surface(root: Path, source: str, name: str) -> str | None:
+    if name in {"Reviewer start notice", "producer data preserved"}:
+        return _worker_handover_surface(root, source)
+    if name == "seat address":
+        return _owner_section(root, "operations/coordination.md", "Address and deliver a message")
+    if name == "whole product identity":
+        return (root / "SKILL.md").read_text()
+    if name in WORKER_REFUSAL_FACETS:
+        return _upward_notice_surface(root, source)
+    return None
+
+
+def _curator_detail_surface(root: Path, source: str, name: str, report_path: Path) -> str | None:
+    if name in MEMORY_DETAIL_FACETS:
+        return _curator_memory_surface(root, source, name, report_path)
+    if name in CURATOR_CODE_CONCERN_FACETS:
+        instruction_surface(root, source)
+        return _owner_section(
+            root,
+            "reference/curator/exceptions-and-recovery.md",
+            "Memory-tool failures, code concerns, and sync conflicts",
+        )
+    return None
 
 
 def clause_surface(  # noqa: PLR0911
     root: Path, source: str, name: str, report_path: Path
 ) -> str:
     """Resolve each relocated obligation through its admitted role and named action."""
+    if source.startswith("roles/") and name in autonomy_clauses(Path(source).stem):
+        return autonomy_surface(root, Path(source).stem)
     if name == "busy retry":
         return _message_surface(root, source, report_path)
-    if source in {"roles/curator.md", "operations/curation.md"} and name in MEMORY_DETAIL_FACETS:
-        return _curator_memory_surface(root, source, name, report_path)
-    if source == "roles/worker.md" and name in {"Reviewer start notice", "producer data preserved"}:
-        return _worker_handover_surface(root, source)
     if name == "action evidence":
-        # P5-23 b3: the rule's own section, not the whole shared file.
-        return _owner_section(root, "core/every-role.md", "Parallel work and waiting")
+        return _owner_section(root, "core/authority.md", "Hand over work and wait for messages")
     if name == "upward notice recovery":
         return _upward_notice_surface(root, source)
-    if source in {"roles/reviewer.md", "operations/review.md"}:
-        instructions = instruction_surface(root, source)
-        if name == "post-pass concern":
-            route = "Before answering a Curator code finding, read [Curation failure handling](curation.md#failure-handling) for the Curator's evidenced concern and the Reviewer's recorded finding or explained rejection. Send your answer directly to the Curator and Worker."
-            assert route in (root / "operations/review.md").read_text()
-            assert normalized(route) in normalized(instructions)
-            return _owner_section(root, "operations/curation.md", "Failure handling")
+    if name == "factual independence":
+        instruction_surface(root, source)
+        assert (
+            "[list](../templates/curator-handoff-list.md)" in (root / "roles/worker.md").read_text()
+        )
+        return (root / "templates/curator-handoff-list.md").read_text()
+    if source == "roles/worker.md" and (detail := _worker_detail_surface(root, source, name)):
+        return detail
+    if source in {"roles/curator.md", "operations/curation.md"} and (
+        detail := _curator_detail_surface(root, source, name, report_path)
+    ):
+        return detail
+    if source in {"roles/reviewer.md", "operations/review.md"} and (
+        detail := _reviewer_detail_surface(root, source, name)
+    ):
+        return detail
     return instruction_surface(root, source)
 
 
@@ -359,10 +380,10 @@ def clause_mutations(
             if name == "upward notice recovery":
                 for facet in (
                     "required Manager notice fails delivery",
-                    "record it as pending",
+                    "record the notice as pending",
                     "continue independent work",
-                    "retry the notice through role_message on agents-remember-task",
-                    "Do not turn that delivery failure into a question to the developer in your own chat",
+                    "retry the notice through role_message",
+                    "Never turn a delivery failure into a question to the developer in your own chat",
                 ):
                     assert normalized(facet) in reading, (source, facet)
                     yield source, name, clauses, reading, reading.replace(normalized(facet), "")
@@ -390,27 +411,14 @@ def assert_git_comparison_scope(root: Path) -> None:
 
 def assert_reviewer_initial_intake(instructions: str) -> None:
     """Check the delivered intake owner, both missing-mode routes and received inputs."""
-    inputs = instructions.split("## Confirm the assignment before inspection\n", 1)[1].split(
-        "## Bind the seam and catalogs", 1
-    )[0]
-    assert "Before inspecting the assigned packet or candidate, follow" in inputs
-    assert "#receive-the-intake-and-hand-over-the-leaf-verdict)" in inputs
-    intake = instructions.split("## Receive the intake and hand over the leaf verdict\n", 1)[1]
-    intake = intake.split("\n## ", 1)[0]
-    assert "If the opening names no review mode," in intake
+    assert (
+        "If mode is absent, ask starter via `role_message` (developer if parentless) and wait."
+        in instructions
+    )
     for clause in (
-        "ask your starter for its first `role_message`",
-        "and wait",
-        "A Reviewer started from the dashboard has no starter",
-        "asks the developer in its own chat instead",
-        "Inspect nothing and infer no mode before the answer arrives",
+        "Require before inspecting:",
+        "mode (`baseline`/`fix-verification`; no whole-review in `fix-verification`)",
+        'exact candidate (no branch/"latest") + clean-copy checks (withhold PASS until passing)',
+        "`system/tools.md` + `system/design-guidelines.md` + guidelines.",
     ):
-        assert clause in intake, clause
-    received = inputs.split("Once intake arrives,", 1)[1]
-    for clause in (
-        "require every applicable input below; refuse and report omissions rather than guessing",
-        "Exactly one review mode",
-        "baseline",
-        "fix-verification",
-    ):
-        assert clause in received, clause
+        assert clause in instructions, clause

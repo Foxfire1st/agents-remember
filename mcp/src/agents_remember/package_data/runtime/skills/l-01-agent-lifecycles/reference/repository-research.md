@@ -98,7 +98,7 @@ The Curator of the foundation task reconciles the handoff against the admitted r
 
 ## Who runs it
 
-The Curator of a foundation task reaches this file from [the repository foundation detail](curator/repository-foundation.md) and may run the research with helpers, as [the Curator role](../roles/curator.md#organise-helpers-within-the-assignment) allows. If the Architect starts an Investigator for the research, the [Investigator role](../roles/investigator.md#read-and-investigate) points here, and the Investigator's report path is recorded in the foundation task document so the Curator finds the evidence.
+The Curator of a foundation task reaches this file from [the repository foundation detail](curator/repository-foundation.md) and may run the research with helpers, as [the Curator role](../roles/curator.md#curator) allows. If the Architect starts an Investigator for the research, the [Investigator role](../roles/investigator.md#read-and-investigate) points here, and the Investigator's report path is recorded in the foundation task document so the Curator finds the evidence.
 
 A run may use helpers in bounded pieces: a scout over the structure, one lens per area, a merge into the area brief, a documentation researcher over the approved sources, and a boundary researcher over the allowed adjacent repositories. The run's lead reads the distilled reports rather than the raw source trees, and answers for every part.
 

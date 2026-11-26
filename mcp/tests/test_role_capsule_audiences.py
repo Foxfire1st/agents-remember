@@ -205,7 +205,7 @@ def test_curator_receives_ruled_step_details_separately_and_keeps_writer_boundar
         for unit in result.capsule.instruction_units
         if unit.block.source_path == "roles/curator.md"
     )
-    intake_syntax = "`knowledge_read` on `agents-remember-task` takes `workspace.memoryRoot`"
+    intake_syntax = "(`read_ar_files`/`context_packet`: `task_context`; `knowledge_read`: `workspace.memoryRoot`)"
     assert intake_syntax in role_block
     assert intake_syntax in text
     with pytest.raises(AssertionError):
@@ -252,7 +252,7 @@ def test_curator_receives_ruled_step_details_separately_and_keeps_writer_boundar
     family = _assert_detail_owner(
         result,
         "reference/curator/family-obligations.md",
-        "Before deciding family coverage or updating a family, read",
+        "| Write/route |",
     )
     _assert_owner_clauses(
         family,
@@ -260,13 +260,14 @@ def test_curator_receives_ruled_step_details_separately_and_keeps_writer_boundar
             "Implementation alone never rewrites member intent or changes an invariant's or family's meaning.",
         ),
     )
+    exceptions = references["reference/curator/exceptions-and-recovery.md"].content.decode()
     for boundary in (
-        "Require that worklist to be readable before ingest.",
-        "These are memory-repository text committed with the leaf memory branch and read by the next planner from its base files.",
-        "The commit option authorizes file writes, not Git or acceptance.",
-        "Family coverage: authored or updated families with members and routes, and examined unchanged families with reasons.",
+        "require readable worklist before ingest",
+        "Verify writer outputs resolve in `workspace.memoryRoot`.",
+        "`knowledge_write` `commit: true` writes files, not Git",
     ):
         assert boundary in text, boundary
+    assert "family coverage (updated plus unchanged with reasons; mark unexamined)" in exceptions
 
 
 def test_manager_curation_does_not_receive_curators_card_or_writer_steps() -> None:
@@ -287,14 +288,15 @@ def test_manager_curation_does_not_receive_curators_card_or_writer_steps() -> No
     assert "changed source files → their file-level sidecars" not in text
     assert "curator-writer-details.md" not in text
     assert (
-        "The Manager reads ordinary leaf state from reports and retains task acceptance and landing authority."
-        in text
+        "Inspect full diff, verdicts, and listed final checks before gates; keep "
+        "closeout/integration/status/acceptance/landing order without relaying "
+        "freeze/finding/verdict/memory changes." in text
     )
-    assert "transaction steps remain with the Manager." in text
+    assert "Curation is evidence, not a gate." in text
     assert (
-        "Inspect the complete changed-file diff, both verdicts and the Worker's report of the requirement's listed final checks before deciding the gate."
-        in text
+        "Curator runs no Git writes, edits no code/gate/lifecycle/contract/closeout state" in text
     )
+    assert "reserved sync steps; sync memory conflicts -> Curator" in text
 
 
 def test_d301_real_capsules_deliver_named_step_files_as_frozen_launch_artifacts(
@@ -342,19 +344,27 @@ def test_d301_real_capsules_deliver_named_step_files_as_frozen_launch_artifacts(
                     replace(role_block, content=strip_frontmatter(role_source.read_text()))
                 ).content
             )
-            inline_rules = [row for row in INLINE_RULE_CLAUSES if row[1] == "roles/reviewer.md"]
+            inline_rules = [
+                row for row in INLINE_RULE_CLAUSES if row[0].startswith("reference/review-")
+            ]
             assert len(inline_rules) == 7
-            for retired, _, heading, clauses in inline_rules:
+            for retired, owner, heading, clauses in inline_rules:
                 assert retired not in references
-                assert role_text.count(heading + "\n") == 1
-                section = role_text.split(heading + "\n", 1)[1].split("\n## ", 1)[0]
+                if owner == "roles/reviewer.md":
+                    owner_text = role_text
+                else:
+                    assert owner in references, (retired, owner)
+                    owner_text = references[owner].content.decode()
+                assert owner_text.count(heading + "\n") == 1, (retired, owner, heading)
+                section = owner_text.split(heading + "\n", 1)[1].split("\n## ", 1)[0]
                 reading = " ".join(section.split())
                 for clause in clauses:
                     normalized_clause = " ".join(clause.split())
-                    assert normalized_clause in reading
-                    assert normalized_clause in " ".join(text.split())
+                    assert normalized_clause in reading, (retired, owner, clause)
+                    if owner == "roles/reviewer.md":
+                        assert normalized_clause in " ".join(text.split())
                     with pytest.raises(AssertionError):
-                        assert clause in reading.replace(clause, "", 1)
+                        assert normalized_clause in reading.replace(normalized_clause, "", 1)
         paths = {entry["sourcePath"]: Path(entry["path"]) for entry in record["detailReferences"]}
         for source in expected:
             # Source identity and emitted identity are separate: link binding rewrites details.
@@ -373,16 +383,16 @@ def test_d301_real_capsules_deliver_named_step_files_as_frozen_launch_artifacts(
 
 def _without_action_operand(text: str, location: str, action: str) -> str:
     cue = " ".join(action.replace("*", "").replace("`", "").split())
-    paragraphs = [
-        paragraph
-        for paragraph in text.split("\n\n")
-        if cue in " ".join(paragraph.replace("*", "").replace("`", "").split())
-        and location in paragraph
+    units = text.splitlines() if action.startswith("|") else text.split("\n\n")
+    matches = [
+        unit
+        for unit in units
+        if cue in " ".join(unit.replace("*", "").replace("`", "").split()) and location in unit
     ]
-    assert len(paragraphs) == 1, (location, action)
-    paragraph = paragraphs[0]
-    assert paragraph.count(location) == 1, (location, action)
-    return text.replace(paragraph, paragraph.replace(location, "", 1), 1)
+    assert len(matches) == 1, (location, action)
+    unit = matches[0]
+    assert unit.count(location) == 1, (location, action)
+    return text.replace(unit, unit.replace(location, "", 1), 1)
 
 
 def _assert_detail_owner(result: CapsuleCompilationResult, source: str, action: str) -> str:
@@ -417,19 +427,15 @@ def _assert_review_boundary_owner(caller: str, location: str, action: str) -> st
         _assert_bound_action(mutant, location, action)
     root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
     content = (root / "operations/review.md").read_text()
-    boundaries = content.split("## Boundaries\n", 1)[1]
+    rounds = content.split("## Rounds\n", 1)[1].split("\n## Boundaries\n", 1)[0]
     _assert_owner_clauses(
-        boundaries,
+        rounds,
         (
-            "Memory review uses separate sealed reports, finding identifiers and its own pass count.",
-            "The Reviewer records its own lane with `begin_review` and `record_review`, using `reviewKind=memory`.",
-            "Code state stays unchanged.",
-            "Memory review opens no code review-state round, resets no passed code review, code verdict or code baseline, and adds no identifiers to that baseline.",
-            "Its ordinary pass limit is the same as code review's.",
-            "A pass beyond the settings limit needs the Architect's or developer's instruction recorded by the Manager.",
+            "Open leaf code rounds via `task_doc(begin_review)`, record via `record_review`/`record_route_review`;",
+            "Memory review uses a separate lane (`reviewKind=memory`; own sealed reports/IDs/pass count, same limit; extra passes need Architect/developer instruction recorded by Manager); code verdict/baseline stay unchanged.",
         ),
     )
-    return boundaries
+    return rounds
 
 
 def test_d301_curator_keeps_whole_handover_and_step_limits_in_capsule() -> None:
@@ -442,22 +448,21 @@ def test_d301_curator_keeps_whole_handover_and_step_limits_in_capsule() -> None:
     )
     text = result.render_instructions()
     for boundary in (
-        "Maintain the entity catalog, and edit an entity only for a real entity change.",
-        "Reconcile current intent, ruled intent and implemented reality. Surface every material divergence",
+        "(edit entities for real changes only)",
+        "Reconcile one leaf's intent and implementation in one fresh session, update affected memory, and deliver the coherence record.",
     ):
         assert boundary in text, boundary
-    scope_location = "../templates/curator-handoff-ingestion.md#curator-authored-semantic-scope"
+    scope_location = "../templates/curator-handoff-ingestion.md"
     _assert_bound_action(
         text,
         scope_location,
-        # The scope link follows the field-list and input-section links in curator.md:41.
-        "the ingestion shape of `knowledge_write` on `agents-remember-task` and",
+        "| Intake/worklist |",
     )
     with pytest.raises(AssertionError):
         _assert_bound_action(
             text.replace(scope_location, "", 1),
             scope_location,
-            "the ingestion shape of `knowledge_write` on `agents-remember-task` and",
+            "| Intake/worklist |",
         )
     scope = (
         (root / "templates/curator-handoff-ingestion.md")
@@ -472,13 +477,12 @@ def test_d301_curator_keeps_whole_handover_and_step_limits_in_capsule() -> None:
     family = _assert_detail_owner(
         result,
         "reference/curator/family-obligations.md",
-        "Before deciding family coverage or updating a family, read",
+        "| Write/route |",
     )
-    # P5-18: the role file's family pointer is the one pointer; the workflow step is plain.
     assert "../reference/curator/family-obligations.md" not in text
     assert (
-        "3. Group obligations and change family membership only with a grouping justification "
-        "and a re-examined guarantee." in text
+        "2. Ingest invariants in scope; update families only with justification + re-examined guarantee."
+        in text
     )
     _assert_owner_clauses(
         family,
@@ -491,11 +495,12 @@ def test_d301_curator_keeps_whole_handover_and_step_limits_in_capsule() -> None:
     routing = _assert_detail_owner(
         result,
         "reference/curator/change-routing.md",
-        "Before routing a changed file or notes item, read",
+        "| Write/route |",
     )
     _assert_owner_clauses(
         routing,
         (
+            "Edit the entity catalog only for a real, load-bearing entity change.",
             "Use the level-three Operational-Notes target only for a notes item with no file, route or entity home.",
             "It is the last resort, never the default for an inconvenient finding.",
         ),
@@ -506,7 +511,7 @@ def test_d301_curator_keeps_whole_handover_and_step_limits_in_capsule() -> None:
     )
     assert history.content == (root / history_source).read_bytes()
     location = "{{detail:" + history_source + "}}"
-    action = "Before updating current overview prose or answering changed-file history, read"
+    action = "| Cards/style |"
     _assert_bound_action(text, location, action)
     mutant = _without_action_operand(text, location, action)
     with pytest.raises(AssertionError):
@@ -536,7 +541,7 @@ def test_d301_curator_keeps_whole_handover_and_step_limits_in_capsule() -> None:
     )
     _assert_review_boundary_owner(
         handoff.content.decode(),
-        "../../operations/review.md#boundaries",
+        "../../operations/review.md#rounds",
         "Before sending a memory candidate for review, read",
     )
 
@@ -547,20 +552,13 @@ def _required_action_paragraph(
     fragment, suffix = ROLE_POINTER_QUALIFICATIONS.get((role, source, action), ("", ""))
     cue = " ".join(action.replace("*", "").replace("`", "").split())
     ending = re.escape(fragment) if fragment else r"(?:#[^)]*)?"
-    pattern = (
-        re.escape(cue)
-        + r"(?:(?!\]\().)*?\]\("
-        + re.escape(location)
-        + ending
-        + r"\)"
-        + re.escape(suffix)
-    )
+    between = r"[^\n]*?\]\(" if action.startswith("|") else r"(?:(?!\]\().)*?\]\("
+    pattern = re.escape(cue) + between + re.escape(location) + ending + r"\)" + re.escape(suffix)
+    units = text.splitlines() if action.startswith("|") else text.split("\n\n")
     matches = [
-        paragraph
-        for paragraph in text.split("\n\n")
-        for _match in re.finditer(
-            pattern, " ".join(paragraph.replace("*", "").replace("`", "").split())
-        )
+        unit
+        for unit in units
+        for _match in re.finditer(pattern, " ".join(unit.replace("*", "").replace("`", "").split()))
     ]
     assert len(matches) == 1, (
         location,
@@ -600,13 +598,13 @@ def _assert_step_detail_timing(text: str, records: list[dict], role: str, operat
 def _assert_bound_action(text: str, location: str, action: str) -> None:
     assert action.strip()
     cue = " ".join(action.replace("*", "").replace("`", "").split())
-    pattern = re.escape(cue) + r"(?:(?!\]\().)*?\]\(" + re.escape(location) + r"(?:#[^)]*)?\)"
+    between = r"[^\n]*?\]\(" if action.startswith("|") else r"(?:(?!\]\().)*?\]\("
+    pattern = re.escape(cue) + between + re.escape(location) + r"(?:#[^)]*)?\)"
+    units = text.splitlines() if action.startswith("|") else text.split("\n\n")
     matches = [
         match
-        for paragraph in text.split("\n\n")
-        for match in re.finditer(
-            pattern, " ".join(paragraph.replace("*", "").replace("`", "").split())
-        )
+        for unit in units
+        for match in re.finditer(pattern, " ".join(unit.replace("*", "").replace("`", "").split()))
     ]
     assert len(matches) == 1, (location, action)
 
@@ -620,6 +618,20 @@ def _assert_detail_roundtrip(root: Path, entry: dict, reference: CapsuleDetailRe
     assert entry["revision"] == compute_content_digest(emitted)
     assert entry["sizeBytes"] == len(emitted)
     assert Path(entry["path"]).stat().st_mode & 0o222 == 0
+
+
+def _assert_architect_review_advisory_pointer(text: str, entries: list[dict]) -> None:
+    advisory = next(
+        item for item in entries if item["sourcePath"] == "reference/review/advisory-reviews.md"
+    )
+    advisory_action = "Before commissioning/routing advisory reviews via `role_start`, read"
+    _assert_bound_action(text, advisory["path"], advisory_action)
+    with pytest.raises(AssertionError):
+        _assert_bound_action(
+            text.replace(advisory_action, "Read during intake", 1),
+            advisory["path"],
+            advisory_action,
+        )
 
 
 def test_step_details_are_named_for_reaching_their_step_not_intake(tmp_path: Path) -> None:
@@ -658,9 +670,11 @@ def test_step_details_are_named_for_reaching_their_step_not_intake(tmp_path: Pat
                 required_paragraph = _required_action_paragraph(
                     text, entry["path"], action, role, source
                 )
+                between = r"[^\n]*?\]\(" if action.startswith("|") else r"(?:(?!\]\().)*?\]\("
                 pattern = (
                     re.escape(action)
-                    + r"(?:(?!\]\().)*?\]\((?P<target>"
+                    + between
+                    + r"(?P<target>"
                     + re.escape(entry["path"])
                     + r"(?:#[^)]*)?)\)"
                 )
@@ -687,6 +701,8 @@ def test_step_details_are_named_for_reaching_their_step_not_intake(tmp_path: Pat
                     assert mutant != text
                     with pytest.raises(AssertionError):
                         _assert_step_detail_timing(mutant, entries, role, operation)
+            if role == "architect" and operation == "review":
+                _assert_architect_review_advisory_pointer(text, entries)
             message = next(
                 (
                     entry
@@ -712,15 +728,22 @@ def test_step_details_are_named_for_reaching_their_step_not_intake(tmp_path: Pat
 
 def test_curator_execution_support_is_an_unconditional_inline_output() -> None:
     root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
-    text = _compile_corpus_pair(
+    result = _compile_corpus_pair(
         root,
         (root / "composition-manifest.json").read_bytes(),
         CapsuleRoleSeat("curator", "leaf"),
         "curation",
-    ).render_instructions()
-    outputs = text.split("## Produce the handover\n", 1)[1].split("## Use direct handovers", 1)[0]
-    clause = "Every handover describes actual host and helper support, delegated work and how it was verified. State explicitly when none was used."
-    assert clause in outputs
+    )
+    exceptions = _assert_detail_owner(
+        result,
+        "reference/curator/exceptions-and-recovery.md",
+        "| Exceptions/sync |",
+    )
+    clause = (
+        "worklist count and host/helper support "
+        "(delegated work and how it was verified; state explicitly when none was used)."
+    )
+    _assert_owner_clauses(exceptions, (clause,))
     assert "{{detail:" not in clause
 
 
@@ -737,16 +760,21 @@ def _delivered_curation_for_d301(tmp_path: Path) -> tuple[str, dict]:
 
 
 def test_d301_external_backing_output_stays_inline(tmp_path: Path) -> None:
-    text, _record = _delivered_curation_for_d301(tmp_path)
+    text, record = _delivered_curation_for_d301(tmp_path)
     root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
-    role = strip_frontmatter((root / "roles/curator.md").read_text())
-    outputs = role.split("## Produce the handover\n", 1)[1].split("## Use direct handovers", 1)[0]
+    exceptions_source = (root / "reference/curator/exceptions-and-recovery.md").read_text()
+    entry = next(
+        item
+        for item in record["detailReferences"]
+        if item["sourcePath"] == "reference/curator/exceptions-and-recovery.md"
+    )
+    delivered_exceptions = Path(entry["path"]).read_text()
     clauses = (
         "Cite an external document supporting a card as an `external` sidecar reference, never as a repository path with a Git blob.",
         "Name the document in the handover evidence for the record's `origin`, so each backed record identifies its supporting document.",
     )
-    _assert_owner_clauses(outputs, clauses)
-    _assert_owner_clauses(text, clauses)
+    _assert_owner_clauses(exceptions_source, clauses)
+    _assert_owner_clauses(delivered_exceptions, clauses)
     assert "Before citing external evidence supporting a card, read" not in text
 
 
@@ -757,15 +785,8 @@ def test_d301_bootstrap_requires_reproducibility_not_reader_execution() -> None:
     text = _compile_corpus_pair(
         root, manifest, CapsuleRoleSeat(role.role, role.altitude), "bootstrap"
     ).render_instructions()
-    assert (
-        "Report claims are checked against the recorded observation, not a promise that a later live call returns the same answer."
-        in text
-    )
-    assert "record the surface, exact arguments, recorded answer and before and after state" in text
-    assert (
-        "so a reader can reproduce the observation from that evidence without asking Bootstrap."
-        in text
-    )
+    assert "State how claims meet the evidence standard." in text
+    assert "record surface, args, answer, before/after state (non-surface = observations)" in text
     assert "Readers must **re-derive every report claim**" not in text
     assert "Readers must get the same answer from the same call." not in text
 
@@ -780,9 +801,17 @@ def test_d301_delivered_authoring_resolves_actual_capsule_routing(tmp_path: Path
     authoring = Path(entry["path"]).read_text()
     assert "role admission and handover authority remain in the curation operation." in authoring
     assert "under the handover rules below" not in authoring
-    assert "## Failure handling" in text and "## Handoff / exit" in text
-    assert "ask the Worker directly about code or the Reviewer about its verdict." in text
-    assert "Ask the Manager only about ownership or authority." in text
+    assert "## Workflow" in text and "### Checks and gates" in text
+    exceptions_entry = next(
+        item
+        for item in record["detailReferences"]
+        if item["sourcePath"] == "reference/curator/exceptions-and-recovery.md"
+    )
+    exceptions = Path(exceptions_entry["path"]).read_text()
+    assert (
+        "ask the Worker directly about code or the Reviewer about its verdict; "
+        "ask the Manager only about ownership or authority." in exceptions
+    )
 
 
 def test_d301_handoff_file_is_read_for_first_review_then_reused_for_repairs(tmp_path: Path) -> None:
@@ -796,16 +825,19 @@ def test_d301_handoff_file_is_read_for_first_review_then_reused_for_repairs(tmp_
     _assert_bound_action(
         text,
         entry["path"],
-        "Before sending a memory candidate for review or returning a memory repair, read",
+        "| Coherence/msg |",
     )
-    assert "Reuse it when returning a repair." in text
-    assert "### Obtain the independent fact-check" in text
-    assert "### Repair and republish" in text
+    assert "Non-authoring seat runs [OM-2]" in text
     handoff = Path(entry["path"]).read_text()
+    assert "before sending a memory candidate for review or returning a repair" in handoff
+    assert (
+        "Receive memory findings or a passing verdict directly from the Reviewer, "
+        "and repair within that lane." in handoff
+    )
     assert "operations/review.md" not in {item["sourcePath"] for item in record["detailReferences"]}
     with shipped_composition_corpus() as (corpus, _manifest):
         review_source = (corpus / "operations/review.md").resolve()
-        review_target = quote(review_source.as_posix(), safe="/:@") + "#boundaries"
+        review_target = quote(review_source.as_posix(), safe="/:@") + "#rounds"
         root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
         assert review_source.read_bytes() == (root / "operations/review.md").read_bytes(), (
             f"Run {RENEW_COMMAND}"
@@ -827,15 +859,10 @@ def test_d301_handoff_file_is_read_for_first_review_then_reused_for_repairs(tmp_
 
 def test_curator_detail_names_use_only_curation_workflow_numbers_and_titles(tmp_path: Path) -> None:
     text, record = _delivered_curation_for_d301(tmp_path)
-    workflow = text.split("## Normal workflow\n", 1)[1].split("## Authority gates", 1)[0]
+    workflow = text.split("## Workflow\n", 1)[1].split("### Checks and gates", 1)[0]
     numbered = [int(match[1]) for match in re.finditer(r"^([1-9])\. ", workflow, re.M)]
-    assert numbered == [1, 2, 3, 4, 5]
-    for heading in (
-        "### Run the complete curation checks",
-        "### Obtain the independent fact-check",
-        "### Repair and republish",
-    ):
-        assert heading in workflow
+    assert numbered == [1, 2, 3, 4]
+    assert "### Checks and gates" in text
     assert {entry["sourcePath"] for entry in record["detailReferences"]} == {
         source
         for source, _ in [
@@ -844,10 +871,8 @@ def test_curator_detail_names_use_only_curation_workflow_numbers_and_titles(tmp_
         ]
     }
     _assert_step_detail_timing(text, record["detailReferences"], "curator", "curation")
-    role_process = text.split("## Reconcile, author and check\n", 1)[1].split(
-        "## Produce the handover", 1
-    )[0]
-    assert not re.search(r"^[1-9]\.", role_process, re.M)
+    role_body = text.split("# Operation — Curation", 1)[0]
+    assert not re.search(r"^[1-9]\.", role_body, re.M)
 
 
 def test_nested_curator_file_names_use_the_same_operation_titles(tmp_path: Path) -> None:
@@ -863,14 +888,8 @@ def test_nested_curator_file_names_use_the_same_operation_titles(tmp_path: Path)
         ingest, writer["path"], "Before a command-line run that decides or writes, read"
     )
     for source, action in (
-        (
-            "reference/curator/knowledge-ingest.md",
-            "Before preparing or ingesting authored knowledge, read",
-        ),
-        (
-            "reference/knowledge/serving-build.md",
-            "Before a command-line run that decides or writes, read",
-        ),
+        ("reference/curator/knowledge-ingest.md", "| Write/route |"),
+        ("reference/knowledge/serving-build.md", "| Knowledge/CLI |"),
     ):
         _assert_bound_action(text, entries[source]["path"], action)
     cli = Path(writer["path"]).read_text()
@@ -882,35 +901,66 @@ def test_nested_curator_file_names_use_the_same_operation_titles(tmp_path: Path)
 
 
 def test_leaf_role_texts_mark_only_their_own_completed_steps() -> None:
-    root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles/roles"
-    reviewer = (root / "reviewer.md").read_text()
-    for clause in (
-        "Before reporting, mark the task step naming your part `done` with `task_doc` on `agents-remember-task`, using `set_step`, its step identifier and a one-line note.",
-        "Do this for the review step only after the last round is recorded as passed.",
-        "If no step names your part, report that and set nothing.",
-        "Task status and acceptance remain the Manager's.",
+    root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
+    manifest = (root / "composition-manifest.json").read_bytes()
+    roles_dir = root / "roles"
+    reviewer = (roles_dir / "reviewer.md").read_text()
+    _assert_owner_clauses(
+        reviewer,
+        (
+            "Mark review `done` via `task_doc(set_step)` after last round passes.",
+            "No edits to code/Worker records/onboarding, requirement rewrites, task acceptance",
+        ),
+    )
+    worker = (roles_dir / "worker.md").read_text()
+    _assert_owner_clauses(
+        worker,
+        (
+            "Mark build `done` via `task_doc(set_step)`.",
+            "No role starts, Reviewer/Curator acts, memory/status edits, closeout",
+        ),
+    )
+    curator = (roles_dir / "curator.md").read_text()
+    _assert_owner_clauses(
+        curator,
+        (
+            "Mark curation `done` via `task_doc(set_step)`.",
+            "No Git writes, code/gate/lifecycle/contract/closeout edits",
+        ),
+    )
+    manager = (roles_dir / "manager.md").read_text()
+    _assert_owner_clauses(manager, ("you set no step for another agent",))
+
+    step_marking_clauses = (
+        "Mark only your own completed step; if no step names your part, report that and mark nothing.",
+        "Incomplete, blocked, progress and escalation reports never mark unfinished work done.",
+    )
+    for seat, operation, detail_source, action, section_marker in (
+        (
+            CapsuleRoleSeat("worker", "leaf"),
+            "implementation",
+            "reference/worker/sync-and-repairs.md",
+            "| Msg/sync/repairs |",
+            "## Worker stops, unfinished turns, and step marking",
+        ),
+        (
+            CapsuleRoleSeat("reviewer", "leaf"),
+            "review",
+            "reference/review/rounds-and-late-findings.md",
+            "| Non-leaf/rounds |",
+            "## Review stops, unfinished turns, and step marking",
+        ),
+        (
+            CapsuleRoleSeat("curator", "leaf"),
+            "curation",
+            "reference/curator/exceptions-and-recovery.md",
+            "| Exceptions/sync |",
+            "- **Stops, unfinished turns, and step marking**:",
+        ),
     ):
-        assert clause in reviewer
-    worker = (root / "worker.md").read_text()
-    curator = (root / "curator.md").read_text()
-    assert "When your part is complete, mark its task-document step `done`" in worker
-    assert "If no step names your part, report that and mark nothing." in worker
-    assert (
-        "Incomplete, blocked, progress and escalation reports never mark unfinished work done."
-        in worker
-    )
-    assert (
-        "This covers only your build and evidence steps, not review, curation, task status or acceptance."
-        in worker
-    )
-    assert "When your part is complete, mark only its task-document step `done`" in curator
-    assert "If no step names your part, report that and set nothing." in curator
-    assert (
-        "An incomplete, blocked, progress or escalation report never marks unfinished work done."
-        in curator
-    )
-    assert "This changes no task status, acceptance or landing state." in curator
-    assert "You set no step for another agent." in (root / "manager.md").read_text()
+        result = _compile_corpus_pair(root, manifest, seat, operation)
+        detail = _assert_detail_owner(result, detail_source, action)
+        _assert_owner_clauses(detail, (section_marker, *step_marking_clauses))
 
 
 def test_every_curator_stage_keeps_the_serving_build_producer_boundary() -> None:
@@ -928,18 +978,18 @@ def test_every_curator_stage_keeps_the_serving_build_producer_boundary() -> None
         text = result.render_instructions()
         if operation == "orientation":
             assert CURATOR_SERVING_STAGE_BOUNDARY in text
-        else:
-            action = (
-                "Before deciding or writing memory, read"
-                if operation == "curation"
-                else "Before resuming a memory decision or write, read"
-            )
-            pointer = "[Bind curation to the serving build](orientation.md#bind-curation-to-the-serving-build)"
+        elif operation == "recovery":
+            action = "Follow"
+            pointer = "[serving-build binding](orientation.md#bind-curation-to-the-serving-build)"
             assert action + " " + pointer in text
             mutant = text.replace(pointer, "", 1)
             assert mutant != text
             with pytest.raises(AssertionError):
                 assert action + " " + pointer in mutant
+        else:
+            _assert_bound_action(
+                text, "{{detail:reference/knowledge/serving-build.md}}", "| Knowledge/CLI |"
+            )
         cli = next(
             item
             for item in result.capsule.detail_references
@@ -950,50 +1000,44 @@ def test_every_curator_stage_keeps_the_serving_build_producer_boundary() -> None
             "[Orientation](../../operations/orientation.md#bind-curation-to-the-serving-build) owns serving-build authority."
             in cli.content.decode()
         )
-        for boundary in (
-            "Use that build both to decide and write.",
-            "A bare `agents-remember` from the executable search path may be stale; report any such use and its observed identity honestly.",
-        ):
-            assert boundary in text, (operation, boundary)
+        assert (
+            "Before a command-line interface (CLI) run that decides or writes, "
+            "bind it to the starting server's `server_info.servingBuild`." in cli.content.decode()
+        )
 
 
 def test_memory_review_instructions_select_the_independent_recorded_lane() -> None:
     root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
     manifest = (root / "composition-manifest.json").read_bytes()
     result = _compile_corpus_pair(root, manifest, CapsuleRoleSeat("curator", "leaf"), "orientation")
-    curator = result.render_instructions()
-    _assert_review_boundary_owner(
-        curator,
-        "../operations/review.md#boundaries",
-        "Before interpreting a memory-review result, read",
-    )
     reviewer = _compile_corpus_pair(
-        root, manifest, CapsuleRoleSeat("reviewer", "leaf"), "orientation"
+        root, manifest, CapsuleRoleSeat("reviewer", "leaf"), "review"
     ).render_instructions()
     assert (
-        "Before recording an ordinary leaf code round, read [code review round recording]"
+        "Open leaf code rounds via `task_doc(begin_review)`, record via `record_review`/`record_route_review`;"
         in reviewer
     )
-    assert "Before recording a memory round" in reviewer
-    assert "[review boundaries](../operations/review.md#boundaries)" in reviewer
+    assert (
+        "Memory review uses a separate lane (`reviewKind=memory`; own sealed reports/IDs/pass count, same limit; extra passes need Architect/developer instruction recorded by Manager); code verdict/baseline stay unchanged."
+        in reviewer
+    )
     review = (root / "operations/review.md").read_text()
     assert "open no review-state round" not in review
-    # P5-18: the Curator's one memory-handover pointer stands in its role file.
     curation = (root / "operations/curation.md").read_text()
     assert "memory-handover.md#send-the-whole-requested-review-or-repair" not in curation
     _assert_bound_action(
         (root / "roles/curator.md").read_text(),
         "{{detail:reference/curator/memory-handover.md}}",
-        "Before sending a memory candidate for review or returning a memory repair, read",
+        "| Coherence/msg |",
     )
     handoff = _assert_detail_owner(
         result,
         "reference/curator/memory-handover.md",
-        "Before sending a memory candidate for review or returning a memory repair, read",
+        "| Coherence/msg |",
     )
     _assert_review_boundary_owner(
         handoff,
-        "../../operations/review.md#boundaries",
+        "../../operations/review.md#rounds",
         "Before sending a memory candidate for review, read",
     )
 
@@ -1073,19 +1117,17 @@ def test_operation_audience_modes_match_their_declared_source_structure() -> Non
 
 
 def test_repairing_roles_stop_after_three_repairs_of_the_same_check_or_finding() -> None:
-    root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles/roles"
-    worker = (root / "worker.md").read_text()
-    curator = (root / "curator.md").read_text()
+    root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
+    worker = (root / "roles/worker.md").read_text()
+    curator = (root / "roles/curator.md").read_text()
+    sync_repairs = (root / "reference/worker/sync-and-repairs.md").read_text()
+    assert "stop after 3 failed repairs on one item and tell Manager." in worker
     assert (
-        "When the same check or finding still fails after three of your repairs, stop repairing."
-        in worker
+        "When the same check or finding still fails after three of the Worker's repairs, stop repairing."
+        in sync_repairs
     )
     assert (
-        "Write what you tried and what still fails, then tell the Manager; it steps the seat up or answers otherwise."
-        in worker
+        "Write what you tried and what still fails, then tell the Manager; the Manager steps the seat up or answers otherwise."
+        in sync_repairs
     )
-    assert (
-        "If the same check or finding still fails after three repairs of your own, stop repairing, record what you tried and what still fails, and tell the Manager."
-        in curator
-    )
-    assert "The Manager increases the seat's capability or answers otherwise." in curator
+    assert "stop after 3 failed repairs on one item and tell Manager." in curator

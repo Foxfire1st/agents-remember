@@ -222,17 +222,18 @@ class HandoverTextWordingTests(unittest.TestCase):
             }
         return context, workspace
 
-    def compiled(
+    def prepared(
         self,
         role: str,
         started_by: StartingAgent | None,
         *,
+        chat_started: bool = False,
         owning_architect_id: str | None = None,
-    ) -> tuple[str, dict[str, Any]]:
+    ) -> dict[str, Any]:
         context, workspace = self.launch_of(role)
         request_id = uuid.uuid4()
         role_launch_preparation._prepare_role_folders(context, workspace, request_id)
-        prepared = _compile_handover(
+        return _compile_handover(
             RoleHandoverRequest(
                 config=self.config,
                 context=context,
@@ -241,10 +242,24 @@ class HandoverTextWordingTests(unittest.TestCase):
                 ar_mcp_context=_ar_mcp_context(self.config, context, workspace),
                 request_id=request_id,
                 started_by=started_by,
+                chat_started=chat_started,
                 owning_architect_id=owning_architect_id,
             )
         )
+
+    def compiled(
+        self,
+        role: str,
+        started_by: StartingAgent | None,
+        *,
+        owning_architect_id: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        prepared = self.prepared(role, started_by, owning_architect_id=owning_architect_id)
         return prepared["prompt"], prepared["handover"]
+
+    @staticmethod
+    def _wire_projection(prompt: str) -> dict[str, Any]:
+        return json.loads(prompt.split("AR owner assignment and canonical task handover:\n", 1)[1])
 
     def test_developer_question_channel_matches_role_and_parent(self) -> None:
         ordinary = (
@@ -256,27 +271,47 @@ class HandoverTextWordingTests(unittest.TestCase):
         orchestrator = StartingAgent(
             "2f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "orchestrator", "SPRINT"
         )
-        for role, parent, routed in (
-            ("orchestrator", architect, True),
-            ("orchestrator", None, False),
-            ("manager", architect, True),
-            ("manager", orchestrator, True),
-            ("manager", None, False),
-            ("worker", architect, True),
-            ("worker", orchestrator, True),
-            (
-                "worker",
-                StartingAgent("3f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "manager", "MASTER"),
-                True,
-            ),
-            ("reviewer", architect, True),
-            ("curator", architect, True),
-            ("investigator", architect, True),
+        manager = StartingAgent("3f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "manager", "MASTER")
+        for role, parent, routed, chat_started in (
+            ("orchestrator", architect, True, False),
+            ("orchestrator", None, False, False),
+            ("manager", architect, True, False),
+            ("manager", orchestrator, True, False),
+            ("manager", None, False, False),
+            ("manager", None, False, True),
+            ("architect", None, False, True),
+            ("worker", architect, True, False),
+            ("worker", orchestrator, True, False),
+            ("worker", manager, True, False),
+            ("reviewer", architect, True, False),
+            ("curator", architect, True, False),
+            ("investigator", architect, True, False),
         ):
-            with self.subTest(role=role, parent=parent.role if parent else None):
-                prompt, handover = self.compiled(role, parent)
-                question = handover["host"]["developerQuestions"]
-                self.assertIn(question, prompt)
+            with self.subTest(
+                role=role,
+                parent=parent.role if parent else None,
+                chat_started=chat_started,
+            ):
+                prepared = self.prepared(role, parent, chat_started=chat_started)
+                prompt, handover = prepared["prompt"], prepared["handover"]
+                complete = json.loads(prepared["handoverFileContent"])
+                projection = self._wire_projection(prompt)
+                question = complete["host"]["developerQuestions"]
+                self.assertEqual(handover["host"]["developerQuestions"], question)
+                self.assertNotIn("developerQuestions", projection["host"])
+                self.assertNotIn("ownerRelation", projection["host"])
+                self.assertNotIn("assignment", projection)
+                self.assertNotIn("canonicalTaskReportPath", projection)
+                self.assertIn("assignment", complete)
+                self.assertIn("canonicalTaskReportPath", complete)
+                self.assertNotIn(question, prompt)
+                expected_route = (
+                    {"mode": "parent", "agentId": parent.agent_id}
+                    if routed and parent is not None
+                    else {"mode": "own-chat"}
+                )
+                self.assertEqual(projection["host"]["developerQuestionRoute"], expected_route)
+                self.assertEqual(complete["host"]["developerQuestionRoute"], expected_route)
                 if routed and role in {"manager", "orchestrator"}:
                     assert parent is not None
                     self.assertIn(
@@ -294,20 +329,40 @@ class HandoverTextWordingTests(unittest.TestCase):
                         "send what needs the developer's decision to that parent",
                         question,
                     )
-                    # A question stays addressed to the parent's agent ID (MIK-R93
-                    # rules 1 and 10; architect QADDR ruling option (a)): rule 10's
-                    # return address is not extended to questions.
                     self.assertIn(f"addressed to agent {parent.agent_id}", question)
                     self.assertNotIn("addressed to the return address", question)
                     self.assertIn("role_message on agents-remember-task", question)
                     self.assertIn("takes precedence over generic own-chat guidance", question)
                     self.assertIn("do not end your turn on the question", question)
+                    if role in {"worker", "reviewer", "curator"} and parent.role != "manager":
+                        self.assertEqual(
+                            projection["host"]["parent"]["agentId"],
+                            parent.agent_id,
+                        )
+                        self.assertEqual(
+                            projection["host"]["parent"]["returnAddress"]["role"],
+                            "manager",
+                        )
                 else:
                     self.assertEqual(question.encode(), ordinary.encode())
+                    self.assertEqual(
+                        complete["host"]["entryMode"],
+                        "chat-role-start" if chat_started else "dashboard-role-start",
+                    )
+                    self.assertEqual(
+                        projection["host"],
+                        {"developerQuestionRoute": {"mode": "own-chat"}},
+                    )
         for role in LAUNCHER_ROLES:
             with self.subTest(dashboard_role=role):
-                _prompt, handover = self.compiled(role, None)
-                self.assertEqual(handover["host"]["developerQuestions"].encode(), ordinary.encode())
+                prepared = self.prepared(role, None)
+                complete = json.loads(prepared["handoverFileContent"])
+                projection = self._wire_projection(prepared["prompt"])
+                self.assertEqual(complete["host"]["developerQuestions"].encode(), ordinary.encode())
+                self.assertEqual(
+                    projection["host"]["developerQuestionRoute"],
+                    {"mode": "own-chat"},
+                )
 
     def test_owner_relation_routes_developer_questions_and_preserves_coordinators(
         self,
@@ -322,9 +377,21 @@ class HandoverTextWordingTests(unittest.TestCase):
         for role in (one for one in LAUNCHER_ROLES if one != "bootstrap"):
             for parent in (None, *parents):
                 with self.subTest(role=role, parent=parent.role if parent else None):
-                    prompt, handover = self.compiled(role, parent)
-                    relation = handover["host"]["ownerRelation"]
-                    self.assertIn(relation, prompt)
+                    prepared = self.prepared(role, parent)
+                    prompt, handover = prepared["prompt"], prepared["handover"]
+                    complete = json.loads(prepared["handoverFileContent"])
+                    projection = self._wire_projection(prompt)
+                    relation = complete["host"]["ownerRelation"]
+                    self.assertEqual(handover["host"]["ownerRelation"], relation)
+                    self.assertNotIn("ownerRelation", projection["host"])
+                    self.assertNotIn(relation, prompt)
+                    expected_route = (
+                        {"mode": "parent", "agentId": parent.agent_id}
+                        if parent is not None
+                        else {"mode": "own-chat"}
+                    )
+                    self.assertEqual(projection["host"]["developerQuestionRoute"], expected_route)
+                    self.assertEqual(complete["host"]["developerQuestionRoute"], expected_route)
                     if parent is None:
                         expected = "This role was started from the dashboard launcher. It has no parent agent and needs none: the developer who reads this chat owns its decisions. The selected AR sprint/master/leaf is work scope, not a parent."
                         self.assertEqual(relation.encode(), expected.encode())
@@ -342,13 +409,12 @@ class HandoverTextWordingTests(unittest.TestCase):
                         if role == "orchestrator":
                             self.assertIn("Forward Architect matters unchanged", relation)
                         self.assertNotIn("addressed to its agent id", relation)
+                        self.assertNotIn("questions about the assignment and your result", relation)
                         self.assertNotIn("Send that agent only what needs", relation)
                         self.assertNotIn("questions about the assignment and your result", prompt)
                     elif role in {"worker", "reviewer", "curator"}:
                         self.assertIn("Send no routine result to the parent.", relation)
                         self.assertIn("leafSeats.roleMessageArguments", relation)
-                        # A leaf's parent is the current Manager of its master, and a
-                        # return goes to that role with its task references (rule 10).
                         self.assertIn("the current Manager of this master", relation)
                         self.assertIn("addressed to the return address role manager", relation)
                         self.assertNotIn("addressed to its agent id", relation)
@@ -382,10 +448,18 @@ class HandoverTextWordingTests(unittest.TestCase):
                 projected = json.loads(
                     prompt.split("AR owner assignment and canonical task handover:\n", 1)[1]
                 )["host"]
-                self.assertEqual(projected["parent"], handover["host"]["parent"])
-                self.assertEqual(projected["parent"]["agentId"], parent.agent_id)
-                self.assertEqual(projected["parent"]["returnAddress"], expected_return)
-                relation = projected["ownerRelation"]
+                self.assertEqual(handover["host"]["parent"]["returnAddress"], expected_return)
+                self.assertEqual(
+                    projected["parent"],
+                    {
+                        "agentId": parent.agent_id,
+                        "role": "orchestrator",
+                        "task": "SPRINT",
+                        "returnAddress": {"role": "orchestrator"},
+                    },
+                )
+                self.assertNotIn("ownerRelation", projected)
+                relation = handover["host"]["ownerRelation"]
                 self.assertIn("Send Architect matters and developer questions", relation)
                 self.assertIn("addressed to the return address role orchestrator", relation)
                 if owning_architect_id is None:
@@ -405,19 +479,20 @@ class HandoverTextWordingTests(unittest.TestCase):
             ("a leaf role started by an agent", "worker", parent),
         ):
             with self.subTest(label):
-                prompt, handover = self.compiled(role, started_by)
+                prepared = self.prepared(role, started_by)
+                prompt, handover = prepared["prompt"], prepared["handover"]
                 self.assertIn(REPORT_DIRECTORY, prompt)
                 self.assertEqual(forbidden_in(prompt), [])
                 self.assertEqual(forbidden_in(json.dumps(handover, ensure_ascii=False)), [])
-                # The first message carries the reader arguments; the rest of the reader context
-                # is in the complete hand-over file the message names (MIK-R193 rule 1).
+                # The first message carries collapsed shared reader arguments; the rest of the
+                # reader context and the complete handover JSON stay in the companion file.
                 projection = json.loads(
                     prompt.split("AR owner assignment and canonical task handover:\n", 1)[1]
                 )
                 reader = handover["arMcpContext"]
                 reader_arguments = reader["readerArguments"]
                 expected = (
-                    {"readerArguments": reader_arguments}
+                    {"readerArguments": {"shared": reader_arguments["context_packet"]}}
                     if reader_arguments is not None
                     else {
                         key: reader[key]
@@ -426,8 +501,9 @@ class HandoverTextWordingTests(unittest.TestCase):
                     }
                 )
                 self.assertEqual(projection["arMcpContext"], expected)
+                self.assertNotIn("handoverFile", projection)
                 self.assertEqual(
-                    projection["handoverFile"]["path"],
+                    prepared["handoverFile"]["path"],
                     handover["taskReportPath"].rsplit(".", 1)[0] + ".handover.json",
                 )
 
@@ -463,48 +539,21 @@ class HandoverTextWordingTests(unittest.TestCase):
         host = handover["host"]
         self.assertEqual((host["name"], host["arToolServer"]), ("Paseo", TOOL_SERVER))
         self.assertIn(
-            f"Call every Agents Remember tool on the tool server named {TOOL_SERVER}",
+            f"Use {TOOL_SERVER} (agents_remember_task:",
             host["arMcpUsage"],
         )
         for said in (
-            "and its tools are in this session.",
-            # A lookup by the server's name as it is spelled here can find nothing, and one by a
-            # tool's own name finds another installation's tool: the server's name, in either
-            # spelling, is what to look for.
-            "A harness shows them in its own way, so find them by the server's name in either "
-            f"spelling, {TOOL_SERVER} or agents_remember_task.",
-            "Either a tool is declared to you under a name that contains that spelling and ends "
-            "in the tool's own name, for example mcp__agents_remember_task__server_info: call "
-            "it.",
-            "Or your harness's own instructions to you list a server or namespace in that "
-            "spelling, for example mcp__agents_remember_task, and say how its tools are "
-            "reached, for example through the harness's tool search or its script tool: reach "
-            "them that way, and learn a tool's arguments there too.",
-            # A tool that proxies other servers answers for those servers only.
-            "A tool that lists, describes, connects or proxies tool servers holds only the "
-            f"servers it was configured with. When it does not list {TOOL_SERVER} itself, do "
-            "not use it for AR tools at all, not even to search for or describe a tool by its "
-            "name: what it answers then comes from another installation, and its answer "
-            '"server not found" speaks only for that tool.',
-            # The developer's own installation, which every harness carries, by its name; and
-            # any other AR tool server, whatever its name: not connected to, listed or called.
-            f"Do not connect to, list, describe or call a tool server named {OTHER_INSTALLATION} "
-            "or any of its tools, nor an AR tool server under any other name: it belongs to "
-            "another installation, its tools carry the same tool names, and nothing found there "
-            "serves this assignment.",
-            f"look once more before reporting {TOOL_SERVER} missing, and report that instead of "
-            "substituting another.",
-            'Add the requested files to read_ar_files as a list of path strings such as "<path '
-            'in the repository>". A compact row gives its path and, where applicable, whether'
-            " it exists, its card's status and the path of its brief with saved freshness. Fuller"
-            " replies can include rule text. A covering write renews a missing or older brief"
-            " when the writer can refresh it. Read source files with your own file tool.",
-            # Every hand-over carries the two sentences on the briefs.
-            "Before editing a source file, open its saved brief when available at briefs/<path "
-            "in the repository>.md under the memory root with your own file tool (source brief "
-            "folders have INDEX.md and briefs/_task/ has no index). When current memory finds "
-            "neither a card nor a qualifying brief for a file it can assess, no rule, weakness,"
-            " decision or standing document is recorded there.",
+            f"Use {TOOL_SERVER} (agents_remember_task: "
+            "mcp__agents_remember_task__server_info or "
+            "mcp__agents_remember_task search/script); "
+            "ignore unlisted proxies.",
+            f"Never use {OTHER_INSTALLATION} or other AR servers.",
+            f"Retry once if {TOOL_SERVER} is missing.",
+            "Pass arMcpContext.readerArguments.shared; read_ar_files=path strings; "
+            "source via file tool.",
+            "Pre-edit: open memory briefs/<repo-path>.md (INDEX.md; "
+            "briefs/_task/ none; absent=none).",
+            "No task_context: stop/report; never drop/substitute root.",
         ):
             with self.subTest(said=said):
                 self.assertIn(said, host["arMcpUsage"])
@@ -514,7 +563,7 @@ class HandoverTextWordingTests(unittest.TestCase):
         # again as a field of the handover.
         self.assertEqual(prompt.count(host["arMcpUsage"]), 1)
         self.assertLess(
-            prompt.index(f"AR tools, before your first tool call: {host['arMcpUsage']}"),
+            prompt.index(f"AR tools: {host['arMcpUsage']}"),
             prompt.index("AR owner assignment and canonical task handover:"),
         )
         self.assertEqual(
@@ -564,21 +613,34 @@ class HandoverTextWordingTests(unittest.TestCase):
         )
         self.assertIn("taskless role has no task document", handover["ownerHandover"])
         self.assertTrue(
-            prompt.startswith("AR ROLE BRIEF: the dashboard launcher started this role")
+            prompt.startswith("AR ROLE BRIEF: Effective instructions and canonical handover")
         )
+        self.assertIn("\n\n## Launch Context\n\nStarted by: the dashboard launcher.\n\n", prompt)
         self.assertEqual(handover["schema"], "ar-role-handover/v1")
         self.assertEqual(handover["agent"], "some-provider")
 
     def test_a_role_without_a_parent_is_told_it_needs_none_and_a_started_role_who_started_it(
         self,
     ) -> None:
-        _prompt, manual = self.compiled("architect", None)
+        manual_prompt, manual = self.compiled("architect", None)
         self.assertEqual(manual["host"]["entryMode"], "dashboard-role-start")
         self.assertIsNone(manual["host"]["parent"])
+        self.assertEqual(manual["host"]["developerQuestionRoute"], {"mode": "own-chat"})
         self.assertIn("It has no parent agent and needs none", manual["host"]["ownerRelation"])
+        self.assertTrue(
+            manual_prompt.startswith("AR ROLE BRIEF: Effective instructions and canonical handover")
+        )
+        self.assertIn(
+            "\n\n## Launch Context\n\nStarted by: the dashboard launcher.\n\n",
+            manual_prompt,
+        )
         parent = StartingAgent("1f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "architect", "Projects")
         prompt, started = self.compiled("orchestrator", parent)
         self.assertEqual(started["host"]["entryMode"], "agent-role-start")
+        self.assertEqual(
+            started["host"]["developerQuestionRoute"],
+            {"mode": "parent", "agentId": parent.agent_id},
+        )
         self.assertEqual(
             started["host"]["parent"],
             {
@@ -600,8 +662,14 @@ class HandoverTextWordingTests(unittest.TestCase):
         )
         self.assertNotIn("addressed to its agent id", started["host"]["ownerRelation"])
         self.assertTrue(
-            prompt.startswith(
-                f"AR ROLE BRIEF: agent {parent.agent_id} (architect · Projects) started this role"
+            prompt.startswith("AR ROLE BRIEF: Effective instructions and canonical handover")
+        )
+        static_prefix, launch_tail = prompt.split("\n\n## Launch Context\n\n", 1)
+        self.assertNotIn("Started by:", static_prefix)
+        self.assertNotIn(parent.agent_id, static_prefix)
+        self.assertTrue(
+            launch_tail.startswith(
+                f"Started by: agent {parent.agent_id} (architect · Projects).\n\n"
             )
         )
 

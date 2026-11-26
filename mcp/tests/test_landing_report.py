@@ -397,8 +397,10 @@ def test_role_texts_hold_landing_sentences_everywhere() -> None:
     # test can still claim is that both surviving copies carry the sentences.
     assert len(roots) == 2
     for root in sorted(roots):
-        curator = (root / "l-01-agent-lifecycles" / "roles" / "curator.md").read_text()
-        _assert_curator_landing_text(curator)
+        detail = (
+            root / "l-01-agent-lifecycles" / "reference" / "curator" / "exceptions-and-recovery.md"
+        ).read_text()
+        _assert_curator_landing_text(detail)
 
     lifecycle = REPO_ROOT / "skills" / "l-01-agent-lifecycles"
     manifest_bytes = (lifecycle / "composition-manifest.json").read_bytes()
@@ -425,9 +427,14 @@ def test_role_texts_hold_landing_sentences_everywhere() -> None:
         outcome = compile_admitted_capsule(binding, request)
         assert outcome.ok, outcome.render_explanation()
         assert outcome.result is not None
-        text = outcome.result.render_instructions()
+        delivery = capsule_delivery_from(outcome.result)
+        exceptions_ref = next(
+            entry
+            for entry in delivery.detail_references
+            if entry.source_path == "reference/curator/exceptions-and-recovery.md"
+        )
         assert sentences == CURATOR_SENTENCES
-        _assert_curator_landing_text(text)
+        _assert_curator_landing_text(exceptions_ref.content.decode("utf-8"))
 
 
 @pytest.mark.parametrize(
@@ -436,7 +443,7 @@ def test_role_texts_hold_landing_sentences_everywhere() -> None:
 def test_reviewer_landing_sentences_are_delivered_before_memory_review(
     root: Path, tmp_path: Path
 ) -> None:
-    """Both findings remain inline in the actual delivered Reviewer role."""
+    """Both findings remain delivered to Reviewer through its bound Tier-2 rounds detail."""
     lifecycle = root / "l-01-agent-lifecycles"
     manifest = (lifecycle / "composition-manifest.json").read_bytes()
     parsed = parse_composition_manifest(manifest)
@@ -476,17 +483,27 @@ def test_reviewer_landing_sentences_are_delivered_before_memory_review(
     assert "reference/review-memory-changes.md" not in {
         entry.source_path for entry in delivery.detail_references
     }
-    instructions, _ = compose_launch_instructions(delivery, str(tmp_path / "review.md"), {})
-    heading = "## Inspect and verify the candidate\n"
-    assert role_text.count(heading) == 1
-    section = role_text.split(heading, 1)[1].split("\n## ", 1)[0]
+    rounds_ref = next(
+        entry
+        for entry in delivery.detail_references
+        if entry.source_path == "reference/review/rounds-and-late-findings.md"
+    )
+    instructions, record = compose_launch_instructions(delivery, str(tmp_path / "review.md"), {})
+    assert any(
+        item["sourcePath"] == "reference/review/rounds-and-late-findings.md"
+        for item in record["detailReferences"]
+    )
+    assert "reference/review/rounds-and-late-findings.md" in role_text
+    assert "review.detail-" in instructions
+    rounds_text = rounds_ref.content.decode("utf-8")
+    heading = "## Omission repairs, whole-set findings, and memory changes\n"
+    assert rounds_text.count(heading) == 1
+    section = rounds_text.split(heading, 1)[1].split("\n## ", 1)[0]
     reading = " ".join(section.split())
-    emitted = " ".join(instructions.split())
     assert "cutCards" in reading and "addedFiles" in reading
     for sentence in REVIEWER_SENTENCES:
         flat_sentence = " ".join(sentence.split())
-        assert flat_sentence in reading, f"{sentence!r} missing in Reviewer role {root}"
-        assert flat_sentence in emitted, f"{sentence!r} missing in delivered {root}"
+        assert flat_sentence in reading, f"{sentence!r} missing in Reviewer detail {root}"
         mutant = reading.replace(flat_sentence, "", 1)
         assert mutant != reading
         with pytest.raises(AssertionError):

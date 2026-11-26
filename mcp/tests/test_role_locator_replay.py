@@ -198,6 +198,7 @@ def test_real_detailed_preparation_refuses_a_collision_before_artifact_writes(
     assert list(foreign.iterdir()) == [marker]
     root = leaf_preparation.config.coordination_root.parent
     assert not list(root.rglob("*.detail-*.md"))
+    assert not list(root.rglob("*.details"))
     assert not list(root.rglob("*.handover.txt"))
     assert not list(root.rglob("*.handover.json"))
     assert not list(root.rglob("*-native-executions/**/*.json"))

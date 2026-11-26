@@ -1,995 +1,223 @@
 {
   "distinctActions": {
-    "core/every-role.md": {
-      "actions": [
-        "every-role-before-landing-leaves-whose-reviews-passed-5a926db702",
-        "every-role-before-proposing-a-requirement-change-to-your-parent-2f5715877b",
-        "every-role-before-proposing-an-input-limit-or-a-new-guard-370ccadee2",
-        "every-role-before-sending-a-requirement-to-a-worker-aec2d93496",
-        "every-role-for-a-check-that-blocks-a-legal-operation-0e274962e8",
-        "every-role-for-an-uncertain-start-6adb914ea9",
-        "every-role-for-helper-collection-and-continuation-54243a673b",
-        "every-role-include-the-review-mode-canonical-task-and-review-purpose-seam-e-646a81cc16",
-        "every-role-the-leaf-task-document-requirement-62fa3ca74c",
-        "every-role-the-requirement-set-dispatched-to-the-builder-exact-stable-ident-58f10d91d0",
-        "every-role-the-requirement-set-includes-identifiers-versions-packets-and-th-817a1b73bd",
-        "every-role-when-the-send-answers-held-81d93d74fa"
-      ],
-      "reason": "the shared block's sections serve separate acts: requirement limits, helper collection, landing order, held sends, uncertain starts, and the approval record named inside an intake or input list"
-    },
-    "criteria/code-seam.md": {
-      "actions": [
-        "code-seam-row-atomic-master-integration-review-0519ef33fd",
-        "code-seam-row-leaf-code-change-review-9eebf60e9e",
-        "code-seam-row-leaf-full-loop-review-a35fb2ddc0",
-        "code-seam-row-master-exit-3d314620d6",
-        "code-seam-row-super-exit-2797a4042b"
-      ],
-      "reason": "the review-mode table: each row names the criteria of a different review mode"
-    },
-    "criteria/doctrine.md": {
-      "actions": [
-        "doctrine-row-atomic-master-integration-review-bf3b5022a9",
-        "doctrine-row-leaf-code-change-review-727a0a3ce2",
-        "doctrine-row-leaf-full-loop-review-b0a87d90ca",
-        "doctrine-row-master-exit-0aba781235",
-        "doctrine-row-super-exit-2f5d7f2e6d"
-      ],
-      "reason": "the review-mode table: each row names the criteria of a different review mode"
-    },
-    "criteria/onboarding-memory.md": {
-      "actions": [
-        "onboarding-memory-row-atomic-master-integration-review-5e90f752a9",
-        "onboarding-memory-row-leaf-code-change-review-5b5d9c4b71",
-        "onboarding-memory-row-leaf-full-loop-review-7065098b0d",
-        "onboarding-memory-row-master-exit-b62465b8a0",
-        "onboarding-memory-row-super-exit-3d37395671"
-      ],
-      "reason": "the review-mode table: each row names the criteria of a different review mode"
-    },
-    "criteria/report-verification.md": {
-      "actions": [
-        "report-verification-row-atomic-master-integration-review-0ab3fcea32",
-        "report-verification-row-leaf-code-change-review-1b166643eb",
-        "report-verification-row-leaf-full-loop-review-8af368406e",
-        "report-verification-row-master-exit-29540aa9e7",
-        "report-verification-row-plan-review-b8f66ec7ae",
-        "report-verification-row-super-exit-8eb3776c20"
-      ],
-      "reason": "the review-mode table: each row names the criteria of a different review mode"
-    },
-    "operations/bootstrap.md": {
-      "actions": [
-        "bootstrap-before-an-effectful-setup-step-067bdcc0ce",
-        "bootstrap-before-continuing-setup-with-a-missing-branch-choice-memory-repos-d80fd44c97",
-        "bootstrap-before-initializing-user-settings-or-handling-an-existing-setting-99d588d117",
-        "bootstrap-before-resuming-a-failed-step-706d9458c9",
-        "bootstrap-opens-owns-the-ordered-steps-their-surfaces-failure-states-and-au-c909f7978b",
-        "bootstrap-state-in-the-report-how-its-claims-meet-31fa5d7257",
-        "bootstrap-state-the-current-fact-and-report-a-surface-that-still-states-a-s-ab1da3694a",
-        "bootstrap-use-the-required-workspace-facts-in-2b549866ed"
-      ],
-      "reason": "Bootstrap's role file points to separate steps of its operation: inputs, workflow, effectful steps, settings, missing decisions, failed steps, failure cases and report evidence"
-    },
-    "operations/closeout.md": {
-      "actions": [
-        "closeout-before-coordinating-paired-closeout-5fc3d144be",
-        "closeout-before-responding-to-gate-findings-from-closeout-preview-or-any-la-7dbfcf8f22"
-      ],
-      "reason": "gate findings during closeout versus coordinating paired closeout"
-    },
     "operations/coordination.md": {
       "actions": [
-        "coordination-before-delegating-coordination-0b1e038a7c",
-        "coordination-before-directing-handovers-repair-loops-review-rounds-memory-p-969d9acb28",
-        "coordination-before-filling-or-reading-message-fields-26e69910c5",
-        "coordination-before-messaging-a-role-agent-through-role-message-on-agents-r-91f406d815",
-        "coordination-before-reconciling-that-start-e5ede19f6c",
-        "coordination-before-restoring-an-existing-ar-leaf-1eb338e6a3",
-        "coordination-before-starting-a-role-and-delivering-its-first-intake-615aa479c1",
-        "coordination-before-starting-and-coordinating-the-leaf-c94bd48d5c",
-        "coordination-before-starting-or-messaging-a-role-ca11cab1a6",
-        "coordination-before-the-reviewer-s-first-inspection-830d329beb",
-        "coordination-for-a-closeout-result-notice-f58ea0a572",
-        "coordination-when-role-message-on-agents-remember-task-answers-held-because-ef792fb8c6",
-        "coordination-when-role-message-on-agents-remember-task-returns-held-because-373b1848c3"
+        "coordination-check-packet-deps-before-starting-integrating-the-produ-5089bd973b",
+        "coordination-follow-b321c4fb90",
+        "coordination-preserve-the-leaf-s-admitted-code-memory-contract-pair-5ea7d5fe7b",
+        "coordination-reconcile-uncertain-role-start-with-the-same-request-id-dd59a93c4b",
+        "coordination-row-manager-brief-stages-role-start-hand-off-seats-reti-8dc9bf2985"
       ],
-      "reason": "separate coordination acts: delegating, starting, messaging, the Reviewer's first intake, directing running work, notices, held sends, reconciliation and review records"
-    },
-    "operations/curation.md": {
-      "actions": [
-        "curation-before-closeout-51e9894b6a",
-        "curation-before-contacting-another-leaf-af03695473",
-        "curation-before-contacting-the-manager-about-curation-f0f0c1a715",
-        "curation-before-continuing-after-a-memory-tool-failure-f4e04b998c",
-        "curation-before-handover-8f0f557a2c",
-        "curation-before-intake-and-writer-admission-b582a83569",
-        "curation-before-reporting-a-completed-curation-result-aac6a303ef",
-        "curation-before-running-curation-checks-572c914a4e",
-        "curation-before-sending-an-evidenced-code-concern-8b34e89080",
-        "curation-before-validating-coherence-7d7016e082"
-      ],
-      "reason": "the Curator's separate curation steps: intake, checks, coherence, fact-check, results, concerns, contacts and tool failures"
-    },
-    "operations/implementation.md": {
-      "actions": [
-        "implementation-before-deciding-closeout-after-a-leaf-sync-4c358e1a57",
-        "implementation-before-deciding-whether-a-handover-was-taken-or-responding-t-d45a8a09fa",
-        "implementation-before-handing-over-a-frozen-candidate-87d208f864",
-        "implementation-before-making-a-measurement-tooling-handover-37ae28e7b2",
-        "implementation-before-recovering-after-that-sync-6063dfe817",
-        "implementation-before-repairing-a-native-memory-file-sync-conflict-01008b5e93",
-        "implementation-before-repairing-a-sealed-finding-in-this-task-s-own-files-6c8c979b8f",
-        "implementation-before-responding-to-a-non-work-reply-an-empty-or-doubled-se-6cfad93f70",
-        "implementation-before-responding-to-a-non-work-reply-empty-or-doubled-seat--941ac3a166",
-        "implementation-before-running-the-final-checks-after-the-pass-51cc91bc41",
-        "implementation-before-writing-the-report-650a46d425",
-        "implementation-when-one-small-item-costs-about-an-hour-a-second-repair-roun-7fbad14ae9",
-        "implementation-when-ruling-on-a-measured-defect-or-costly-small-work-adf28f77a3",
-        "implementation-when-the-master-line-moves-run-the-supported-sync-of-your-ow-19e3c76ab6"
-      ],
-      "reason": "separate Worker and sync acts: reports, freeze and measurement handovers, receipts, sealed repairs, sync and its conflicts, cost rulings and seat refusals"
+      "reason": "separate coordination acts: planning delegation, recovery reconciliation, and role reference index"
     },
     "operations/orientation.md": {
       "actions": [
-        "orientation-before-acting-on-a-denied-or-unanswered-harness-request-1482ca975f",
-        "orientation-before-an-admitted-canonical-task-document-edit-4f585ccb08",
-        "orientation-before-asking-a-question-27ac79f734",
-        "orientation-before-changing-a-canonical-task-document-57ad8d7cbb",
-        "orientation-before-deciding-a-formal-permission-1a1510e105",
-        "orientation-before-deciding-or-writing-memory-5073c98684",
-        "orientation-before-editing-a-canonical-task-document-or-marking-your-own-co-33a8fd6941",
-        "orientation-before-making-a-formal-permission-decision-b8e750b84f",
-        "orientation-before-responding-to-an-advisory-reviewer-s-permission-prompt-e5d3f86652",
-        "orientation-before-resuming-a-memory-decision-or-write-3d77526a1f",
-        "orientation-before-sending-a-developer-question-or-handling-a-relayed-answe-3292c9d062",
-        "orientation-before-sending-a-developer-question-or-recognizing-a-relayed-an-fd9dd3021d",
-        "orientation-before-sending-developer-questions-or-handling-relayed-answers-700fb4ea81",
-        "orientation-preserve-the-read-rules-under-22f85c695e"
+        "orientation-follow-85e926cf8e",
+        "orientation-row-exceptions-sync-3b0147c66e"
       ],
-      "reason": "separate orientation acts: developer questions, task-document edits, formal permissions, harness denials, memory decisions and read rules"
-    },
-    "operations/planning.md": {
-      "actions": [
-        "planning-before-assigning-an-issue-to-another-open-leaf-d2aec569fd",
-        "planning-before-releasing-a-packet-7fa00e952d"
-      ],
-      "reason": "releasing a packet versus assigning an issue to another leaf"
-    },
-    "operations/review.md": {
-      "actions": [
-        "review-before-checking-repaired-findings-at-the-round-limit-42fbe8913d",
-        "review-before-commissioning-advisory-independent-reviews-0b5f60fa23",
-        "review-before-coordinating-a-memory-review-6c18151a07",
-        "review-before-handling-findings-received-after-sealing-including-those-arri-2257e515d0",
-        "review-before-inspecting-the-assigned-packet-or-candidate-5a94ae7ca5",
-        "review-before-opening-or-recording-an-ordinary-code-review-round-fb43a2bf0c",
-        "review-before-rechecking-a-repaired-worker-record-ae2b005c06",
-        "review-before-recording-a-memory-round-requesting-an-extra-round-or-handlin-89bdef8876",
-        "review-before-recording-an-ordinary-leaf-code-round-a938dfa412",
-        "review-write-and-record-the-verdict-then-follow-3d45d3319e"
-      ],
-      "reason": "separate review acts: inspection, verdict handover, round records, late findings, repaired-finding checks, advisory reviews and memory-review coordination"
+      "reason": "curator role index versus recovery serving-build pointer"
     },
     "reference/bootstrap/foundation-state.md": {
       "actions": [
-        "foundation-state-before-naming-the-next-step-in-the-conversation-and-report-de2636bc9c",
-        "foundation-state-before-reading-and-reporting-the-knowledge-foundation-s-st-5f3255ffd9"
+        "foundation-state-foundation-report-knowledge-state-follow-f507e5b488",
+        "foundation-state-row-report-memory-init-cmds-6573340672"
       ],
-      "reason": "reading and reporting the state versus naming the next step"
+      "reason": "bootstrap role index versus step 8 foundation handover"
+    },
+    "reference/coordination/shared/closeout-recovery.md": {
+      "actions": [
+        "closeout-recovery-apply-task-doc-edits-projectioneffects-eb70b8f100",
+        "closeout-recovery-manager-uses-standing-leaf-authority-for-routine-paired-2ea81db0e2",
+        "closeout-recovery-permission-held-permission-pending-44e5f71829",
+        "closeout-recovery-row-manager-brief-stages-role-start-hand-off-seats-reti-3062cdf8c5",
+        "closeout-recovery-row-meas-advisory-flat-closeout-fd198cb179",
+        "closeout-recovery-row-seats-retire-child-3rd-sync-worktree-closeout-previ-cfc122ac45",
+        "closeout-recovery-worktree-closeout-apply-worktree-status-worktree-operat-264439c738"
+      ],
+      "reason": "role reference index versus separate coordination closeout/projection/permission triggers"
     },
     "reference/coordination/shared/requirement-design.md": {
       "actions": [
-        "requirement-design-before-authoring-or-amending-a-requirement-and-its-task--54d61e4057",
-        "requirement-design-before-grouping-primary-and-additional-same-topic-packet-c6cc728029"
+        "requirement-design-assign-stable-requirement-id-version-with-1-packet-per--2c784460b1",
+        "requirement-design-row-reqs-task-doc-context-packet-knowledge-read-171c816e34"
       ],
-      "reason": "authoring a requirement versus grouping same-topic packets"
-    },
-    "reference/curator/card-formats-and-citations.md": {
-      "actions": [
-        "card-formats-and-citations-before-checking-or-repairing-citations-870073a455",
-        "card-formats-and-citations-before-creating-or-maintaining-cards-or-overview-93a803a9f5",
-        "card-formats-and-citations-before-maintaining-the-entity-catalog-1e13763169",
-        "card-formats-and-citations-before-writing-card-history-87a3567855"
-      ],
-      "reason": "cards, the entity catalog, card history and citations are separate sections and acts"
-    },
-    "reference/curator/governing-sources.md": {
-      "actions": [
-        "governing-sources-before-authoring-a-governing-decision-record-b73cbfcf70",
-        "governing-sources-before-explaining-an-assigned-contract-7b9040f96b"
-      ],
-      "reason": "explaining a contract versus authoring a governing decision record"
-    },
-    "reference/curator/intent-reconciliation.md": {
-      "actions": [
-        "intent-reconciliation-before-promoting-a-historical-oddity-8a72dc8862",
-        "intent-reconciliation-before-reconciling-current-intent-ruled-intent-and-im-8f92dc66d4"
-      ],
-      "reason": "reconciliation itself versus the failure case of promoting an oddity"
-    },
-    "reference/knowledge/commands.md": {
-      "actions": [
-        "commands-before-a-knowledge-system-command-or-check-e11771b5d9",
-        "commands-before-planning-repository-work-f354fc415a",
-        "commands-before-retrieving-its-context-again-64f475e9a9",
-        "commands-before-using-a-knowledge-command-or-acting-on-its-result-f0057bd956",
-        "commands-before-using-a-knowledge-command-or-interpreting-its-result-ffa261af02",
-        "commands-before-using-a-knowledge-command-or-its-result-f62bf894a2",
-        "commands-before-using-a-knowledge-system-command-or-interpreting-its-result-736de9c39c"
-      ],
-      "reason": "a role's own command use versus the shared rule for retrieving lost context without Bootstrap"
-    },
-    "reference/knowledge/use.md": {
-      "actions": [
-        "use-before-checking-code-and-memory-23bce46d91",
-        "use-before-diagnosing-b338e1f9ff",
-        "use-before-diagnosing-a-failing-test-d3b0c7772d",
-        "use-before-editing-source-b26c8e8871",
-        "use-before-interpreting-a-knowledge-read-75e1759f9d",
-        "use-before-interpreting-their-resolution-93247df79f",
-        "use-before-investigating-repository-code-ff130ed307",
-        "use-before-relying-on-storage-or-path-eligibility-cross-repository-allowanc-13fc42b13f",
-        "use-when-inspecting-changes-fd041ceb7c"
-      ],
-      "reason": "separate read moments: editing, diagnosing, checking memory, interpreting a read or a resolution, investigating, inspecting changes, and the shared settings-source rule"
+      "reason": "architect role index versus planning requirement-packet creation step"
     },
     "reference/message-handover.md": {
       "actions": [
-        "message-handover-before-delivering-a-developer-question-to-a-recipient-or-p-3ee8adce5f",
-        "message-handover-before-handing-over-work-896f91e068",
-        "message-handover-before-handing-work-to-a-waiting-seat-c6d5ce942c",
-        "message-handover-before-locating-a-filed-message-or-receipt-24d3455219",
-        "message-handover-before-responding-to-a-full-store-refusal-0c68571173",
-        "message-handover-before-sending-a-handover-37bf446167",
-        "message-handover-before-sending-a-message-6112e9ce74"
+        "message-handover-body-unlimited-over-limit-text-refuses-attach-hashes-fi-4bacbd7502",
+        "message-handover-on-full-store-refusal-9b09b27c83",
+        "message-handover-row-coherence-msg-4fd2173c49",
+        "message-handover-row-knowledge-read-context-packet-role-message-sandbox--12f22edf25",
+        "message-handover-row-master-task-doc-worktree-abandon-record-landing-ret-5878c05118",
+        "message-handover-row-msg-sync-repairs-0748a0a8f5",
+        "message-handover-row-process-claims-dev-child-qs-role-message-b9e73d7d06",
+        "message-handover-row-research-shortfalls-msg-c8afc70056",
+        "message-handover-row-templates-msg-1e4f789b2f"
       ],
-      "reason": "one handover pointer per role, plus separate acts: a developer question's delivery, locating a filed message, and a full-store refusal"
+      "reason": "role reference index versus coordination message fields and recovery full-store refusal"
     },
     "reference/refused-write.md": {
       "actions": [
-        "refused-write-before-retiring-or-moving-a-task-0ff5836fa2",
-        "refused-write-for-a-correct-input-refusal-of-a-covered-write-task-doc-edits-1193753949"
+        "refused-write-for-correct-input-refused-covered-writes-1817b416bd",
+        "refused-write-row-master-task-doc-worktree-abandon-record-landing-ret-ddbab93442"
       ],
-      "reason": "the Manager's task retirement or movement versus recovering any refused covered write"
+      "reason": "shared refused-write recovery rule versus manager task-retirement index row"
     },
-    "reference/tasks/document-authoring.md": {
+    "reference/review/advisory-reviews.md": {
       "actions": [
-        "document-authoring-before-authoring-a-task-document-or-requirement-packet-f737cf157b",
-        "document-authoring-before-editing-skipping-or-previewing-task-document-fiel-af832d7374",
-        "document-authoring-before-editing-skipping-or-previewing-task-document-fiel-a7b9b94732",
-        "document-authoring-before-making-the-change-537af426a2",
-        "document-authoring-before-using-task-doc-append-decision-0a48f4c36c"
+        "advisory-reviews-before-commissioning-routing-advisory-reviews-via-role--cf1318e4bf",
+        "advisory-reviews-row-meas-advisory-flat-closeout-c2ea08cb80"
       ],
-      "reason": "the shared code-change rule (F1 ruling) versus the role's own task-document edits"
+      "reason": "architect role index versus review-operation advisory pointer"
     },
-    "roles/bootstrap.md": {
+    "reference/worker/sync-and-repairs.md": {
       "actions": [
-        "bootstrap-before-asking-a-setup-question-b632cc3308",
-        "bootstrap-before-taking-a-setup-action-de2e6e6d81",
-        "bootstrap-with-an-attributed-baseline-and-resolving-context-apply-8194f4aaa8"
+        "sync-and-repairs-after-clean-sync-the-reviewed-result-stands-follow-221a3e756b",
+        "sync-and-repairs-row-exceptions-sync-b514d0c6a5",
+        "sync-and-repairs-row-msg-sync-repairs-fc65361da6",
+        "sync-and-repairs-row-seats-retire-child-3rd-sync-worktree-closeout-previ-2715e6bab2"
       ],
-      "reason": "choosing who continues, asking a setup question and taking a setup action are separate moments"
-    },
-    "roles/curator.md": {
-      "actions": [
-        "curator-before-capturing-a-discovery-993bc68530",
-        "curator-before-repairing-a-failed-curation-step-e260171a20",
-        "curator-before-writing-the-handover-output-542939fb7c",
-        "curator-when-repairing-memory-encountered-during-curation-00fc524f5e"
-      ],
-      "reason": "the operation's separate returns to the role file: discoveries, failed steps, handover output, and encountered memory"
-    },
-    "roles/manager.md": {
-      "actions": [
-        "manager-for-a-round-beyond-the-settings-limit-a455a8fe8b",
-        "manager-the-manager-receives-the-worker-s-freeze-notice-to-start-the-review-6283839f4b"
-      ],
-      "reason": "a round beyond the limit versus the Manager's leaf-notice occasions"
-    },
-    "roles/orchestrator.md": {
-      "actions": [
-        "orchestrator-forward-only-questions-requiring-the-developer-and-the-permiss-1e962adc22",
-        "orchestrator-pending-developer-questions-and-held-report-state-from-910407ef4d",
-        "orchestrator-the-rulings-record-requirement-change-list-and-status-file-pat-907eaa982e",
-        "orchestrator-verified-manager-delivery-with-reports-findings-review-curatio-2378a5b760"
-      ],
-      "reason": "the report list and the permission-notice forwarding name different sections"
-    },
-    "roles/reviewer.md": {
-      "actions": [
-        "reviewer-before-a-code-edit-task-acceptance-write-role-start-or-git-publica-e5b7dfded9",
-        "reviewer-in-fix-verification-reuse-the-sealed-evidence-and-verify-only-list-a30a4e514c"
-      ],
-      "reason": "the standing restrictions versus the sanctioned routes in fix-verification"
-    },
-    "roles/worker.md": {
-      "actions": [
-        "worker-before-handing-over-or-attempting-a-role-start-acceptance-or-publica-491deada88",
-        "worker-before-reading-the-task-inputs-8d86cc2666"
-      ],
-      "reason": "reading the task inputs versus handover, start, acceptance and publication restrictions"
-    },
-    "templates/curator-handoff-list.md": {
-      "actions": [
-        "curator-handoff-list-before-producing-the-curator-hand-off-list-f289b28ae9",
-        "curator-handoff-list-when-naming-them-44f5147e6a"
-      ],
-      "reason": "the list's shape versus the record kinds for outside-scope items"
+      "reason": "role reference index versus recovery clean-sync pointer"
     }
   },
   "actionSources": {
-    "core/every-role.md": {
-      "every-role-before-landing-leaves-whose-reviews-passed-5a926db702": [
-        "operations/coordination.md"
-      ],
-      "every-role-before-proposing-a-requirement-change-to-your-parent-2f5715877b": [
-        "roles/investigator.md"
-      ],
-      "every-role-before-proposing-an-input-limit-or-a-new-guard-370ccadee2": [
-        "roles/architect.md"
-      ],
-      "every-role-before-sending-a-requirement-to-a-worker-aec2d93496": [
-        "roles/architect.md"
-      ],
-      "every-role-for-a-check-that-blocks-a-legal-operation-0e274962e8": [
-        "roles/architect.md"
-      ],
-      "every-role-for-an-uncertain-start-6adb914ea9": [
-        "operations/coordination.md"
-      ],
-      "every-role-for-helper-collection-and-continuation-54243a673b": [
-        "roles/architect.md",
-        "roles/curator.md",
-        "roles/investigator.md",
-        "roles/manager.md",
-        "roles/orchestrator.md",
-        "roles/reviewer.md"
-      ],
-      "every-role-include-the-review-mode-canonical-task-and-review-purpose-seam-e-646a81cc16": [
-        "operations/planning.md"
-      ],
-      "every-role-the-leaf-task-document-requirement-62fa3ca74c": [
-        "roles/curator.md"
-      ],
-      "every-role-the-requirement-set-dispatched-to-the-builder-exact-stable-ident-58f10d91d0": [
-        "roles/reviewer.md"
-      ],
-      "every-role-the-requirement-set-includes-identifiers-versions-packets-and-th-817a1b73bd": [
-        "operations/coordination.md"
-      ],
-      "every-role-when-the-send-answers-held-81d93d74fa": [
-        "roles/orchestrator.md"
-      ]
-    },
-    "criteria/code-seam.md": {
-      "code-seam-row-atomic-master-integration-review-0519ef33fd": [
-        "roles/reviewer.md"
-      ],
-      "code-seam-row-leaf-code-change-review-9eebf60e9e": [
-        "roles/reviewer.md"
-      ],
-      "code-seam-row-leaf-full-loop-review-a35fb2ddc0": [
-        "roles/reviewer.md"
-      ],
-      "code-seam-row-master-exit-3d314620d6": [
-        "roles/reviewer.md"
-      ],
-      "code-seam-row-super-exit-2797a4042b": [
-        "roles/reviewer.md"
-      ]
-    },
-    "criteria/doctrine.md": {
-      "doctrine-row-atomic-master-integration-review-bf3b5022a9": [
-        "roles/reviewer.md"
-      ],
-      "doctrine-row-leaf-code-change-review-727a0a3ce2": [
-        "roles/reviewer.md"
-      ],
-      "doctrine-row-leaf-full-loop-review-b0a87d90ca": [
-        "roles/reviewer.md"
-      ],
-      "doctrine-row-master-exit-0aba781235": [
-        "roles/reviewer.md"
-      ],
-      "doctrine-row-super-exit-2f5d7f2e6d": [
-        "roles/reviewer.md"
-      ]
-    },
-    "criteria/onboarding-memory.md": {
-      "onboarding-memory-row-atomic-master-integration-review-5e90f752a9": [
-        "roles/reviewer.md"
-      ],
-      "onboarding-memory-row-leaf-code-change-review-5b5d9c4b71": [
-        "roles/reviewer.md"
-      ],
-      "onboarding-memory-row-leaf-full-loop-review-7065098b0d": [
-        "roles/reviewer.md"
-      ],
-      "onboarding-memory-row-master-exit-b62465b8a0": [
-        "roles/reviewer.md"
-      ],
-      "onboarding-memory-row-super-exit-3d37395671": [
-        "roles/reviewer.md"
-      ]
-    },
-    "criteria/report-verification.md": {
-      "report-verification-row-atomic-master-integration-review-0ab3fcea32": [
-        "roles/reviewer.md"
-      ],
-      "report-verification-row-leaf-code-change-review-1b166643eb": [
-        "roles/reviewer.md"
-      ],
-      "report-verification-row-leaf-full-loop-review-8af368406e": [
-        "roles/reviewer.md"
-      ],
-      "report-verification-row-master-exit-29540aa9e7": [
-        "roles/reviewer.md"
-      ],
-      "report-verification-row-plan-review-b8f66ec7ae": [
-        "roles/reviewer.md"
-      ],
-      "report-verification-row-super-exit-8eb3776c20": [
-        "roles/reviewer.md"
-      ]
-    },
-    "operations/bootstrap.md": {
-      "bootstrap-before-an-effectful-setup-step-067bdcc0ce": [
-        "roles/bootstrap.md"
-      ],
-      "bootstrap-before-continuing-setup-with-a-missing-branch-choice-memory-repos-d80fd44c97": [
-        "roles/bootstrap.md"
-      ],
-      "bootstrap-before-initializing-user-settings-or-handling-an-existing-setting-99d588d117": [
-        "roles/bootstrap.md"
-      ],
-      "bootstrap-before-resuming-a-failed-step-706d9458c9": [
-        "roles/bootstrap.md"
-      ],
-      "bootstrap-opens-owns-the-ordered-steps-their-surfaces-failure-states-and-au-c909f7978b": [
-        "roles/bootstrap.md"
-      ],
-      "bootstrap-state-in-the-report-how-its-claims-meet-31fa5d7257": [
-        "roles/bootstrap.md"
-      ],
-      "bootstrap-state-the-current-fact-and-report-a-surface-that-still-states-a-s-ab1da3694a": [
-        "roles/bootstrap.md"
-      ],
-      "bootstrap-use-the-required-workspace-facts-in-2b549866ed": [
-        "roles/bootstrap.md"
-      ]
-    },
-    "operations/closeout.md": {
-      "closeout-before-coordinating-paired-closeout-5fc3d144be": [
-        "roles/manager.md"
-      ],
-      "closeout-before-responding-to-gate-findings-from-closeout-preview-or-any-la-7dbfcf8f22": [
-        "roles/manager.md"
-      ]
-    },
     "operations/coordination.md": {
-      "coordination-before-delegating-coordination-0b1e038a7c": [
+      "coordination-check-packet-deps-before-starting-integrating-the-produ-5089bd973b": [
+        "roles/manager.md"
+      ],
+      "coordination-follow-b321c4fb90": [
         "operations/planning.md"
       ],
-      "coordination-before-directing-handovers-repair-loops-review-rounds-memory-p-969d9acb28": [
-        "roles/manager.md"
-      ],
-      "coordination-before-filling-or-reading-message-fields-26e69910c5": [
-        "operations/review.md"
-      ],
-      "coordination-before-messaging-a-role-agent-through-role-message-on-agents-r-91f406d815": [
-        "roles/architect.md"
-      ],
-      "coordination-before-reconciling-that-start-e5ede19f6c": [
+      "coordination-preserve-the-leaf-s-admitted-code-memory-contract-pair-5ea7d5fe7b": [
         "operations/recovery.md"
       ],
-      "coordination-before-restoring-an-existing-ar-leaf-1eb338e6a3": [
+      "coordination-reconcile-uncertain-role-start-with-the-same-request-id-dd59a93c4b": [
         "operations/recovery.md"
       ],
-      "coordination-before-starting-a-role-and-delivering-its-first-intake-615aa479c1": [
-        "roles/architect.md"
-      ],
-      "coordination-before-starting-and-coordinating-the-leaf-c94bd48d5c": [
-        "roles/manager.md"
-      ],
-      "coordination-before-starting-or-messaging-a-role-ca11cab1a6": [
+      "coordination-row-manager-brief-stages-role-start-hand-off-seats-reti-8dc9bf2985": [
         "roles/orchestrator.md"
-      ],
-      "coordination-before-the-reviewer-s-first-inspection-830d329beb": [
-        "roles/manager.md"
-      ],
-      "coordination-for-a-closeout-result-notice-f58ea0a572": [
-        "roles/manager.md"
-      ],
-      "coordination-when-role-message-on-agents-remember-task-answers-held-because-ef792fb8c6": [
-        "roles/architect.md",
-        "roles/orchestrator.md"
-      ],
-      "coordination-when-role-message-on-agents-remember-task-returns-held-because-373b1848c3": [
-        "roles/manager.md"
-      ]
-    },
-    "operations/curation.md": {
-      "curation-before-closeout-51e9894b6a": [
-        "roles/curator.md"
-      ],
-      "curation-before-contacting-another-leaf-af03695473": [
-        "roles/curator.md"
-      ],
-      "curation-before-contacting-the-manager-about-curation-f0f0c1a715": [
-        "roles/curator.md"
-      ],
-      "curation-before-continuing-after-a-memory-tool-failure-f4e04b998c": [
-        "roles/curator.md"
-      ],
-      "curation-before-handover-8f0f557a2c": [
-        "operations/curation.md"
-      ],
-      "curation-before-intake-and-writer-admission-b582a83569": [
-        "roles/curator.md"
-      ],
-      "curation-before-reporting-a-completed-curation-result-aac6a303ef": [
-        "roles/curator.md"
-      ],
-      "curation-before-running-curation-checks-572c914a4e": [
-        "roles/curator.md"
-      ],
-      "curation-before-sending-an-evidenced-code-concern-8b34e89080": [
-        "roles/curator.md"
-      ],
-      "curation-before-validating-coherence-7d7016e082": [
-        "roles/curator.md"
-      ]
-    },
-    "operations/implementation.md": {
-      "implementation-before-deciding-closeout-after-a-leaf-sync-4c358e1a57": [
-        "roles/manager.md"
-      ],
-      "implementation-before-deciding-whether-a-handover-was-taken-or-responding-t-d45a8a09fa": [
-        "roles/worker.md"
-      ],
-      "implementation-before-handing-over-a-frozen-candidate-87d208f864": [
-        "roles/worker.md"
-      ],
-      "implementation-before-making-a-measurement-tooling-handover-37ae28e7b2": [
-        "roles/worker.md"
-      ],
-      "implementation-before-recovering-after-that-sync-6063dfe817": [
-        "operations/recovery.md"
-      ],
-      "implementation-before-repairing-a-native-memory-file-sync-conflict-01008b5e93": [
-        "operations/curation.md"
-      ],
-      "implementation-before-repairing-a-sealed-finding-in-this-task-s-own-files-6c8c979b8f": [
-        "roles/worker.md"
-      ],
-      "implementation-before-responding-to-a-non-work-reply-an-empty-or-doubled-se-6cfad93f70": [
-        "operations/curation.md"
-      ],
-      "implementation-before-responding-to-a-non-work-reply-empty-or-doubled-seat--941ac3a166": [
-        "operations/review.md"
-      ],
-      "implementation-before-writing-the-report-650a46d425": [
-        "roles/worker.md"
-      ],
-      "implementation-when-one-small-item-costs-about-an-hour-a-second-repair-roun-7fbad14ae9": [
-        "roles/worker.md"
-      ],
-      "implementation-when-ruling-on-a-measured-defect-or-costly-small-work-adf28f77a3": [
-        "roles/architect.md"
-      ],
-      "implementation-when-the-master-line-moves-run-the-supported-sync-of-your-ow-19e3c76ab6": [
-        "roles/worker.md"
-      ],
-      "implementation-before-running-the-final-checks-after-the-pass-51cc91bc41": [
-        "operations/review.md",
-        "roles/worker.md"
       ]
     },
     "operations/orientation.md": {
-      "orientation-before-acting-on-a-denied-or-unanswered-harness-request-1482ca975f": [
-        "operations/coordination.md",
-        "operations/curation.md",
-        "operations/implementation.md",
-        "operations/planning.md",
-        "operations/review.md"
-      ],
-      "orientation-before-an-admitted-canonical-task-document-edit-4f585ccb08": [
-        "roles/curator.md"
-      ],
-      "orientation-before-asking-a-question-27ac79f734": [
-        "roles/worker.md"
-      ],
-      "orientation-before-changing-a-canonical-task-document-57ad8d7cbb": [
-        "roles/manager.md"
-      ],
-      "orientation-before-deciding-a-formal-permission-1a1510e105": [
-        "operations/coordination.md"
-      ],
-      "orientation-before-deciding-or-writing-memory-5073c98684": [
-        "operations/curation.md"
-      ],
-      "orientation-before-editing-a-canonical-task-document-or-marking-your-own-co-33a8fd6941": [
-        "operations/implementation.md"
-      ],
-      "orientation-before-making-a-formal-permission-decision-b8e750b84f": [
-        "roles/architect.md"
-      ],
-      "orientation-before-responding-to-an-advisory-reviewer-s-permission-prompt-e5d3f86652": [
-        "operations/review.md"
-      ],
-      "orientation-before-resuming-a-memory-decision-or-write-3d77526a1f": [
+      "orientation-follow-85e926cf8e": [
         "operations/recovery.md"
       ],
-      "orientation-before-sending-a-developer-question-or-handling-a-relayed-answe-3292c9d062": [
-        "roles/curator.md",
-        "roles/orchestrator.md"
-      ],
-      "orientation-before-sending-a-developer-question-or-recognizing-a-relayed-an-fd9dd3021d": [
-        "roles/manager.md"
-      ],
-      "orientation-before-sending-developer-questions-or-handling-relayed-answers-700fb4ea81": [
-        "roles/reviewer.md"
-      ],
-      "orientation-preserve-the-read-rules-under-22f85c695e": [
-        "roles/architect.md"
-      ]
-    },
-    "operations/planning.md": {
-      "planning-before-assigning-an-issue-to-another-open-leaf-d2aec569fd": [
-        "operations/planning.md"
-      ],
-      "planning-before-releasing-a-packet-7fa00e952d": [
-        "roles/architect.md"
+      "orientation-row-exceptions-sync-3b0147c66e": [
+        "roles/curator.md"
       ]
     },
     "operations/review.md": {
-      "review-before-checking-repaired-findings-at-the-round-limit-42fbe8913d": [
-        "roles/reviewer.md"
-      ],
-      "review-before-commissioning-advisory-independent-reviews-0b5f60fa23": [
-        "roles/architect.md"
-      ],
-      "review-before-coordinating-a-memory-review-6c18151a07": [
+      "review-keep-serial-landing-order-sync-once-to-prior-landing-se-572d0310cc": [
         "operations/coordination.md"
-      ],
-      "review-before-handling-findings-received-after-sealing-including-those-arri-2257e515d0": [
-        "roles/reviewer.md"
-      ],
-      "review-before-inspecting-the-assigned-packet-or-candidate-5a94ae7ca5": [
-        "roles/reviewer.md"
-      ],
-      "review-before-opening-or-recording-an-ordinary-code-review-round-fb43a2bf0c": [
-        "operations/coordination.md"
-      ],
-      "review-before-rechecking-a-repaired-worker-record-ae2b005c06": [
-        "roles/reviewer.md"
-      ],
-      "review-before-recording-a-memory-round-requesting-an-extra-round-or-handlin-89bdef8876": [
-        "roles/reviewer.md"
-      ],
-      "review-before-recording-an-ordinary-leaf-code-round-a938dfa412": [
-        "roles/reviewer.md"
-      ],
-      "review-write-and-record-the-verdict-then-follow-3d45d3319e": [
-        "roles/reviewer.md"
       ]
     },
     "reference/bootstrap/foundation-state.md": {
-      "foundation-state-before-naming-the-next-step-in-the-conversation-and-report-de2636bc9c": [
+      "foundation-state-foundation-report-knowledge-state-follow-f507e5b488": [
         "operations/bootstrap.md"
       ],
-      "foundation-state-before-reading-and-reporting-the-knowledge-foundation-s-st-5f3255ffd9": [
+      "foundation-state-row-report-memory-init-cmds-6573340672": [
         "roles/bootstrap.md"
+      ]
+    },
+    "reference/coordination/shared/closeout-recovery.md": {
+      "closeout-recovery-worktree-closeout-apply-worktree-status-worktree-operat-264439c738": [
+        "operations/coordination.md"
+      ],
+      "closeout-recovery-apply-task-doc-edits-projectioneffects-eb70b8f100": [
+        "operations/coordination.md"
+      ],
+      "closeout-recovery-manager-uses-standing-leaf-authority-for-routine-paired-2ea81db0e2": [
+        "operations/closeout.md"
+      ],
+      "closeout-recovery-permission-held-permission-pending-44e5f71829": [
+        "operations/coordination.md"
+      ],
+      "closeout-recovery-row-manager-brief-stages-role-start-hand-off-seats-reti-3062cdf8c5": [
+        "roles/orchestrator.md"
+      ],
+      "closeout-recovery-row-meas-advisory-flat-closeout-fd198cb179": [
+        "roles/architect.md"
+      ],
+      "closeout-recovery-row-seats-retire-child-3rd-sync-worktree-closeout-previ-cfc122ac45": [
+        "roles/manager.md"
       ]
     },
     "reference/coordination/shared/requirement-design.md": {
-      "requirement-design-before-authoring-or-amending-a-requirement-and-its-task--54d61e4057": [
-        "roles/architect.md"
-      ],
-      "requirement-design-before-grouping-primary-and-additional-same-topic-packet-c6cc728029": [
+      "requirement-design-assign-stable-requirement-id-version-with-1-packet-per--2c784460b1": [
         "operations/planning.md"
-      ]
-    },
-    "reference/curator/card-formats-and-citations.md": {
-      "card-formats-and-citations-before-checking-or-repairing-citations-870073a455": [
-        "roles/curator.md"
       ],
-      "card-formats-and-citations-before-creating-or-maintaining-cards-or-overview-93a803a9f5": [
-        "roles/curator.md"
-      ],
-      "card-formats-and-citations-before-maintaining-the-entity-catalog-1e13763169": [
-        "roles/curator.md"
-      ],
-      "card-formats-and-citations-before-writing-card-history-87a3567855": [
-        "roles/curator.md"
-      ]
-    },
-    "reference/curator/governing-sources.md": {
-      "governing-sources-before-authoring-a-governing-decision-record-b73cbfcf70": [
-        "roles/curator.md"
-      ],
-      "governing-sources-before-explaining-an-assigned-contract-7b9040f96b": [
-        "roles/curator.md"
-      ]
-    },
-    "reference/curator/intent-reconciliation.md": {
-      "intent-reconciliation-before-promoting-a-historical-oddity-8a72dc8862": [
-        "operations/curation.md"
-      ],
-      "intent-reconciliation-before-reconciling-current-intent-ruled-intent-and-im-8f92dc66d4": [
-        "roles/curator.md"
-      ]
-    },
-    "reference/knowledge/commands.md": {
-      "commands-before-a-knowledge-system-command-or-check-e11771b5d9": [
-        "roles/reviewer.md"
-      ],
-      "commands-before-planning-repository-work-f354fc415a": [
+      "requirement-design-row-reqs-task-doc-context-packet-knowledge-read-171c816e34": [
         "roles/architect.md"
-      ],
-      "commands-before-retrieving-its-context-again-64f475e9a9": [
-        "core/every-role.md"
-      ],
-      "commands-before-using-a-knowledge-command-or-acting-on-its-result-f0057bd956": [
-        "roles/orchestrator.md"
-      ],
-      "commands-before-using-a-knowledge-command-or-interpreting-its-result-ffa261af02": [
-        "roles/investigator.md",
-        "roles/manager.md",
-        "roles/worker.md"
-      ],
-      "commands-before-using-a-knowledge-command-or-its-result-f62bf894a2": [
-        "roles/bootstrap.md"
-      ],
-      "commands-before-using-a-knowledge-system-command-or-interpreting-its-result-736de9c39c": [
-        "roles/curator.md"
-      ]
-    },
-    "reference/knowledge/use.md": {
-      "use-before-checking-code-and-memory-23bce46d91": [
-        "roles/curator.md"
-      ],
-      "use-before-diagnosing-b338e1f9ff": [
-        "roles/architect.md"
-      ],
-      "use-before-diagnosing-a-failing-test-d3b0c7772d": [
-        "roles/worker.md"
-      ],
-      "use-before-editing-source-b26c8e8871": [
-        "roles/worker.md"
-      ],
-      "use-before-interpreting-a-knowledge-read-75e1759f9d": [
-        "roles/curator.md"
-      ],
-      "use-before-interpreting-their-resolution-93247df79f": [
-        "roles/bootstrap.md"
-      ],
-      "use-before-investigating-repository-code-ff130ed307": [
-        "roles/investigator.md"
-      ],
-      "use-before-relying-on-storage-or-path-eligibility-cross-repository-allowanc-13fc42b13f": [
-        "core/every-role.md"
-      ],
-      "use-when-inspecting-changes-fd041ceb7c": [
-        "roles/reviewer.md"
       ]
     },
     "reference/message-handover.md": {
-      "message-handover-before-delivering-a-developer-question-to-a-recipient-or-p-3ee8adce5f": [
-        "operations/orientation.md"
+      "message-handover-body-unlimited-over-limit-text-refuses-attach-hashes-fi-4bacbd7502": [
+        "operations/coordination.md"
       ],
-      "message-handover-before-handing-over-work-896f91e068": [
-        "roles/investigator.md",
-        "roles/reviewer.md"
+      "message-handover-on-full-store-refusal-9b09b27c83": [
+        "operations/recovery.md"
       ],
-      "message-handover-before-handing-work-to-a-waiting-seat-c6d5ce942c": [
-        "roles/architect.md",
-        "roles/manager.md",
+      "message-handover-row-knowledge-read-context-packet-role-message-sandbox--12f22edf25": [
         "roles/orchestrator.md"
       ],
-      "message-handover-before-locating-a-filed-message-or-receipt-24d3455219": [
-        "operations/coordination.md",
-        "operations/review.md"
+      "message-handover-row-coherence-msg-4fd2173c49": [
+        "roles/curator.md"
       ],
-      "message-handover-before-responding-to-a-full-store-refusal-0c68571173": [
-        "operations/closeout.md",
-        "operations/coordination.md",
-        "operations/curation.md",
-        "operations/implementation.md",
-        "operations/orientation.md",
-        "operations/planning.md",
-        "operations/recovery.md",
-        "operations/review.md"
+      "message-handover-row-master-task-doc-worktree-abandon-record-landing-ret-5878c05118": [
+        "roles/manager.md"
       ],
-      "message-handover-before-sending-a-handover-37bf446167": [
+      "message-handover-row-msg-sync-repairs-0748a0a8f5": [
         "roles/worker.md"
       ],
-      "message-handover-before-sending-a-message-6112e9ce74": [
-        "roles/curator.md"
+      "message-handover-row-process-claims-dev-child-qs-role-message-b9e73d7d06": [
+        "roles/architect.md"
+      ],
+      "message-handover-row-research-shortfalls-msg-c8afc70056": [
+        "roles/investigator.md"
+      ],
+      "message-handover-row-templates-msg-1e4f789b2f": [
+        "roles/reviewer.md"
       ]
     },
     "reference/refused-write.md": {
-      "refused-write-before-retiring-or-moving-a-task-0ff5836fa2": [
-        "roles/manager.md"
-      ],
-      "refused-write-for-a-correct-input-refusal-of-a-covered-write-task-doc-edits-1193753949": [
-        "core/every-role.md"
-      ]
-    },
-    "reference/tasks/document-authoring.md": {
-      "document-authoring-before-authoring-a-task-document-or-requirement-packet-f737cf157b": [
-        "roles/architect.md"
-      ],
-      "document-authoring-before-editing-skipping-or-previewing-task-document-fiel-af832d7374": [
-        "roles/worker.md"
-      ],
-      "document-authoring-before-editing-skipping-or-previewing-task-document-fiel-a7b9b94732": [
-        "roles/manager.md"
-      ],
-      "document-authoring-before-making-the-change-537af426a2": [
+      "refused-write-for-correct-input-refused-covered-writes-1817b416bd": [
         "core/every-role.md"
       ],
-      "document-authoring-before-using-task-doc-append-decision-0a48f4c36c": [
-        "roles/orchestrator.md"
-      ]
-    },
-    "roles/bootstrap.md": {
-      "bootstrap-before-asking-a-setup-question-b632cc3308": [
-        "operations/bootstrap.md"
-      ],
-      "bootstrap-before-taking-a-setup-action-de2e6e6d81": [
-        "operations/bootstrap.md"
-      ],
-      "bootstrap-with-an-attributed-baseline-and-resolving-context-apply-8194f4aaa8": [
-        "operations/bootstrap.md"
-      ]
-    },
-    "roles/curator.md": {
-      "curator-before-capturing-a-discovery-993bc68530": [
-        "operations/curation.md"
-      ],
-      "curator-before-repairing-a-failed-curation-step-e260171a20": [
-        "operations/curation.md"
-      ],
-      "curator-before-writing-the-handover-output-542939fb7c": [
-        "operations/curation.md"
-      ],
-      "curator-when-repairing-memory-encountered-during-curation-00fc524f5e": [
-        "roles/curator.md"
-      ]
-    },
-    "roles/manager.md": {
-      "manager-for-a-round-beyond-the-settings-limit-a455a8fe8b": [
+      "refused-write-row-master-task-doc-worktree-abandon-record-landing-ret-ddbab93442": [
         "roles/manager.md"
-      ],
-      "manager-the-manager-receives-the-worker-s-freeze-notice-to-start-the-review-6283839f4b": [
-        "operations/coordination.md"
       ]
     },
-    "roles/orchestrator.md": {
-      "orchestrator-forward-only-questions-requiring-the-developer-and-the-permiss-1e962adc22": [
-        "roles/orchestrator.md"
-      ],
-      "orchestrator-pending-developer-questions-and-held-report-state-from-910407ef4d": [
-        "roles/orchestrator.md"
-      ],
-      "orchestrator-the-rulings-record-requirement-change-list-and-status-file-pat-907eaa982e": [
-        "roles/orchestrator.md"
-      ],
-      "orchestrator-verified-manager-delivery-with-reports-findings-review-curatio-2378a5b760": [
-        "roles/orchestrator.md"
-      ]
-    },
-    "roles/reviewer.md": {
-      "reviewer-before-a-code-edit-task-acceptance-write-role-start-or-git-publica-e5b7dfded9": [
+    "reference/review/advisory-reviews.md": {
+      "advisory-reviews-before-commissioning-routing-advisory-reviews-via-role--cf1318e4bf": [
         "operations/review.md"
       ],
-      "reviewer-in-fix-verification-reuse-the-sealed-evidence-and-verify-only-list-a30a4e514c": [
-        "roles/reviewer.md"
+      "advisory-reviews-row-meas-advisory-flat-closeout-c2ea08cb80": [
+        "roles/architect.md"
       ]
     },
-    "roles/worker.md": {
-      "worker-before-handing-over-or-attempting-a-role-start-acceptance-or-publica-491deada88": [
-        "operations/implementation.md"
+    "reference/worker/sync-and-repairs.md": {
+      "sync-and-repairs-after-clean-sync-the-reviewed-result-stands-follow-221a3e756b": [
+        "operations/recovery.md"
       ],
-      "worker-before-reading-the-task-inputs-8d86cc2666": [
-        "operations/implementation.md"
-      ]
-    },
-    "templates/curator-handoff-list.md": {
-      "curator-handoff-list-before-producing-the-curator-hand-off-list-f289b28ae9": [
-        "roles/worker.md"
-      ],
-      "curator-handoff-list-when-naming-them-44f5147e6a": [
-        "roles/worker.md"
-      ]
-    },
-    "reference/coordination/shared/master-state.md": {
-      "master-state-before-updating-master-state-through-completion-bee60d927b": [
-        "roles/manager.md"
-      ]
-    },
-    "templates/curator-handoff-ingestion.md": {
-      "curator-handoff-ingestion-before-ingesting-a-producer-list-or-authoring-its-eca4d69785": [
+      "sync-and-repairs-row-exceptions-sync-b514d0c6a5": [
         "roles/curator.md"
+      ],
+      "sync-and-repairs-row-msg-sync-repairs-fc65361da6": [
+        "roles/worker.md"
+      ],
+      "sync-and-repairs-row-seats-retire-child-3rd-sync-worktree-closeout-previ-2715e6bab2": [
+        "roles/manager.md"
       ]
     }
   },
   "multiLinkSentences": {
-    "operations/coordination.md": [
+    "operations/review.md": [
       {
-        "source": "roles/architect.md",
-        "action": "coordination-before-starting-a-role-and-delivering-its-first-intake-615aa479c1"
-      },
-      {
-        "source": "roles/manager.md",
-        "action": "coordination-before-starting-and-coordinating-the-leaf-c94bd48d5c"
-      },
-      {
-        "source": "roles/orchestrator.md",
-        "action": "coordination-before-starting-or-messaging-a-role-ca11cab1a6"
-      }
-    ],
-    "operations/curation.md": [
-      {
-        "source": "roles/curator.md",
-        "action": "curation-before-intake-and-writer-admission-b582a83569"
-      }
-    ],
-    "operations/orientation.md": [
-      {
-        "source": "roles/curator.md",
-        "action": "orientation-before-sending-a-developer-question-or-handling-a-relayed-answe-3292c9d062"
-      },
-      {
-        "source": "roles/manager.md",
-        "action": "orientation-before-sending-a-developer-question-or-recognizing-a-relayed-an-fd9dd3021d"
-      },
-      {
-        "source": "roles/orchestrator.md",
-        "action": "orientation-before-sending-a-developer-question-or-handling-a-relayed-answe-3292c9d062"
-      }
-    ],
-    "reference/coordination/shared/master-state.md": [
-      {
-        "source": "roles/manager.md",
-        "action": "master-state-before-updating-master-state-through-completion-bee60d927b"
-      }
-    ],
-    "templates/curator-handoff-ingestion.md": [
-      {
-        "source": "roles/curator.md",
-        "action": "curator-handoff-ingestion-before-ingesting-a-producer-list-or-authoring-its-eca4d69785"
+        "source": "operations/coordination.md",
+        "action": "review-keep-serial-landing-order-sync-once-to-prior-landing-se-572d0310cc"
       }
     ]
   },
-  "exclusive": [
-    [
-      "message-handover-before-handing-over-work-896f91e068",
-      "message-handover-before-handing-work-to-a-waiting-seat-c6d5ce942c",
-      "message-handover-before-sending-a-handover-37bf446167",
-      "message-handover-before-sending-a-message-6112e9ce74"
-    ],
-    [
-      "orientation-before-asking-a-question-27ac79f734",
-      "orientation-before-sending-a-developer-question-or-handling-a-relayed-answe-3292c9d062",
-      "orientation-before-sending-a-developer-question-or-recognizing-a-relayed-an-fd9dd3021d",
-      "orientation-before-sending-developer-questions-or-handling-relayed-answers-700fb4ea81"
-    ],
-    [
-      "commands-before-a-knowledge-system-command-or-check-e11771b5d9",
-      "commands-before-planning-repository-work-f354fc415a",
-      "commands-before-using-a-knowledge-command-or-acting-on-its-result-f0057bd956",
-      "commands-before-using-a-knowledge-command-or-interpreting-its-result-ffa261af02",
-      "commands-before-using-a-knowledge-command-or-its-result-f62bf894a2",
-      "commands-before-using-a-knowledge-system-command-or-interpreting-its-result-736de9c39c"
-    ],
-    [
-      "document-authoring-before-authoring-a-task-document-or-requirement-packet-f737cf157b",
-      "document-authoring-before-editing-skipping-or-previewing-task-document-fiel-a7b9b94732",
-      "document-authoring-before-editing-skipping-or-previewing-task-document-fiel-af832d7374",
-      "document-authoring-before-using-task-doc-append-decision-0a48f4c36c"
-    ]
-  ]
+  "exclusive": []
 }

@@ -74,19 +74,45 @@ from test_worktree_support import open_external_contract_fixture
 def _check_projection(
     projection: dict[str, Any], prepared: dict[str, Any], *, kept: tuple[str, ...]
 ) -> None:
-    """The projection holds only the permitted fields and names the complete hand-over.
+    """The projection holds only the permitted fields while the full handover stays in JSON.
 
     ``kept`` names the optional fields this seat's own selection makes present.
     """
 
-    assert set(projection) - {PROJECTION_FILE_FIELD} == set(projection) & set(PROJECTION_FIELDS)
-    assert projection[PROJECTION_FILE_FIELD]["path"] == (
+    assert PROJECTION_FILE_FIELD not in projection
+    assert set(projection) <= set(PROJECTION_FIELDS)
+    assert prepared["handoverFile"]["path"] == (
         Path(prepared["taskReportPath"]).with_suffix(".handover.json").as_posix()
     )
-    for absent in ("capsule", "contextPacket", "ownerHandover", "taskDocumentDigest"):
+    for absent in (
+        "assignment",
+        "canonicalTaskReportPath",
+        "capsule",
+        "contextPacket",
+        "ownerHandover",
+        "taskDocumentDigest",
+    ):
         assert absent not in projection
+    assert "ownerRelation" not in projection["host"]
+    assert "developerQuestions" not in projection["host"]
+    assert "developerQuestionRoute" in projection["host"]
     for name in ("documents", "leafSeats"):
         assert (name in projection) is (name in kept)
+    if "documents" in kept:
+        doc = projection["documents"][0]
+        assert set(doc) == {
+            "id",
+            "kind",
+            "repo_id",
+            "task_name",
+            "slug",
+            "renderedReadPath",
+            "jsonPath",
+            "contentDigest",
+        }
+    if "leafSeats" in kept:
+        assert projection["leafSeats"] == {"roles": ["worker", "reviewer", "curator"]}
+        assert "roleMessageArguments" in prepared["handover"]["leafSeats"]
 
 
 def _projection(prepared: dict[str, Any]) -> dict[str, Any]:
@@ -366,15 +392,12 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
                     # The handover names the one server to use for AR tools, and no other.
                     self.assertEqual(handover["host"]["arToolServer"], "agents-remember-task")
                     for sentence in (
-                        "Call every Agents Remember tool on the tool server named "
-                        "agents-remember-task",
-                        "Do not connect to, list, describe or call a tool server named "
-                        "agents-remember or any of its tools, nor an AR tool server under any "
-                        "other name: it belongs to another installation, its tools carry the "
-                        "same tool names, and nothing found there serves this assignment.",
-                        "After a start or a resume a tool server can take some seconds to "
-                        "appear: look once more before reporting agents-remember-task missing, "
-                        "and report that instead of substituting another.",
+                        "Use agents-remember-task (agents_remember_task): "
+                        "direct mcp__agents_remember_task__server_info or "
+                        "mcp__agents_remember_task search/script; "
+                        "ignore proxies without it, other install.",
+                        "Never use agents-remember or another AR server (different install).",
+                        "Retry once after start/resume if agents-remember-task is missing.",
                     ):
                         self.assertIn(sentence, handover["host"]["arMcpUsage"])
                     self.assertNotIn("existing shared", prepared["prompt"])
@@ -383,6 +406,9 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
                     self.assertIsNone(handover["host"]["parent"])
                     self.assertIn("needs none", handover["host"]["ownerRelation"])
                     self.assertIn("in your own chat", handover["host"]["developerQuestions"])
+                    self.assertEqual(
+                        handover["host"]["developerQuestionRoute"], {"mode": "own-chat"}
+                    )
                     self.assertTrue(canonical_report.is_relative_to(task_reports.resolve()))
                     self.assertEqual(len(documents), 3)
                     documents_by_ref = {
@@ -537,10 +563,18 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
             handover["capsule"]["binding"]["taskPath"],
             "free-agent:architect",
         )
-        self.assertEqual(handover["capsule"]["binding"]["role"], "architect")
-        self.assertEqual(handover["capsule"]["binding"]["operation"], "planning")
+        self.assertEqual(
+            (handover["capsule"]["binding"]["role"], handover["capsule"]["binding"]["operation"]),
+            ("architect", "planning"),
+        )
         self.assertTrue(
-            prepared["prompt"].startswith("AR ROLE BRIEF: the dashboard launcher started this role")
+            prepared["prompt"].startswith(
+                "AR ROLE BRIEF: Effective instructions and canonical handover"
+            )
+        )
+        self.assertIn(
+            "\n\n## Launch Context\n\nStarted by: the dashboard launcher.\n\n",
+            prepared["prompt"],
         )
         self.assertEqual(forbidden_in(prepared["prompt"]), [])
         source = handover["host"]["instructionSource"]

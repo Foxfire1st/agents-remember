@@ -19,3 +19,12 @@ When a provider is unavailable, move its work in the same turn to an available m
 For a defaults switch, the Manager tells the Architect through its existing parent route. Under direct coordination, the Architect uses its own developer-decision route. Do not wait for a reset or run a probe loop.
 
 A developer-specified model or an unapproved substitute needs the developer's decision through the upward route before substitution. Handle a safety refusal through the same model-change authority boundaries instead of retrying the refused provider model; the work does not wait for that provider.
+
+## Retire child scope and active turns
+
+Call `retire_child` to archive another seat only within your scope. Architects cover all scopes; Managers cover their master and leaves; Orchestrators cover their sprint, masters and leaves.
+
+- **`outside-scope`**: Nothing is archived when the target seat lies outside your scope. Route the retirement request to a seat whose scope covers the target (its owning Manager, Orchestrator or Architect) instead of retrying from an unauthorized seat.
+- **`agent-in-turn`**: Nothing is archived when the target seat has an active turn or running sub-agents. Either wait for the turn to settle, or pass `interrupt_turn=true` when the seat's work is already finished (for example, an Investigator whose reporting turn is still active) or must stop immediately.
+- **`open-children`**: Nothing is archived while live, unarchived child seats remain under the target. Retire those descendant seats first (deepest first), or replace the parent seat through its authorized replacement route instead of retiring it with open children.
+- **Unresolved launches and transient failures**: When `retire_child` returns `launch-unresolved`, let the launch settle or have its starter reconcile the original request before retiring. When it returns `host-unreachable`, `archive-refused` or `retire-record-failed`, retry the identical retirement once the refusal or connectivity condition clears so the receipt reconciles cleanly.

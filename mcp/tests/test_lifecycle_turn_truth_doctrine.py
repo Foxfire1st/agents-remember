@@ -16,13 +16,18 @@ Read this before trusting a test below, because the mechanisms are not interchan
     --------------------------------------------------   ---------------------------------------
     no canonical surface contradicts the boundary         the claim sweep over EVERY `.md` under
       (the cross-role agreement property)                 `skills/l-01-agent-lifecycles`, not over
-                                                          the declared roster. A contradiction in
-                                                          an undeclared file still fails.
-    every surface that speaks the completion-truth        the roster census: the declared roster
-      vocabulary states the mechanical reading            must EQUAL the files that use the
-                                                          vocabulary, in both directions.
-    each declared surface states its own owed clauses     the per-surface required-statement sets,
-      and does not deny them                              which are also contradiction-aware: a
+                                                          the declared roster, in
+                                                          `test_lifecycle_turn_truth_handovers.py`.
+                                                          A contradiction in an undeclared file
+                                                          still fails.
+    every surface that speaks the completion-truth        the roster census in
+      vocabulary states the mechanical reading            `test_lifecycle_turn_truth_handovers.py`:
+                                                          the declared roster must EQUAL the files
+                                                          that use the vocabulary, in both
+                                                          directions.
+    each declared surface states its own owed clauses     the per-surface required-statement sets
+      and does not deny them                              in `test_lifecycle_turn_truth_handovers.py`,
+                                                          which are also contradiction-aware: a
                                                           surface that states and denies fails
                                                           `_assert_owed` and reads CONTRADICTED.
     the sweep can still fail                              `DetectorTeethTests` runs every retired
@@ -85,7 +90,6 @@ WHAT THIS DOES NOT COVER (stated, not implied)
 
 from __future__ import annotations
 
-import json
 import re
 import unittest
 from dataclasses import dataclass
@@ -99,14 +103,8 @@ DOCTRINE_TREE = "skills/l-01-agent-lifecycles"
 TREE_LITERAL = REPOSITORY_ROOT / DOCTRINE_TREE
 
 # Every canonical surface that composes completion-truth wording belongs on this roster.
-# The curation operation carries the Curator's mechanical reading; a role file without that
-# vocabulary is not itself a speaker. The census below checks both additions and removals.
-COMPLETION_TRUTH_ROSTER = (
-    "skills/l-01-agent-lifecycles/core/acceptance.md",
-    "skills/l-01-agent-lifecycles/operations/curation.md",
-    "skills/l-01-agent-lifecycles/roles/orchestrator.md",
-    "skills/l-01-agent-lifecycles/roles/reviewer.md",
-)
+# The census below checks both additions and removals.
+COMPLETION_TRUTH_ROSTER = ("skills/l-01-agent-lifecycles/core/acceptance.md",)
 # The completion-truth vocabulary itself: a surface uses it when it composes completion from
 # terminal/finalizer truth. `agent-notifier` is excluded on purpose -- naming the relay is not the
 # same act as composing completion, and three criteria/history files name it for other reasons.
@@ -451,40 +449,6 @@ RETIRED_CLAIMS = (
     ),
 )
 
-# The clause sets each declared surface owes. A surface may be legitimately silent on a clause; a
-# surface on this roster is not, and the markers are the shipped wording for its own side of the
-# boundary. Matching is on normalized words, so emphasis and re-wrapping are free.
-#
-# Required statements name each current owner's obligations. Architect methods retain
-# their artifact-before-ruling boundary without pretending to be separate role turns.
-OWED_STATEMENTS: dict[str, tuple[str, ...]] = {
-    "skills/l-01-agent-lifecycles/core/acceptance.md": (
-        "The relay neither validates artifact content nor invents a gate decision.",
-        "means only that the provider turn ended normally",
-        "does not establish that the required artifact exists, is current or satisfies its requirement",
-        "The host reads that a turn ended and derives the mechanical seat-state signal.",
-        "It delivers one line to the structurally current owner waiting for that agent, "
-        "carrying the ended agent's last line.",
-        "The relay never opens, parses or evaluates reports, verdicts, coherence records "
-        "or acceptance envelopes.",
-        "On wake, the current gate owner opens and validates the required artifact, candidate "
-        "identity, evidence and acceptance envelope before advancing lifecycle state.",
-        "it nudges, rejects, replaces or escalates instead of waiting for the relay to check the artifact",
-        "Worker, Reviewer and Curator write their durable handoff artifact before ending a "
-        "successful handoff turn.",
-        "They then send it with `role_message` to the waiting agent.",
-        "A filed artifact wakes nobody by itself.",
-    ),
-    "skills/l-01-agent-lifecycles/templates/master-handover-packet.md": (
-        "Before deciding the received handover, read [Keep relay and gate-owner duties separate](../core/acceptance.md#keep-relay-and-gate-owner-duties-separate) for exact-artifact and candidate validation.",
-        "The completion and handover boundary this template follows is owned by [acceptance](../core/acceptance.md).",
-    ),
-    "skills/l-01-agent-lifecycles/templates/turn-report.md": (
-        "The [acceptance reference](../core/acceptance.md) owns acceptance",
-        "[the checks before a freeze](../operations/implementation.md#check-the-candidate-before-each-freeze) owns targeted handover checks.",
-    ),
-}
-
 
 class Reading(StrEnum):
     """What one canonical surface says about the mechanical-only reading of completion."""
@@ -562,346 +526,6 @@ def canonical_surfaces() -> tuple[Path, ...]:
 
 def read_surface(relative: str) -> str:
     return (REPOSITORY_ROOT / relative).read_text(encoding="utf-8")
-
-
-class AgreementAcrossTheRoleSetTests(unittest.TestCase):
-    """The property R13 exists for: no canonical surface contradicts the boundary."""
-
-    def test_no_canonical_surface_contradicts_the_boundary(self) -> None:
-        surfaces = canonical_surfaces()
-        # Fail closed on the tree itself: an empty or shrunken surface set would let this case pass
-        # with nothing examined, which is the one way a sweep like this can lie.
-        self.assertTrue(
-            TREE_LITERAL.is_dir(),
-            f"the canonical doctrine tree is missing: {DOCTRINE_TREE}",
-        )
-        self.assertGreater(
-            len(surfaces),
-            len(COMPLETION_TRUTH_ROSTER),
-            "the contradiction sweep examined no more surfaces than the declared roster",
-        )
-        findings: list[str] = []
-        for path in surfaces:
-            surface = path.relative_to(REPOSITORY_ROOT).as_posix()
-            findings.extend(
-                finding.render(surface)
-                for finding in contradictions(path.read_text(encoding="utf-8"))
-            )
-        self.assertEqual(
-            findings,
-            [],
-            "canonical lifecycle doctrine contradicts the handoff authority boundary "
-            "(terminal truth only ends a turn; the owner validates the artifact) in:\n  "
-            + "\n  ".join(findings),
-        )
-
-    def test_the_boundarys_one_home_states_the_whole_boundary(self) -> None:
-        """The owner carries the whole boundary; the sweep also checks every referring surface."""
-
-        self._assert_owed("skills/l-01-agent-lifecycles/core/acceptance.md")
-
-    def test_every_declared_surface_states_its_owed_clause(self) -> None:
-        for relative in sorted(OWED_STATEMENTS):
-            with self.subTest(surface=relative):
-                self._assert_owed(relative)
-
-    def _assert_owed(self, relative: str) -> None:
-        """The surface must state its owed clauses AND not deny the boundary anywhere.
-
-        Presence alone is not a pass: a surface that states the boundary and contradicts it in the
-        next sentence holds no reading an agent can rely on, and it is exactly the disagreement R13
-        exists to prevent.
-        """
-
-        raw = read_surface(relative)
-        if relative.startswith("skills/l-01-agent-lifecycles/templates/"):
-            target = (REPOSITORY_ROOT / relative).parent / "../core/acceptance.md"
-            self.assertEqual(target.resolve(), (TREE_LITERAL / "core/acceptance.md").resolve())
-            self.assertTrue(target.is_file())
-            self._assert_owed("skills/l-01-agent-lifecycles/core/acceptance.md")
-        text = normalize(raw)
-        missing = [
-            statement
-            for statement in OWED_STATEMENTS[relative]
-            if normalize(statement) not in text.casefold()
-        ]
-        self.assertEqual(
-            missing,
-            [],
-            f"{relative} no longer states its side of the handoff authority boundary: {missing}",
-        )
-        self.assertEqual(
-            [finding.render(relative) for finding in contradictions(raw)],
-            [],
-            f"{relative} states its owed boundary clauses and contradicts them elsewhere",
-        )
-
-    def test_the_declared_roster_equals_the_surfaces_that_speak_the_vocabulary(self) -> None:
-        observed = tuple(
-            path.relative_to(REPOSITORY_ROOT).as_posix()
-            for path in canonical_surfaces()
-            if COMPLETION_TRUTH_VOCABULARY.search(path.read_text(encoding="utf-8"))
-        )
-        self.assertEqual(
-            sorted(observed),
-            sorted(COMPLETION_TRUTH_ROSTER),
-            "every canonical surface that composes completion from terminal/finalizer truth must "
-            "be on the roster (and the roster must not outlive the vocabulary): declare a new "
-            "participant in COMPLETION_TRUTH_ROSTER and make it state the mechanical reading, or "
-            "remove the row when the surface stops speaking the vocabulary",
-        )
-
-    def test_every_roster_surface_carries_the_mechanical_reading(self) -> None:
-        for relative in sorted(COMPLETION_TRUTH_ROSTER):
-            with self.subTest(surface=relative):
-                self.assertEqual(
-                    classify_reading(read_surface(relative)),
-                    Reading.STATED,
-                    f"{relative} speaks the completion-truth vocabulary without stating that the "
-                    "terminal outcome only ends the turn",
-                )
-
-    def test_the_relay_reference_surfaces_point_to_the_owner(self) -> None:
-        for relative in sorted(RELAY_REFERENCE_SURFACES):
-            with self.subTest(surface=relative):
-                self._assert_owed(relative)
-
-    def test_a_worker_hands_its_frozen_report_directly_to_the_reviewer(self) -> None:
-        worker_source = read_surface("skills/l-01-agent-lifecycles/roles/worker.md")
-        operation_source = read_surface("skills/l-01-agent-lifecycles/operations/implementation.md")
-        every_role_source = read_surface("skills/l-01-agent-lifecycles/core/every-role.md")
-        # Rule 43 stages seat creation through the Manager, while the Worker
-        # still sends the complete frozen object directly to its Reviewer.
-        routes = (
-            (
-                worker_source,
-                "Report and freeze the candidate",
-                (
-                    "Before writing the report, follow [Implementation outputs]"
-                    "(../operations/implementation.md#outputs) "
-                    "for report contents, checks and the freeze procedure.",
-                    (
-                        "Before handing over a frozen candidate, follow [Hand over the frozen "
-                        "candidate](../operations/implementation.md#hand-over-the-frozen-candidate) "
-                        "for the Manager stage-start notice, direct Reviewer handover and "
-                        "code-`PASS` Curator handover, each sent with `role_message` on "
-                        "`agents-remember-task`."
-                    ),
-                ),
-            ),
-            (
-                worker_source,
-                "Preserve role and task boundaries",
-                (
-                    "A Worker starts no role.",
-                    "Keep the direct Reviewer and Curator handovers described above; "
-                    "the Manager does not relay their contents.",
-                ),
-            ),
-            (
-                operation_source,
-                "Outputs",
-                (
-                    "Freeze the candidate and tell the Manager to start the Reviewer.",
-                    "Once the Reviewer exists, send it the freeze directly with `role_message` "
-                    "on `agents-remember-task`.",
-                    "Name the leaf, the report path and the whole next stretch of work. "
-                    "The report names the head and change hash.",
-                ),
-            ),
-            (
-                every_role_source,
-                "Parallel work and waiting",
-                (
-                    "Count a handover as taken only when the recipient's reply, report or intake "
-                    "names the exact object and shows the requested work or its start.",
-                    "Open every supplied recipient artifact before you call one absent.",
-                ),
-            ),
-        )
-
-        def require_route(source: str, heading: str, clauses: tuple[str, ...]) -> None:
-            match = re.search(r"(?ms)^## " + re.escape(heading) + r"\n(.*?)(?=^## |\Z)", source)
-            self.assertIsNotNone(match, heading)
-            assert match is not None
-            reading = normalize(match[1])
-            for clause in clauses:
-                self.assertIn(normalize(clause), reading)
-
-        for source, heading, clauses in routes:
-            require_route(source, heading, clauses)
-            for clause in clauses:
-                with self.subTest(heading=heading, route_clause=clause):
-                    mutant = source.replace(clause, "")
-                    self.assertNotEqual(mutant, source)
-                    with self.assertRaises(AssertionError):
-                        require_route(mutant, heading, clauses)
-        worker = normalize(worker_source)
-        operation = normalize(operation_source)
-        self.assertIn(
-            "do not send it routine report notices or ask it to relay handover contents", operation
-        )
-        self.assertIn("before deciding whether a handover was taken", worker)
-        self.assertIn("a worker started from the dashboard has none", worker)
-        self.assertIn("a finished turn is not ar acceptance", worker)
-
-    def test_delivered_coordinator_capsules_check_candidate_evidence_before_acceptance(
-        self,
-    ) -> None:
-        manifest = json.loads((TREE_LITERAL / "composition-manifest.json").read_text())
-        cases = (
-            (
-                "architect",
-                "review",
-                (
-                    "review the full candidate diff",
-                    "check each requirement against its evidence class",
-                    "test result is evidence, not semantic acceptance",
-                ),
-            ),
-            (
-                "manager",
-                "coordination",
-                (
-                    "inspect the complete changed-file diff",
-                    "both verdicts and the Worker's report of the requirement's listed final checks before deciding the gate",
-                    "never substitute shell commits or a finished turn for ar acceptance",
-                ),
-            ),
-            (
-                "orchestrator",
-                "coordination",
-                (
-                    "verify each manager's delivery and aggregate evidence",
-                    "inspect supplied actual diffs for acceptance",
-                    "an agent's state in paseo does not record agents remember (ar) acceptance",
-                    "keep reports, findings, review, curation, and git publication separately addressed",
-                    "use the existing ar task and paired git owners for their semantic records",
-                ),
-            ),
-        )
-
-        for role, operation, markers in cases:
-            with self.subTest(role=role, operation=operation):
-                role_entry = manifest["roles"][role]
-                operation_entry = manifest["operations"][operation]
-                self.assertIn(operation, role_entry["operations"])
-                role_text = (TREE_LITERAL / role_entry["file"]).read_text(encoding="utf-8")
-                operation_text = (TREE_LITERAL / operation_entry["source"]).read_text(
-                    encoding="utf-8"
-                )
-                delivered = normalize(role_text + "\n" + operation_text)
-                self.assertEqual(
-                    [marker for marker in markers if normalize(marker) not in delivered],
-                    [],
-                    f"{role}+{operation} no longer checks its candidate/evidence boundary",
-                )
-
-                for marker in markers:
-                    with self.subTest(removed_marker=marker):
-                        mutant = delivered.replace(normalize(marker), " ")
-                        self.assertNotEqual(mutant, delivered)
-                        self.assertNotIn(normalize(marker), mutant)
-
-                if role == "manager":
-                    weakened = role_text.replace(
-                        "Inspect the complete changed-file diff, both verdicts and the Worker's report of the requirement's listed final checks before deciding the gate.",
-                        "Accept each deliverable onward.",
-                        1,
-                    )
-                    self.assertNotEqual(weakened, role_text, "the mutation site must be present")
-                    weakened_delivery = normalize(weakened + "\n" + operation_text)
-                    self.assertIn(
-                        "inspect the complete changed-file diff",
-                        [
-                            marker
-                            for marker in markers
-                            if normalize(marker) not in weakened_delivery
-                        ],
-                        "removing candidate inspection must make the guard fail",
-                    )
-
-
-class ConvergenceTeethTests(unittest.TestCase):
-    """Current source must read clean while each paired contradiction remains detectable.
-
-    The shipped side is read from the corpus; only the mutant is synthetic. Updating
-    required wording or Markdown segmentation must not hollow out the detector.
-    """
-
-    #: site -> (corpus surface, synthetic contradicting variant, claim the variant must trip)
-    RECONCILED_SITE_MUTANTS: tuple[tuple[str, str, str, str], ...] = (
-        (
-            "core/acceptance.md table attribution",
-            "skills/l-01-agent-lifecycles/core/acceptance.md",
-            "| LOCR-1 | x | The completed outcome accepts the handoff and validates the artifact |",
-            "terminal-outcome-semantic-acceptance",
-        ),
-        (
-            "roles/architect.md relay sentence",
-            "skills/l-01-agent-lifecycles/roles/architect.md",
-            "The relay evaluates the artifact and nudges the seat when a report is missing.",
-            "relay-evaluates-artifact",
-        ),
-        (
-            "roles/orchestrator.md sweep sentence",
-            "skills/l-01-agent-lifecycles/roles/orchestrator.md",
-            "The sweep inspects the durable report before the owner is woken.",
-            "relay-evaluates-artifact",
-        ),
-        (
-            "roles/reviewer.md negated instruction",
-            "skills/l-01-agent-lifecycles/roles/reviewer.md",
-            "**Never:** implement or edit code, run an unrequested full suite, or author a second "
-            "completion row.",
-            "second-completion-message",
-        ),
-    )
-
-    def test_each_reconciled_site_reads_clean_and_its_mutant_still_fails(self) -> None:
-        for site, relative, mutant, claim_id in self.RECONCILED_SITE_MUTANTS:
-            with self.subTest(site=site):
-                self.assertEqual(
-                    [
-                        finding.render(relative)
-                        for finding in contradictions(read_surface(relative))
-                    ],
-                    [],
-                    f"{site}: the surface stopped reading clean; the reconciliation went the wrong way",
-                )
-                self.assertIn(
-                    claim_id,
-                    [finding.claim_id for finding in contradictions(mutant)],
-                    f"{site}: the detector no longer catches the contradiction it exists for",
-                )
-
-    def test_a_contradicting_sentence_added_to_a_roster_surface_still_fails_it(self) -> None:
-        """The per-surface check is state-and-deny aware, and this is the packet's own named failure."""
-
-        relative = "skills/l-01-agent-lifecycles/core/acceptance.md"
-        shipped = read_surface(relative)
-        self.assertEqual(contradictions(shipped), ())
-        self.assertEqual(classify_reading(shipped), Reading.STATED)
-        mutated = (
-            shipped
-            + "\nThe manager may treat a `completed` outcome as acceptance of the handoff.\n"
-        )
-        self.assertEqual(classify_reading(mutated), Reading.CONTRADICTED)
-
-    def test_removing_an_owed_clause_from_the_shipped_text_still_fails_its_surface(self) -> None:
-        # Delete each owed statement on its authoritative source or explicit referral.
-        for relative, clauses in OWED_STATEMENTS.items():
-            shipped = normalize(read_surface(relative))
-            for clause in clauses:
-                with self.subTest(surface=relative, clause=clause):
-                    marker = normalize(clause)
-                    self.assertIn(marker, shipped, f"{relative} no longer states its owed clause")
-                    mutated = shipped.replace(marker, " ")
-                    self.assertIn(
-                        clause,
-                        [owed for owed in clauses if normalize(owed) not in mutated],
-                        "a surface that lost its owed clause must be reported as missing it",
-                    )
 
 
 class SilenceIsNotContradictionTests(unittest.TestCase):

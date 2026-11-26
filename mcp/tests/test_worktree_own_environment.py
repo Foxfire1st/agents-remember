@@ -61,13 +61,12 @@ def test_worker_candidate_environment_names_no_candidate_interpreter() -> None:
             f"{surface} no longer points at the repository's tool notes"
         )
         for clause in (
-            "Build each worktree's environment as `system/tools.md` says.",
-            "Run every candidate command in that environment.",
-            "Report a command the tool notes lack,",
-            "record the interpreter each run used.",
+            "Build env per `system/tools.md` (report missing tools; record interpreter).",
+            "report missing tools",
+            "record interpreter",
         ):
             assert text.count(clause) == 1, (surface, clause)
-        assert "record the interpreter each run used" in text, (
+        assert "record interpreter" in text, (
             f"{surface} no longer requires a run record to name its interpreter"
         )
 

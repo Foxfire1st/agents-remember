@@ -120,9 +120,13 @@ def test_real_leaf_preparation_restores_details_beside_local_handover(
     references = receipt["instructionComposition"]["detailReferences"]
     assert references, f"The {role} capsule must actually exercise frozen details"
     frozen = {reference["path"]: Path(reference["path"]).read_bytes() for reference in references}
+    detail_root = role_instruction_details.nested_detail_root(Path(report))
+    assert f"detail={json.dumps(detail_root.as_posix())}" in compiled["prompt"]
     for reference in references:
-        assert Path(reference["path"]).parent == Path(report).parent
-        assert reference["path"] in compiled["prompt"]
+        assert Path(reference["path"]) == role_instruction_details.nested_detail_path(
+            Path(report), reference["sourcePath"]
+        )
+        assert f"detail/{reference['sourcePath']}" in compiled["prompt"]
     receipt_path = Path(workspace["scratchRoot"]) / "receipt.json"
     _validate(receipt)
     Path(artifact["path"]).unlink()
