@@ -92,7 +92,7 @@ Fill every placeholder before supplying the intake values. Do not send an unreso
 
 Immediately before starting the Curator, call `worktree_status` for the canonical leaf. Require `sourceLineage.state=current`. If it is stale or unavailable, synchronize and reconcile before opening the Curator.
 
-Use the leaf's `series-contract.md` under the master's `enclosures/<leaf-id>/` for `<enclosure-contract-path>`. Before supplying memory-tool scope, read [Authority gates](../operations/curation.md#authority-gates) for the enclosure-contract requirement and unscoped `route_index_refresh` consequence.
+Use the leaf's `series-contract.md` under the master's `enclosures/<leaf-id>/` for `<enclosure-contract-path>`. Before supplying memory-tool scope, read [Checks and gates](../operations/curation.md#checks-and-gates) for the enclosure-contract requirement and unscoped `route_index_refresh` consequence.
 
 Before starting the Curator stage, read [Start leaf stages and deliver the first intake](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake) for stage timing and direct producer handovers.
 
@@ -100,6 +100,6 @@ Supply the task, intent and current-lineage anchors.
 
 Name the Worker report and candidate-bound Reviewer verdict paths as task-note inputs supplied directly by those producers. The Curator does not request evidence again when it already exists in `notes/reports/`.
 
-Before recording ordinary code review, read [Record code review rounds](../operations/review.md#record-code-review-rounds) for ordinary leaf begin and result records.
+Before recording ordinary code review, read [Rounds](../operations/review.md#rounds) for ordinary leaf begin and result records.
 
-Before checking code and memory lane results, read [the leaf verdict handover procedure](../operations/review.md#receive-the-intake-and-hand-over-the-leaf-verdict) for separate code and memory results, direct handovers and stage-start notices.
+Before checking code and memory lane results, read [the leaf verdict handover procedure](../operations/review.md#focused-tests-and-handover) for separate code and memory results, direct handovers and stage-start notices.

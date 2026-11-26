@@ -129,7 +129,11 @@ PROJECTED_BOUNDARY_CLAUSES: tuple[BoundaryClause, ...] = (
         "core/acceptance.md",
         "On wake, the current gate owner opens and validates the required artifact, candidate identity, evidence and acceptance envelope before advancing lifecycle state.",
     ),
-    BoundaryClause("roles/worker.md", "A finished turn is not AR acceptance."),
+    BoundaryClause("core/every-role.md", "Completion != acceptance:"),
+    BoundaryClause(
+        "roles/worker.md",
+        "No role starts, Reviewer/Curator acts, memory/status edits, closeout, commit/merge/push/publish or requirement/packet rewrites.",
+    ),
     BoundaryClause(
         "reference/writing/technical-english-profile.md",
         "Clearer wording is not proof that meaning was preserved.",

@@ -13,6 +13,7 @@ from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.primitives.gate_vocab import STORED_GATE_WAY_OUT
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
+from agents_remember.models.role_capsules.refusal_references import with_refusal_reference
 from agents_remember.observer.events import now_iso
 from agents_remember.worktrees.closeout_input import (
     effective_message_arguments,
@@ -388,8 +389,11 @@ def _closeout_gate_blocked_preview(contract, guard: CloseoutGuard) -> dict[str, 
     is not followed by the hint to ask for the commit approval.
     """
 
-    summary = f"The closeout would be refused, and nothing would be committed: {guard.reason}"
-    step = f"{summary}. {STORED_GATE_WAY_OUT}."
+    base_summary = f"The closeout would be refused, and nothing would be committed: {guard.reason}"
+    summary = with_refusal_reference(base_summary, "closeout-gate-blocked")
+    step = with_refusal_reference(
+        f"{base_summary}. {STORED_GATE_WAY_OUT}.", "closeout-gate-blocked"
+    )
     status = {
         key: value
         for key, value in status_payload(contract).items()
@@ -555,7 +559,10 @@ def _refuse_unsatisfied_closeout_gate(contract, args: WorktreeArgs) -> None:
     guard = _closeout_gate_guard(contract, args)
     if guard is not None and not guard.permitted:
         raise RuntimeError(
-            f"closeout blocked by gate enforcement: {guard.reason}. {STORED_GATE_WAY_OUT}"
+            with_refusal_reference(
+                f"closeout blocked by gate enforcement: {guard.reason}. {STORED_GATE_WAY_OUT}",
+                "closeout-gate-blocked",
+            )
         )
 
 
@@ -610,7 +617,10 @@ def _claim_closeout_gate(contract, args: WorktreeArgs) -> CloseoutGuard | None:
     )
     if not guard.permitted:
         raise RuntimeError(
-            f"closeout blocked by gate enforcement: {guard.reason}. {STORED_GATE_WAY_OUT}"
+            with_refusal_reference(
+                f"closeout blocked by gate enforcement: {guard.reason}. {STORED_GATE_WAY_OUT}",
+                "closeout-gate-blocked",
+            )
         )
     return guard
 

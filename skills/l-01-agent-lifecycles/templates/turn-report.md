@@ -4,7 +4,7 @@ The Worker uses this template for the mandatory report at every handoff. The Man
 
 In this template, AR means Agents Remember and ID means identifier.
 
-This template supplies the report and journal authoring shapes. The [acceptance reference](../core/acceptance.md) owns acceptance, and [the checks before a freeze](../operations/implementation.md#check-the-candidate-before-each-freeze) owns targeted handover checks.
+This template supplies the report and journal authoring shapes. The [acceptance reference](../core/acceptance.md) owns acceptance, and [the checks before a freeze](../operations/implementation.md#operation--implementation) owns targeted handover checks.
 
 ## Rules
 

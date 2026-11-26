@@ -17,6 +17,7 @@ from agents_remember.application.role_capsules.compilation import (
     CapsuleCompilationOutcome,
     compile_admitted_capsule,
 )
+from agents_remember.application.role_capsules.shared_block import filter_shared_block
 from agents_remember.application.role_launch_context import (
     RoleLaunchContext,
     resolve_role_launch_context,
@@ -28,6 +29,7 @@ from agents_remember.cli import role_launch_routes, role_launch_workspace
 from agents_remember.cli.paseo_role_tools import start_role
 from agents_remember.cli.role_brief_message import SHARED_BLOCK_HEADING
 from agents_remember.cli.role_instruction_details import compose_launch_instructions
+from agents_remember.cli.role_instruction_links import compact_skill_uri_links
 from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.mcp.registration.knowledge import register_knowledge_tools
@@ -55,7 +57,6 @@ from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract, contract_publication_text
 from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from agents_remember_test_support.testing.leaf_instruction_wording import (
-    assert_action_pointer,
     assert_emitted_detail_links,
 )
 from lifecycle_enclosure_test_support import discard_test_enclosures, publish_test_enclosure
@@ -79,37 +80,20 @@ from test_worktree_sync_knowledge_merge import (
 )
 
 KNOWLEDGE_SOURCE = "reference/knowledge/use.md"
-KNOWLEDGE_STEPS = {
+KNOWLEDGE_INDEX_POINTERS: dict[str, tuple[str, str, str]] = {
     "architect": (
-        (
-            "Before diagnosing, call `knowledge_read` on "
-            "`agents-remember-task` for the files involved; read"
-        ),
+        "Reqs/`task_doc`/`context_packet`/`knowledge_read`",
+        "diagnose",
+        "#architect-diagnose-before-proposing-a-repair",
     ),
     "investigator": (
-        ("Call `knowledge_read` on `agents-remember-task` for the records you need whole; read"),
+        "Knowledge readers",
+        "claims",
+        "#investigator-distinguish-claims-observations-and-hypotheses",
     ),
-    "worker": (
-        (
-            "For a record you need whole, call `knowledge_read` on "
-            '`agents-remember-task` with `view="source_context"`; read'
-        ),
-        (
-            "Before diagnosing a failing test, call `knowledge_read` on "
-            '`agents-remember-task` with `view="source_context"` for the '
-            "test file; read"
-        ),
-    ),
-    "reviewer": (
-        (
-            "Call `knowledge_read` on `agents-remember-task` for the "
-            "changed files' records you need whole; read"
-        ),
-    ),
-    "curator": (
-        ("Call `knowledge_read` on `agents-remember-task` for the records you check; read"),
-        "Before interpreting a knowledge read, read",
-    ),
+    "worker": ("Knowledge/CLI", "use", ""),
+    "reviewer": ("Baseline/knowledge", "use", ""),
+    "curator": ("Knowledge/CLI", "use", ""),
 }
 ADVICE_RULE = (
     "Reviews, cold reads, re-checks, sweeps and Investigator reports are advice, not requirements. "
@@ -182,17 +166,36 @@ def _emitted_instruction_detail(
     return instructions, content.decode("utf-8")
 
 
+def _assert_index_detail_pointer(
+    text: str, source: str, trigger: str, label: str, fragment: str = ""
+) -> None:
+    """Require one Reference index row binding trigger and detail link."""
+    link = f"[{label}]({{{{detail:{source}}}}}{fragment})"
+    rows = [
+        line
+        for line in text.splitlines()
+        if line.lstrip().startswith("|")
+        and line.strip().strip("|").split("|", 1)[0].strip() == trigger
+        and link in line
+    ]
+    assert len(rows) == 1, (
+        source,
+        trigger,
+        link,
+        f"If derived facts are stale, run {RENEW_COMMAND}",
+    )
+
+
 def _prerequisite_curation_owner(
     result: CapsuleCompilationResult, rendered: str, report_path: Path
 ) -> str:
-    """Follow the Manager's stage-start action, in its curation compile, to the stage owner.
-
-    P5-18: ``roles/manager.md`` holds the one stage-start pointer in every Manager operation;
-    the curation operation no longer repeats it for starting the Curator.
-    """
-    action = "Before starting and coordinating the leaf, read"
+    """Follow the Manager's stage-start action, in its curation compile, to the stage owner."""
+    action = (
+        "Check packet deps before starting/integrating "
+        "(the product does not perform that check); follow"
+    )
     pointer = action + (
-        " [leaf-stage coordination]"
+        " [leaf stages]"
         "(../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake)"
     )
     assert "Before starting the Curator for ordinary delivery" not in rendered
@@ -233,9 +236,10 @@ class RealDigestFirstMessageTests(FirstMessageMatrixBase):
                 self.check_message(
                     message, receipt, role=role, harness=FIXTURE_HARNESSES[0], kind=kind
                 )
+                expected_digest = compact_skill_uri_links(filter_shared_block(digest, role))
                 self.assertEqual(message.count(heading), 1)
-                self.assertEqual(message.count(digest), 1, remedy)
-                self.assertIn(f"{heading}{digest}\n\n# {role.title()}", message, remedy)
+                self.assertEqual(message.count(expected_digest), 1, remedy)
+                self.assertIn(f"{heading}{expected_digest}\n\n# {role.title()}", message, remedy)
                 self.release(receipt)
 
 
@@ -251,16 +255,24 @@ def test_knowledge_detail_reaches_its_step_in_every_declared_role_operation() ->
             details = {item.source_path: item for item in result.capsule.detail_references}
             rendered = result.render_instructions()
             pointer = "{{detail:" + KNOWLEDGE_SOURCE + "}}"
-            assert (KNOWLEDGE_SOURCE in details) == (role in KNOWLEDGE_STEPS), (role, operation)
-            assert (pointer in rendered) == (role in KNOWLEDGE_STEPS), (role, operation)
-            if role in KNOWLEDGE_STEPS:
+            assert (KNOWLEDGE_SOURCE in details) == (role in KNOWLEDGE_INDEX_POINTERS), (
+                role,
+                operation,
+            )
+            assert (pointer in rendered) == (role in KNOWLEDGE_INDEX_POINTERS), (role, operation)
+            if role in KNOWLEDGE_INDEX_POINTERS:
                 assert details[KNOWLEDGE_SOURCE].content == expected, (role, operation)
-                for action in KNOWLEDGE_STEPS[role]:
-                    assert_action_pointer(rendered, KNOWLEDGE_SOURCE, action)
-                    mutant = rendered.replace(action, "Read during intake", 1)
+                trigger, label, fragment = KNOWLEDGE_INDEX_POINTERS[role]
+                _assert_index_detail_pointer(rendered, KNOWLEDGE_SOURCE, trigger, label, fragment)
+                for mutant in (
+                    rendered.replace(trigger, "Read during intake", 1),
+                    rendered.replace(pointer, "", 1),
+                ):
                     assert mutant != rendered
                     with pytest.raises(AssertionError):
-                        assert_action_pointer(mutant, KNOWLEDGE_SOURCE, action)
+                        _assert_index_detail_pointer(
+                            mutant, KNOWLEDGE_SOURCE, trigger, label, fragment
+                        )
                 assert details[KNOWLEDGE_SOURCE].step.strip()
             checked.add((role, operation))
     assert checked == {
@@ -305,8 +317,10 @@ async def test_knowledge_detail_views_and_keywords_match_the_registered_tool(
     views = set(re.findall(r'view="([a-z_]+)"', text))
     assert views == {"source_context", "invariant", "family"}
     description = tool.description or ""
-    advertised = description.split("Views:", 1)[1].split(".", 1)[0]
-    assert views <= set(re.findall(r"[a-z_]+", advertised))
+    advertised_match = re.search(r"\bviews:\s*([^.(]+)", description, flags=re.IGNORECASE)
+    assert advertised_match is not None, description
+    advertised = {token.strip() for token in advertised_match.group(1).split(",") if token.strip()}
+    assert views <= advertised
     for view in views:
         _content, answer = await server.call_tool(
             "knowledge_read", {"memoryRoot": str(tmp_path / "absent-memory"), "view": view}
@@ -350,21 +364,24 @@ def test_d639_rules_reach_only_their_compiled_role_audience() -> None:
 def test_worker_measurement_checkpoint_steps_reach_every_worker_operation() -> None:
     """Worker builds and forwards identities while Architect remains the measurement owner."""
 
-    clauses = (
-        "Before making a measurement-tooling handover, follow [Make the measurement handover]"
-        "(../operations/implementation.md#make-the-measurement-handover) for the candidate and "
-        "case-set binding and the Manager's response.",
-    )
+    sync_source = "reference/worker/sync-and-repairs.md"
+    worker_whole_link = "[sync]({{detail:" + sync_source + "}})"
     for role, entry in _shipped_parsed().roles.items():
         for operation in entry.operations:
-            rendered = " ".join(_compiled(role, operation).render_instructions().split())
-            for clause in clauses:
-                assert (clause in rendered) == (role == "worker"), (role, operation, clause)
+            result = _compiled(role, operation)
+            rendered = " ".join(result.render_instructions().split())
+            assert (worker_whole_link in rendered) == (role == "worker"), (role, operation)
             if role == "worker":
+                sync_detail = next(
+                    item
+                    for item in result.capsule.detail_references
+                    if item.source_path == sync_source
+                )
+                assert sync_detail.content == (LIFECYCLE_ROOT / sync_source).read_bytes()
                 assert "{{detail:reference/sandbox-actors.md}}" in rendered
                 sandbox = next(
                     item
-                    for item in _compiled(role, operation).capsule.detail_references
+                    for item in result.capsule.detail_references
                     if item.source_path == "reference/sandbox-actors.md"
                 )
                 assert sandbox.content == (LIFECYCLE_ROOT / sandbox.source_path).read_bytes()
@@ -377,14 +394,14 @@ def test_worker_measurement_checkpoint_steps_reach_every_worker_operation() -> N
                     assert mutant != sandbox.content.decode()
                     with pytest.raises(AssertionError):
                         assert clause in mutant
-    source = (LIFECYCLE_ROOT / "operations/implementation.md").read_text(encoding="utf-8")
-    handover = source.split("### Make the measurement handover", 1)[1].split(
-        "### Write the report", 1
+    source = (LIFECYCLE_ROOT / sync_source).read_text(encoding="utf-8")
+    handover = source.split("## Make the measurement handover", 1)[1].split(
+        "## Report a refused handover", 1
     )[0]
     for clause in (
-        "For measurement tooling, send the candidate and case-set identity to the Manager. "
-        "Await the Manager's go on the same route.",
-        "This simple handover is not a review freeze and starts no seat.",
+        "For measurement tooling, the Worker sends the candidate and case-set identity to the Manager "
+        "and awaits the Manager's go on the same route.",
+        "This handover is not a review freeze and starts no seat.",
     ):
         assert clause in " ".join(handover.split())
         mutant = handover.replace(clause, "", 1)
@@ -795,9 +812,9 @@ class PrerequisiteSyncCuratorTests(RoleToolsTestCase):
     def test_manager_starts_curator_for_actual_prerequisite_memory_reconciliation(self) -> None:
         """The documented exception reaches the exact conflicted enclosure without healing it."""
         clauses = (
-            "When an approved packet's prerequisite sync reaches Curator-owned memory "
-            "reconciliation, the Manager starts the Curator for that reconciliation.",
-            "Ordinary delivery curation and the knowledge check still follow code `PASS`.",
+            "when an approved packet's prerequisite sync reaches Curator-owned memory "
+            "reconciliation, the Manager starts the Curator for that reconciliation",
+            "ordinary delivery curation and knowledge check still follow code `PASS`",
         )
         for role, operation in (("manager", "coordination"), ("manager", "curation")):
             result = _compiled(role, operation)

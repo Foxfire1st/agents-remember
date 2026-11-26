@@ -26,17 +26,17 @@ import unittest
 from pathlib import Path
 from typing import Any, cast
 
+from agents_remember.application.role_capsules.shared_block import filter_shared_block
 from agents_remember.errors import CapsuleManifestError
 from agents_remember.models.role_capsules.types import CapsuleOperation, CapsuleRole
 from agents_remember_test_support.testing.capsule_wording import (
-    MEMORY_HANDOVER_ACTION,
+    autonomy_surface,
     clause_surface,
     instruction_owner,
 )
 from agents_remember_test_support.testing.curator_contracts import compile_matrix
 from agents_remember_test_support.testing.leaf_instruction_wording import (
     LEAF_CLAUSES,
-    MESSAGE_HANDOVER_ACTIONS,
     MESSAGE_HANDOVER_SOURCE,
     assert_emitted_detail_links,
     autonomy_clauses,
@@ -169,40 +169,42 @@ CURATION_HANDOFF_FACETS = (
 )
 
 
+MESSAGE_HANDOVER_TABLE_ACTIONS = {
+    "architect": "[msgs](",
+    "orchestrator": "[msgs](",
+    "manager": "[msgs](",
+    "worker": "[msg](",
+    "reviewer": "[msg](",
+    "curator": "[msg](",
+    "investigator": "[msgs](",
+}
+
+
 def reviewer_outputs_duplicates(source: str) -> list[str]:
-    """Keep retired duplicate verdict directions out of the artifact section."""
-    match = re.search(r"(?ms)^## Write the review artifacts\n(.*?)(?=^## |\Z)", source)
-    assert match is not None
-    reading = normalized(match[1])
+    """Keep retired duplicate verdict directions out of the Reviewer role file."""
+    reading = normalized(source)
     return [clause for clause in RETIRED_REVIEWER_OUTPUT_CLAUSES if normalized(clause) in reading]
 
 
 def require_curation_handoff_targets(root: Path) -> None:
     """Follow the operation and delivered-detail routes for all six moved facets."""
     operation = (root / "operations/curation.md").read_text()
-    assert re.search(r"(?m)^## Handoff / exit\s*$", operation)
+    assert re.search(r"(?m)^### Checks and gates\s*$", operation)
     reviewer = (root / "operations/review.md").read_text()
     for clause in (
-        "Memory review uses separate sealed reports, finding identifiers and its own pass count.",
-        "The Reviewer records its own lane with `begin_review` and `record_review`, using `reviewKind=memory`.",
-        "Code state stays unchanged.",
-        "Its ordinary pass limit is the same as code review's.",
-        "A pass beyond the settings limit needs the Architect's or developer's instruction recorded by the Manager.",
+        "Memory review uses a separate lane (`reviewKind=memory`; own sealed reports/IDs/pass count, "
+        "same limit; extra passes need Architect/developer instruction recorded by Manager); "
+        "code verdict/baseline stay unchanged.",
     ):
         assert normalized(clause) in normalized(reviewer), clause
     curator = (root / "roles/curator.md").read_text()
-    assert (
-        "[Obtain the independent fact-check](../operations/curation.md#obtain-the-independent-fact-check)"
-        in curator
-    )
-    assert "The curation operation owns the workflow sequence." in curator
-    assert "{{detail:reference/curator/memory-handover.md}}" in curator
+    assert "[handover]({{detail:reference/curator/memory-handover.md}})" in curator
     with tempfile.TemporaryDirectory() as directory:
         _, detail = delivered_step(
             root,
             ("curator", "curation"),
             "reference/curator/memory-handover.md",
-            MEMORY_HANDOVER_ACTION,
+            "[handover](",
             Path(directory) / "handoff.md",
         )
         assert re.search(r"(?m)^## Send the whole requested review or repair\s*$", detail)
@@ -221,7 +223,7 @@ def message_step(root: Path, role: str, operation: str = "orientation") -> tuple
             root,
             (cast(CapsuleRole, owner), cast(CapsuleOperation, operation)),
             MESSAGE_HANDOVER_SOURCE,
-            MESSAGE_HANDOVER_ACTIONS[owner],
+            MESSAGE_HANDOVER_TABLE_ACTIONS[owner],
             Path(directory) / "report.md",
         )
     return instructions, text
@@ -287,36 +289,47 @@ HELD_DELIVERY_CLAUSES = (
     "Withdraw a superseded held message with `withdraw_held_message_id`.",
     "A receiver does not poll.",
 )
-HELD_DELIVERY_PREFIX = "Architect, Orchestrator, Manager, Worker, Curator, Reviewer, Investigator: "
+HELD_DELIVERY_KERNEL_CLAUSES = (
+    "`held` = queued",
+    "never resend",
+    "withdraw via `withdraw_held_message_id`",
+    "open supplied artifacts first",
+)
+HELD_DELIVERY_KERNEL_LINE = (
+    "`held` = queued; never resend, withdraw via `withdraw_held_message_id`, "
+    "open supplied artifacts first."
+)
 
 
 def _assert_held_shared_line(text: str) -> None:
-    assert text.count(HELD_DELIVERY_PREFIX + " ".join(HELD_DELIVERY_CLAUSES)) == 1
+    assert text.count(HELD_DELIVERY_KERNEL_LINE) == 1
+    assert "Never poll" in text
 
 
 def assert_held_shared_delivery(root: Path) -> None:
     """Verify every messaging role's actual shared compiler stream without a detail read."""
     source = (root / "core/authority.md").read_text()
     assert " ".join(HELD_DELIVERY_CLAUSES) in source
+    raw_shared = (root / "core/every-role.md").read_text()
     seen = set()
     for delivery in compile_matrix(root):
         if delivery.role not in COMPILED_ROLES:
             assert delivery.role == "bootstrap"
+            assert delivery.shared_block is not None
+            assert delivery.shared_block == filter_shared_block(raw_shared, delivery.role)
             continue
         shared = delivery.shared_block
         assert shared is not None
-        assert shared == (root / "core/every-role.md").read_text()
+        assert shared == filter_shared_block(raw_shared, delivery.role)
         _assert_held_shared_line(shared)
         assert "#handle-held-delivery" not in delivery.result.render_instructions()
-        for clause in HELD_DELIVERY_CLAUSES:
+        for clause in HELD_DELIVERY_KERNEL_CLAUSES:
             changed = shared.replace(clause, "", 1)
             assert changed != shared
             with unittest.TestCase().assertRaises(AssertionError):
                 _assert_held_shared_line(changed)
         with unittest.TestCase().assertRaises(AssertionError):
-            _assert_held_shared_line(
-                shared + "\n" + HELD_DELIVERY_PREFIX + " ".join(HELD_DELIVERY_CLAUSES)
-            )
+            _assert_held_shared_line(shared + "\n" + HELD_DELIVERY_KERNEL_LINE)
         seen.add(delivery.role)
     assert seen == set(COMPILED_ROLES)
 
@@ -417,9 +430,9 @@ def scan(roots: list[Path], files: tuple[str, ...]) -> tuple[list[str], list[str
             short = f"{label}/{relative}"
             if relative == "roles/bootstrap.md":
                 for clause in (
-                    "with no task document, brief or parent.",
-                    "Start no role. Bootstrap messages no one.",
-                    "in your own chat",
+                    "with no task doc, brief, or parent;",
+                    "Start no role, message no one;",
+                    "ask/report in own chat",
                 ):
                     if normalized(clause) not in normalized(text):
                         missing.append(f"{short}: missing {clause!r}")
@@ -580,20 +593,21 @@ class RoleMessageWordingTests(unittest.TestCase):
         """Report returns retain role/task addressing and the instructed recipient exception."""
         manager_clauses = {
             "general report address": (
-                "When another agent starts you, report to that agent's role with its task references, "
-                "unless the Architect changes your reporting recipient as described below.",
+                "Report to launching parent unless Architect instructs an Orchestrator recipient.",
             ),
             "report address": (
-                "Address that final message to the parent's role with its task references.",
+                "parent's role with its task references (or parent ID for developer questions)",
             ),
             "recipient change": (
-                "If your launching Architect names an Orchestrator\u2019s agent identifier when a second master starts, record the instruction and identifier in your report. Use it as your reporting recipient. Your launch parent stays fixed. Only that instruction changes your recipient.",
+                "When launching Architect names an Orchestrator ID on a 2nd master, record it and switch recipient (launch parent stays fixed).",
             ),
-            "parentless": ("A Manager started from the dashboard has no parent and needs none.",),
+            "parentless": ("dashboard Managers have no parent; invent no ID",),
         }
         investigator_clauses = {
-            "report address": ("addressed to the parent's role with its task references",),
-            "parentless": ("Without a parent, the developer reads the report in your own chat.",),
+            "report address": (
+                "send path to parent's role with its task references via `role_message`",
+            ),
+            "parentless": ("parentless: own chat",),
         }
         for root in surfaces():
             for relative, clauses in (
@@ -607,21 +621,15 @@ class RoleMessageWordingTests(unittest.TestCase):
         root = surfaces()[0]
         source = (root / "roles/reviewer.md").read_text()
         clauses = {**LEAF_CLAUSES["roles/reviewer.md"], **autonomy_clauses("reviewer")}
-        verdict = {"verdict to worker": clauses.pop("verdict to worker")}
+        clauses.pop("verdict to worker")
         expected = (
-            "2. Send the verdict directly to the Worker through `role_message` on "
-            "`agents-remember-task`. The message names the verdict file; it never pastes the text. "
-            "A block names the sealed-findings report and requests the whole repair stretch."
+            "2. Send verdict path directly to Worker via `role_message` "
+            "(no pasted text; block names sealed report + repair stretch)."
         )
-        self.assertEqual(verdict["verdict to worker"], (expected,))
-        self.assertIn(
-            "Before inspecting the assigned packet or candidate, follow [the review intake "
-            "procedure](../operations/review.md#receive-the-intake-and-hand-over-the-leaf-verdict)",
-            source,
-        )
+        verdict = {"verdict to worker": (expected,)}
         operation = (root / "operations/review.md").read_text()
         section = re.search(
-            r"(?ms)^## Receive the intake and hand over the leaf verdict\n(.*?)(?=^## |\Z)",
+            r"(?ms)^## Focused tests and handover\n(.*?)(?=^## |\Z)",
             operation,
         )
         self.assertIsNotNone(section)
@@ -635,17 +643,14 @@ class RoleMessageWordingTests(unittest.TestCase):
         for retired in RETIRED_REVIEWER_OUTPUT_CLAUSES:
             with self.subTest(deleted_outputs_clause=retired):
                 self.assertIn("verdict to worker", missing_clauses(retired, verdict))
-                restored = source.replace(
-                    "## Write the review artifacts\n",
-                    "## Write the review artifacts\n\n" + retired + "\n",
-                )
+                restored = source + "\n" + retired + "\n"
                 self.assertNotEqual(restored, source)
                 self.assertIn(retired, reviewer_outputs_duplicates(restored))
         with tempfile.TemporaryDirectory() as directory:
             for name, alternatives in clauses.items():
                 with self.subTest(obligation=name):
                     if name in autonomy_clauses("reviewer"):
-                        text = source
+                        text = autonomy_surface(root, "reviewer")
                     else:
                         text = clause_surface(
                             root,
@@ -665,7 +670,7 @@ class RoleMessageWordingTests(unittest.TestCase):
         root = surfaces()[0]
         require_curation_handoff_targets(root)
         for relative, before, after in (
-            ("operations/curation.md", "## Handoff / exit\n", "## Renamed exit\n"),
+            ("operations/curation.md", "### Checks and gates\n", "### Renamed gates\n"),
             (
                 "reference/curator/memory-handover.md",
                 "## Send the whole requested review or repair\n",
@@ -715,16 +720,11 @@ class RoleMessageWordingTests(unittest.TestCase):
                 else:
                     path = root / "roles/reviewer.md"
                     original = path.read_text()
+                    action = MESSAGE_HANDOVER_TABLE_ACTIONS["reviewer"]
                     if mutation == "action":
-                        mutant = original.replace(
-                            MESSAGE_HANDOVER_ACTIONS["reviewer"], "After the turn ends, read"
-                        )
+                        mutant = original.replace(action, "[other](")
                     else:
-                        line = next(
-                            line
-                            for line in original.splitlines()
-                            if MESSAGE_HANDOVER_ACTIONS["reviewer"] in line
-                        )
+                        line = next(line for line in original.splitlines() if action in line)
                         mutant = original + "\n" + line + "\n"
                     self.assertNotEqual(mutant, original)
                     path.write_text(mutant)

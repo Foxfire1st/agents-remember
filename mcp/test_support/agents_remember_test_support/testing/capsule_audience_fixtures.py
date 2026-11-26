@@ -13,283 +13,223 @@ ROLE_POINTER_ACTIONS = {
     "architect": [
         (
             "reference/coordination/shared/requirement-design.md",
-            "Before authoring or amending a requirement and its task structure, read",
+            "| Reqs/`task_doc`/`context_packet`/`knowledge_read` |",
         ),
         (
             "reference/tasks/document-authoring.md",
-            "Before authoring a task document or requirement packet, read",
+            "| Reqs/`task_doc`/`context_packet`/`knowledge_read` |",
         ),
-        ("reference/knowledge/commands.md", "Before planning repository work, read"),
+        (
+            "reference/knowledge/commands.md",
+            "| Reqs/`task_doc`/`context_packet`/`knowledge_read` |",
+        ),
         (
             "reference/knowledge/use.md",
-            (
-                "Before diagnosing, call `knowledge_read` on "
-                "`agents-remember-task` for the files involved; read"
-            ),
+            "| Reqs/`task_doc`/`context_packet`/`knowledge_read` |",
         ),
         (
             "reference/coordination/architect/models-and-settings.md",
-            "Before selecting a seat model and its authorized settings, read",
+            "| Models/sandbox (`role_start`), master, seats (`retire_child`), 3rd |",
         ),
         (
-            "reference/coordination/architect/process-decisions.md",
-            "Before deciding or escalating a coordination issue, read",
-        ),
-        (
-            "reference/coordination/architect/curator-measurement.md",
-            "Before running or discussing a Curator measurement, read",
-        ),
-        (
-            "reference/coordination/shared/seat-recovery.md",
-            "Before recovering idle, unfinished, stopped or unavailable-provider work, read",
+            "reference/sandbox-actors.md",
+            "| Models/sandbox (`role_start`), master, seats (`retire_child`), 3rd |",
         ),
         (
             "reference/coordination/shared/master-state.md",
-            "Before updating the master after a start, handover or landing, read",
+            "| Models/sandbox (`role_start`), master, seats (`retire_child`), 3rd |",
+        ),
+        (
+            "reference/coordination/shared/seat-recovery.md",
+            "| Models/sandbox (`role_start`), master, seats (`retire_child`), 3rd |",
         ),
         (
             "reference/coordination/shared/third-rejected-round.md",
-            "Before judging a third rejected round during direct coordination, read",
+            "| Models/sandbox (`role_start`), master, seats (`retire_child`), 3rd |",
         ),
         (
-            "reference/coordination/architect/developer-decisions.md",
-            "Before relaying a developer decision from question through instruction delivery, read",
+            "reference/coordination/architect/process-decisions.md",
+            "| Process, claims, dev/child Qs, `role_message` |",
         ),
         (
             "reference/coordination/architect/claim-verification.md",
-            "Before ruling on a reported claim, read",
+            "| Process, claims, dev/child Qs, `role_message` |",
         ),
-        ("reference/message-handover.md", "Before handing work to a waiting seat, read"),
         (
-            "reference/sandbox-actors.md",
-            "Before configuring or inspecting a sandbox harness without changing user-owned "
-            "configuration, read",
+            "reference/coordination/architect/developer-decisions.md",
+            "| Process, claims, dev/child Qs, `role_message` |",
         ),
         (
             "reference/coordination/shared/child-questions.md",
-            "Before answering a child's question or returning the developer's answer, read",
+            "| Process, claims, dev/child Qs, `role_message` |",
+        ),
+        (
+            "reference/message-handover.md",
+            "| Process, claims, dev/child Qs, `role_message` |",
+        ),
+        (
+            "reference/coordination/architect/curator-measurement.md",
+            "| Meas., advisory, flat closeout |",
+        ),
+        (
+            "reference/review/advisory-reviews.md",
+            "| Meas., advisory, flat closeout |",
+        ),
+        (
+            "reference/coordination/shared/closeout-recovery.md",
+            "| Meas., advisory, flat closeout |",
         ),
     ],
     "orchestrator": [
         (
             "reference/coordination/shared/seat-recovery.md",
-            "Before recovering idle, unfinished, stopped or unavailable-provider work, read",
+            "| Manager brief, stages (`role_start`), hand-off, seats (`retire_child`), "
+            "master/decisions (`task_doc`), closeout |",
         ),
         (
             "reference/coordination/shared/master-state.md",
-            "Before updating the master after a start, handover or landing, read",
+            "| Manager brief, stages (`role_start`), hand-off, seats (`retire_child`), "
+            "master/decisions (`task_doc`), closeout |",
         ),
-        ("reference/tasks/document-authoring.md", "Before using `task_doc append_decision`, read"),
+        (
+            "reference/tasks/document-authoring.md",
+            "| Manager brief, stages (`role_start`), hand-off, seats (`retire_child`), "
+            "master/decisions (`task_doc`), closeout |",
+        ),
+        (
+            "reference/coordination/shared/closeout-recovery.md",
+            "| Manager brief, stages (`role_start`), hand-off, seats (`retire_child`), "
+            "master/decisions (`task_doc`), closeout |",
+        ),
         (
             "reference/knowledge/commands.md",
-            "Before using a knowledge command or acting on its result, read",
+            "| `knowledge_read`/`context_packet`, `role_message`, sandbox, child Qs |",
         ),
-        ("reference/message-handover.md", "Before handing work to a waiting seat, read"),
+        (
+            "reference/message-handover.md",
+            "| `knowledge_read`/`context_packet`, `role_message`, sandbox, child Qs |",
+        ),
         (
             "reference/sandbox-actors.md",
-            "Before configuring or inspecting a sandbox harness without changing "
-            "user-owned configuration, read",
+            "| `knowledge_read`/`context_packet`, `role_message`, sandbox, child Qs |",
         ),
         (
             "reference/coordination/shared/child-questions.md",
-            "Before handling a child's question or the developer's answer to it, read",
+            "| `knowledge_read`/`context_packet`, `role_message`, sandbox, child Qs |",
         ),
     ],
     "manager": [
         (
-            "reference/knowledge/commands.md",
-            "Before using a knowledge command or interpreting its result, read",
-        ),
-        (
             "reference/coordination/shared/seat-recovery.md",
-            "Before recovering idle, unfinished, stopped or unavailable-provider work, read",
+            "| Seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), "
+            "switch (`worktree_closeout_*`) |",
         ),
-        ("reference/refused-write.md", "Before retiring or moving a task, read"),
         (
             "reference/coordination/shared/third-rejected-round.md",
-            "Before judging repair progress at a third rejected round, an earlier coder switch "
-            "or a Reviewer replacement, read",
+            "| Seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), "
+            "switch (`worktree_closeout_*`) |",
+        ),
+        (
+            "reference/worker/sync-and-repairs.md",
+            "| Seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), "
+            "switch (`worktree_closeout_*`) |",
+        ),
+        (
+            "reference/coordination/shared/closeout-recovery.md",
+            "| Seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), "
+            "switch (`worktree_closeout_*`) |",
         ),
         (
             "reference/coordination/shared/master-state.md",
-            "Before updating master state through completion, read",
+            "| Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, "
+            "msgs, sandbox, child |",
         ),
         (
             "reference/tasks/document-authoring.md",
-            "Before editing, skipping or previewing task-document fields, or using `task_doc "
-            "append_decision`, read",
+            "| Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, "
+            "msgs, sandbox, child |",
+        ),
+        (
+            "reference/refused-write.md",
+            "| Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, "
+            "msgs, sandbox, child |",
+        ),
+        (
+            "reference/knowledge/commands.md",
+            "| Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, "
+            "msgs, sandbox, child |",
+        ),
+        (
+            "reference/message-handover.md",
+            "| Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, "
+            "msgs, sandbox, child |",
+        ),
+        (
+            "reference/sandbox-actors.md",
+            "| Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, "
+            "msgs, sandbox, child |",
         ),
         (
             "reference/coordination/shared/child-questions.md",
-            "Before handling a child's question or returning the developer's answer, read",
-        ),
-        ("reference/message-handover.md", "Before handing work to a waiting seat, read"),
-        (
-            "reference/sandbox-actors.md",
-            "Before configuring or inspecting a sandbox harness without changing user-owned "
-            "configuration, read",
+            "| Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, "
+            "msgs, sandbox, child |",
         ),
     ],
     "worker": [
-        (
-            "reference/tasks/document-authoring.md",
-            "Before editing, skipping or previewing task-document fields, read",
-        ),
-        (
-            "reference/knowledge/use.md",
-            (
-                "For a record you need whole, call `knowledge_read` on "
-                '`agents-remember-task` with `view="source_context"`; read'
-            ),
-        ),
-        (
-            "reference/knowledge/commands.md",
-            "Before using a knowledge command or interpreting its result, read",
-        ),
-        (
-            "reference/sandbox-actors.md",
-            "Before configuring or inspecting a sandbox harness, choosing its launch home or "
-            "starting its actors, read",
-        ),
-        ("templates/turn-report.md", "Before writing the freeze report, read the"),
-        (
-            "reference/writing/visual-explainers.md",
-            "Before you add an optional walkthrough to your freeze report, read",
-        ),
-        (
-            "reference/knowledge/serving-build.md",
-            "Before a command-line run that decides or writes, read",
-        ),
-        ("reference/message-handover.md", "Before sending a handover, read"),
-        (
-            "reference/knowledge/use.md",
-            (
-                "Before diagnosing a failing test, call `knowledge_read` on "
-                '`agents-remember-task` with `view="source_context"` for the '
-                "test file; read"
-            ),
-        ),
+        ("reference/knowledge/use.md", "| Knowledge/CLI |"),
+        ("reference/knowledge/commands.md", "| Knowledge/CLI |"),
+        ("reference/knowledge/serving-build.md", "| Knowledge/CLI |"),
+        ("reference/tasks/document-authoring.md", "| Task/report/list |"),
+        ("templates/turn-report.md", "| Task/report/list |"),
+        ("reference/writing/visual-explainers.md", "| Task/report/list |"),
+        ("reference/message-handover.md", "| Msg/sync/repairs |"),
+        ("reference/worker/sync-and-repairs.md", "| Msg/sync/repairs |"),
+        ("reference/sandbox-actors.md", "| Sandbox/ask |"),
     ],
     "curator": [
-        (
-            "reference/knowledge/use.md",
-            ("Call `knowledge_read` on `agents-remember-task` for the records you check; read"),
-        ),
-        ("reference/knowledge/use.md", "Before interpreting a knowledge read, read"),
-        (
-            "reference/curator/repository-foundation.md",
-            "Before a repository's first or resumed knowledge foundation, read",
-        ),
-        (
-            "reference/curator/intent-reconciliation.md",
-            "Before reconciling current intent, ruled intent and implementation, read",
-        ),
-        ("reference/curator/worklist.md", "Before answering the persisted leaf worklist, read"),
-        ("reference/curator/governing-sources.md", "Before explaining an assigned contract, read"),
-        (
-            "reference/curator/card-sentence-decisions.md",
-            "Before editing a card or its paired notes, read",
-        ),
-        (
-            "reference/curator/knowledge-ingest.md",
-            "Before preparing or ingesting authored knowledge, read",
-        ),
-        (
-            "reference/curator/family-obligations.md",
-            "Before deciding family coverage or updating a family, read",
-        ),
-        (
-            "reference/curator/change-routing.md",
-            "Before routing a changed file or notes item, read",
-        ),
-        (
-            "reference/curator/current-prose-and-history.md",
-            "Before updating current overview prose or answering changed-file history, read",
-        ),
-        (
-            "reference/curator/governing-sources.md",
-            "Before authoring a governing decision record, read",
-        ),
-        ("reference/curator/coherence-judgments.md", "Before preparing a coherence judgment, read"),
-        (
-            "reference/writing/technical-english-profile.md",
-            "Before drafting invariant statements, family guarantees or history reasons, read the",
-        ),
-        (
-            "reference/knowledge/serving-build.md",
-            "Before a command-line run that decides or writes, read",
-        ),
-        (
-            "reference/curator/card-formats-and-citations.md",
-            "Before creating or maintaining cards or overviews, read",
-        ),
-        (
-            "reference/curator/card-formats-and-citations.md",
-            "Before maintaining the entity catalog, read [entity catalog maintenance",
-        ),
-        ("reference/curator/card-formats-and-citations.md", "Before writing card history, read"),
-        (
-            "reference/curator/card-formats-and-citations.md",
-            "Before checking or repairing citations, read",
-        ),
-        (
-            "reference/knowledge/commands.md",
-            "Before using a knowledge-system command or interpreting its result, read",
-        ),
-        (
-            "reference/curator/publication-report.md",
-            "Before interpreting an ingest result or claiming publication, read",
-        ),
-        (
-            "reference/curator/memory-handover.md",
-            "Before sending a memory candidate for review or returning a memory repair, read",
-        ),
-        (
-            "reference/curator/encountered-records.md",
-            "Before authoring an encountered weakness or document dependency, read",
-        ),
-        ("reference/message-handover.md", "Before sending a message, read"),
-        ("reference/sandbox-actors.md", "Before configuring or inspecting a sandbox harness, read"),
+        ("reference/knowledge/use.md", "| Knowledge/CLI |"),
+        ("reference/knowledge/commands.md", "| Knowledge/CLI |"),
+        ("reference/knowledge/serving-build.md", "| Knowledge/CLI |"),
+        ("reference/curator/intent-reconciliation.md", "| Intake/worklist |"),
+        ("reference/curator/worklist.md", "| Intake/worklist |"),
+        ("reference/curator/knowledge-ingest.md", "| Write/route |"),
+        ("reference/curator/publication-report.md", "| Write/route |"),
+        ("reference/curator/family-obligations.md", "| Write/route |"),
+        ("reference/curator/change-routing.md", "| Write/route |"),
+        ("reference/curator/encountered-records.md", "| Write/route |"),
+        ("reference/curator/current-prose-and-history.md", "| Cards/style |"),
+        ("reference/curator/card-sentence-decisions.md", "| Cards/style |"),
+        ("reference/curator/card-formats-and-citations.md", "| Cards/style |"),
+        ("reference/curator/governing-sources.md", "| Cards/style |"),
+        ("reference/writing/technical-english-profile.md", "| Cards/style |"),
+        ("reference/curator/coherence-judgments.md", "| Coherence/msg |"),
+        ("reference/curator/memory-handover.md", "| Coherence/msg |"),
+        ("reference/message-handover.md", "| Coherence/msg |"),
+        ("reference/curator/exceptions-and-recovery.md", "| Exceptions/sync |"),
+        ("reference/curator/repository-foundation.md", "| Exceptions/sync |"),
+        ("reference/worker/sync-and-repairs.md", "| Exceptions/sync |"),
+        ("reference/sandbox-actors.md", "| Exceptions/sync |"),
     ],
     "reviewer": [
-        (
-            "reference/knowledge/use.md",
-            (
-                "Call `knowledge_read` on `agents-remember-task` for the "
-                "changed files' records you need whole; read"
-            ),
-        ),
-        ("reference/knowledge/commands.md", "Before a knowledge-system command or check, read"),
-        ("reference/review-baseline.md", "Before preparing a baseline review, read"),
-        ("reference/message-handover.md", "Before handing over work, read"),
-        ("reference/sandbox-actors.md", "Before setting up or inspecting a sandbox harness, read"),
+        ("reference/review/non-leaf-seams-and-catalogs.md", "| Non-leaf/rounds |"),
+        ("reference/review/rounds-and-late-findings.md", "| Non-leaf/rounds |"),
+        ("reference/review-baseline.md", "| Baseline/knowledge |"),
+        ("reference/knowledge/use.md", "| Baseline/knowledge |"),
+        ("reference/knowledge/commands.md", "| Baseline/knowledge |"),
+        ("reference/message-handover.md", "| Templates & msg |"),
+        ("reference/sandbox-actors.md", "| Sandbox/ask |"),
     ],
     "investigator": [
-        (
-            "reference/knowledge/commands.md",
-            "Before using a knowledge command or interpreting its result, read",
-        ),
-        (
-            "reference/knowledge/use.md",
-            (
-                "Call `knowledge_read` on `agents-remember-task` for the "
-                "records you need whole; read"
-            ),
-        ),
-        (
-            "reference/instruction-shortfall-review.md",
-            "Before reviewing an instruction shortfall named by the concern, read",
-        ),
-        ("reference/sandbox-actors.md", "Before setting up or inspecting a sandbox harness, read"),
-        ("reference/message-handover.md", "Before handing over work, read"),
+        ("reference/knowledge/commands.md", "| Knowledge readers |"),
+        ("reference/knowledge/use.md", "| Knowledge readers |"),
+        ("reference/instruction-shortfall-review.md", "| Research/shortfalls/msg |"),
+        ("reference/sandbox-actors.md", "| Research/shortfalls/msg |"),
+        ("reference/message-handover.md", "| Research/shortfalls/msg |"),
     ],
     "bootstrap": [
-        (
-            "reference/bootstrap/foundation-state.md",
-            "Before reading and reporting the knowledge foundation's state, read",
-        ),
-        ("reference/knowledge/commands.md", "Before using a knowledge command or its result, read"),
-        ("reference/sandbox-actors.md", "Before setting up or inspecting a sandbox harness, read"),
+        ("reference/bootstrap/foundation-state.md", "| Report, `memory_init`, cmds |"),
+        ("reference/knowledge/commands.md", "| Report, `memory_init`, cmds |"),
+        ("reference/sandbox-actors.md", "| Settings, sandbox |"),
     ],
 }
 
@@ -324,11 +264,11 @@ OPERATION_POINTER_ACTIONS = {
         "reviewer": [],
     },
     "bootstrap": {
-        # P5-18: roles/bootstrap.md:24 is the one state-reading pointer.
         "bootstrap": [
             (
                 "reference/bootstrap/failure-states.md",
-                "When a step returns a state you cannot name, read",
+                "When hitting unfamiliar states (`memory_init`/`memory_baseline_status`/"
+                "`user_settings_init`/`server_info`/`context_packet`/`runtime_install`), read",
             ),
         ]
     },
@@ -412,8 +352,7 @@ R125_OPERATION_ROLES = {
     "bootstrap": ("bootstrap",),
 }
 
-# P5-18: the full-store pointer lives in each operation, not in the Curator role.
-CURATOR_MESSAGE_TIMING = ("Before sending a message, read",)
+CURATOR_MESSAGE_TIMING = ("| Coherence/msg |",)
 
 CURATOR_MESSAGE_CONTENT = (
     "## Send a message that names the files",
@@ -427,10 +366,9 @@ CURATOR_MESSAGE_CONTENT = (
 )
 
 CURATOR_SERVING_STAGE_BOUNDARY = (
-    "Decide and write through the starting server or its serving-build command-line interface (CLI). "
-    "Development uses clean main and its stated serving commit as the reference build; name it. Leaf source "
-    "never produces leaf memory: test leaf writer/check changes on fixtures or scratch. Install nothing; "
-    "disable no guard."
+    "Decide/write via starting server or serving-build command-line interface (CLI) against "
+    "clean main (name commit); leaf source never produces leaf memory (test on fixtures/scratch); "
+    "install nothing, disable no guard."
 )
 
 
@@ -447,60 +385,73 @@ CURATOR_SEMANTIC_SCOPE_CLAUSES = (
 )
 
 
-# These role action clauses distinguish metadata reads from ordinary operation links.
+# Section fragments and suffixes pinned on role index links.
 ROLE_POINTER_QUALIFICATIONS = {
     (
         "architect",
-        "reference/coordination/shared/master-state.md",
-        "Before updating the master after a start, handover or landing, read",
-    ): ("#update-the-master-after-starts-handovers-and-landings", ""),
+        "reference/knowledge/use.md",
+        "| Reqs/`task_doc`/`context_packet`/`knowledge_read` |",
+    ): ("#architect-diagnose-before-proposing-a-repair", ""),
+    (
+        "architect",
+        "reference/coordination/shared/closeout-recovery.md",
+        "| Meas., advisory, flat closeout |",
+    ): ("#flat-mode-direct-paired-closeout", ""),
     (
         "orchestrator",
-        "reference/coordination/shared/master-state.md",
-        "Before updating the master after a start, handover or landing, read",
-    ): ("#update-the-master-after-starts-handovers-and-landings", ""),
-    ("manager", "reference/refused-write.md", "Before retiring or moving a task, read"): (
-        "#apply-the-procedure-to-a-task-document-or-folder",
-        "",
-    ),
+        "reference/coordination/shared/closeout-recovery.md",
+        "| Manager brief, stages (`role_start`), hand-off, seats (`retire_child`), "
+        "master/decisions (`task_doc`), closeout |",
+    ): ("#recover-an-unfinished-closeout", ""),
+    (
+        "orchestrator",
+        "reference/tasks/document-authoring.md",
+        "| Manager brief, stages (`role_start`), hand-off, seats (`retire_child`), "
+        "master/decisions (`task_doc`), closeout |",
+    ): ("#preserve-decisions-and-approved-intent", ""),
     (
         "manager",
-        "reference/coordination/shared/master-state.md",
-        "Before updating master state through completion, read",
-    ): ("#update-the-master-after-starts-handovers-and-landings", ""),
+        "reference/coordination/shared/closeout-recovery.md",
+        "| Seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), "
+        "switch (`worktree_closeout_*`) |",
+    ): ("#orchestrator-recipient-switch-and-closeout-notices", ""),
+    (
+        "manager",
+        "reference/worker/sync-and-repairs.md",
+        "| Seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), "
+        "switch (`worktree_closeout_*`) |",
+    ): ("#synchronize-the-leaf", ""),
+    (
+        "manager",
+        "reference/refused-write.md",
+        "| Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, "
+        "msgs, sandbox, child |",
+    ): ("#apply-the-procedure-to-a-task-document-or-folder", ""),
+    (
+        "worker",
+        "templates/turn-report.md",
+        "| Task/report/list |",
+    ): ("#shape", ""),
     (
         "curator",
-        "reference/curator/governing-sources.md",
-        "Before authoring a governing decision record, read",
-    ): ("#preserve-governing-decisions", ""),
+        "reference/worker/sync-and-repairs.md",
+        "| Exceptions/sync |",
+    ): ("#synchronize-the-leaf", ""),
     (
-        "curator",
-        "reference/curator/card-formats-and-citations.md",
-        "Before creating or maintaining cards or overviews, read",
-    ): ("#choose-card-and-overview-scope", ""),
+        "investigator",
+        "reference/knowledge/use.md",
+        "| Knowledge readers |",
+    ): ("#investigator-distinguish-claims-observations-and-hypotheses", ""),
     (
-        "curator",
-        "reference/curator/card-formats-and-citations.md",
-        "Before maintaining the entity catalog, read [entity catalog maintenance",
-    ): ("#maintain-the-entity-catalog", ""),
+        "investigator",
+        "reference/message-handover.md",
+        "| Research/shortfalls/msg |",
+    ): ("#send-a-message-that-names-the-files", ""),
     (
-        "curator",
-        "reference/curator/card-formats-and-citations.md",
-        "Before writing card history, read",
-    ): ("#choose-the-history-disposition", ""),
-    (
-        "curator",
-        "reference/curator/card-formats-and-citations.md",
-        "Before checking or repairing citations, read",
-    ): ("#prepare-citation-input", ""),
-    ("reviewer", "reference/message-handover.md", "Before handing over work, read"): (
-        "#send-a-message-that-names-the-files",
-        "",
-    ),
-    ("investigator", "reference/message-handover.md", "Before handing over work, read"): (
-        "#send-a-message-that-names-the-files",
-        "",
-    ),
+        "bootstrap",
+        "reference/bootstrap/foundation-state.md",
+        "| Report, `memory_init`, cmds |",
+    ): ("#read-the-state", ""),
 }
 
 
@@ -508,18 +459,17 @@ ROLE_POINTER_QUALIFICATIONS = {
 INLINE_RULE_CLAUSES = (
     (
         "reference/coord-topic-architect-bound-brief.md",
-        "roles/architect.md",
-        "### Prepare and preserve each brief",
+        "reference/coordination/architect/process-decisions.md",
+        "## Keep briefs, masters, and side problems bounded",
         (
-            "A code or feature brief is bounded to what was asked and names where an outside discovery "
-            "goes; a sighting next to the task does not widen it. Curator memory healing retains its "
-            "separate rule.",
+            "Keep every code or feature brief bounded to what was asked: a sighting next to the task "
+            "does not widen it (the Curator's encountered-memory healing retains its separate rule).",
         ),
     ),
     (
         "reference/coord-topic-architect-bound-side-problem.md",
-        "roles/architect.md",
-        "### Prepare and preserve each brief",
+        "reference/coordination/architect/process-decisions.md",
+        "## Keep briefs, masters, and side problems bounded",
         (
             "Give a hard, open-ended side problem a separate bounded step instead of folding it into "
             "another round.",
@@ -527,93 +477,73 @@ INLINE_RULE_CLAUSES = (
     ),
     (
         "reference/coord-topic-architect-compute-cost.md",
-        "roles/architect.md",
-        "### Checks and investigations",
+        "reference/coordination/architect/process-decisions.md",
+        "## Weigh compute cost, review shortfalls, and document harness setup",
         (
-            "Weigh what each requirement, ruling or brief costs the reading agent's context, the machine "
-            "and paid compute, and choose the cheap shape: a pointer to a file, a selective read, one "
-            "call.",
-            "Gross waste of context, machine or compute in the product or in a planned task goes to the "
-            "developer once, with a measurement and the fix you propose.",
+            "Weigh context, machine, and paid-compute cost and choose the cheap shape; escalate gross "
+            "waste once with a measurement and a proposed fix.",
         ),
     ),
     (
         "reference/coord-topic-architect-developer-check-failure.md",
         "roles/architect.md",
-        "### Checks and investigations",
-        (
-            "Passing by one of the developer's checks (a commit without his hook, a switched-off check) "
-            "is never a formality: the failure is repaired, and the bypass stays his alone.",
-            "For a check that blocks a legal operation, follow [Requirements and limits](../core/every-role.md#requirements-and-limits) "
-            "for the bounded repair. Keep commit and landing guards separate from file guards.",
-        ),
+        "## Establish the work",
+        ("Never bypass checks or freeze animations; gate repairs never free tasks under test.",),
     ),
     (
         "reference/coord-topic-architect-instruction-review.md",
-        "roles/architect.md",
-        "## Role agents and messages",
+        "reference/coordination/architect/process-decisions.md",
+        "## Weigh compute cost, review shortfalls, and document harness setup",
         (
             "Offer the developer an instruction-shortfall review about every two weeks and at each "
-            "master's end; count a fix as made only when its words reach the compiled first messages.",
+            "master's end, and count a fix as made only when its words reach compiled first messages.",
         ),
     ),
     (
         "reference/coord-topic-architect-master-scope.md",
-        "roles/architect.md",
-        "## Delegate and decide",
+        "reference/coordination/architect/process-decisions.md",
+        "## Keep briefs, masters, and side problems bounded",
         (
-            "Finish the master's approved subject: do not park admitted work for a follow-up master or "
-            "trim its promise to converge. New or changed scope still returns to the developer.",
+            "Finish the master's approved subject; do not park admitted work for a follow-up master "
+            "or trim its promise to converge.",
         ),
     ),
     (
         "reference/coord-topic-architect-master-status-read.md",
-        "roles/architect.md",
-        "## Delegate and decide",
+        "reference/coordination/shared/master-state.md",
+        "## Update the master after starts, handovers and landings",
         (
-            "At each status read, compare the master's page as the developer sees it with the Manager's "
-            "last handover. Compare the status note, **In work now**, and task statuses. Renew a lagging "
-            "part and tell the Manager.",
-            "Identify stalls from task progress. These include fifteen minutes without an active turn, or "
-            "a ready task left unstarted.",
+            "At each status read, compare the master page with the Manager's last handover, renew "
+            "lagging parts and tell the Manager.",
+            "Identify stalls from task progress: fifteen minutes without an active turn, or a ready "
+            "task left unstarted.",
         ),
     ),
     (
         "reference/coord-topic-architect-page-proof.md",
         "roles/architect.md",
-        "### Checks and investigations",
-        (
-            "Do not disable, pause or freeze page scripts or animations to make a proof pass; capture the "
-            "page while they run.",
-        ),
+        "## Establish the work",
+        ("Never bypass checks or freeze animations; gate repairs never free tasks under test.",),
     ),
     (
         "reference/coord-topic-architect-timing-result.md",
         "roles/architect.md",
         "## Delegate and decide",
-        (
-            "Do not make timing a separate landing condition or reopen an optimisation subject the "
-            "developer has closed.",
-            "When a timing or speed target of a task is missed, grant no further review round and no "
-            "stronger coder for that miss: land the gains and record the miss. A defect found in the work "
-            "is repaired as usual.",
-        ),
+        ("never gate landing on timing;",),
     ),
     (
         "reference/coord-topic-manager-count-and-route-failures.md",
         "roles/manager.md",
         "## Start leaf agents and preserve their work",
         (
-            "Count a lane's failures from its `FAILED`, `SUBFAILED` and `ERROR` lines, grouped by test "
-            "node. Assign every failing node an owner.",
-            "A reported test file that fails at collection or does not import is a regression of a landed "
-            "leaf. Route its repair at once; do not leave it as a recorded mark.",
+            "Group failures (`FAILED`/`SUBFAILED`/`ERROR`) by node; "
+            "collection/import failure is a landed-leaf regression (route repair at once).",
         ),
     ),
     (
         "reference/coord-topic-shared-compare-builds-before-diagnosing-a-tool-mismatch.md",
-        "core/every-role.md",
-        "## Evidence and handovers",
+        "core/invariants.md",
+        "## Keep continuity in durable state",
         (
             "Before reporting mismatched behavior as a defect, compare the serving tool build with the "
             "code.",
@@ -621,8 +551,8 @@ INLINE_RULE_CLAUSES = (
     ),
     (
         "reference/coord-topic-shared-count-evidence-from-the-producing-call.md",
-        "core/every-role.md",
-        "## Evidence and handovers",
+        "core/invariants.md",
+        "## Keep continuity in durable state",
         (
             "For each recorded time, read the clock in the same step. Append a correction instead of "
             "rewriting a wrong time.",
@@ -632,8 +562,8 @@ INLINE_RULE_CLAUSES = (
     ),
     (
         "reference/coord-topic-shared-identify-the-setup-behind-a-graphics-measurement.md",
-        "core/every-role.md",
-        "## Evidence and handovers",
+        "core/invariants.md",
+        "## Keep continuity in durable state",
         (
             "Name the graphics setup behind a browser measurement. Do not claim it represents the "
             "developer's browser without evidence for that claim.",
@@ -643,114 +573,87 @@ INLINE_RULE_CLAUSES = (
         "reference/coord-topic-shared-remove-scratch-paths-safely.md",
         "core/every-role.md",
         "## Keep your role and authority",
-        (
-            "Avoid forced recursive removal through a shell variable. Use a fresh folder or an approved "
-            "literal path.",
-        ),
+        ("Never force-remove via shell variable.",),
     ),
     (
         "reference/coord-topic-shared-stop-a-process-or-operate-on-the-live-host.md",
         "core/every-role.md",
         "## Keep your role and authority",
         (
-            "Stop or signal a process only by a checked process identifier (PID) or the sandbox's own PID "
-            "file. Rebuild the dashboard after a frontend change (`scripts/sync-dashboard.py`) only when "
-            "the developer or the Architect assigns it.",
-            "A host restart or seat reload is done only when the developer or the Architect assigns it, "
-            "by the procedure the assignment names; if it names none, report that to whoever assigned it "
-            "instead of choosing a command.",
-            "On the developer's live host, only the process, dashboard, restart and seat-reload actions described above are admitted.",
+            "Signal processes by checked PID only; dashboard rebuilds, host restarts, "
+            "and seat reloads need developer or Architect assignment.",
         ),
     ),
     (
         "reference/coord-topic-worker-map-evidence-to-report-files.md",
-        "roles/worker.md",
-        "## Map and record evidence",
+        "reference/worker/sync-and-repairs.md",
+        "## Focused test selection and freeze report details",
         (
-            "At intake and at each freeze, map every numbered evidence item the round carries to its report "
-            "file; map a final check's evidence when it runs. Name missing evidence openly.",
+            "Map numbered evidence items to report files at intake, freeze and final checks, "
+            "and name any gaps.",
         ),
     ),
     (
         "reference/coord-topic-worker-regenerate-producer-lists-for-each-freeze.md",
-        "roles/worker.md",
-        "## Report and freeze the candidate",
-        (
-            "At each freeze, regenerate the scripted Curator list and its binding for the frozen tree, "
-            "ready for code review to return `PASS`.",
-            "Before freezing a product-code removal or rename, prove that the whole test tree collects on "
-            "the frozen tree.",
-        ),
+        "reference/worker/sync-and-repairs.md",
+        "## Focused test selection and freeze report details",
+        ("Prove whole-test-tree collection before freezing any product-code removal or rename.",),
     ),
     (
         "reference/curator-baseline-preservation.md",
-        "roles/curator.md",
-        "## Reconcile, author and check",
-        (
-            "Name the immutable baseline and candidate records through admitted, scoped `knowledge_read` "
-            "on `agents-remember-task`. Open the named files with your own tools and read the full "
-            "`knowledge_diff` comparison report before semantic changes. Preserve the baseline and read "
-            "admitted records back under that authority.",
-        ),
+        "operations/curation.md",
+        "## Workflow",
+        ("read scoped `knowledge_read` + full `knowledge_diff` before semantic changes.",),
     ),
     (
         "reference/curator-intake-details.md",
         "roles/curator.md",
-        "## Establish the assignment",
+        "# Curator",
         (
-            "Use the handover's `arMcpContext.readerArguments` and the actual tool schemas. "
-            "`knowledge_read` on `agents-remember-task` takes `workspace.memoryRoot`. Both `context_packet` and `read_ar_files` "
-            "take the exact supplied leaf `task_context`, with the canonical task reference and enclosure "
-            "contract.",
-            "The code freeze is a tree, usually uncommitted over its base. Curate and cite that tree. No "
-            "Git commit precedes curation; the commit comes with closeout. `knowledge_write` on `agents-remember-task` with "
-            "`commit: true` writes memory files, not a Git commit.",
+            "Open briefs (`read_ar_files`/`context_packet`: `task_context`; "
+            "`knowledge_read`: `workspace.memoryRoot`).",
+            "Curate uncommitted freeze (`knowledge_write` `commit: true` writes files, not Git).",
         ),
     ),
     (
         "reference/review-card-dates.md",
         "roles/reviewer.md",
-        "## Inspect and verify the candidate",
-        ("Check card-date claims against the adding commit.",),
+        "## Bind the seam and catalogs",
+        ("check card dates vs commits",),
     ),
     (
         "reference/review-knowledge-changes.md",
         "roles/reviewer.md",
-        "## Inspect and verify the candidate",
-        (
-            "For knowledge changes, inspect the before-and-after candidate, family interactions and "
-            "unchanged sibling realizations. Preserve supplied Curator hand-off producer fields unchanged "
-            "for co-resolution.",
-        ),
+        "## Bind the seam and catalogs",
+        ("keep Curator producer fields",),
     ),
     (
         "reference/review-master-exit.md",
-        "roles/reviewer.md",
-        "## Master and portfolio exit reviews",
+        "reference/review/non-leaf-seams-and-catalogs.md",
+        "## Master, atomic-master, plan, and portfolio exit reviews",
         (
             "Account for every master requirement, leaf, substep and accepted small gap filled during the "
             "work.",
             "Completion against task documents is an affirmative duty, not a formatting check. Skipped or "
-            "reshaped work needs a decision-log trail. A packet that reads as complete while silently "
-            "omitting unfinished leaf work, a substep or an accepted gap-fill has a blocking finding.",
+            "reshaped work needs a decision-log trail; a packet that reads as complete while silently "
+            "omitting unfinished leaf work, a substep or an accepted gap-fill carries a blocking finding.",
         ),
     ),
     (
         "reference/review-memory-changes.md",
-        "roles/reviewer.md",
-        "## Inspect and verify the candidate",
+        "reference/review/rounds-and-late-findings.md",
+        "## Omission repairs, whole-set findings, and memory changes",
         (
-            "When you review the Curator's memory change, inspect the quality result's reports of cards "
-            "with substantial text removed (`cutCards`) and files added outside the knowledge "
-            "(`addedFiles`).",
-            "Report a finding when text was removed without a named change. Also report a finding when a "
-            "file was added outside the knowledge without a place in the task's requirement.",
+            "During memory review, inspect the quality result's reports of cards with substantial text "
+            "removed (`cutCards`) and files added outside the knowledge (`addedFiles`), reporting a "
+            "finding when text was removed without a named change or when a file was added outside "
+            "the knowledge without a place in the task's requirement.",
         ),
     ),
     (
         "reference/review-omission-repairs.md",
-        "roles/reviewer.md",
-        "## Inspect and verify the candidate",
+        "reference/review/rounds-and-late-findings.md",
+        "## Omission repairs, whole-set findings, and memory changes",
         (
             "Close an omission finding by listing and checking every behavior introduced by the diff.",
         ),
@@ -758,35 +661,31 @@ INLINE_RULE_CLAUSES = (
     (
         "reference/review-requirement-adjudication.md",
         "roles/reviewer.md",
-        "## Inspect and verify the candidate",
-        (
-            "When the leaf's task document declares `expectedKnowledgeEffects`, compare it with the "
-            "leaf's requirement packet. The declared subjects and effects must match what the packet "
-            "requires, with none missing and none invented. A mismatch is a finding.",
-        ),
+        "## Bind the seam and catalogs",
+        ("check `expectedKnowledgeEffects`",),
     ),
     (
         "reference/review-whole-set-findings.md",
-        "roles/reviewer.md",
-        "## Inspect and verify the candidate",
+        "reference/review/rounds-and-late-findings.md",
+        "## Omission repairs, whole-set findings, and memory changes",
         (
-            "For a finding about every member of a set, script a scan of the whole candidate and rerun it "
-            "during verification.",
+            "For a finding about every member of a set, script a scan of the whole candidate and "
+            "rerun it during verification.",
         ),
     ),
     (
         "reference/coord-topic-architect-harness-setup-documentation.md",
-        "roles/architect.md",
-        "## Establish the work",
+        "reference/coordination/architect/process-decisions.md",
+        "## Weigh compute cost, review shortfalls, and document harness setup",
         (
-            "When a harness needs a setting or workaround before AR agents work on it, record it at once "
-            "in the master's harness list (symptom, cause, setting, who makes it) for the public docs.",
+            "Record any required harness setting or workaround at once in the master's harness list "
+            "(symptom, cause, setting, and who makes it) for public documentation.",
         ),
     ),
     (
         "reference/curator-external-evidence.md",
-        "roles/curator.md",
-        "## Produce the handover",
+        "reference/curator/exceptions-and-recovery.md",
+        "## Quality-check card cuts and external citations",
         (
             "Cite an external document supporting a card as an `external` sidecar reference, never as a "
             "repository path with a Git blob. Name the document in the handover evidence for the record's "
@@ -798,20 +697,19 @@ INLINE_RULE_CLAUSES = (
 
 # Approved short rules delivered in the real shared digest, not behind step reads.
 SHARED_SHORT_RULE_CLAUSES = (
-    # P5-03 Reviewer 67:0: the ceiling rule moved from roles/architect.md into the digest,
-    # named for the two roles that need it (v14 rule 4).
     (
         "AU11.6",
         "core/authority.md",
-        "Architect, Reviewer: A role's capsule ceiling is its entry in `current_capsule_ceilings_words` "
-        "of the [current budget record](skill://agents-remember/skills/l-01-agent-lifecycles/"
-        "capsule-budgets-current.json), with the developer decision that set it; read the complete "
-        "entry before you state it. Only the developer sets or raises a ceiling.",
+        "Architect, Reviewer: Ceilings are `WIRE_TOKEN_CEILINGS` and "
+        "`COMPILED_CAPSULE_TOKEN_CEILINGS` in "
+        "`mcp/src/agents_remember/application/role_capsules/wire_budget.py`; "
+        "only developer sets/raises them.",
         ("architect", "reviewer"),
         (
-            "A role's capsule ceiling is its entry in `current_capsule_ceilings_words` of the [current "
-            "budget record](../capsule-budgets-current.json), with the developer decision that set it; "
-            "read the complete entry before you state it. Only the developer sets or raises a ceiling.",
+            "A role's Turn-1 wire ceiling is its entry in `WIRE_TOKEN_CEILINGS`, and a compiled "
+            "capsule's ceiling is its entry in `COMPILED_CAPSULE_TOKEN_CEILINGS`, both in "
+            "`mcp/src/agents_remember/application/role_capsules/wire_budget.py`; read the complete "
+            "entry before you state it. Only the developer sets or raises a ceiling.",
         ),
     ),
     (
@@ -828,9 +726,8 @@ SHARED_SHORT_RULE_CLAUSES = (
     (
         "AU11.4",
         "core/authority.md",
-        "Architect, Orchestrator, Manager: Never force a refused push. Using `--no-verify` requires "
-        "the developer's word for that occasion. Send the failure through your parent to the "
-        "developer.",
+        "Pushing, PRs, and releases need developer delegation; never force a refused push; "
+        "`--no-verify` needs developer's word.",
         ("architect", "orchestrator", "manager"),
         (
             "Never force a refused push. Using `--no-verify` requires the developer's word for that "
@@ -840,13 +737,18 @@ SHARED_SHORT_RULE_CLAUSES = (
     (
         "AU10.4",
         "core/authority.md",
-        "Architect, Orchestrator, Manager, Worker, Curator, Reviewer, Investigator: A held receipt "
-        "means queued eventual delivery, possibly many turns later. Never resend it. Count a handover "
-        "as taken only when the recipient's reply, report or intake names the exact object and shows the "
-        "requested work or its start. Open every supplied recipient artifact before you call one absent. "
-        "Withdraw a superseded held message with "
-        "`withdraw_held_message_id`. A receiver does not poll.",
-        ("architect", "orchestrator", "manager", "worker", "curator", "reviewer", "investigator"),
+        "`held` = queued; never resend, withdraw via `withdraw_held_message_id`, "
+        "open supplied artifacts first.",
+        (
+            "architect",
+            "orchestrator",
+            "manager",
+            "worker",
+            "curator",
+            "reviewer",
+            "investigator",
+            "bootstrap",
+        ),
         (
             "A held receipt means queued eventual delivery, possibly many turns later. Never resend it. "
             "Count a handover as taken only when the recipient's reply, report or intake names the exact "
@@ -858,10 +760,8 @@ SHARED_SHORT_RULE_CLAUSES = (
     (
         "AC0.5",
         "core/acceptance.md",
-        "Completion is not acceptance. Write the artifact before handing it over and message its "
-        "waiting recipient. Add no model-written completion row and no other role agent's runtime "
-        "identity. A role with no parent reports in its own chat. Name the finished object and its "
-        "evidence file. A finished turn or a filed report alone does not notify it.",
+        "Completion != acceptance: write artifact, name object/file, message recipient "
+        "(own chat if parentless); no model completion row.",
         (
             "architect",
             "orchestrator",
@@ -880,10 +780,8 @@ SHARED_SHORT_RULE_CLAUSES = (
     (
         "AU10.3",
         "core/authority.md",
-        "Collect your helpers' results and continue the work. Use the helper-wait procedure declared "
-        "by your launch; otherwise preserve the harness's native collection of results within the turn. "
-        "If your harness offers helpers (sub-agents), they run on your own seat's model unless the "
-        "developer names another.",
+        "End waits with `WAITING FOR SUBAGENTS:` or `WAITING FOR BACKGROUND:` "
+        "(process, id/log, expected end), sending no parent progress `role_message`.",
         (
             "architect",
             "orchestrator",
@@ -993,8 +891,8 @@ GROUPED_DETAIL_CLAUSES = (
     (
         "architect",
         "reference/coordination/shared/requirement-design.md",
-        "Before authoring or amending a requirement and its task structure, read",
-        " for caller and phase checks, approval, task structure, and control and dashboard design.",
+        "| Reqs/`task_doc`/`context_packet`/`knowledge_read` |",
+        "",
         (
             "Give a clickable control one named location and state where it does not appear; avoid "
             "“wherever X is shown”.",
@@ -1006,11 +904,8 @@ GROUPED_DETAIL_CLAUSES = (
     (
         "reviewer",
         "reference/review-baseline.md",
-        "Before preparing a baseline review, read",
-        " for route partitioning, baseline evidence checks, sealing and focused-test selection. Review "
-        "the Worker's targeted checks and past regressions for the scope. Full suites and drift "
-        "reporting on `agents-remember-task` run only on an explicit developer request, or as a "
-        "requirement's listed final checks.",
+        "| Baseline/knowledge |",
+        "",
         (
             "Organise the route work yourself, using sub-agents if your harness offers them. No "
             "particular harness arrangement is required.",
@@ -1038,10 +933,8 @@ GROUPED_DETAIL_CLAUSES = (
     (
         "worker",
         "reference/sandbox-actors.md",
-        "Before configuring or inspecting a sandbox harness, choosing its launch home or starting its "
-        "actors, read",
-        " for per-run settings, user-owned configuration, the admitted actor model, launch-home "
-        "selection, credentials, tool-server binding and host-agent counts.",
+        "| Sandbox/ask |",
+        "",
         (
             "Do not write user-level harness configuration. Bind each sandbox actor per run, or stop and "
             "ask.",

@@ -158,8 +158,16 @@ class ReviewerCriterionDeliveryTests(FirstMessageMatrixBase):
         assert intake is not None
         target, fragment = intake[1].rsplit("#", 1)
         self.assertEqual(fragment, "receive-the-intake-and-hand-over-the-leaf-verdict")
+        self.assertEqual(target, "skill/operations/review.md")
+        link_roots = re.search(r'^Link roots: skill=("(?:[^"\\]|\\.)+")', opening, re.M)
+        self.assertIsNotNone(link_roots, "opening must declare skill link root")
+        assert link_roots is not None
+        skill_root = Path(json.loads(link_roots[1]))
         with shipped_composition_corpus() as (corpus, _):
-            self.assertEqual(Path(target).resolve(), (corpus / "operations/review.md").resolve())
+            self.assertEqual(
+                (skill_root / target.removeprefix("skill/")).resolve(),
+                (corpus / "operations/review.md").resolve(),
+            )
         self.assertIn("Require these inputs before candidate inspection:", opening)
         self.assertFalse(
             any(

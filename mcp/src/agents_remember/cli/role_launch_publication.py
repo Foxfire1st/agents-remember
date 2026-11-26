@@ -21,6 +21,13 @@ from agents_remember.cli.role_instructions import launch_choice_metadata
 from agents_remember.cli.role_launch_first_run import recall_first_run_report
 from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA, _now_iso, digest
 from agents_remember.cli.role_launch_request_rules import missing_copies_receipt_warning
+from agents_remember.cli.role_opening_offload import (
+    preflight_opening_message_artifact,
+    prepare_direct_opening_message,
+    resolve_role_message_limit,
+    selection_repo_id,
+    write_opening_message_artifact,
+)
 from agents_remember.cli.role_step_up_runtime import successor_prompt
 
 if TYPE_CHECKING:
@@ -41,6 +48,7 @@ class _PublishedHandover:
     prompt: str
     artifact: dict[str, Any]
     handover: dict[str, Any]
+    opening_artifact: dict[str, Any] | None = None
 
 
 def publish_prepared_launch(
@@ -65,8 +73,15 @@ def _publish_files(start: _PreparedRoleStart, preparation: LaunchPublication) ->
     prepared = start.role_handover.handover
     # A takeover's sidecar is an in-group write as well as the main handover files.
     prompt = successor_prompt(start, preparation.prompt)
+    opening_artifact: dict[str, Any] | None = None
     if start.opening_message and not start.held:
-        prompt = f"{prompt}\n{start.opening_message}"
+        limit = resolve_role_message_limit(start.config, repo_id=selection_repo_id(start.binding))
+        bounded_opening, opening_artifact = prepare_direct_opening_message(
+            prepared["taskReportPath"], start.opening_message, limit=limit
+        )
+        if opening_artifact is not None:
+            preflight_opening_message_artifact(opening_artifact)
+        prompt = f"{prompt}\n{bounded_opening}"
     if preparation.instruction is not None:
         prompt = f"{prompt}\n\n{preparation.instruction}"
     # The message's artifact and the complete hand-over are written before the message that
@@ -78,9 +93,14 @@ def _publish_files(start: _PreparedRoleStart, preparation: LaunchPublication) ->
         expected=prepared["handoverFile"],
         request_id=str(start.request.request_id),
     )
+    if opening_artifact is not None:
+        write_opening_message_artifact(opening_artifact)
 
     return _PublishedHandover(
-        first_message(artifact, prompt, handover_file), artifact, handover_file
+        first_message(artifact, prompt, handover_file),
+        artifact,
+        handover_file,
+        opening_artifact,
     )
 
 
@@ -193,6 +213,11 @@ def _launch_receipt(
         "handoverArtifact": files.artifact,
         "handoverFile": {**files.handover, "content": prepared["handoverFileContent"]},
         "stepUpArtifact": prepared.get("stepUpArtifact"),
+        **(
+            {"openingMessageArtifact": files.opening_artifact}
+            if files.opening_artifact is not None
+            else {}
+        ),
         # A held seat keeps its opening handover for its first message (MIK-R100 rules 2/4).
         **(
             {

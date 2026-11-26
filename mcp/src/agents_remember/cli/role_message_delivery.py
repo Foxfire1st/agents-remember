@@ -20,6 +20,9 @@ from typing import TYPE_CHECKING, Any
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from agents_remember.application.role_capsules.refusal_references import (
+    with_refusal_reference,
+)
 from agents_remember.application.role_launch_context import (
     selection_binding,
 )
@@ -187,7 +190,10 @@ def _message_scope(config: McpRuntimeConfig, parties: _MessageParties) -> Any:
         raise _Refused(
             "message-file-failed",
             str(error),
-            "Restore the unreadable task document, then send the message again.",
+            with_refusal_reference(
+                "Restore the unreadable task document, then send the message again.",
+                "role-message-file-failed",
+            ),
         ) from error
 
 
@@ -258,7 +264,10 @@ def _refuse_over_limit(call: RoleMessageCall, limit: int) -> None:
         f"The message holds {count} characters, over the limit of {limit}. "
         "Put the full text in body (any length, filed with the message) or attach "
         "its files with attach, and keep text to what wakes the recipient.",
-        "Send the message again with a shorter text and the full text in body or attach.",
+        with_refusal_reference(
+            "Send the message again with a shorter text and the full text in body or attach.",
+            "role-message-too-long",
+        ),
         messageLength=count,
         messageLimit=limit,
     )
@@ -269,7 +278,10 @@ def _archived_for(caller_role: str, recipient_role: str, agent_id: str) -> _Refu
     return _Refused(
         "recipient-archived",
         f"Agent {agent_id} is archived. A message never un-archives an agent.",
-        _start_again_next_action(caller_role, recipient_role, "if the work continues"),
+        with_refusal_reference(
+            _start_again_next_action(caller_role, recipient_role, "if the work continues"),
+            "role-message-recipient-archived",
+        ),
         recipientAgentId=agent_id,
     )
 
@@ -306,7 +318,10 @@ def _archived_with_successor(config: McpRuntimeConfig, parties: _MessageParties)
             "recipient-archived",
             f"Agent {recipient.agent_id} is archived. The same role has a live "
             f"successor: agent {successor}. A message never un-archives an agent.",
-            f"Send the message again to agent {successor}.",
+            with_refusal_reference(
+                f"Send the message again to agent {successor}.",
+                "role-message-recipient-archived",
+            ),
             recipientAgentId=recipient.agent_id,
             successorAgentId=successor,
         )
@@ -406,7 +421,10 @@ def _filing_seat_lock(ref: HeldSeatRef | None) -> Iterator[None]:
                 "message-file-failed",
                 f"The role execution receipt folder cannot be created or locked at "
                 f"{ref.receipt_path.parent}: {error} Nothing was delivered.",
-                "Resolve the reason named in detail, then send the message again.",
+                with_refusal_reference(
+                    "Resolve the reason named in detail, then send the message again.",
+                    "role-message-file-failed",
+                ),
             ) from error
         yield
 
@@ -489,7 +507,10 @@ def _prepare_attachments(
             "message-file-failed",
             f"attach must be the paths of files that exist, not {attach!r}. "
             "Nothing was written and nothing was delivered.",
-            "Send the message again with attach as a list of existing file paths.",
+            with_refusal_reference(
+                "Send the message again with attach as a list of existing file paths.",
+                "role-message-file-failed",
+            ),
         )
     paths = list(attach)
     for entry in paths:
@@ -498,7 +519,10 @@ def _prepare_attachments(
                 "message-file-failed",
                 f"attach must be the paths of files that exist, not {entry!r}. "
                 "Nothing was written and nothing was delivered.",
-                "Send the message again with attach as a list of existing file paths.",
+                with_refusal_reference(
+                    "Send the message again with attach as a list of existing file paths.",
+                    "role-message-file-failed",
+                ),
             )
     roots = [scope.record_root]
     for receipt in (parties.own_receipt, parties.recipient.receipt):
@@ -511,8 +535,11 @@ def _prepare_attachments(
         raise _Refused(
             "message-file-failed",
             str(error),
-            "Attach only paths of files that exist and can be read; a file outside "
-            "the task's record and the leaf workspaces is copied into the folder.",
+            with_refusal_reference(
+                "Attach only paths of files that exist and can be read; a file outside "
+                "the task's record and the leaf workspaces is copied into the folder.",
+                "role-message-file-failed",
+            ),
         ) from error
 
 
@@ -635,7 +662,10 @@ def _store_message(
         raise _Refused(
             "message-file-failed",
             f"{error} Nothing was delivered.",
-            "Resolve the reason named in detail, then send the message again.",
+            with_refusal_reference(
+                "Resolve the reason named in detail, then send the message again.",
+                "role-message-file-failed",
+            ),
         ) from error
     digest = sha256_file(path)
     # One id for the message whatever the number of attempts: the runtime records it with the

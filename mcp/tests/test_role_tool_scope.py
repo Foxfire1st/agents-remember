@@ -520,3 +520,27 @@ def test_installed_mcp_meets_declared_floor_and_server_lists_tools(
     scoped = create_server(config)
     scoped_names = tuple(tool.name for tool in asyncio.run(scoped.list_tools()))
     assert scoped_names == tools_for_role("worker")
+
+
+def test_composition_manifest_role_tools_match_allowlists_and_runtime_copy() -> None:
+    """Every canonical role's manifest tools match ROLE_TOOL_ALLOWLISTS in PUBLIC_TOOLS order."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest_rel = Path("skills/l-01-agent-lifecycles/composition-manifest.json")
+    source_manifest = repo_root / manifest_rel
+    runtime_manifest = repo_root / "mcp/src/agents_remember/package_data/runtime" / manifest_rel
+
+    source_bytes = source_manifest.read_bytes()
+    assert source_bytes == runtime_manifest.read_bytes(), (
+        f"{runtime_manifest} drifted from {source_manifest}"
+    )
+
+    manifest = json.loads(source_bytes.decode("utf-8"))
+    roles = manifest["roles"]
+    assert set(roles) == set(ROLES)
+    for role in ROLES:
+        declared = roles[role]["tools"]
+        expected = list(ROLE_TOOL_ALLOWLISTS[role])
+        assert declared == expected, f"{role} manifest tools differ from ROLE_TOOL_ALLOWLISTS"
+        ordered = [name for name in PUBLIC_TOOLS if name in declared]
+        assert declared == ordered, f"{role} manifest tools are not in PUBLIC_TOOLS order"

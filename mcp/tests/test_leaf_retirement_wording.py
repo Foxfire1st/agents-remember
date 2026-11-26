@@ -7,7 +7,6 @@ from agents_remember_test_support.testing.curation_doctrine import (
     retired_statement_findings,
 )
 from agents_remember_test_support.testing.leaf_instruction_wording import (
-    autonomy_clauses,
     forbidden_autonomy_clauses,
     missing_clauses,
 )
@@ -26,14 +25,37 @@ REMOVED_INSTRUCTION_SOURCES = frozenset(
     }
 )
 
+BOOTSTRAP_AUTONOMY_CLAUSES: dict[str, tuple[str, ...]] = {
+    "bootstrap read-only helper scope": ("Helpers assist read-only queries only.",),
+    "helper seat scope": (
+        "Harness sub-agents work inside their owning seat's assignment, "
+        "with its permissions and working folder.",
+    ),
+    "seat checks credits and boundary acts": (
+        "The seat organizes their work, verifies and credits it, "
+        "and performs every boundary act itself.",
+    ),
+    "helper seat role and independent review": (
+        "Helpers hold no Agents Remember seat, start no role and cannot "
+        "provide independent review of their author.",
+    ),
+    "parallel work": ("Parallelize independent work (serial landing, no cap).",),
+    "no harness dependency": ("a harness without sub-agents",),
+}
+
 
 def test_bootstrap_restored_fixed_helper_restriction_fails_with_freedom_present() -> None:
-    current = (ROOT / "skills/l-01-agent-lifecycles/roles/bootstrap.md").read_text()
+    lifecycle = ROOT / "skills/l-01-agent-lifecycles"
+    current = (lifecycle / "roles/bootstrap.md").read_text()
+    shared = "\n".join(
+        (lifecycle / rel).read_text()
+        for rel in ("core/authority.md", "core/every-role.md", "core/invariants.md")
+    )
     old = (
         "- **Sub-agents** — read/search only, writing durable notes; your main loop owns every "
         "mutating call and the report, and no sub-agent runs a setup surface."
     )
-    assert missing_clauses(current + old, autonomy_clauses("bootstrap")) == []
+    assert missing_clauses(current + "\n" + shared + old, BOOTSTRAP_AUTONOMY_CLAUSES) == []
     assert forbidden_autonomy_clauses("bootstrap", current) == []
     assert forbidden_autonomy_clauses("bootstrap", current + old) == [
         "read/search-only helpers",

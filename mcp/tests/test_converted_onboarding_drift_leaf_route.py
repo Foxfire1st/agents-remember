@@ -165,11 +165,17 @@ def test_descriptions_say_what_the_check_is() -> None:
             "Curator executing the bounded citation repair step.",
         ):
             assert phrase in commands, (copy, phrase)
-        operation = _normalized_text(copy.parent / "operations/curation.md")
+        role = _normalized_text(copy.parent / "roles/curator.md")
         assert (
-            "The Curator reconciles intent and writes memory through one admitted writer."
-            in operation
+            "Reconcile one leaf's intent and implementation in one fresh session, update affected memory"
+            in role
         )
+        assert (
+            "Write `onboarding/`+`knowledge/` via one writer (`knowledge_write` or serving-build CLI `--commit`/`commit: true`"
+            in role
+        )
+        operation = _normalized_text(copy.parent / "operations/curation.md")
+        assert "1. Reconcile intent/code; verify card sentences vs code." in operation
         knowledge = _normalized_text(copy.parent / "reference/knowledge/use.md")
         assert (
             "Stale memory may guide orientation when you label it explicitly as stale" in knowledge

@@ -16,6 +16,7 @@ from agents_remember.application.review_final_output_receipt import (
     attach_prepared_selection,
 )
 from agents_remember.application.review_sync_rebinding import rebinding_result_block
+from agents_remember.application.role_capsules.refusal_references import with_refusal_reference
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_status import project_contract_status
 from agents_remember.kernel.authority import require_repo, require_within_coordination
@@ -556,7 +557,7 @@ def _operation_control_request_refusal(
             "operation": "worktree_operation_control",
             "state": "refused",
             "status": error.status,
-            "detail": error.detail,
+            "detail": with_refusal_reference(error.detail, "worktree-operation-control-refused"),
             "expected": error.expected,
             "observed": error.observed,
             "nextAction": "correct-request",
@@ -594,7 +595,7 @@ def _resolve_control_caller(
             "operation": "worktree_operation_control",
             "state": "refused",
             "status": exc.status,
-            "detail": exc.detail,
+            "detail": with_refusal_reference(exc.detail, "worktree-operation-control-refused"),
             "expected": {},
             "observed": {},
             "nextAction": "developer-decision",
@@ -640,7 +641,7 @@ def _execute_operation_control(
             "operation": "worktree_operation_control",
             "state": "refused",
             "status": exc.status,
-            "detail": exc.detail,
+            "detail": with_refusal_reference(exc.detail, "worktree-operation-control-refused"),
             **exc.response_fields(
                 contract_path=confined.as_posix(),
                 kind=request.operation_kind,
@@ -679,7 +680,7 @@ def _journal_read_refusal(
         "operation": operation,
         "state": "refused",
         "status": decision.status,
-        "detail": decision.detail,
+        "detail": with_refusal_reference(decision.detail, "worktree-operation-control-refused"),
         **{key: value for key, value in payload.items() if key != "state"},
     }
 
@@ -884,6 +885,9 @@ def _closeout_input_refusal(operation: str, error: CloseoutInputError) -> dict[s
         "operation": operation,
         "state": "refused",
         "status": error.status,
-        "detail": "closeout input is invalid; use the corrected call",
+        "detail": with_refusal_reference(
+            "closeout input is invalid; use the corrected call",
+            "worktree-operation-control-refused",
+        ),
         **error.response_fields(),
     }

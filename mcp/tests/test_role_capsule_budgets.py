@@ -46,9 +46,6 @@ from agents_remember_test_support.testing.capsule_budget_d695 import (
     current_budget_view as d695_current_budget_view,
 )
 from agents_remember_test_support.testing.capsule_budget_d695 import (
-    current_capsule_ceiling as d695_current_capsule_ceiling,
-)
-from agents_remember_test_support.testing.capsule_budget_d695 import (
     load_current_budget_view as d695_load_current_budget_view,
 )
 from agents_remember_test_support.testing.capsule_budget_snapshot import (
@@ -468,6 +465,7 @@ def _approved_budget_findings(
 
 def test_no_capsule_exceeds_its_recorded_budget() -> None:
     budgets = d695_load_current_budget_view(D695_CURRENT_BUDGETS_PATH)
+    assert isinstance(budgets.get("new_source_budgets"), dict) and budgets["new_source_budgets"]
     sizes = {key: compiled_size(*key.split("/", 1)) for key in matrix_keys()}
     details = detail_sizes()
     findings = d695_current_budget_findings(budgets, sizes, details, digest_size(), REPOSITORY_ROOT)
@@ -478,12 +476,7 @@ def test_no_capsule_exceeds_its_recorded_budget() -> None:
             {
                 "capsules": sizes,
                 "step_details": details,
-                "capsule_ceilings": {
-                    key: d695_current_capsule_ceiling(key, budgets) for key in sizes
-                },
-                "step_detail_ceiling": budgets["current_step_ceiling_words"],
                 "digest_words": digest_size(),
-                "digest_ceiling": budgets["current_digest_ceiling_words"],
                 "historical_provisional_measurements": json.loads(BUDGETS_PATH.read_text())[
                     "provisional_measurements"
                 ],

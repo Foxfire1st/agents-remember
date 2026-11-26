@@ -13,6 +13,11 @@ from agents_remember.application.role_capsules.sources import (
     CapsuleAdmissionRequest,
     admit_capsule_sources,
 )
+from agents_remember.application.role_capsules.wire_budget import (
+    COMPILED_CAPSULE_TOKEN_CEILINGS,
+    evaluate_wire_token_ceilings,
+    measure_compiled_capsule_tokens,
+)
 from agents_remember.application.skill_resources.capsule import (
     CapsuleSeatAddress,
     routed_admission_for,
@@ -86,10 +91,18 @@ def _binding(parsed: CapsuleCompositionManifest, role: str, operation: str) -> C
     )
 
 
-def _matrix(root: Path, overrides: Mapping[str, bytes]) -> tuple[dict[str, int], dict[str, str]]:
+def _matrix(
+    root: Path, overrides: Mapping[str, bytes]
+) -> tuple[dict[str, int], dict[str, int], dict[str, str]]:
     lifecycle = root / LIFECYCLE
     manifest = _read(root, f"{LIFECYCLE}/composition-manifest.json", overrides)
     parsed = parse_composition_manifest(manifest)
+    every_role_path = f"{LIFECYCLE}/core/every-role.md"
+    every_role = (
+        _read(root, every_role_path, overrides).decode("utf-8")
+        if every_role_path in overrides or (root / every_role_path).is_file()
+        else ""
+    )
     keys = [
         (role, operation)
         for role in parsed.role_order
@@ -98,6 +111,7 @@ def _matrix(root: Path, overrides: Mapping[str, bytes]) -> tuple[dict[str, int],
     ]
     keys.extend(("launcher", operation) for operation in parsed.launcher.operations)
     sizes: dict[str, int] = {}
+    compiled_tokens: dict[str, int] = {}
     revisions: dict[str, str] = {}
     for role, operation in keys:
         request = _request(lifecycle, manifest, parsed, role, operation)
@@ -105,9 +119,13 @@ def _matrix(root: Path, overrides: Mapping[str, bytes]) -> tuple[dict[str, int],
         result = compile_role_capsule(
             _binding(parsed, role, operation), manifest, sources, request.as_selection()
         )
-        sizes[f"{role}/{operation}"] = len(result.render_instructions().split())
+        key = f"{role}/{operation}"
+        sizes[key] = len(result.render_instructions().split())
+        compiled_tokens[key] = measure_compiled_capsule_tokens(
+            result, corpus_root=lifecycle, every_role=every_role
+        )
         revisions.update({source.path: source.revision for source in sources})
-    return sizes, dict(sorted(revisions.items()))
+    return sizes, compiled_tokens, dict(sorted(revisions.items()))
 
 
 def _sources(
@@ -124,7 +142,7 @@ def _sources(
     return tuple(sources)
 
 
-def _measure(root: Path, overrides: Mapping[str, bytes]) -> dict:
+def _measure_with_tokens(root: Path, overrides: Mapping[str, bytes]) -> tuple[dict, dict[str, int]]:
     raw = _read(root, f"{LIFECYCLE}/composition-manifest.json", overrides)
     references = compose_manifest(json.loads(raw))["references"]
     details = sorted(
@@ -139,7 +157,7 @@ def _measure(root: Path, overrides: Mapping[str, bytes]) -> dict:
             and entry["source"].endswith(".md")
         }
     )
-    capsules, revisions = _matrix(root, overrides)
+    capsules, compiled_tokens, revisions = _matrix(root, overrides)
     sources = {
         path.relative_to(root).as_posix()
         for path in (root / LIFECYCLE).rglob("*")
@@ -176,7 +194,11 @@ def _measure(root: Path, overrides: Mapping[str, bytes]) -> dict:
         "current_linked_template_population": ordinary,
         "approved_source_sizes": source_sizes,
         "compiler_input_revisions": revisions,
-    }
+    }, compiled_tokens
+
+
+def _measure(root: Path, overrides: Mapping[str, bytes]) -> dict:
+    return _measure_with_tokens(root, overrides)[0]
 
 
 def _size_notices(before: dict, after: dict) -> list[str]:
@@ -209,31 +231,18 @@ def plan(root: Path, overrides: Mapping[str, bytes] | None = None) -> tuple[dict
     """Return all current measured facts and visible size deltas for the planned bytes."""
     changes = {} if overrides is None else overrides
     record = json.loads((root / RECORD).read_bytes())
-    measured = _measure(root, changes)
-    _check_ceilings(record, measured["current_measurements"])
+    measured, compiled_tokens = _measure_with_tokens(root, changes)
+    _check_ceilings(compiled_tokens)
     return measured, _size_notices(record["derived"], measured)
 
 
-def _check_ceilings(record: dict, measurements: dict) -> None:
-    findings = []
-    for area in ("capsules", "step_details", "digest"):
-        for key, size in measurements[area].items():
-            ceiling = _ceiling(record, area, key)
-            if size > ceiling:
-                findings.append(
-                    f"{area}/{key}: size {size} words exceeds ceiling {ceiling}; raising a ceiling is the developer's decision"
-                )
+def _check_ceilings(compiled_tokens: Mapping[str, int]) -> None:
+    findings = evaluate_wire_token_ceilings(compiled_tokens, COMPILED_CAPSULE_TOKEN_CEILINGS)
+    missing = sorted(COMPILED_CAPSULE_TOKEN_CEILINGS.keys() - compiled_tokens.keys())
+    findings.extend(f"{key}: compiled capsule missing token measurement" for key in missing)
     if findings:
-        raise AuthorityError("\n".join(findings))
-
-
-def _ceiling(record: dict, area: str, key: str) -> int:
-    if area == "capsules":
-        role = key.split("/", 1)[0]
-        ceilings = record["current_capsule_ceilings_words"]
-        return ceilings[role] if role in ceilings else ceilings["every_other_role"]
-    return (
-        record["current_step_ceiling_words"]
-        if area == "step_details"
-        else record["current_digest_ceiling_words"]
-    )
+        raise AuthorityError(
+            "\n".join(
+                f"{finding}; raising a ceiling is the developer's decision" for finding in findings
+            )
+        )

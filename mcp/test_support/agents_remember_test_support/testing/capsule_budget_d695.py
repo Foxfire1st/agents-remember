@@ -6,10 +6,7 @@ from pathlib import Path
 
 from agents_remember.models.role_capsules.manifest_derived import compose_manifest
 
-from agents_remember_test_support.testing.capsule_budget_d694 import current_capsule_ceiling
 from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
-
-__all__ = ["current_capsule_ceiling"]
 
 COMMAND = RENEW_COMMAND
 _REGISTRIES = {"capsule-budgets.json", "capsule-budgets-d694.json", "capsule-budgets-current.json"}
@@ -60,19 +57,6 @@ def _current_area_findings(record: dict, area: str, actual: dict[str, int]) -> l
         if size != measured[key]:
             findings.append(
                 f"{area}/{key}: stale recorded size {measured[key]}; actual {size}; run {COMMAND}"
-            )
-        if area == "ordinary_templates":
-            continue
-        ceiling = (
-            current_capsule_ceiling(key, record)
-            if area == "capsules"
-            else record["current_step_ceiling_words"]
-            if area == "step_details"
-            else record["current_digest_ceiling_words"]
-        )
-        if size > ceiling:
-            findings.append(
-                f"{area}/{key}: size {size} words exceeds ceiling {ceiling}; raising a ceiling is the developer's decision"
             )
     return findings
 

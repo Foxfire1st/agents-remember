@@ -44,6 +44,7 @@ from agents_remember.models.lifecycles.review_assessment import (
 from agents_remember.models.lifecycles.review_assessment_binding import (
     supplied_measurement_statuses,
 )
+from agents_remember.models.role_capsules.refusal_references import with_refusal_reference
 from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
@@ -371,16 +372,19 @@ def _require_knowledge_gate(
     except (GateProbeError, RuntimeError) as error:
         raise CuratorCoherenceError(
             "curator-coherence-knowledge-gate-refused",
-            str(error),
+            with_refusal_reference(str(error), "curator-coherence-knowledge-gate-refused"),
             next_action="memory_quality_check",
         ) from error
     if not applies:
         raise CuratorCoherenceError(
             "curator-coherence-knowledge-gate-refused",
-            legacy_format_refusal(
-                repository,
-                operation="the curator-coherence knowledge gate",
-                subject=f"the unconverted memory of {leaf_line(contract)}",
+            with_refusal_reference(
+                legacy_format_refusal(
+                    repository,
+                    operation="the curator-coherence knowledge gate",
+                    subject=f"the unconverted memory of {leaf_line(contract)}",
+                ),
+                "curator-coherence-knowledge-gate-refused",
             ),
             next_action="memory_quality_check",
         )
@@ -392,7 +396,7 @@ def _require_knowledge_gate(
     if refusal is not None:
         raise CuratorCoherenceError(
             "curator-coherence-knowledge-gate-refused",
-            refusal,
+            with_refusal_reference(refusal, "curator-coherence-knowledge-gate-refused"),
             next_action="memory_quality_check",
         )
 

@@ -1,7 +1,7 @@
 """The bounded locator a launch names its hand-over artifact through (MIK-R208).
 
 The artifact keeps its own name and bytes beside the report; the agent, the recovery note and the
-first message's first line name it through one product-owned directory alias per request, whose
+first message's final line name it through one product-owned directory alias per request, whose
 length does not depend on how deep the report folder is. The alias belongs to its request, is
 reused by a repeat, rebuilt when lost, refused when it would lead elsewhere, and removed alone
 when the seat can no longer resume.
@@ -158,7 +158,7 @@ class PublishedArtifactTests(LocatorTestCase):
         self.assertEqual(stat.S_IMODE(stored.stat().st_mode), 0o444)
         line = artifact_line(artifact)
         self.assertTrue(line.startswith(f"AR handover artifact: {artifact['path']} "))
-        self.assertEqual(first_message(artifact, body.decode("utf-8")).partition("\n")[0], line)
+        self.assertEqual(first_message(artifact, body.decode("utf-8")).rpartition("\n")[2], line)
 
     def test_the_locator_is_as_long_at_any_folder_depth(self) -> None:
         shallow = self.publish(self.shallow(), request_id=REQUEST_ID)

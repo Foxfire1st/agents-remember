@@ -4,7 +4,7 @@ The Reviewer uses this template to report an independent review at a seam: a bou
 
 In this template, ID means identifier.
 
-Write the artifact in the handover's local report folder (`role-reports/` on a leaf, `notes/reports/` on other seams). Organizational leaf route review and atomic-master integration review bind through the task document. Other seam verdicts attach to handover gates as evidence for the decider.
+Write the artifact in the handover's local report folder (`role-reports/` on a leaf, `notes/reports/` on other seams). Record a memory `verdictRef` as an existing absolute path, `role-reports/<rel>`, or `notes/reports/<rel>`. Organizational leaf route review and atomic-master integration review bind through the task document. Other seam verdicts attach to handover gates as evidence for the decider.
 
 The variants below are organizational leaf route review, atomic-master integration review, master exit (Manager to Orchestrator), super exit (Orchestrator to the Architect, who takes it to the developer for the decision), and the loop-review adaptation. Atomic child leaves do not receive a separate route-review verdict.
 
@@ -45,7 +45,7 @@ For additions after sealing, follow the three routes and round authority in the 
 
 ## Mandatory Requirement Adjudication Block (repeat once per stable ID + version in every variant)
 
-Use this authoring block for [the independent-review record](../roles/reviewer.md#write-the-review-artifacts). The verdict links the resulting leaf-journal anchor rather than duplicating the appended record. Before inspecting the canonical packet, read [the approval-record definition](../core/every-role.md#requirements-and-limits) for the approved manifest entry, its content hash and the corpus hash.
+Use this authoring block for [the independent-review record](../roles/reviewer.md#bind-the-seam-and-catalogs). The verdict links the resulting leaf-journal anchor rather than duplicating the appended record. Before inspecting the canonical packet, read [the approval-record definition](../core/every-role.md#requirements-and-limits) for the approved manifest entry, its content hash and the corpus hash.
 
 ```md
 ### <stable requirement ID> @ <version> — <exact requirement label>
@@ -143,9 +143,9 @@ Failure class: `<one of the five classes defined by [Append the independent revi
 - verdictRef: `notes/reports/<leaf-id>-route-review-verdict.md`
 - routes: `<one {route, verdict, evidenceRef} row per table row>`
 
-Before recording an ordinary code round, read [Record code review rounds](../operations/review.md#record-code-review-rounds) for the recording owner and operations.
+Before recording an ordinary code round, read [Rounds](../operations/review.md#rounds) for the recording owner and operations.
 
-Before handing over the leaf verdict, read [Receive the intake and hand over the leaf verdict](../operations/review.md#receive-the-intake-and-hand-over-the-leaf-verdict) for the Manager notices, direct peer handovers and separate memory lane.
+Before handing over the leaf verdict, read [Focused tests and handover](../operations/review.md#focused-tests-and-handover) for the Manager notices, direct peer handovers and separate memory lane.
 ```
 
 ## Atomic-Master Integration Route-Review Variant

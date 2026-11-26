@@ -14,6 +14,7 @@ import textwrap
 from collections.abc import Mapping
 from typing import Any
 
+from agents_remember.application.role_capsules.refusal_references import with_refusal_reference
 from agents_remember.models.memory import (
     MemoryQualityPollRequest,
     MemoryQualityStartRequest,
@@ -314,6 +315,27 @@ def carry_failed_quality_reason(
             answer["nextAction"] = "curator_coherence"
         else:
             answer["nextAction"] = quality_default_next_action(whole)
+    if _is_worklist_quality_failure(whole, answer):
+        existing = answer.get("guidance")
+        answer["guidance"] = with_refusal_reference(
+            existing if isinstance(existing, str) else "",
+            "memory-quality-worklist",
+        )
+
+
+def _is_worklist_quality_failure(whole: Mapping[str, Any], answer: Mapping[str, Any]) -> bool:
+    """Whether a failed memory-quality answer failed on worklist or knowledge-gate findings."""
+    if answer.get("code") in {
+        "action-required",
+        "not-ready",
+        "curator-coherence-knowledge-gate-refused",
+    }:
+        return True
+    worklist = whole.get("knowledgeWorklist")
+    if isinstance(worklist, Mapping) and worklist.get("state") == "incomplete":
+        return True
+    gate = whole.get("knowledgeGate")
+    return isinstance(gate, Mapping) and gate.get("state") == "refused"
 
 
 _QUALITY_TAKEOVER_ERRORS = {

@@ -2,68 +2,291 @@
 
 import json
 import re
+import shutil
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from agents_remember.application.knowledge_gate.gate import __doc__ as GATE_GUIDE
 from agents_remember.application.knowledge_writer import __doc__ as WRITER_GUIDE
 from agents_remember.application.skill_resources.provider import shipped_composition_corpus
-from agents_remember_test_support.testing.capsule_wording import instruction_surface
+from agents_remember.cli.role_instruction_details import compose_launch_instructions
+from agents_remember.models.role_capsules.manifest_derived import compose_manifest
+from agents_remember.models.role_capsules.types import compute_content_digest
+from agents_remember.serving.capsule_delivery import CapsuleDelivery
+from agents_remember_test_support.testing.capsule_budget_d695 import (
+    current_budget_view,
+    load_current_budget_view,
+)
 from agents_remember_test_support.testing.curator_contracts import (
     PERMISSION_ACTION,
-    require_permission_delivery,
+    SectionLink,
+    compile_matrix,
+    linked_section,
+    require_clauses,
 )
-from agents_remember_test_support.testing.leaf_instruction_wording import (
-    assert_action_pointer,
-    normalized,
-)
+from agents_remember_test_support.testing.leaf_instruction_wording import normalized
 from test_knowledge_bootstrap_procedure import (
     FOUNDATION_AUTHORITY_CLAUSES,
-    delivered_foundation,
-    foundation_delivery_controls,
+    FOUNDATION_HEADING,
+    FOUNDATION_SOURCE,
     free_agent_capsule,
 )
 
 ROOT = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
+PERMISSION_CLAUSES = (
+    "Never bypass an open/denied harness permission; wait while open, else continue without it and report.",
+)
+
+
+def _assert_index_detail_pointer(
+    text: str,
+    trigger: str,
+    label: str,
+    source: str,
+    fragment: str = "",
+) -> None:
+    """Require one Reference-index table row linking the named detail."""
+    marker = "{{detail:" + source + "}}" + fragment
+    link = f"[{label}]({marker})"
+    rows = [
+        line
+        for line in text.splitlines()
+        if line.lstrip().startswith("|") and f"| {trigger} |" in line and link in line
+    ]
+    assert len(rows) == 1, (trigger, label, source, "missing or repeated index pointer")
+    assert text.count(marker) == 1, (source, "expected one detail marker")
+
+
+def _require_permission_delivery(detail: str, root: Path) -> None:
+    """Verify the emitted permission link resolves to the shipped orientation boundary."""
+    with shipped_composition_corpus() as (origin, _):
+        target = origin / "operations/orientation.md"
+        assert target.read_bytes() == (root / "operations/orientation.md").read_bytes()
+        boundary = linked_section(
+            detail,
+            root / "reference/refused-write.md",
+            SectionLink(
+                target,
+                "Honor harness permission decisions",
+                PERMISSION_ACTION,
+                "## Honor harness permission decisions",
+            ),
+        )
+        require_clauses(boundary, PERMISSION_CLAUSES, "permission owner")
+        for obligation in PERMISSION_CLAUSES:
+            reading = normalized(boundary)
+            mutant = reading.replace(normalized(obligation), "", 1)
+            assert mutant != reading
+            with pytest.raises(AssertionError):
+                require_clauses(mutant, PERMISSION_CLAUSES, "deleted permission condition")
+        for mutant in (
+            detail.replace("[Honor harness permission decisions]", "[missing rule]", 1),
+            detail.replace("#honor-harness-permission-decisions", "#wrong-section", 1),
+            detail.replace(
+                "[Honor harness permission decisions]",
+                "\n\n[Honor harness permission decisions]",
+                1,
+            ),
+        ):
+            assert mutant != detail
+            with pytest.raises(AssertionError):
+                linked_section(
+                    mutant,
+                    root / "reference/refused-write.md",
+                    SectionLink(
+                        target,
+                        "Honor harness permission decisions",
+                        PERMISSION_ACTION,
+                        "## Honor harness permission decisions",
+                    ),
+                )
+
+
+def _delivered_foundation(
+    capsule: CapsuleDelivery, root: Path, report_path: Path, clauses: tuple[str, ...]
+) -> str:
+    """Verify the Curator's declared, index-linked and emitted foundation detail."""
+    budgets = current_budget_view(load_current_budget_view(root / "capsule-budgets-current.json"))
+    assert FOUNDATION_SOURCE in budgets["step_details"], "undeclared budget detail"
+    manifest = compose_manifest(json.loads((root / "composition-manifest.json").read_text()))
+    declared = manifest["references"]["curator/repository-foundation"]
+    assert declared["source"] == FOUNDATION_SOURCE
+    assert declared["step_detail"] is True
+    assert "curator" in declared["roles"]
+    assert declared["step"].strip()
+    _assert_index_detail_pointer(
+        capsule.trusted_instructions, "Exceptions/sync", "foundation", FOUNDATION_SOURCE
+    )
+    references = [r for r in capsule.detail_references if r.source_path == FOUNDATION_SOURCE]
+    assert len(references) == 1
+    reference = references[0]
+    assert reference.step == declared["step"]
+    assert reference.content == (root / FOUNDATION_SOURCE).read_bytes()
+    instructions, record = compose_launch_instructions(capsule, str(report_path), {})
+    entries = [r for r in record["detailReferences"] if r["sourcePath"] == FOUNDATION_SOURCE]
+    assert len(entries) == 1
+    assert entries[0]["step"] == reference.step
+    path = Path(entries[0]["path"])
+    assert f"[foundation]({path.as_posix()})" in instructions
+    assert "{{detail:" not in instructions
+
+    link = re.compile(r"\]\(([^)]+)\)")
+    emitted_text, source_text = path.read_text(), reference.content.decode("utf-8")
+    assert link.sub("](target)", emitted_text) == link.sub("](target)", source_text)
+    with shipped_composition_corpus() as (origin, _manifest):
+        owner = origin / FOUNDATION_SOURCE
+        for emitted, written in zip(
+            link.findall(emitted_text), link.findall(source_text), strict=True
+        ):
+            if written.startswith("skill://"):
+                assert emitted == written
+                continue
+            emitted_path, _, emitted_anchor = emitted.partition("#")
+            written_path, _, written_anchor = written.partition("#")
+            assert emitted_anchor == written_anchor, (emitted, written)
+            assert Path(emitted_path).resolve() == (owner.parent / written_path).resolve()
+    detail = path.read_text()
+    assert detail.splitlines()[0] == FOUNDATION_HEADING
+    for clause in clauses:
+        assert normalized(clause) in normalized(detail), clause
+    return detail
+
+
+def _foundation_delivery_controls(
+    capsule: CapsuleDelivery,
+    root: Path,
+    output: Path,
+    clauses: tuple[str, ...],
+    sentence: str,
+) -> None:
+    """All five corruptions fail the foundation delivery proof without editing sources."""
+    for mutation in (
+        "step_details",
+        "heading",
+        "sentence",
+        "undeclared-pointer",
+        "relocated-pointer",
+    ):
+        copied = output / mutation / "lifecycle"
+        for relative in (
+            "capsule-budgets-current.json",
+            "composition-manifest.json",
+            FOUNDATION_SOURCE,
+        ):
+            target = copied / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(root / relative, target)
+        changed_capsule = capsule
+        if mutation == "step_details":
+            target = copied / "capsule-budgets-current.json"
+            budgets = json.loads(target.read_text())
+            del budgets["derived"]["current_measurements"]["step_details"][FOUNDATION_SOURCE]
+            target.write_text(json.dumps(budgets))
+        elif mutation == "relocated-pointer":
+            marker = "{{detail:" + FOUNDATION_SOURCE + "}}"
+            assert capsule.trusted_instructions.count(marker) == 1
+            changed = capsule.trusted_instructions.replace(f"[foundation]({marker})", "", 1)
+            changed += f"\n\n| Unrelated | [foundation]({marker}) |"
+            assert changed.count(marker) == 1
+            changed_capsule = replace(capsule, trusted_instructions=changed)
+        elif mutation == "undeclared-pointer":
+            changed = capsule.trusted_instructions.replace(
+                "{{detail:" + FOUNDATION_SOURCE + "}}", "{{detail:reference/undeclared.md}}"
+            )
+            assert changed != capsule.trusted_instructions
+            changed_capsule = replace(capsule, trusted_instructions=changed)
+        else:
+            target = copied / FOUNDATION_SOURCE
+            original = target.read_text()
+            changed = original.replace(
+                FOUNDATION_HEADING if mutation == "heading" else sentence,
+                "# Renamed foundation" if mutation == "heading" else "",
+            )
+            assert changed != original
+            target.write_text(changed)
+            content = target.read_bytes()
+            changed_capsule = replace(
+                capsule,
+                detail_references=tuple(
+                    replace(r, content=content, revision=compute_content_digest(content))
+                    if r.source_path == FOUNDATION_SOURCE
+                    else r
+                    for r in capsule.detail_references
+                ),
+            )
+        with pytest.raises(AssertionError):
+            _delivered_foundation(changed_capsule, copied, output / mutation / "report.md", clauses)
 
 
 def test_curator_deduplication_keeps_distinct_authority_and_outcome_clauses(tmp_path: Path) -> None:
-    surface = normalized(instruction_surface(ROOT, "roles/curator.md"))
+    delivery = next(
+        item
+        for item in compile_matrix(ROOT)
+        if (item.role, item.operation) == ("curator", "curation")
+    )
+    surface = normalized(delivery.result.render_instructions())
     for clause in (
-        "Use mounted `knowledge_write` on `agents-remember-task` or the admitted serving-build command-line writer with the task contract, handoff list and `--commit` or `commit: true`.",
-        "Only the tool and input class of a covered correct write admit open manual recovery; every other write retains its tool.",
-        "A missing writer is not a correct-write refusal: report the required records not written.",
-        "Never edit the derived index.",
-        "The commit option authorizes file writes, not Git or acceptance.",
-        "`planned` and `refused` wrote nothing.",
-        "Writer-report state, written record and entry identifiers and paths, history rows, and each refusal's own reason.",
-        "Send code questions and evidenced concerns, including after passing code review, to the recipients that Report findings to their owners names.",
+        "Write `onboarding/`+`knowledge/` via one writer (`knowledge_write` or serving-build CLI `--commit`/`commit: true`; missing writer != correct-input refusal); never edit derived indexes.",
+        "`knowledge_write` `commit: true` writes files, not Git",
+        "Send evidenced code concerns to Worker+Reviewer; repair no code, author no false knowledge.",
     ):
         assert normalized(clause) in surface, clause
+
+    details = {
+        item.source_path: normalized(item.content.decode("utf-8"))
+        for item in delivery.result.capsule.detail_references
+    }
+    for source_path, clause in (
+        (
+            "reference/curator/publication-report.md",
+            "`--commit` authorizes file writes, never a Git commit or acceptance.",
+        ),
+        (
+            "reference/curator/publication-report.md",
+            "Read the actual report state, written paths, record and entry identifiers, and refusals.",
+        ),
+        (
+            "reference/curator/exceptions-and-recovery.md",
+            "(`planned` and `refused` wrote nothing)",
+        ),
+        (
+            "reference/curator/exceptions-and-recovery.md",
+            "writer state/IDs/paths/refusals",
+        ),
+        (
+            "reference/curator/exceptions-and-recovery.md",
+            "Send evidenced code concerns to both Worker and Reviewer, including after passing code review, showing the requirement or report mismatch.",
+        ),
+    ):
+        assert normalized(clause) in details[source_path], (source_path, clause)
+
     capsule = free_agent_capsule("curator")
-    delivered_foundation(capsule, ROOT, tmp_path / "foundation.md", FOUNDATION_AUTHORITY_CLAUSES)
-    foundation_delivery_controls(
+    _delivered_foundation(capsule, ROOT, tmp_path / "foundation.md", FOUNDATION_AUTHORITY_CLAUSES)
+    _foundation_delivery_controls(
         capsule,
         ROOT,
         tmp_path / "foundation-controls",
         FOUNDATION_AUTHORITY_CLAUSES,
         "Report a missing task; never fabricate a task, worktree or enclosure.",
     )
-    # P5-18: the Curator reaches correct-write recovery only through the shared
-    # every-role paragraph, which links the served file; read that served file.
     shared = (ROOT / "core/every-role.md").read_text(encoding="utf-8")
     [paragraph] = [
-        line for line in shared.splitlines() if "correct-input refusal of a covered" in line
+        line for line in shared.splitlines() if "correct-input refused covered writes" in line
     ]
-    assert paragraph.startswith("For a correct-input refusal"), (
+    assert paragraph.startswith("For correct-input refused covered writes"), (
         "unlabelled: every role, Curator too"
     )
     served = "skill://agents-remember/skills/l-01-agent-lifecycles/reference/refused-write.md"
     assert paragraph.count("](" + served + ")") == 1
+    assert "(same tool and input class) before applying a stop." in paragraph
+    assert "Other refusals keep stops." in paragraph
     assert "{{detail:reference/refused-write.md}}" not in (ROOT / "roles/curator.md").read_text()
     with shipped_composition_corpus() as (origin, _manifest):
         detail = (origin / "reference/refused-write.md").read_text(encoding="utf-8")
     assert detail == (ROOT / "reference/refused-write.md").read_text(encoding="utf-8")
     for clause in (
+        "A missing tool or unadmitted capability is not a refused correct write. Report the missing capability and what remains unwritten.",
         "Retain the tool's actual refusal.",
         "Record every input and refusal.",
         "A route requiring hidden edits, an older build without a check, false tool authorship or a weakened false claim is not an admitted route.",
@@ -79,8 +302,7 @@ def test_curator_deduplication_keeps_distinct_authority_and_outcome_clauses(tmp_
     ):
         assert normalized(clause) in normalized(detail), clause
     with shipped_composition_corpus() as (origin, _manifest):
-        # The served file's relative links resolve inside the served package.
-        require_permission_delivery(detail, origin)
+        _require_permission_delivery(detail, origin)
 
 
 def test_curator_guidance_names_one_run_rows_proofs_and_link_recovery() -> None:
@@ -96,14 +318,12 @@ def test_curator_guidance_names_one_run_rows_proofs_and_link_recovery() -> None:
     for relative in ("roles/curator.md", "templates/curator-handoff-list.md"):
         capsule = (ROOT / relative).read_text(encoding="utf-8")
         details = re.findall(r"\{\{detail:([^{}]+)\}\}", capsule)
-        # The ingestion template (Architect F1) is a Curator template reached by a real
-        # link from this file, not a detail; count it only when that holds.
         ingestion = "templates/curator-handoff-ingestion.md"
         manifest = json.loads((ROOT / "composition-manifest.json").read_text(encoding="utf-8"))
         assert ingestion.removeprefix("templates/") in manifest["roles"]["curator"]["templates"]
-        assert re.search(r"\]\((?:\.\./templates/)?curator-handoff-ingestion\.md#", capsule), (
-            relative
-        )
+        assert re.search(
+            r"\]\((?:\.\./templates/)?curator-handoff-ingestion\.md(?:#[^)]*)?\)", capsule
+        ), relative
         details = [*details, ingestion]
         text = " ".join(
             (capsule + "\n" + "\n".join((ROOT / path).read_text() for path in details)).split()
@@ -126,7 +346,7 @@ def test_curator_guidance_names_one_run_rows_proofs_and_link_recovery() -> None:
 def test_planning_declares_only_packet_named_recorded_effects_before_implementation() -> None:
     for relative in ("roles/architect.md", "operations/planning.md"):
         text = " ".join((ROOT / relative).read_text(encoding="utf-8").split())
-        for marker in ("expectedKnowledgeEffects", "before implementation", "declares nothing"):
+        for marker in ("expectedKnowledgeEffects", "before implementation", "(else none)"):
             assert marker in text, (relative, marker)
 
 
@@ -208,15 +428,11 @@ def test_authored_handoff_and_walkthrough_reach_one_profile() -> None:
     )
     assert "It cannot replace" in explainer_text
     worker = (ROOT / "roles/worker.md").read_text(encoding="utf-8")
-    assert_action_pointer(
-        worker,
-        "templates/turn-report.md",
-        "Before writing the freeze report, read",
+    _assert_index_detail_pointer(
+        worker, "Task/report/list", "report", "templates/turn-report.md", "#shape"
     )
-    assert_action_pointer(
-        worker,
-        "reference/writing/visual-explainers.md",
-        "Before you add an optional walkthrough to your freeze report, read",
+    _assert_index_detail_pointer(
+        worker, "Task/report/list", "explainer", "reference/writing/visual-explainers.md"
     )
     handoff = sources[0].read_text(encoding="utf-8")
     assert "producer-owned fields remain verbatim" in handoff

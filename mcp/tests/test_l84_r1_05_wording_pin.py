@@ -131,7 +131,8 @@ def test_source_homes_carry_the_architect_wording() -> None:
     assert "Some harnesses create files there" not in authority
 
 
-# P5-16 moved these out of reference/sandbox-actors.md; their pins follow to the homes.
+# Sandbox rules live in core/authority.md; core/every-role.md retains the condensed
+# scratch-root invariant.
 MOVED_SANDBOX_RULES = (
     "Run a harness command only in the supplied scratch roots, never with a worktree as its "
     "working folder. Some harnesses create files in the folder they run in; remove any that "
@@ -139,15 +140,20 @@ MOVED_SANDBOX_RULES = (
     "In a sandbox run's report, name the sandbox's host, plug-in and build versions; treat a "
     "difference from the developer's installation as a finding.",
 )
+CONDENSED_SCRATCH_ROOT_RULE = (
+    "Run harness commands in supplied scratch roots only, never a worktree."
+)
 
 
 def test_moved_sandbox_rules_hold_once_in_each_home() -> None:
     sandbox = (LIFECYCLE / "reference/sandbox-actors.md").read_text(encoding="utf-8")
-    for home in ("core/authority.md", "core/every-role.md"):
-        text = (LIFECYCLE / home).read_text(encoding="utf-8")
-        for rule in MOVED_SANDBOX_RULES:
-            assert text.count(rule) == 1, (home, rule)
-            assert rule not in sandbox
+    authority = (LIFECYCLE / "core/authority.md").read_text(encoding="utf-8")
+    every_role = (LIFECYCLE / "core/every-role.md").read_text(encoding="utf-8")
+    for rule in MOVED_SANDBOX_RULES:
+        assert authority.count(rule) == 1, ("core/authority.md", rule)
+        assert rule not in sandbox
+    assert every_role.count(CONDENSED_SCRATCH_ROOT_RULE) == 1
+    assert CONDENSED_SCRATCH_ROOT_RULE not in sandbox
 
 
 def test_reviewer_repair_and_continue_rule_is_pinned() -> None:

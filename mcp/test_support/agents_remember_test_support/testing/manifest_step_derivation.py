@@ -164,7 +164,14 @@ def sentence_start(line: str, position: int) -> int:
 
 
 def action_of(line: str, link_start: int) -> tuple[str | None, str]:
-    """The opening Before/When/For clause of the link's sentence, or None."""
+    """The opening Before/When/For clause of the link's sentence, or table row trigger."""
+    if line.lstrip().startswith("|"):
+        cell = line.strip().strip("|").split("|", 1)[0]
+        cell = re.sub(r"\[((?:[^\[\]]|\[[^\[\]]*\])*)\]\([^)]*\)", r"\1", cell)
+        cell = re.sub(r"\s+", " ", cell).strip(" *_-:;,").lower()
+        if cell and not set(cell) <= {"-", ":"}:
+            return f"row: {cell}", cell
+        return None, cell
     begin = sentence_start(line, link_start)
     first_link = next(
         match.start() for match in LINK.finditer(line) if begin <= match.start() <= link_start

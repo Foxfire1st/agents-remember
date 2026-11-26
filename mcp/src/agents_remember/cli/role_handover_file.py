@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agents_remember.cli.immutable_artifact import (
     MAX_ARTIFACT_BYTES,
@@ -85,6 +85,34 @@ def handover_file_line(saved: dict[str, Any]) -> str:
     """How a message and a restore name the complete hand-over's path and digest."""
 
     return f"{saved['path']} (SHA-256 {saved['sha256']})"
+
+
+def handover_envelope_candidates(
+    message: str,
+) -> list[tuple[Literal["suffix", "prefix"], str, str]]:
+    """Return candidate ``(position, locator_line, content)`` splits of a saved first message.
+
+    Checks both the trailing suffix locator line and the legacy leading prefix locator line
+    without rejecting when both structural shapes appear, so callers can disambiguate by exact
+    locator text and content digest.
+    """
+
+    candidates: list[tuple[Literal["suffix", "prefix"], str, str]] = []
+    content_s, sep_s, last_line = message.rpartition("\n")
+    if (
+        sep_s
+        and last_line.startswith(("AR handover artifact: ", "AR handover artifacts: "))
+        and "holds the launch handover above this line" in last_line
+    ):
+        candidates.append(("suffix", last_line, content_s))
+    first_line, sep_p, content_p = message.partition("\n")
+    if (
+        sep_p
+        and first_line.startswith(("AR handover artifact: ", "AR handover artifacts: "))
+        and "everything below this line" in first_line
+    ):
+        candidates.append(("prefix", first_line, content_p))
+    return candidates
 
 
 def preflight_handover_file(saved: dict[str, Any], message: str, *, receipt: Path) -> None:
@@ -184,7 +212,8 @@ def _checked_handover_file(
             f"reference in receipt {receipt}. Nothing was written. Put the recorded text and "
             "digest back as the launch wrote them and retry."
         )
-    if handover_file_line(saved) not in message.partition("\n")[0]:
+    candidates = handover_envelope_candidates(message)
+    if not any(handover_file_line(saved) in line for _pos, line, _content in candidates):
         raise ValueError(
             f"The saved first message of receipt {receipt} does not name the complete hand-over "
             f"at {saved['path']} that it was compiled with. Nothing was written. Restore the "

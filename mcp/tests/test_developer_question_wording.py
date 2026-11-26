@@ -8,6 +8,7 @@ from urllib.parse import quote
 
 import pytest
 import test_role_instruction_wording_handover as handover_wording
+from agents_remember.application.role_capsules.shared_block import filter_shared_block
 from agents_remember.application.skill_resources.provider import shipped_composition_corpus
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.models.role_capsules.types import CapsuleRole
@@ -18,7 +19,6 @@ from agents_remember_test_support.testing.curation_doctrine import (
 from agents_remember_test_support.testing.curator_contracts import compile_matrix
 from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from agents_remember_test_support.testing.leaf_instruction_wording import (
-    MESSAGE_HANDOVER_ACTIONS,
     MESSAGE_HANDOVER_SOURCE,
     delivered_step,
 )
@@ -29,26 +29,36 @@ QUESTION_TRANSPORT_CLAUSES = (
     "Record the handover as pending and continue independent work",
     "Resend once before the turn ends",
     "If it is refused again, report the second refusal and leave it pending",
-    "A held receipt means queued eventual delivery, possibly many turns later. Never resend it",
-    "Count a handover as taken only when the recipient's reply, report or intake names the exact object and shows the requested work or its start",
-    "Open every supplied recipient artifact before you call one absent",
-    "Withdraw a superseded held message with `withdraw_held_message_id`",
+    "`held` = queued; never resend",
+    "withdraw via `withdraw_held_message_id`",
+    "open supplied artifacts first",
+    "Never poll",
 )
-SHARED_QUESTION_AUDIENCE = (
-    "Architect, Orchestrator, Manager, Worker, Curator, Reviewer, Investigator: "
-)
-SHARED_QUESTION_RULE = (
+SHARED_QUESTION_AUTHORITY_RULE = (
     "A held receipt means queued eventual delivery, possibly many turns later. Never resend it. "
     "Count a handover as taken only when the recipient's reply, report or intake names the exact "
     "object and shows the requested work or its start. Open every supplied recipient artifact "
     "before you call one absent. Withdraw a superseded held message with "
     "`withdraw_held_message_id`. A receiver does not poll."
 )
+SHARED_QUESTION_KERNEL_LINE = (
+    "`held` = queued; never resend, withdraw via `withdraw_held_message_id`, "
+    "open supplied artifacts first."
+)
+MESSAGE_HANDOVER_TABLE_ACTIONS = {
+    "architect": "[msgs](",
+    "orchestrator": "[msgs](",
+    "manager": "[msgs](",
+    "worker": "[msg](",
+    "reviewer": "[msg](",
+    "curator": "[msg](",
+    "investigator": "[msgs](",
+}
 CHILD_QUESTION_SOURCE = "reference/coordination/shared/child-questions.md"
 CHILD_QUESTION_ACTIONS = {
-    "architect": "Before answering a child's question or returning the developer's answer, read",
-    "orchestrator": "Before handling a child's question or the developer's answer to it, read",
-    "manager": "Before handling a child's question or returning the developer's answer, read",
+    "architect": "[child](",
+    "orchestrator": "[child](",
+    "manager": "[child](",
 }
 ANSWER_CLAUSES = (
     "first check whether the decision falls within your authority",
@@ -65,58 +75,32 @@ ANSWER_CLAUSES = (
 )
 
 ORIENTATION_REFERRALS = {
-    "orchestrator": (
-        "Before sending a developer question or handling a relayed answer, "
-        "read [developer questions](../operations/orientation.md#ask-for-a-developer-decision) "
-        "for the reporting route through `role_message` on "
-        "`agents-remember-task` and "
-        "[relayed answers](../operations/orientation.md#recognize-a-relayed-developer-answer) "
-        "for attribution and quoted words."
-    ),
-    "manager": "Before sending a developer question or recognizing a relayed answer, read [developer questions](../operations/orientation.md#ask-for-a-developer-decision) for the reporting route and [relayed answers](../operations/orientation.md#recognize-a-relayed-developer-answer) for attribution and quoted words.",
-    "worker": (
-        "Before asking a question, follow "
-        "[Ask for a developer decision](../operations/orientation.md#ask-for-a-developer-decision) "
-        "for the reporting recipient and parentless route: send questions "
-        "requiring the developer's decision to your parent with `role_message` "
-        "on `agents-remember-task`, or ask in your own chat when you have no "
-        "parent."
-    ),
-    "reviewer": (
-        "Before sending developer questions or handling relayed answers, read "
-        "[developer-question routing](../operations/orientation.md#ask-for-a-developer-decision) "
-        "for the question and answer procedure through `role_message` on "
-        "`agents-remember-task`."
-    ),
-    "curator": (
-        "Before sending a developer question or handling a relayed answer, "
-        "read [developer questions](../operations/orientation.md#ask-for-a-developer-decision) "
-        "for the reporting route through `role_message` on "
-        "`agents-remember-task` and "
-        "[relayed answers](../operations/orientation.md#recognize-a-relayed-developer-answer) "
-        "for attribution and quoted words."
-    ),
-    "investigator": (
-        "Before sending developer questions or handling relayed answers, read "
-        "[developer-question routing](../operations/orientation.md#ask-for-a-developer-decision) "
-        "for the question and answer procedure."
-    ),
+    "worker": "[ask](../operations/orientation.md#ask-for-a-developer-decision)",
+    "reviewer": "[ask](../operations/orientation.md#ask-for-a-developer-decision)",
+    "curator": "[ask](../operations/orientation.md#ask-for-a-developer-decision)",
 }
-COORDINATION_REFERRALS = {
-    "architect": "When `role_message` on `agents-remember-task` answers `held` because a child waits at a permission prompt, or its wait returns `permission-pending`, follow [Relay a child\N{RIGHT SINGLE QUOTATION MARK}s permission notice](../operations/coordination.md#relay-a-childs-permission-notice) for the upward route, child identity and supplied permission facts.",
-    "orchestrator": "When `role_message` on `agents-remember-task` answers `held` because a child waits at a permission prompt, or its wait returns `permission-pending`, follow [Relay a child\N{RIGHT SINGLE QUOTATION MARK}s permission notice](../operations/coordination.md#relay-a-childs-permission-notice) for the upward route, child identity and supplied permission facts.",
-    "manager": "When `role_message` on `agents-remember-task` returns `held` because a child waits at a permission prompt, or a wait returns `permission-pending`, follow [Relay a child\N{RIGHT SINGLE QUOTATION MARK}s permission notice](../operations/coordination.md#relay-a-childs-permission-notice) for the upward route, child identity and supplied permission facts.",
+ROLE_QUESTION_ROUTES = {
+    "orchestrator": "Message handover parent ID via `role_message` for developer decisions:",
+    "manager": (
+        "Message recorded recipient, else parent's role with its task references "
+        "(or parent ID for developer questions), else own chat via `role_message`"
+    ),
+    "investigator": "Parent's first `role_message` supplies concern (ask once if missing, wait); parentless asks developer in own chat.",
 }
+COORDINATION_PERMISSION_POINTER = (
+    "Permission `held`/`permission-pending`: "
+    "[relays](../reference/coordination/shared/closeout-recovery.md#relay-a-childs-permission-notice)."
+)
 
 
 def held_question_transport(shared: str, role: str) -> str:
-    """Require the held rule in its actual role-qualified shared paragraph."""
-    assert role.capitalize() in SHARED_QUESTION_AUDIENCE.removesuffix(": ").split(", ")
-    paragraph = SHARED_QUESTION_AUDIENCE + SHARED_QUESTION_RULE
+    """Require the held-delivery kernel rule in the compiled shared block."""
     paragraphs = [" ".join(part.split()) for part in shared.split("\n\n")]
-    assert paragraphs.count(paragraph) == 1, (role, "held shared paragraph")
-    assert shared.count(SHARED_QUESTION_RULE) == 1, role
-    return paragraph
+    matching = [part for part in paragraphs if SHARED_QUESTION_KERNEL_LINE in part]
+    assert len(matching) == 1, (role, "held shared paragraph")
+    assert shared.count(SHARED_QUESTION_KERNEL_LINE) == 1, role
+    assert "Never poll" in matching[0], role
+    return matching[0]
 
 
 def delivered_question_transport(role: str, detail: str) -> str:
@@ -130,21 +114,17 @@ def delivered_question_transport(role: str, detail: str) -> str:
     assert len(deliveries) == 1, role
     shared = deliveries[0].shared_block
     assert shared is not None, role
-    assert shared == (root / "core/every-role.md").read_text()
-    assert SHARED_QUESTION_RULE in (root / "core/authority.md").read_text()
+    assert shared == filter_shared_block((root / "core/every-role.md").read_text(), role)
+    assert SHARED_QUESTION_AUTHORITY_RULE in (root / "core/authority.md").read_text()
     paragraph = held_question_transport(shared, role)
     # Exercise actual shared delivery, not a fixture pretending the rule is in a detail.
-    for clause in (*QUESTION_TRANSPORT_CLAUSES[4:], "A receiver does not poll."):
+    for clause in QUESTION_TRANSPORT_CLAUSES[4:]:
         mutant = shared.replace(clause, "", 1)
         assert mutant != shared, (role, clause)
         with pytest.raises(AssertionError):
             held_question_transport(mutant, role)
     for mutant in (
-        # The audience label of this exact paragraph (other paragraphs share the label).
-        shared.replace(
-            SHARED_QUESTION_AUDIENCE + SHARED_QUESTION_RULE, "Bootstrap: " + SHARED_QUESTION_RULE, 1
-        ),
-        shared.replace(SHARED_QUESTION_RULE, SHARED_QUESTION_RULE + " One more.", 1),
+        shared.replace(SHARED_QUESTION_KERNEL_LINE, "", 1),
         shared + "\n\n" + paragraph,
     ):
         assert mutant != shared
@@ -223,10 +203,15 @@ def test_each_parentable_role_has_question_recovery_and_answer_provenance() -> N
     for clause in clauses:
         assert clause in home, ("orientation", clause)
     for role in ("orchestrator", "manager", "worker", "reviewer", "curator", "investigator"):
-        transport = question_step(role, MESSAGE_HANDOVER_SOURCE, MESSAGE_HANDOVER_ACTIONS[role])
+        transport = question_step(
+            role, MESSAGE_HANDOVER_SOURCE, MESSAGE_HANDOVER_TABLE_ACTIONS[role]
+        )
         assert not missing_question_clauses(transport, QUESTION_TRANSPORT_CLAUSES), role
         text = role_text(role)
-        assert ORIENTATION_REFERRALS[role] in text, (role, "one-home pointer")
+        if role in ORIENTATION_REFERRALS:
+            assert ORIENTATION_REFERRALS[role] in text, (role, "one-home pointer")
+        else:
+            assert ROLE_QUESTION_ROUTES[role] in text, (role, "role question route")
         assert (
             "Send every question requiring the developer's decision to the reporting recipient your role instructs"
             not in text
@@ -237,7 +222,11 @@ def test_each_parentable_role_has_question_recovery_and_answer_provenance() -> N
 
 
 def test_each_parent_has_upward_notice_and_unchanged_downward_answer_duties() -> None:
-    home = " ".join(read(LIFECYCLE / "operations" / "coordination.md").split())
+    coordination = " ".join(read(LIFECYCLE / "operations" / "coordination.md").split())
+    assert COORDINATION_PERMISSION_POINTER in coordination
+    home = " ".join(
+        read(LIFECYCLE / "reference" / "coordination" / "shared" / "closeout-recovery.md").split()
+    )
     notice = (
         "or a wait returns `permission-pending`, tell your parent immediately",
         "Without a parent, tell the developer in your own chat",
@@ -249,11 +238,12 @@ def test_each_parent_has_upward_notice_and_unchanged_downward_answer_duties() ->
         "Do not ask the developer to confirm an answered prompt",
     )
     for clause in notice:
-        assert clause in home, ("coordination", clause)
+        assert clause in home, ("closeout-recovery", clause)
     for role in STARTERS:
         text = role_text(role)
-        assert COORDINATION_REFERRALS[role] in text, (role, "one-home referral")
-        transport = question_step(role, MESSAGE_HANDOVER_SOURCE, MESSAGE_HANDOVER_ACTIONS[role])
+        transport = question_step(
+            role, MESSAGE_HANDOVER_SOURCE, MESSAGE_HANDOVER_TABLE_ACTIONS[role]
+        )
         assert not missing_question_clauses(transport, QUESTION_TRANSPORT_CLAUSES), role
         assert "or a wait returns `permission-pending`, tell your parent immediately" not in text, (
             role,
@@ -269,7 +259,11 @@ def test_each_parent_has_upward_notice_and_unchanged_downward_answer_duties() ->
 
 def test_question_step_checks_reject_each_actual_transport_or_answer_deletion() -> None:
     for source, step, clauses in (
-        (MESSAGE_HANDOVER_SOURCE, MESSAGE_HANDOVER_ACTIONS["manager"], QUESTION_TRANSPORT_CLAUSES),
+        (
+            MESSAGE_HANDOVER_SOURCE,
+            MESSAGE_HANDOVER_TABLE_ACTIONS["manager"],
+            QUESTION_TRANSPORT_CLAUSES,
+        ),
         (CHILD_QUESTION_SOURCE, CHILD_QUESTION_ACTIONS["manager"], ANSWER_CLAUSES),
     ):
         text = question_step("manager", source, step)
@@ -323,22 +317,16 @@ def test_manager_records_an_already_sent_developer_question_wait_locally(tmp_pat
             root,
             ("manager", "orientation"),
             MESSAGE_HANDOVER_SOURCE,
-            MESSAGE_HANDOVER_ACTIONS["manager"],
+            MESSAGE_HANDOVER_TABLE_ACTIONS["manager"],
             tmp_path / "report.md",
         )
     section = re.search(r"(?ms)^## Ask for a developer decision\n(.*?)(?=^## |\Z)", instructions)
     assert section is not None
     question_text = " ".join(section[1].split())
+    assert "Via `role_message`, state the question" in question_text
     assert (
-        "For a recipient or parent, use `role_message` on `agents-remember-task` "
-        "with the instructed address." in question_text
-    )
-    assert (
-        "When no independent work remains, record the pending answer "
-        "and its recipient in your report. "
-        "The Manager records the wait in its end line and status file. "
-        "Other roles send what they await and from whom to that recipient "
-        "with `role_message` on `agents-remember-task`." in question_text
+        "When idle, record the wait (Manager: end line & status file; others: `role_message`)."
+        in question_text
     )
     assert "record your state in your report and send what you await" not in question_text
 
