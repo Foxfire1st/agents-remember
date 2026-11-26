@@ -11,6 +11,8 @@
     "isolatedModules": true,
     "moduleDetection": "force",
     "noEmit": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./tsconfig.driver.tsbuildinfo",
 
     "strict": true,
     "noUnusedLocals": true,

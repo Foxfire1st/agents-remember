@@ -38,6 +38,7 @@ mcp/tests/fixtures/sim-rich/
 # unignored is staged and committed rather than merely ignored by ruff.
 .dmypy.json
 .mypy_cache/
+.eslintcache
 
 # AR leaf evidence and tooling scratch — never a deliverable. The closeout derives its candidate
 # tree with `git add -A`, so anything unignored under temp/ is staged and committed with the code;

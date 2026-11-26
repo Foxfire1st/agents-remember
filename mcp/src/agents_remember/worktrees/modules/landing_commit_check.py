@@ -18,25 +18,27 @@ from one with no such fact without any new durable record.
 
 from __future__ import annotations
 
-import json
 import os
-import re
-import select
-import signal
 import subprocess
 import tempfile
 import time
-import uuid
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.kernel._agentic_settings_core import (
-    DEFAULT_COMMIT_CHECK_TIMEOUT_SECONDS,
-)
 from agents_remember.kernel.git_command import git_environment
-from agents_remember.worktrees.modules.landing_commit_check_pipes import _pipe_write_end_holders
+from agents_remember.worktrees.modules.commit_check_process import (
+    CommitCheckProcessOutcome,
+    CommitCheckSettingsError,
+    default_commit_check_log_path,
+    last_failing_commit_check_step,
+    read_commit_check_log_tail,
+    reclaim_commit_check_logs,
+    resolve_commit_check_timeout_seconds,
+    run_process_to_log,
+    spawn_commit_check_process,
+    write_commit_check_log_footer,
+)
 from agents_remember.worktrees.modules.models import PATH_SAMPLE_LIMIT, CommitPublicationRefusal
 
 #: The trailer a landing commit carries for MIK-R152 rule 8:
@@ -49,42 +51,7 @@ COMMIT_CHECK_TRAILER_PREFIX = "Commit-Check-Pass:"
 #: message ends here (``.githooks/_gate.sh`` ``STASH_MESSAGE``).
 _GATE_STASH_MESSAGE_SUFFIX = "gate: staged-content isolation"
 
-#: After the bound, the hook's process group is asked to stop before it is
-#: stopped: the gate restores its isolation stash on a trapped exit.
-_HOOK_TERM_GRACE_SECONDS = 30.0
-#: Bound for asking an escaped pipe holder to die before stopping it; the drain
-#: grace already expired, so this is short patience, not a second grace.
-_HOOK_ESCAPED_TERM_SECONDS = 2.0
-
-#: Rounds of scan-ask-stop-verify for escaped pipe holders before survivors
-#: are named alive instead of being claimed stopped; a holder the scan missed
-#: or forked mid-round is caught by the next.
-_HOOK_ESCAPED_ROUNDS = 3
-
-#: Bound verifying a stopped holder is really dead before it counts as such;
-#: a zombie holds no file end, so reaping lag never blocks the pipe — but the
-#: return must not claim a live holder stopped.
-_HOOK_ESCAPED_KILL_VERIFY_SECONDS = 5.0
-
-#: Hook output is copied to the log in chunks; no run holds more than one
-#: chunk in memory, whatever the hook writes (standing code-seam CS-6).
-_HOOK_OUTPUT_CHUNK_BYTES = 65536
-
-#: The step parser reads only the log's tail, never the whole output.
-_HOOK_LOG_TAIL_BYTES = 65536
-
-#: Retention: newest per-repo hook logs kept; older ones are reclaimed.
-_HOOK_LOG_KEEP_COUNT = 20
-
-#: Bound for draining the pipe after the process group is stopped; a writer
-#: that escaped the group and still holds the pipe past this bound is cut off
-#: (its file end is closed) and named in the log footer.
-_HOOK_DRAIN_GRACE_SECONDS = 10.0
-
-#: Quantum for the output-copy wait and the group-death poll.
-_HOOK_COPY_QUANTUM_SECONDS = 0.05
-
-_RESULT_FAIL_RE = re.compile(r"^.*result:\s+(?P<step>\S+)\s+FAIL\s*$")
+_run_hook_to_log = run_process_to_log
 
 
 @dataclass(frozen=True)
@@ -318,28 +285,6 @@ def _refuse_unreadable_settings(repo: Path, step: str) -> LandingCommitCheckRefu
     )
 
 
-def _merge_landing_block(merged: dict[str, object], repo: Path, path: Path, raw: object) -> None:
-    """Merge one settings file's ``orchestration.landing`` block, failing loud."""
-    if not isinstance(raw, dict):
-        raise _refuse_unreadable_settings(repo, f"the settings file holds no object: {path}")
-    orchestration = raw.get("orchestration")
-    if orchestration is None:
-        return
-    if not isinstance(orchestration, dict):
-        raise _refuse_unreadable_settings(repo, f"orchestration is no object: {path}")
-    landing = orchestration.get("landing")
-    if landing is None:
-        return
-    if not isinstance(landing, dict):
-        raise _refuse_unreadable_settings(repo, f"orchestration.landing is no object: {path}")
-    unknown = set(landing) - {"commitCheckTimeoutSeconds"}
-    if unknown:
-        raise _refuse_unreadable_settings(
-            repo, f"unknown orchestration.landing key: {sorted(unknown)}: {path}"
-        )
-    merged.update(landing)
-
-
 def commit_check_hook_id(repo: Path) -> str:
     """The hook identity for the pass trailer: the hook's display path, or ``"none"``."""
     hook = _hook_candidate(repo)
@@ -362,80 +307,10 @@ def message_with_commit_check_trailer(repo: Path, message: str, tree: str) -> st
 
 def commit_check_timeout_seconds(repo: Path) -> int:
     """The bound on one hook run: the settings, else the default (MIK-R152 rule 6)."""
-    top = _git(repo, ["rev-parse", "--show-toplevel"])
-    candidates = (
-        [Path(os.environ["XDG_CONFIG_HOME"]) / "agents-remember" / "settings.json"]
-        if os.environ.get("XDG_CONFIG_HOME")
-        else [Path.home() / ".config" / "agents-remember" / "settings.json"]
-    )
-    if top.returncode == 0:
-        candidates.append(Path(top.stdout.strip()) / "system" / "settings.json")
-        # A linked worktree holds no settings of its own: the repo-local layer
-        # lives in the main checkout, found through the common git dir as the
-        # hook itself does (`.githooks/_gate.sh` `main_root`).
-        common = _git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        if common.returncode == 0:
-            main_root = Path(common.stdout.strip()).parent
-            if main_root != Path(top.stdout.strip()):
-                candidates.append(main_root / "system" / "settings.json")
-    merged: dict[str, object] = {}
-    for path in candidates:
-        try:
-            raw = json.loads(path.read_bytes().decode("utf-8"))
-        except OSError:
-            continue
-        except ValueError as error:
-            raise _refuse_unreadable_settings(
-                repo, f"the settings file cannot be read: {path}: {error}"
-            ) from error
-        _merge_landing_block(merged, repo, path, raw)
-    if "commitCheckTimeoutSeconds" not in merged:
-        return DEFAULT_COMMIT_CHECK_TIMEOUT_SECONDS
-    value = merged["commitCheckTimeoutSeconds"]
-    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-        raise _refuse_unreadable_settings(
-            repo,
-            "orchestration.landing.commitCheckTimeoutSeconds must be a positive whole number",
-        )
-    return value
-
-
-def _default_log_path(repo: Path) -> Path:
-    common = _require_git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-    return Path(common) / f"agents-remember-commit-check-{uuid.uuid4().hex[:12]}.log"
-
-
-def _reclaim_hook_logs(repo: Path) -> None:
-    """Keep the newest per-repo hook logs; reclaim older ones (standing code-seam CS-6).
-
-    Every run writes one log file; without an owner the common git dir would
-    accumulate one per landing. Best effort: a failure to list or remove never
-    refuses the landing the check judges.
-    """
     try:
-        common = _require_git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        logs = sorted(
-            Path(common).glob("agents-remember-commit-check-*.log"),
-            key=lambda path: (path.stat().st_mtime, path.name),
-        )
-    except (RuntimeError, OSError):
-        return
-    for stale in logs[: max(0, len(logs) - _HOOK_LOG_KEEP_COUNT)]:
-        with suppress(OSError):
-            stale.unlink()
-
-
-def _log_tail_text(log: Path) -> str:
-    """The log's tail for the step parser: bounded, never the whole output."""
-    try:
-        size = log.stat().st_size
-        with log.open("rb") as handle:
-            if size > _HOOK_LOG_TAIL_BYTES:
-                handle.seek(size - _HOOK_LOG_TAIL_BYTES)
-            tail = handle.read()
-    except OSError:
-        return ""
-    return tail.decode("utf-8", "surrogateescape")
+        return resolve_commit_check_timeout_seconds(repo)
+    except CommitCheckSettingsError as error:
+        raise _refuse_unreadable_settings(repo, str(error)) from error
 
 
 def _index_tree(repo: Path, *, env: dict[str, str] | None = None) -> str:
@@ -562,34 +437,6 @@ def _stash_message(repo: Path, entry: str) -> str:
 
 def _stash_entry_is_ours(repo: Path, entry: str) -> bool:
     return _stash_message(repo, entry).endswith(_GATE_STASH_MESSAGE_SUFFIX)
-
-
-def _last_failing_step(output: str, *, hook_path: Path | None = None) -> str | None:
-    """The last step the hook reported, or what its silence means.
-
-    A ``result: <step> FAIL`` line names the step. Where the hook reports none,
-    a refused exec names the hook's interpreter; otherwise the last output line
-    stands in, so a missing interpreter or package refuses with its reason.
-    """
-    step: str | None = None
-    for line in output.splitlines():
-        match = _RESULT_FAIL_RE.match(line.strip())
-        if match:
-            step = match.group("step")
-    if step is not None:
-        return step
-    if hook_path is not None and "cannot exec" in output:
-        try:
-            first = hook_path.read_text(encoding="utf-8", errors="replace").splitlines()[0]
-        except OSError:
-            first = ""
-        if first.startswith("#!"):
-            return f"the hook's interpreter cannot run: {first[2:].strip() or first}"
-    for line in reversed(output.splitlines()):
-        if line.strip():
-            text = line.strip()
-            return text if len(text) <= 200 else f"{text[:200]}…"
-    return None
 
 
 @dataclass(frozen=True)
@@ -730,22 +577,77 @@ def run_landing_commit_check_on_index(
     )
 
 
+def _common_checkout_root(repo: Path) -> Path | None:
+    """Primary checkout root for ``repo`` via its Git common directory, or ``None``."""
+    common = _git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    if common.returncode != 0 or not common.stdout.strip():
+        return None
+    return Path(common.stdout.strip()).parent
+
+
+def _lockfile_borrow_refusal(repo: Path, common_root: Path) -> str | None:
+    """Validate that primary ``dashboard/node_modules`` can be borrowed safely (L29-R8)."""
+    if not (common_root / "dashboard" / "node_modules").is_dir():
+        return (
+            "dashboard/node_modules missing in candidate and primary checkout; "
+            "run 'npm ci' in dashboard/ first"
+        )
+    cand_lock = repo / "dashboard" / "package-lock.json"
+    primary_lock = common_root / "dashboard" / "package-lock.json"
+    if not cand_lock.is_file() or not primary_lock.is_file():
+        return (
+            "cannot borrow primary dashboard/node_modules: "
+            "dashboard/package-lock.json is missing in candidate or primary checkout"
+        )
+    if cand_lock.read_bytes() != primary_lock.read_bytes():
+        return (
+            "cannot borrow primary dashboard/node_modules: "
+            "candidate dashboard/package-lock.json differs from primary checkout"
+        )
+    ignored = _git(repo, ["check-ignore", "-q", "dashboard/node_modules/"])
+    if ignored.returncode != 0:
+        return (
+            "cannot borrow primary dashboard/node_modules: "
+            "dashboard/node_modules is not gitignored in candidate"
+        )
+    return None
+
+
+def _borrow_dashboard_node_modules(repo: Path) -> tuple[Path | None, str | None]:
+    """Ensure ``dashboard/node_modules`` before spawning a hook, borrowing only on exact lockfile."""
+    target = repo / "dashboard" / "node_modules"
+    if not (repo / "dashboard" / "package.json").is_file() or target.is_dir():
+        return None, None
+    if target.exists() or target.is_symlink():
+        return None, f"dashboard/node_modules is not a usable directory: {target.as_posix()}"
+    common_root = _common_checkout_root(repo)
+    if common_root is None or common_root.resolve() == repo.resolve():
+        refusal: str | None = "dashboard/node_modules missing; run 'npm ci' in dashboard/ first"
+    else:
+        refusal = _lockfile_borrow_refusal(repo, common_root)
+    if refusal is not None:
+        return None, refusal
+    assert common_root is not None
+    try:
+        os.symlink(common_root / "dashboard" / "node_modules", target)
+    except OSError as error:
+        return None, f"cannot borrow primary dashboard/node_modules: {error}"
+    return target, None
+
+
 def _run_checked(repo: Path, request: _CheckRequest) -> CommitCheckPass:
     """One hook run for either public entry point above."""
     bound = (
         request.timeout_s if request.timeout_s is not None else commit_check_timeout_seconds(repo)
     )
-    log = request.log_path if request.log_path is not None else _default_log_path(repo)
+    log = request.log_path if request.log_path is not None else default_commit_check_log_path(repo)
     if request.log_path is None:
-        _reclaim_hook_logs(repo)
+        reclaim_commit_check_logs(repo)
     hook = resolve_commit_check_hook(repo)
     started = time.monotonic()
 
     def footer(outcome: str) -> float:
-        seconds = time.monotonic() - started
-        with log.open("a", encoding="utf-8") as handle:
-            handle.write(f"elapsed: {seconds:.3f}s {outcome}\n")
-        return seconds
+        return write_commit_check_log_footer(log, started, outcome)
 
     if hook is None:
         reason = unrunnable_hook_reason(repo)
@@ -767,59 +669,75 @@ def _run_checked(repo: Path, request: _CheckRequest) -> CommitCheckPass:
 
     hook_id = _hook_display(repo, hook)
     checked = CheckedTree(repo=repo, tree=request.tree, hook=hook_id)
-    env = (
-        {**git_environment(), "GIT_INDEX_FILE": request.index_file.as_posix()}
-        if request.index_file
-        else None
-    )
-    before = _HookRunState(
-        index_tree=_index_tree(repo, env=env),
-        diff_head=_diff_head_raw(repo, env=env, against=_diff_base_ref(repo)),
-        blobs=worktree_blob_map(repo, env=env),
-        untracked=_untracked_status(repo, env=env),
-        unmerged=_unmerged_paths(repo, env=env),
-        stash=_stash_top(repo),
-        env=env,
-    )
-    log.write_text(
-        f"landing commit check: hook={hook_id} tree={request.tree} bound={bound}s\n",
-        encoding="utf-8",
-    )
-    try:
-        process = _spawn_hook(repo, env)
-    except OSError as error:
-        footer("unrunnable(spawn)")
+    borrowed_modules, dashboard_refusal = _borrow_dashboard_node_modules(repo)
+    if dashboard_refusal is not None:
+        if request.restore_index is not None:
+            request.restore_index()
+        log.write_text(f"landing commit check refused: {dashboard_refusal}\n", encoding="utf-8")
+        footer("unrunnable")
         raise LandingCommitCheckRefusal(
-            "unrunnable", checked=checked, step=str(error), log=log
-        ) from error
-    outcome = _run_hook_to_log(process, log, bound)
-    footer("timeout" if outcome.timed_out else f"exit={outcome.returncode}")
-    _judge_hook_result(
-        outcome,
-        before,
-        checked,
-        log,
-        request.restore_index,
-    )
-    left_untracked = [
-        line for line in _untracked_status(repo, env=env) if line not in set(before.untracked)
-    ]
-    if left_untracked:
-        with log.open("a", encoding="utf-8") as handle:
-            handle.write(
-                "untracked paths the hook's run left behind: "
-                + ", ".join(line[3:] for line in left_untracked[:PATH_SAMPLE_LIMIT])
-                + "\n"
-            )
-    return CommitCheckPass(
-        tree=request.tree,
-        hook=hook_id,
-        log=log,
-        seconds=footer("pass"),
-        admitted=TreeSnapshot(
-            index_tree=before.index_tree, diff_head=before.diff_head, blobs=before.blobs
-        ),
-    )
+            "unrunnable",
+            checked=checked,
+            step=dashboard_refusal,
+            log=log,
+        )
+    try:
+        env = (
+            {**git_environment(), "GIT_INDEX_FILE": request.index_file.as_posix()}
+            if request.index_file
+            else None
+        )
+        before = _HookRunState(
+            index_tree=_index_tree(repo, env=env),
+            diff_head=_diff_head_raw(repo, env=env, against=_diff_base_ref(repo)),
+            blobs=worktree_blob_map(repo, env=env),
+            untracked=_untracked_status(repo, env=env),
+            unmerged=_unmerged_paths(repo, env=env),
+            stash=_stash_top(repo),
+            env=env,
+        )
+        log.write_text(
+            f"landing commit check: hook={hook_id} tree={request.tree} bound={bound}s\n",
+            encoding="utf-8",
+        )
+        try:
+            process = _spawn_hook(repo, env)
+        except OSError as error:
+            footer("unrunnable(spawn)")
+            raise LandingCommitCheckRefusal(
+                "unrunnable", checked=checked, step=str(error), log=log
+            ) from error
+        outcome = _run_hook_to_log(process, log, bound)
+        footer("timeout" if outcome.timed_out else f"exit={outcome.returncode}")
+        _judge_hook_result(
+            outcome,
+            before,
+            checked,
+            log,
+            request.restore_index,
+        )
+        left_untracked = [
+            line for line in _untracked_status(repo, env=env) if line not in set(before.untracked)
+        ]
+        if left_untracked:
+            with log.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    "untracked paths the hook's run left behind: "
+                    + ", ".join(line[3:] for line in left_untracked[:PATH_SAMPLE_LIMIT])
+                    + "\n"
+                )
+        return CommitCheckPass(
+            tree=request.tree,
+            hook=hook_id,
+            log=log,
+            seconds=footer("pass"),
+            admitted=TreeSnapshot(
+                index_tree=before.index_tree, diff_head=before.diff_head, blobs=before.blobs
+            ),
+        )
+    finally:
+        if borrowed_modules is not None and borrowed_modules.is_symlink():
+            borrowed_modules.unlink()
 
 
 def _spawn_hook(repo: Path, env: dict[str, str] | None) -> subprocess.Popen[bytes]:
@@ -829,134 +747,11 @@ def _spawn_hook(repo: Path, env: dict[str, str] | None) -> subprocess.Popen[byte
     run buffers the hook's whole output in memory whatever it writes.
     """
     merged = {**git_environment(), **env} if env else git_environment()
-    return subprocess.Popen(
-        ["git", "hook", "run", "pre-commit"],
-        cwd=repo,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-        start_new_session=True,
-        env=merged,
-    )
-
-
-def _run_hook_to_log(process: subprocess.Popen[bytes], log: Path, bound: int) -> _HookOutcome:
-    """Copy the hook's output to the log within the bound; stop it past the bound.
-
-    Returns the exit status and whether the bound stopped the run. Past the
-    bound the process group is stopped with its children (MIK-R152 rule 6) and
-    the pipe is drained to the log; a writer that escaped the group is asked,
-    stopped, and verified dead over bounded rounds, else named alive in the
-    footer and the outcome — the return never claims a live holder stopped.
-    """
-    deadline = time.monotonic() + bound
-    assert process.stdout is not None
-    stopped: list[int] = []
-    survivors: list[int] = []
-    try:
-        with log.open("ab") as handle:
-            reached_eof = _copy_hook_output(process, handle, deadline)
-            timed_out = not reached_eof
-            if timed_out:
-                _stop_hook_tree(process)
-                drained = _copy_hook_output(
-                    process, handle, time.monotonic() + _HOOK_DRAIN_GRACE_SECONDS
-                )
-                if not drained:
-                    stopped, survivors = _stop_escaped_pipe_holders(process)
-                    drained = _copy_hook_output(
-                        process, handle, time.monotonic() + _HOOK_DRAIN_GRACE_SECONDS
-                    )
-                    if stopped:
-                        handle.write(
-                            (
-                                "\n[escaped hook descendants holding the hook output pipe were "
-                                f"stopped: {', '.join(f'pid={pid}' for pid in stopped)}]\n"
-                            ).encode()
-                        )
-                    for pid in survivors:
-                        handle.write(
-                            (
-                                "\n[escaped hook descendant holding the hook output pipe is "
-                                f"STILL ALIVE: pid={pid}]\n"
-                            ).encode()
-                        )
-                    if not drained:
-                        handle.write(
-                            b"\n[a writer outside the stopped process group still held the hook output pipe; it was cut off]\n"
-                        )
-            else:
-                # EOF with the hook still running (it closed its output and computes
-                # on) still ends at the bound: the landing cannot wait past it.
-                try:
-                    process.wait(timeout=max(0.0, deadline - time.monotonic()))
-                except subprocess.TimeoutExpired:
-                    timed_out = True
-                    _stop_hook_tree(process)
-            returncode = process.wait()
-    finally:
-        # The pipe reader is owned here on every path: a pass that returns
-        # without closing it leaks the BufferedReader past teardown.
-        with suppress(OSError):
-            process.stdout.close()
-    return _HookOutcome(
-        returncode=returncode,
-        timed_out=timed_out,
-        escaped_stopped=tuple(stopped),
-        escaped_survivors=tuple(survivors),
-    )
-
-
-def _copy_hook_output(process: subprocess.Popen[bytes], handle: object, deadline: float) -> bool:
-    """Copy the hook's pipe to the log file until EOF or the deadline.
-
-    Answers whether EOF was reached. Reads through the file descriptor, never
-    through the process object's buffer, and never holds more than one chunk.
-    """
-    assert process.stdout is not None
-    fd = process.stdout.fileno()
-    write = handle.write  # type: ignore[attr-defined]
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return False
-        ready, _, _ = select.select([fd], [], [], min(remaining, _HOOK_COPY_QUANTUM_SECONDS))
-        if not ready:
-            # No bytes yet: the hook may still be running, or only an escaped
-            # writer still holds the pipe. Either way the deadline decides.
-            continue
-        try:
-            chunk = os.read(fd, _HOOK_OUTPUT_CHUNK_BYTES)
-        except OSError:
-            return True
-        if not chunk:
-            return True
-        write(chunk)
-
-
-def _process_group_dead(pid: int) -> bool:
-    """Whether no process survives in the group the hook run owns."""
-    try:
-        os.killpg(pid, 0)
-    except ProcessLookupError:
-        return True
-    except (PermissionError, OSError):
-        return False
-    return False
-
-
-@dataclass(frozen=True)
-class _HookOutcome:
-    """What one hook run said: its status, and whether the bound stopped it."""
-
-    returncode: int
-    timed_out: bool
-    escaped_stopped: tuple[int, ...] = ()
-    escaped_survivors: tuple[int, ...] = ()
+    return spawn_commit_check_process(["git", "hook", "run", "pre-commit"], cwd=repo, env=merged)
 
 
 def _judge_hook_result(
-    outcome: _HookOutcome,
+    outcome: CommitCheckProcessOutcome,
     before: _HookRunState,
     checked: CheckedTree,
     log: Path,
@@ -990,8 +785,8 @@ def _judge_hook_result(
             raise LandingCommitCheckRefusal(
                 "failed",
                 checked=checked,
-                step=_last_failing_step(
-                    _log_tail_text(log), hook_path=resolve_commit_check_hook(repo)
+                step=last_failing_commit_check_step(
+                    read_commit_check_log_tail(log), hook_path=resolve_commit_check_hook(repo)
                 ),
                 log=log,
             )
@@ -1015,7 +810,9 @@ def _judge_hook_result(
         "changed",
         checked=checked,
         step=(
-            _last_failing_step(_log_tail_text(log), hook_path=resolve_commit_check_hook(repo))
+            last_failing_commit_check_step(
+                read_commit_check_log_tail(log), hook_path=resolve_commit_check_hook(repo)
+            )
             if outcome.returncode != 0
             else None
         ),
@@ -1046,115 +843,6 @@ def _changed_paths(before: TreeSnapshot, after: TreeSnapshot) -> list[str]:
     if not paths and after.index_tree != before.index_tree:
         return ["the index"]
     return sorted(paths)
-
-
-def _holder_alive(pid: int) -> bool:
-    """Whether a pipe holder is live rather than a lingering zombie.
-
-    A zombie holds no file end, so only a running (or uninterruptibly
-    sleeping) process keeps the pipe open; state ``Z`` from its stat entry
-    counts as dead for pipe purposes. Where ``/proc`` cannot be read, the
-    existence probe decides.
-    """
-
-    try:
-        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
-    except (OSError, ValueError, IndexError):
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return False
-        except (PermissionError, OSError):
-            return True
-        return True
-    return state != "Z"
-
-
-def _live_pipe_holders(pipe_inode: int) -> list[int]:
-    """Live PIDs holding the pipe open now, zombies excluded."""
-
-    return [pid for pid in _pipe_write_end_holders(pipe_inode) if _holder_alive(pid)]
-
-
-def _ask_pipe_holders_to_close(pipe_inode: int) -> bool:
-    """Ask live holders to die and wait out the TERM grace; True when none holds."""
-
-    for pid in _live_pipe_holders(pipe_inode):
-        with suppress(ProcessLookupError, PermissionError, OSError):
-            os.kill(pid, signal.SIGTERM)
-    deadline = time.monotonic() + _HOOK_ESCAPED_TERM_SECONDS
-    while time.monotonic() < deadline:
-        if not _live_pipe_holders(pipe_inode):
-            return True
-        time.sleep(_HOOK_COPY_QUANTUM_SECONDS)
-    return not _live_pipe_holders(pipe_inode)
-
-
-def _stop_pipe_holders(pipe_inode: int) -> None:
-    """KILL live holders and wait out the death verify; survivors stay visible."""
-
-    holders = _live_pipe_holders(pipe_inode)
-    for pid in holders:
-        with suppress(ProcessLookupError, PermissionError, OSError):
-            os.kill(pid, signal.SIGKILL)
-    deadline = time.monotonic() + _HOOK_ESCAPED_KILL_VERIFY_SECONDS
-    while time.monotonic() < deadline:
-        # F02 native trace: closing the pipe can precede PID death. Retain
-        # identity before KILL, so the caller can verify and name that PID.
-        if not any(_holder_alive(pid) for pid in holders):
-            break
-        time.sleep(_HOOK_COPY_QUANTUM_SECONDS)
-
-
-def _stop_escaped_pipe_holders(process: subprocess.Popen[bytes]) -> tuple[list[int], list[int]]:
-    """Stop hook descendants that escaped the process group holding the pipe.
-
-    Up to ``_HOOK_ESCAPED_ROUNDS`` rounds of scan-ask-stop-verify: a TERM is
-    asked first, then KILL for survivors, and a KILL counts only after the
-    PID is verified dead (zombies excluded). A holder the scan missed or one
-    forked mid-round is caught by the next round. Answers ``(stopped,
-    survivors)``: survivors are named alive by the caller — the return never
-    claims a live holder stopped.
-    """
-    assert process.stdout is not None
-    try:
-        pipe_inode = os.fstat(process.stdout.fileno()).st_ino
-    except OSError:
-        return [], []
-    stopped: list[int] = []
-    for _ in range(_HOOK_ESCAPED_ROUNDS):
-        holders = _live_pipe_holders(pipe_inode)
-        if not holders:
-            return stopped, []
-        _ask_pipe_holders_to_close(pipe_inode)
-        if not _live_pipe_holders(pipe_inode):
-            return stopped, []
-        kill_set = _live_pipe_holders(pipe_inode)
-        _stop_pipe_holders(pipe_inode)
-        for pid in dict.fromkeys([*holders, *kill_set]):
-            if pid not in stopped and not _holder_alive(pid):
-                stopped.append(pid)
-    return stopped, _live_pipe_holders(pipe_inode)
-
-
-def _stop_hook_tree(process: subprocess.Popen[bytes]) -> None:
-    """Stop the hook run with its children: ask first, then stop (MIK-R152 rule 6)."
-
-    The term grace is spent waiting for the owned process GROUP to die, not
-    just the direct child: a child that ignores TERM and keeps the output pipe
-    open must not complete work after the bound. Past the grace the group is
-    stopped and the direct child reaped.
-    """
-    with suppress(ProcessLookupError, PermissionError, OSError):
-        os.killpg(process.pid, signal.SIGTERM)
-    deadline = time.monotonic() + _HOOK_TERM_GRACE_SECONDS
-    while time.monotonic() < deadline:
-        if process.poll() is not None and _process_group_dead(process.pid):
-            break
-        time.sleep(_HOOK_COPY_QUANTUM_SECONDS)
-    with suppress(ProcessLookupError, PermissionError, OSError):
-        os.killpg(process.pid, signal.SIGKILL)
-    process.wait()
 
 
 def _recover_isolation_stash(repo: Path, before: _HookRunState) -> str | None:
