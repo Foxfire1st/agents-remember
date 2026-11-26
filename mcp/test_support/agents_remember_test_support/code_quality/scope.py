@@ -324,15 +324,57 @@ def python_files_under(project_root: Path, roots: list[Path]) -> list[Path]:
     return sorted(found)
 
 
-def eslint_result_files(dashboard: Path) -> list[Path]:
-    """The exact result set resolved by the dashboard's installed ESLint."""
-    executable = dashboard / "node_modules" / ".bin" / "eslint"
+def parse_oxlint_result_files(raw_json: str) -> list[Path]:
+    """Parse oxlint JSON output into distinct files with findings."""
+    try:
+        payload = json.loads(raw_json)
+    except json.JSONDecodeError as error:
+        raise ScopeError(
+            f"oxlint returned invalid JSON while resolving lint scope: {error}"
+        ) from error
+    if not isinstance(payload, dict):
+        raise ScopeError(
+            "oxlint machine-readable result is not a JSON object; cannot report lint scope"
+        )
+    file_count = payload.get("number_of_files")
+    if isinstance(file_count, bool) or not isinstance(file_count, int):
+        raise ScopeError("oxlint machine-readable result is missing integer number_of_files")
+    if file_count <= 0:
+        raise ScopeError(
+            "oxlint resolved zero files; correct its configured input and ignore scope"
+        )
+    diagnostics = payload.get("diagnostics")
+    if not isinstance(diagnostics, list):
+        raise ScopeError(
+            "oxlint machine-readable result is missing diagnostics list; cannot report lint scope"
+        )
+    findings: list[str] = []
+    seen: dict[str, Path] = {}
+    for index, row in enumerate(diagnostics):
+        if (
+            not isinstance(row, dict)
+            or not isinstance(row.get("filename"), str)
+            or not row["filename"].strip()
+        ):
+            findings.append(f"diagnostic row {index} has no non-empty string filename")
+            continue
+        filename = row["filename"]
+        seen.setdefault(filename, Path(filename))
+    if findings:
+        rendered = "\n".join(f"  - {finding}" for finding in findings)
+        raise ScopeError(f"oxlint scope result has {len(findings)} finding(s):\n{rendered}")
+    return list(seen.values())
+
+
+def oxlint_result_files(dashboard: Path) -> list[Path]:
+    """The distinct files with findings reported by the dashboard's installed oxlint."""
+    executable = dashboard / "node_modules" / ".bin" / "oxlint"
     if not executable.is_file():
         raise ScopeError(
-            f"ESLint executable is missing at {executable}; run npm ci before reporting lint scope"
+            f"oxlint executable is missing at {executable}; run npm ci before reporting lint scope"
         )
     completed = subprocess.run(
-        [executable.as_posix(), ".", "--format", "json"],
+        [executable.as_posix(), "--format", "json", "."],
         cwd=dashboard,
         text=True,
         capture_output=True,
@@ -342,32 +384,10 @@ def eslint_result_files(dashboard: Path) -> list[Path]:
     if completed.returncode not in {0, 1}:
         detail = completed.stderr.strip() or completed.stdout.strip()
         raise ScopeError(
-            f"ESLint could not resolve its machine-readable result set "
+            f"oxlint could not resolve its machine-readable result set "
             f"(exit {completed.returncode}): {detail}"
         )
-    try:
-        rows = json.loads(completed.stdout)
-    except json.JSONDecodeError as error:
-        raise ScopeError(
-            f"ESLint returned invalid JSON while resolving lint scope: {error}"
-        ) from error
-    if not isinstance(rows, list):
-        raise ScopeError("ESLint machine-readable result is not a list; cannot report lint scope")
-    findings: list[str] = []
-    paths: list[Path] = []
-    for index, row in enumerate(rows):
-        if not isinstance(row, dict) or not isinstance(row.get("filePath"), str):
-            findings.append(f"result row {index} has no string filePath")
-            continue
-        paths.append(Path(row["filePath"]))
-    if findings:
-        rendered = "\n".join(f"  - {finding}" for finding in findings)
-        raise ScopeError(f"ESLint scope result has {len(findings)} finding(s):\n{rendered}")
-    if not paths:
-        raise ScopeError(
-            "ESLint resolved zero files; correct its configured input and ignore scope"
-        )
-    return paths
+    return parse_oxlint_result_files(completed.stdout)
 
 
 def config_string_array(path: Path, prefix: str, label: str) -> tuple[str, ...]:

@@ -277,13 +277,19 @@ describe('on Send (rule 4)', () => {
     await panel.findByTestId('explainer-build');
 
     const posted = server.last('POST', BUILD);
-    expect(posted?.body).toMatchObject({
+    if (!posted?.body) {
+      throw new Error('Expected POST to explainer build endpoint with a JSON body');
+    }
+    expect(posted.body).toMatchObject({
       target: 'new-explainer',
       message: 'Explain the whole change set end to end.',
       planned: false,
       stalePartIds: [],
     });
-    expect((posted?.body?.picks as unknown[]).length).toBe(1);
+    if (!Array.isArray(posted.body.picks)) {
+      throw new Error(`Expected posted.body.picks to be an array, got ${typeof posted.body.picks}`);
+    }
+    expect(posted.body.picks.length).toBe(1);
 
     expect(steps(panel)).toEqual([
       { name: 'Create the explainer’s workspace', state: 'done', percent: null },
@@ -391,19 +397,25 @@ describe('on Send (rule 4)', () => {
     fireEvent.click(panel.getByTestId('explainer-send'));
     await waitFor(() => expect(server.count('POST', BUILD)).toBe(1));
     const posted = server.last('POST', BUILD)?.body;
-    expect(typeof posted?.requestId).toBe('string');
+    if (!posted) {
+      throw new Error('Expected POST to explainer build endpoint with a JSON body');
+    }
+    expect(typeof posted.requestId).toBe('string');
     // His words go out as they are, and the picks carry the reference and its note: the route
     // composes them into the first turn once (serving/explainer.py `_send_facts`). Sending the
     // composed text AND the picks would put every reference and note in twice.
-    expect(posted?.message).toBe('');
-    const picks = posted?.picks as Array<{ title?: string; note?: string; reference?: unknown }> | undefined;
+    if (typeof posted.message !== 'string') {
+      throw new Error(`Expected posted.message to be a string, got ${typeof posted.message}`);
+    }
+    expect(posted.message).toBe('');
+    const picks = posted.picks as Array<{ title?: string; note?: string; reference?: unknown }> | undefined;
     expect(picks).toHaveLength(1);
     expect(picks?.[0]?.title).toContain('INV-1ZKP4R');
     expect(picks?.[0]?.note).toBe('focus on recovery');
     expect(picks?.[0]?.reference).toMatchObject({ id: 'INV-1ZKP4R' });
     // The real route's own check: the composed first turn is non-empty exactly because the picks
     // exist, so a reference-only Send passes `_send_facts` with an empty message.
-    expect((posted?.message as string).trim() !== '' || (picks?.length ?? 0) > 0).toBe(true);
+    expect(posted.message.trim() !== '' || (picks?.length ?? 0) > 0).toBe(true);
     expect((await panel.findByTestId('explainer-held-notice')).textContent).toContain('rate-limited');
   });
 

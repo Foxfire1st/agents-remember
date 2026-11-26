@@ -18,7 +18,7 @@ from agents_remember_test_support.code_quality.scope import GateScope
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GATE_SCRIPT = REPO_ROOT / ".githooks/_gate.sh"
 DASHBOARD_BIN = REPO_ROOT / "dashboard/node_modules/.bin"
-ESLINT_BIN = DASHBOARD_BIN / "eslint"
+OXLINT_BIN = DASHBOARD_BIN / "oxlint"
 TSC_BIN = DASHBOARD_BIN / "tsc"
 SCOPE_MODULE = "agents_remember_test_support.code_quality.scope_reporting"
 
@@ -396,7 +396,7 @@ def test_r3_dashboard_only_failure_fails_preserving_order_and_message(tmp_path: 
     npm_stub = (
         'case "$*" in\n'
         "  *run\\ lint*)\n"
-        '    echo "eslint: no-unused-vars in App.tsx" >&2\n'
+        '    echo "oxlint: no-unused-vars in App.tsx" >&2\n'
         "    exit 1\n"
         "    ;;\n"
         "esac\n"
@@ -406,7 +406,7 @@ def test_r3_dashboard_only_failure_fails_preserving_order_and_message(tmp_path: 
     result = _run_gate(repo, env)
     assert result.returncode == 1
     assert "result: evidence-lifecycle PASS" in result.stdout
-    assert "eslint: no-unused-vars in App.tsx" in result.stderr
+    assert "oxlint: no-unused-vars in App.tsx" in result.stderr
     assert "result: dashboard-lint FAIL" in result.stderr
     assert result.stderr.splitlines()[-1].endswith("result: fast-tier FAIL")
 
@@ -429,7 +429,8 @@ def test_r3_python_only_failure_fails_preserving_message(tmp_path: Path) -> None
     assert result.stderr.splitlines()[-1].endswith("result: fast-tier FAIL")
 
 
-def test_r4_gate_passes_eslint_content_cache_flags(tmp_path: Path) -> None:
+def test_r4_gate_runs_dashboard_lint_without_eslint_cache_flags(tmp_path: Path) -> None:
+    """oxlint has no --cache flag and runs cold in ~0.65s across the dashboard."""
     npm_log = tmp_path / "npm.log"
     npm_stub = f'printf "%s\\n" "$*" >> "{npm_log}"\nexit 0\n'
     repo, env = _make_hook_repo(tmp_path, "exit 0\n", npm_stub)
@@ -437,34 +438,24 @@ def test_r4_gate_passes_eslint_content_cache_flags(tmp_path: Path) -> None:
     result = _run_gate(repo, env)
     assert result.returncode == 0, result.stderr + result.stdout
     npm_calls = npm_log.read_text(encoding="utf-8").splitlines()
-    assert (
-        "--prefix dashboard run lint --silent -- "
-        "--cache --cache-strategy content --cache-location .eslintcache"
-    ) in npm_calls
+    assert "--prefix dashboard run lint --silent" in npm_calls
+    assert all("--cache" not in call and ".eslintcache" not in call for call in npm_calls)
 
 
-def test_r4_eslint_content_cache_catches_introduced_lint_error(tmp_path: Path) -> None:
-    assert ESLINT_BIN.is_file(), f"missing ESLint binary at {ESLINT_BIN}"
-    project = tmp_path / "eslint_fixture"
+def test_r4_oxlint_catches_introduced_lint_error(tmp_path: Path) -> None:
+    assert OXLINT_BIN.is_file(), f"missing oxlint binary at {OXLINT_BIN}"
+    project = tmp_path / "oxlint_fixture"
     project.mkdir()
-    (project / "eslint.config.mjs").write_text(
-        'export default [{ rules: { "no-unused-vars": "error" } }];\n',
+    (project / ".oxlintrc.json").write_text(
+        json.dumps({"categories": {"correctness": "off"}, "rules": {"no-unused-vars": "error"}})
+        + "\n",
         encoding="utf-8",
     )
     sample = project / "sample.js"
     sample.write_text("export const answer = 42;\n", encoding="utf-8")
-    cmd = [
-        str(ESLINT_BIN),
-        ".",
-        "--cache",
-        "--cache-strategy",
-        "content",
-        "--cache-location",
-        ".eslintcache",
-    ]
+    cmd = [str(OXLINT_BIN), "."]
     cold = subprocess.run(cmd, cwd=project, capture_output=True, text=True, check=False)
     assert cold.returncode == 0, cold.stdout + cold.stderr
-    assert (project / ".eslintcache").is_file()
 
     warm = subprocess.run(cmd, cwd=project, capture_output=True, text=True, check=False)
     assert warm.returncode == 0, warm.stdout + warm.stderr
@@ -534,7 +525,7 @@ def test_r5_tsc_b_incremental_cache_catches_introduced_type_error(tmp_path: Path
     assert "TS2322" in mutated.stdout + mutated.stderr
 
 
-def test_r4_r5_caches_are_gitignored_and_do_not_trip_landing_commit_check(tmp_path: Path) -> None:
+def test_r5_tsc_caches_are_gitignored_and_do_not_trip_landing_commit_check(tmp_path: Path) -> None:
     repo = tmp_path / "closeout_repo"
     (repo / "dashboard").mkdir(parents=True)
     shutil.copyfile(REPO_ROOT / ".gitignore", repo / ".gitignore")
@@ -547,7 +538,6 @@ def test_r4_r5_caches_are_gitignored_and_do_not_trip_landing_commit_check(tmp_pa
     _git(repo, "commit", "-m", "base")
 
     cache_relpaths = (
-        "dashboard/.eslintcache",
         "dashboard/tsconfig.app.tsbuildinfo",
         "dashboard/tsconfig.node.tsbuildinfo",
         "dashboard/tsconfig.driver.tsbuildinfo",
@@ -555,7 +545,6 @@ def test_r4_r5_caches_are_gitignored_and_do_not_trip_landing_commit_check(tmp_pa
     git_dir = Path(_git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
     hook_body = (
         "#!/bin/sh\n"
-        'printf "{}" > dashboard/.eslintcache\n'
         'printf "{}" > dashboard/tsconfig.app.tsbuildinfo\n'
         'printf "{}" > dashboard/tsconfig.node.tsbuildinfo\n'
         'printf "{}" > dashboard/tsconfig.driver.tsbuildinfo\n'

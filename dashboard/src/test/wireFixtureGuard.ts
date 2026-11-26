@@ -72,7 +72,7 @@
 //      and is NOT set on this project (measured: 381 errors across 107 files); the builders carry
 //      the constraint themselves instead. See `fixtures/overrides.ts` and `fixtureOverrides.test.ts`.
 
-import ts from "typescript";
+import ts from "typescript-compiler-api";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 

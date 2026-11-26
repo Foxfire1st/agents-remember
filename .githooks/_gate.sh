@@ -269,10 +269,9 @@ dashboard_checks() {
     return 1
   fi
   echo "[$label] result: dashboard-codegen PASS"
-  # L29-R3: content-hashed ESLint cache lives at gitignored dashboard/.eslintcache.
+  # oxlint runs cold in ~0.65s across the dashboard and exposes no --cache flag.
   echo "[$label] npm run lint (dashboard)..."
-  if ! npm --prefix dashboard run lint --silent -- \
-    --cache --cache-strategy content --cache-location .eslintcache; then
+  if ! npm --prefix dashboard run lint --silent; then
     echo "[$label] result: dashboard-lint FAIL" >&2
     return 1
   fi
