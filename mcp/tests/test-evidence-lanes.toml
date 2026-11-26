@@ -338,6 +338,7 @@ unit-regression = [
   "mcp/tests/test_location_cache_scope.py",
   "mcp/tests/test_master_chain_offenders.py",
   "mcp/tests/test_master_chain_public_routes.py",
+  "mcp/tests/test_master_end_document_staleness.py",
   "mcp/tests/test_master_net_generation.py",
   "mcp/tests/test_master_preparation.py",
   "mcp/tests/test_master_range_boundaries.py",

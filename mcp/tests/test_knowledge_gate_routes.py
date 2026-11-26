@@ -663,11 +663,42 @@ def test_a_timed_out_blob_read_or_an_unverifiable_entry_refuses_a_master_landing
     code_commit = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
     world.reanchor("RLZ-A00001")
     memory_commit = commit(world.memory, {}, trailer=code_commit)  # RLZ-A00002's blob moved too
-    series = replace(_series(world), code_commit=code_commit, memory_content_commit=memory_commit)
+    task_root = world.root / "tasks" / "agents-remember" / "261112_gate_case"
+    task_root.mkdir(parents=True, exist_ok=True)
+    series = replace(
+        default_series_contract(
+            ContractTask(
+                name="gate_case",
+                repo_name="agents-remember",
+                coordination_root=world.root,
+                workflow_kind="light-task",
+                memory_mode="external",
+            ),
+            code=RepoBranchPlan(world.code, "main", "leaf", world.code_base),
+            memory=RepoBranchPlan(world.memory, "main", "leaf", world.memory_base),
+            task_root=task_root,
+        ),
+        code_commit=code_commit,
+        memory_content_commit=memory_commit,
+    )
+    write_contract(series.contract_path, series)
+    write_task_doc(
+        task_root,
+        TaskDocument(
+            kind="master",
+            id="GATE_CASE",
+            slug="261112_gate_case",
+            title="Gate Case",
+            status="inProgress",
+            repo="agents-remember",
+            createdAt="2026-11-26",
+            subTasks=[SubTaskRef(number="GATE_CASE-L1", name="Abandoned leaf", status="abandoned")],
+        ),
+    )
     sources = IntegrationSources(world.code_base, world.memory_base, False, False)
     args = WorktreeArgs(contract_path=series.contract_path, dry_run=True)
     # The landing chain proof is pinned separately with real enclosures; this synthetic world has
-    # no task documents, so the chain is held proved here and only the validator and the net
+    # no leaf enclosures, so the chain is held proved here and only the validator and the net
     # staleness check are exercised.
     chained = mock.patch.object(integration_gate, "landed_chain_refusal", return_value=None)
     with chained:
