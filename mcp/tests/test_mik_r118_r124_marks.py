@@ -32,6 +32,9 @@ from agents_remember.application.file_briefs.triggers import (
     refresh_written_memory_folder,
 )
 from agents_remember.application.knowledge_currentness.observe import CodeTree, open_code_tree
+from agents_remember.application.knowledge_gate import (
+    document_staleness as document_staleness_module,
+)
 from agents_remember.application.knowledge_gate import landing as landing_module
 from agents_remember.application.knowledge_gate.adapter import KnowledgeGate
 from agents_remember.application.knowledge_gate.landing import (
@@ -842,7 +845,6 @@ def test_the_masters_end_refuses_and_passes_after_the_confirmation(_bound_servic
             code_repository=code,
             code_commit=code_tip,
             code_base=code_base,
-            series_contract="/tmp/series-contract.md",
             # This is the landing that finishes the master: only it refuses document debt (F10).
             master_end=True,
         )
@@ -872,7 +874,6 @@ def test_the_masters_end_refuses_and_passes_after_the_confirmation(_bound_servic
                 code_repository=code,
                 code_commit=code_tip,
                 code_base=code_base,
-                series_contract="/tmp/series-contract.md",
                 master_end=True,
             )
         )
@@ -893,7 +894,6 @@ def test_the_masters_end_names_a_document_already_stale_at_its_base_and_refuses_
         code_repository=code,
         code_commit=code_tip,
         code_base=code_base,
-        series_contract="/tmp/series-contract.md",
         master_end=True,
     )
     assert landing_gate_refusal(request) is None
@@ -1465,7 +1465,7 @@ def _many_documents_world(root: Path, count: int) -> tuple:
 def test_a_landing_reads_only_the_dependents_the_change_can_move(tmp_path, monkeypatch):
     """F08: acquisition is metadata first; the population's bodies are not read."""
 
-    original = landing_module.read_git_blobs_bytes
+    original = document_staleness_module.read_git_blobs_bytes
     acquired: list[str] = []
 
     def measured(repository, ids):
@@ -1473,7 +1473,7 @@ def test_a_landing_reads_only_the_dependents_the_change_can_move(tmp_path, monke
         acquired.extend(blob for blob, data in result.items() if b'"ar-dependent/v1"' in data)
         return result
 
-    monkeypatch.setattr(landing_module, "read_git_blobs_bytes", measured)
+    monkeypatch.setattr(document_staleness_module, "read_git_blobs_bytes", measured)
     for count in (20, 200):
         root = tmp_path / f"w{count}"
         memory, code, memory_base, memory_tip, code_base, code_tip = _many_documents_world(
@@ -1571,7 +1571,7 @@ def test_a_new_record_made_stale_by_a_net_zero_change_is_caught_at_the_masters_e
     assert document_staleness(request, full=True).documents == ("docs/reference/settings-json.md",)
     # A checkpoint (master_end False) reports that debt and refuses nothing; the master's end refuses.
     assert landing_gate_refusal(request) is None
-    refused = landing_gate_refusal(replace(request, master_end=True, series_contract="/tmp/x.md"))
+    refused = landing_gate_refusal(replace(request, master_end=True))
     assert refused is not None and "1 document(s) are stale" in refused
 
 
@@ -1677,6 +1677,15 @@ def test_an_unobservable_document_is_disclosed_and_refuses_the_masters_end(
         memory,
         record_path("dependent", "DPD-7K3F9Q", "doc"),
         _dependent(
+            stands_on=[{"kind": "file", "path": "notes.txt", "blob": _blob(code, "notes.txt")}],
+        ),
+    )
+    memory_base = _commit(memory, "the readable document at the base")
+    write_document(
+        memory,
+        record_path("dependent", "DPD-7K3F9Q", "doc"),
+        _dependent(
+            revision=2,
             stands_on=[
                 {
                     "kind": "anchor",
@@ -1690,9 +1699,7 @@ def test_an_unobservable_document_is_disclosed_and_refuses_the_masters_end(
             ],
         ),
     )
-    memory_base = _commit(memory, "the document at the base")
-    (memory / "memory.md").write_text("the ledger\n", encoding="utf-8")
-    memory_tip = _commit(memory, "the tip")
+    memory_tip = _commit(memory, "the unobservable tip")
     (code / "notes.txt").write_text("two\n", encoding="utf-8")
     code_tip = _commit(code, "two")
 
@@ -1704,7 +1711,6 @@ def test_an_unobservable_document_is_disclosed_and_refuses_the_masters_end(
         code_commit=code_tip,
         code_base=code_base,
         master_end=True,
-        series_contract="/tmp/series-contract.md",
     )
     staleness = document_staleness(request)
     assert staleness.unverifiable, staleness
@@ -2307,7 +2313,7 @@ def test_selected_dependent_acquisition_failures_are_never_absence(
     memory, _, memory_base, memory_tip, _, _ = world
     path = record_path("dependent", "DPD-7K3F9Q", "settings-json")
     blob = _git(memory, "rev-parse", f"{memory_tip}:{path}")
-    read = landing_module.read_git_blobs_bytes
+    read = document_staleness_module.read_git_blobs_bytes
 
     def missing(repository, ids):
         result = read(repository, ids)
@@ -2316,10 +2322,10 @@ def test_selected_dependent_acquisition_failures_are_never_absence(
 
     request = _request(world)
     with monkeypatch.context() as patch:
-        patch.setattr(landing_module, "read_git_blobs_bytes", missing)
+        patch.setattr(document_staleness_module, "read_git_blobs_bytes", missing)
         answer = document_staleness(request).answer()
         assert answer is not None and answer["state"] == "uncomputable", answer
-        final = replace(request, master_end=True, series_contract="/tmp/master.md")
+        final = replace(request, master_end=True)
         refusal = landing_gate_refusal(final)
         assert refusal is not None and "cannot be computed" in refusal, refusal
     (memory / path).write_text('{"schema":"ar-dependent/v1"}', encoding="utf-8")
@@ -2375,7 +2381,6 @@ def test_a_master_retains_document_origin_across_a_checkpoint_and_sync(_bound_se
         code_base=code_tip,
         memory_bases=(memory_tip,),
         master_end=True,
-        series_contract="/tmp/master.md",
         document_base=(code_base, memory_base),
     )
     refusal = landing_gate_refusal(final)

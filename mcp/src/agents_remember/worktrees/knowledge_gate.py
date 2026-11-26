@@ -67,7 +67,7 @@ from agents_remember.worktrees.knowledge_validation import (
     has_layout_marker,
     memory_commit_refusal,
 )
-from agents_remember.worktrees.modules.git import branch_commit, local_branch_ref
+from agents_remember.worktrees.modules.git import branch_commit, is_ancestor, local_branch_ref
 from agents_remember.worktrees.services import (
     CandidateTrees,
     DirectGateSource,
@@ -92,6 +92,7 @@ __all__ = [
     "direct_gate_verdict",
     "forget_direct_closing",
     "keep_direct_closing",
+    "landing_document_answer",
     "landing_gate_refusal",
     "landing_history_refusal",
     "latest_owner_history",
@@ -99,6 +100,7 @@ __all__ = [
     "leaf_gate_refusal",
     "leaf_line",
     "leaf_memory_converted",
+    "master_document_base",
     "parent_memory_tip",
     "require_readable_closings",
     "settle_direct_closing",
@@ -356,6 +358,35 @@ def landing_gate_refusal(request: LandingGateRequest) -> str | None:
     return "\n".join(named) if named else None
 
 
+def master_document_base(
+    contract: WorktreeContract, *, code_commit: str, memory_commit: str
+) -> tuple[str, str]:
+    """The newest synced source pair whose commits are both ancestors of the judged pair.
+
+    Walks ``contract.sync_log`` newest to oldest: a ``repository-default`` entry supplies
+    ``(codeSourceCommit, memorySourceCommit or memoryBaseTo)`` (so a skipped memory sync falls
+    back to ``memoryBaseTo``), and any other entry supplies ``(codeBaseTo, memoryBaseTo)``.
+    Falls back to :func:`original_base_pair` when no synced pair qualifies.
+    """
+
+    memory_repo = contract.memory_repo_path
+    if memory_repo is not None and code_commit and memory_commit:
+        for entry in reversed(contract.sync_log):
+            if entry.get("syncSource") == "repository-default":
+                code_base = entry.get("codeSourceCommit", "")
+                memory_base = entry.get("memorySourceCommit", "") or entry.get("memoryBaseTo", "")
+            else:
+                code_base = entry.get("codeBaseTo", "")
+                memory_base = entry.get("memoryBaseTo", "")
+            if not code_base or not memory_base:
+                continue
+            if is_ancestor(contract.code_repo_path, code_base, code_commit) and is_ancestor(
+                memory_repo, memory_base, memory_commit
+            ):
+                return (code_base, memory_base)
+    return original_base_pair(contract)
+
+
 def landing_document_answer(
     contract: WorktreeContract, *, code_commit: str, memory_commit: str, master_end: bool = False
 ) -> dict[str, Any] | None:
@@ -384,6 +415,7 @@ def landing_document_answer(
             return None
     except GateProbeError as error:
         return {"state": "uncomputable", "detail": str(error)}
+    contract_path = getattr(contract, "contract_path", None)
     return document_staleness(
         LandingGateRequest(
             memory_repository=repository,
@@ -392,7 +424,15 @@ def landing_document_answer(
             code_repository=contract.code_repo_path,
             code_commit=code_commit,
             code_base=contract.code_base_commit,
-            document_base=original_base_pair(contract) if master_end else None,
+            series_contract=(
+                contract_path.as_posix() if master_end and contract_path is not None else None
+            ),
+            master_end=master_end,
+            document_base=(
+                master_document_base(contract, code_commit=code_commit, memory_commit=memory_commit)
+                if master_end
+                else None
+            ),
         ),
         # A series landing is the master's own line: every document is examined, so one already
         # stale at the base is named and debt a net-zero change would hide is still caught (F11).

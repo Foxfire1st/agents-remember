@@ -51,6 +51,7 @@ from agents_remember.worktrees.knowledge_gate import (
     landing_gate_refusal,
     landing_history_refusal,
     leaf_cutover_refusal,
+    master_document_base,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.closeout_external import leaf_pair_refusal
@@ -75,7 +76,6 @@ from agents_remember.worktrees.services import LandingGateRequest
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
     load_contract,
-    original_base_pair,
 )
 
 # The route label recorded in the contract's ``integration.strategy`` cell, so the cell says which
@@ -411,6 +411,7 @@ def _landing_request(
         code = _judged_master_code(contract, code_commit)
     except (RuntimeError, subprocess.SubprocessError) as error:
         return f"record_landing refused: the landed code commit cannot be read: {error}"
+    is_series = contract.kind == "series"
     return LandingGateRequest(
         memory_repository=repository,
         memory_commit=memory_commit,
@@ -423,8 +424,12 @@ def _landing_request(
         leaf_owner=(contract.leaf_id or contract.task_name) if contract.kind == "leaf" else None,
         frozen=tuple(made_on) if recorded else (),
         series_contract=contract.contract_path.as_posix(),
-        master_end=contract.kind == "series",
-        document_base=original_base_pair(contract) if contract.kind == "series" else None,
+        master_end=is_series,
+        document_base=(
+            master_document_base(contract, code_commit=code, memory_commit=memory_commit)
+            if is_series
+            else None
+        ),
     )
 
 
