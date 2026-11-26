@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build/select canonical CPython and recreate the MCP development venv.
+# Select uv-managed CPython and recreate the checkout MCP development environment.
 #
 # The uv on the PATH must be the runtime contract's version or newer; the
 # script uses it as it is and installs none itself.
@@ -11,23 +11,20 @@ repo_root="$(CDPATH= cd -- "$script_dir/.." && pwd)"
 # shellcheck source=python-runtime-contract.env
 . "$script_dir/python-runtime-contract.env"
 
-data_root="${XDG_DATA_HOME:-$HOME/.local/share}/agents-remember"
-prefix="${AR_PYTHON_PREFIX:-$data_root/python/cpython-$AR_PYTHON_VERSION}"
 venv="$repo_root/mcp/.venv"
-replace=false
 
 # The uv selected by resolve_uv, before anything is moved or created.
 uv_path=""
 observed_uv=""
 
 usage() {
-  echo "usage: scripts/bootstrap-mcp-venv.sh [--replace] [--prefix PATH]" >&2
+  echo "usage: scripts/bootstrap-mcp-venv.sh [--replace | --ensure]" >&2
   exit 2
 }
 
 # version_at_least OBSERVED MINIMUM: success when the dotted OBSERVED version
 # is equal to or newer than MINIMUM. Parts compare as decimal numbers, never
-# as text, so 0.12.21 is newer than 0.12.6; missing parts are zero. Both sides
+# as text, so 0.13.10 is newer than 0.13; missing parts are zero. Both sides
 # must already match ^[0-9]+(\.[0-9]+)*$.
 version_at_least() {
   local observed="$1" minimum="$2"
@@ -61,9 +58,9 @@ resolve_uv() {
     echo "[python-runtime] uv $AR_UV_VERSION or newer is required to create mcp/.venv; found no uv on the PATH" >&2
     return 1
   }
-  uv_version_output="$(uv --version 2>/dev/null)" && uv_version_ok=true || uv_version_ok=false
+  uv_version_output="$("$uv_path" --version 2>/dev/null)" && uv_version_ok=true || uv_version_ok=false
   # First line only; a leading "uv " token is the version command's own name,
-  # so "uv 0.12.21 (...)" and a bare "0.12.21" both read as 0.12.21. The raw
+  # so "uv 0.13.10 (...)" and a bare "0.13.10" both read as 0.13.10. The raw
   # text is kept for the refusal below: a nonzero exit or an unreadable token
   # is refused with what was actually reported, never with <empty> for it.
   uv_version_output="${uv_version_output%%$'\n'*}"
@@ -83,43 +80,61 @@ resolve_uv() {
   echo "[python-runtime] building with uv $observed_uv at $uv_path (requires $AR_UV_VERSION or newer)"
 }
 
+current_venv() {
+  "$runtime_python" -B -P -c '
+from pathlib import Path
+import sys
+
+sys.path.insert(0, sys.argv[1])
+from agents_remember.python_runtime import read_venv_home
+
+raise SystemExit(read_venv_home(Path(sys.argv[2])) != Path(sys.argv[3]))
+' "$repo_root/mcp/src" "$venv" "$runtime_base/bin"
+}
+
+reserve_backup_path() {
+  local folder
+  mkdir -p "$backup_root" || return
+  folder="$(mktemp -d "$backup_root/agents-remember-mcp-$(basename -- "$repo_root")-$(date -u +%Y%m%dT%H%M%S)-XXXXXXXX")" || return
+  printf '%s/venv\n' "$folder"
+}
+
 main() {
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      --replace) replace=true; shift ;;
-      --prefix)
-        [ "$#" -ge 2 ] || usage
-        prefix="$2"
-        shift 2
-        ;;
-      *) usage ;;
-    esac
-  done
+  local mode="${1:-}"
+  [ "$#" -le 1 ] || usage
+  case "$mode" in
+    ""|--replace|--ensure) ;;
+    *) usage ;;
+  esac
 
   resolve_uv || exit 1
-
-  "$script_dir/install-python-runtime.sh" --prefix "$prefix"
-  runtime_python="$prefix/bin/python$AR_PYTHON_MINOR"
+  "$uv_path" python install --no-bin "$AR_PYTHON_MINOR"
+  runtime_python="$("$uv_path" python find --system --managed-python --no-python-downloads "$AR_PYTHON_MINOR")"
+  runtime_base="$(dirname -- "$(dirname -- "$runtime_python")")"
   "$runtime_python" "$script_dir/check-python-runtime.py" \
-    --expected-version "$AR_PYTHON_VERSION" \
-    --expected-base-prefix "$prefix" \
+    --expected-version "$AR_PYTHON_MINOR" \
+    --expected-base-prefix "$runtime_base" \
+    --base-interpreter \
     --require-linux-pidfd \
-    --source-url "$AR_PYTHON_SOURCE_URL" \
-    --source-sha256 "$AR_PYTHON_SOURCE_SHA256" \
-    --builder-commit "$AR_PYTHON_BUILD_COMMIT" >/dev/null
+    --uv-version "$observed_uv" >/dev/null
+
+  # The checkout directory stays in place throughout venv replacement and rollback.
+  # The shell retains the descriptor after Python acquires the lock on it.
+  exec 9< "$repo_root/mcp"
+  "$runtime_python" -B -P -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX)'
 
   backup=""
   backup_root="${XDG_CACHE_HOME:-$HOME/.cache}/agents-remember/venv-backups"
   if [ -e "$venv" ]; then
-    # The backup root is created only when a previous environment is actually
-    # moved aside: a fresh build writes nothing outside the worktree for this.
-    mkdir -p "$backup_root"
-    $replace || {
+    if [ "$mode" != --replace ] && current_venv; then
+      if [ "$mode" = --ensure ] && [ -x "$venv/bin/python" ]; then
+        return 0
+      fi
       echo "[python-runtime] $venv already exists; pass --replace for an explicit recreation" >&2
-      exit 1
-    }
-    backup="$backup_root/agents-remember-mcp-$(basename -- "$repo_root")-$(date -u +%Y%m%dT%H%M%SZ)"
-    mv -- "$venv" "$backup"
+      return 1
+    fi
+    backup="$(reserve_backup_path)"
+    mv -T -- "$venv" "$backup"
   fi
 
   restore_previous() {
@@ -127,13 +142,13 @@ main() {
     trap - EXIT
     if [ "$status" -ne 0 ]; then
       if [ -e "$venv" ]; then
-        failed="$backup_root/agents-remember-mcp-failed-$(basename -- "$repo_root")-$(date -u +%Y%m%dT%H%M%SZ)"
-        mkdir -p "$backup_root"
-        mv -- "$venv" "$failed"
+        failed="$(reserve_backup_path)"
+        mv -T -- "$venv" "$failed"
         echo "[python-runtime] failed candidate retained for diagnosis at $failed" >&2
       fi
       if [ -n "$backup" ]; then
-        mv -- "$backup" "$venv"
+        mv -T -- "$backup" "$venv"
+        rmdir -- "$(dirname -- "$backup")"
         echo "[python-runtime] restored previous venv after failed recreation" >&2
       fi
     fi
@@ -141,10 +156,11 @@ main() {
   }
   trap restore_previous EXIT
 
-  if ! UV_PROJECT_ENVIRONMENT="$venv" uv sync \
+  if ! UV_PROJECT_ENVIRONMENT="$venv" "$uv_path" sync \
     --project "$repo_root/mcp" \
-    --python "$runtime_python" \
-    --no-managed-python \
+    --python "$AR_PYTHON_MINOR" \
+    --managed-python \
+    --no-python-downloads \
     --frozen \
     --all-extras; then
     echo "[python-runtime] uv sync failed with uv $observed_uv at $uv_path (requires $AR_UV_VERSION or newer)" >&2
@@ -152,17 +168,16 @@ main() {
   fi
 
   "$venv/bin/python" "$script_dir/check-python-runtime.py" \
-    --expected-version "$AR_PYTHON_VERSION" \
-    --expected-base-prefix "$prefix" \
+    --expected-version "$AR_PYTHON_MINOR" \
+    --expected-base-prefix "$runtime_base" \
     --require-linux-pidfd \
-    --source-url "$AR_PYTHON_SOURCE_URL" \
-    --source-sha256 "$AR_PYTHON_SOURCE_SHA256" \
-    --builder-commit "$AR_PYTHON_BUILD_COMMIT"
-  uv pip check --python "$venv/bin/python"
+    --uv-version "$observed_uv"
+  "$uv_path" pip check --python "$venv/bin/python"
 
   trap - EXIT
   if [ -n "$backup" ]; then
-    rm -rf -- "$backup"
+    rm -r -- "$backup"
+    rmdir -- "$(dirname -- "$backup")"
     echo "[python-runtime] removed replaced venv at $backup after successful recreation"
   fi
   echo "[python-runtime] canonical MCP venv ready at $venv"

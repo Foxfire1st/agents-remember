@@ -57,8 +57,9 @@ returns names and locations only; the agent opens the named files itself.
 
 ## What an installation needs
 
-A Linux x86_64 machine (WSL 2 counts as Linux), Python 3.14, uv, Git, and one harness that is
-installed and logged in. Step 1 and step 4 need the network. Docker is not needed.
+A Linux x86_64 machine (WSL 2 counts as Linux), uv, Git, and one harness that is installed and
+logged in. uv supplies Python 3.14 during installation. Step 1 and step 4 need the network.
+Docker is not needed.
 
 ## Install steps
 
@@ -67,7 +68,7 @@ installed and logged in. Step 1 and step 4 need the network. Docker is not neede
 1. **Install the package.** Install the published package `agents-remember-mcp` with one command:
 
    ```bash
-   uv tool install --python 3.14 agents-remember-mcp
+   uv tool install --managed-python --python 3.14 agents-remember-mcp
    ```
 
    The package installs the commands `agents-remember-mcp` and `agents-remember`, and it

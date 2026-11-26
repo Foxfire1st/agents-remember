@@ -124,6 +124,7 @@ def _write_sandbox_manifest(
     prepared: _PreparedSandbox,
     execution: AdmittedRepositoryProfileExecution,
     authority: AdmittedDaggerAuthority,
+    dropped_selectors: tuple[str, ...],
 ) -> None:
     source = prepared.root / "source"
     observed = observe_profile_source_selection(
@@ -152,6 +153,7 @@ def _write_sandbox_manifest(
         "executorAdapter": execution.executor.model_dump(mode="json"),
         "resultDecoder": execution.decoder.model_dump(mode="json"),
         "runtimeAuthority": authority.snapshot.as_manifest(),
+        "droppedDaggerSelectors": list(dropped_selectors),
         "publishedArtifacts": [
             artifact.model_dump(mode="json") for artifact in execution.published_artifacts
         ],

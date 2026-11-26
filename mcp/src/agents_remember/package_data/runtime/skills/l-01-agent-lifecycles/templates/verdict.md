@@ -4,7 +4,7 @@ The Reviewer uses this template to report an independent review at a seam: a bou
 
 In this template, ID means identifier.
 
-Write the artifact under the series `notes/reports/` directory. Organizational leaf route review and atomic-master integration review bind through the task document. Other seam verdicts attach to handover gates as evidence for the decider.
+Write the artifact in the handover's local report folder (`role-reports/` on a leaf, `notes/reports/` on other seams). Record a memory `verdictRef` as an existing absolute path, `role-reports/<rel>`, or `notes/reports/<rel>`. Organizational leaf route review and atomic-master integration review bind through the task document. Other seam verdicts attach to handover gates as evidence for the decider.
 
 The variants below are organizational leaf route review, atomic-master integration review, master exit (Manager to Orchestrator), super exit (Orchestrator to the Architect, who takes it to the developer for the decision), and the loop-review adaptation. Atomic child leaves do not receive a separate route-review verdict.
 
@@ -360,7 +360,7 @@ reviewer does not.
 
 ## Loop-Review Adaptation (leaf full-loop · plan review)
 
-A full-loop leaf review or a plan review submitted by the Architect uses the **master-exit variant's shape minus the gate machinery**. Drop the `gate evidence` header row and the Judge-Evidence Note: neither review attaches to a gate. Set `decider` to the leaf's owning seat for a leaf review, or to the Architect for a plan review. Scope it to the round's change set or **the reviewed plan**. For a leaf, use the direct Worker repair section instead of a Manager fix-leaf request.
+A full-loop leaf review or a plan review submitted by the Architect uses the **master-exit variant's shape minus the gate machinery**. Drop the `gate evidence` header row and the Judge-Evidence Note: neither review attaches to a gate. Set `decider` to the leaf's owning seat for a leaf review, or to the Architect for a plan review. For a leaf review, set `artifact path` in the handover's local `role-reports/` folder (collected to `notes/reports/`); for a plan review, under `notes/reports/`. Scope it to the round's change set or **the reviewed plan**. For a leaf, use the direct Worker repair section instead of a Manager fix-leaf request.
 
 Keep everything else: recommendation, Catalog Binding, Criteria Catalog Results with the bound catalogs (for example, `plan-review` + `report-verification` for a plan review), ranked refute-tested findings and fix decomposition. The verdict is **evidence to the recipient, never a decision**. Keep the mandatory Requirement Adjudication section and one block per stable ID + version. The Architect accepts the plan review's adjudications.
 

@@ -210,6 +210,10 @@ A new version of the package can pin another host or another Node. After you ins
    version, and brings a stopped host to the new version.
 3. Read the `host` part of the answer. When it names `restartRequired`, the running host was left
    as it was; make the restart as the section above describes.
+4. If the answer lists Agents Remember checkouts whose environments need rebuilding, update
+   each listed checkout to a revision with the new bootstrap before running the command shown
+   for it. That command recreates the environment from the checkout's lock using uv-managed
+   Python 3.14. Call `runtime_install` again to see whether any checkouts still need that step.
 
 ## The `paseoRuntime` block
 

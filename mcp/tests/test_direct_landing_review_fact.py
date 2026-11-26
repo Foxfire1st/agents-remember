@@ -27,7 +27,7 @@ from test_knowledge_closeout_gate import LEAF, A
 from test_worktree_support import git
 
 HISTORY = f"knowledge/history/{LEAF}.json"
-VERDICT_REF = "memory.md"
+VERDICT_REF = "notes/reports/memory.md"
 
 
 @pytest.fixture

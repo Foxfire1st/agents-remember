@@ -501,6 +501,9 @@ def _write_test_results_report(report: _QualityGateReport) -> None:
         f"- Elapsed seconds: `{report.elapsed_seconds:.3f}`",
         f"- Command: `{shlex.join(report.command)}`",
     ]
+    if report.result.dropped_selectors:
+        keys = ", ".join(f"`{key}`" for key in report.result.dropped_selectors)
+        lines.append(f"- Dagger launch omitted {keys}")
     if report.requested_memory_cap_bytes is not None:
         lines.extend(
             [

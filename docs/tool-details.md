@@ -130,7 +130,14 @@ Answer fields (delivered):
   `removedLocks`, and `preserved` on an executed install, or `reason` when blocked). The
   delivered MCP answer omits the per-seat `stores` list on both preview and executed runs; a
   preview writes no report, and an executed install records the individual seats in the report
-  named by `reportPath`.
+  named by `reportPath`;
+- `checkoutEnvironments`: present in preview and apply when the settings register
+  `agents-remember`. The read-only inventory lists registered checkouts with a stale
+  `mcp/.venv` in `staleCheckouts`. Each row gives the `checkout` and its
+  `bootstrapCommand`. Follow the `instruction` before running the commands.
+  An `error` describes an inventory read failure. If the answer overflows, open
+  `log` for the complete list. An applied install also includes the inventory in
+  `reportPath`;
 - `summary`: `createdDirs`, `copiedFiles`, `unchangedFiles`, `replacedLinks` and
   `removedPaths`;
 - `messages`: the first 5 inline, the rest in the report;

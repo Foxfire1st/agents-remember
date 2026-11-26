@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Final, Literal
 
 from pydantic import TypeAdapter, ValidationError
@@ -33,6 +34,11 @@ from agents_remember.models.knowledge_files.history import HistoryFile, ReviewFa
 from agents_remember.models.knowledge_files.records import KnowledgeRecord
 from agents_remember.models.knowledge_files.shapes import Label
 from agents_remember.models.knowledge_files.writer_stamp import UNKNOWN, WriterStamp
+from agents_remember.worktrees.role_reports import (
+    COLLECTED_REPORT_PARTS,
+    ROLE_REPORT_DIRECTORY,
+    collected_report_ref,
+)
 
 CONVERSION_OPERATION: Final = "state-conversion"
 WRITING_DISPOSITION: Final = "changed"
@@ -46,8 +52,7 @@ HANDOVER_NOT_RECORDED: Final = (
 _AGENT_FIELDS: Final = ("role", "harness", "model", "effort", "seat")
 _CROSSING_TASK: Final = re.compile(r"^(?P<task>.+)-crossing-[1-9][0-9]*$")
 _STAMP_VALUE: Final = TypeAdapter(Label)
-_DURABLE_REPORT_PREFIX: Final = "notes/reports"
-_REPORT_MARKERS: Final = (("role-reports",), ("notes", "reports"))
+_REPORT_MARKERS: Final = ((ROLE_REPORT_DIRECTORY,), COLLECTED_REPORT_PARTS)
 _WINDOWS_DRIVE: Final = re.compile(r"^[A-Za-z]:/")
 
 OwnerKind = Literal["leaf", "wave", "crossing"]
@@ -159,7 +164,7 @@ def _durable_verdict_ref(reference: str) -> str:
     tail = _report_tail(parts, absolute=is_absolute)
     if not tail:
         return cleaned
-    return f"{_DURABLE_REPORT_PREFIX}/{'/'.join(tail)}"
+    return collected_report_ref(PurePosixPath(*tail))
 
 
 def _report_tail(parts: list[str], *, absolute: bool) -> list[str] | None:

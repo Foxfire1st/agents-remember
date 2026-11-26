@@ -1,6 +1,9 @@
 {
   "command": "uvx",
   "args": [
+    "--managed-python",
+    "--python",
+    "3.14",
     "--refresh-package",
     "agents-remember-mcp",
     "agents-remember-mcp@latest",

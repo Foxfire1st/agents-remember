@@ -46,6 +46,9 @@ reinterpret that refusal. After the tooling lands, sync and use the landed versi
 Borrowed evidence requires unchanged tooling files; changed inputs repeat only their
 dependent qualification.
 
+Current PNT tooling supports only product checkouts on the uv-managed Python contract, so
+use the PNT tooling from the product checkout's own revision for a pre-migration checkout.
+
 The directory has no `__init__.py`, on purpose. `scripts/pnt-sandbox.py` puts `scripts/` on the
 import path and imports `pnt_sandbox` as a namespace package. A package there would make
 `scripts/` an import root in the repository's dependency facts, under which the script-local
@@ -94,6 +97,11 @@ A sandbox built by an earlier version of this tooling is rebuilt once by the nex
 build adds what is new (`dagger-authority/`, `eve/removed-variables.json`, the Pi provider entry
 of the settings file).
 
+For a checkout using the uv-managed Python contract, `build` prepares its `mcp/.venv` with
+the checkout's `scripts/bootstrap-mcp-venv.sh --ensure`. The bootstrap creates a missing
+environment, reuses a current one, and backs up and replaces one based on a stale Python.
+If replacement fails, it restores the previous environment.
+
 `reset` deletes the sandbox's marker last. If something cannot be deleted, it says so and names
 what is left by its full path. What is left is still marked as this tool's and as being reset:
 nothing is built or started there, and `reset` can be run again once the obstacle is gone.
@@ -109,10 +117,9 @@ nothing is built or started there, and `reset` can be run again once the obstacl
 3. Reports `already running` with the URL when both of its processes run and hold their ports.
    The safety check is not run again in that case: after editing the settings file by hand, run
    `check`.
-4. Builds the sandbox when it is missing or was built by an earlier version of this tooling. The
-   build creates the checkout's `mcp/.venv` when that is missing.
-5. Builds the checkout's dashboard bundle when it is missing or stale. Environment and bundle
-   are ignored build products; nothing else in the checkout is written.
+4. Builds the sandbox when it is missing or was built by an earlier version of this tooling.
+5. Prepares the checkout's Python environment as `build` does and builds the dashboard bundle
+   when it is missing or stale. The environment and bundle are ignored build products.
 6. Runs the safety check and refuses when it fails, then looks at the two ports again.
 7. Deletes a stale Paseo process record (see Processes), provisions the Paseo runtime through
    the candidate's public `runtime_install` tool and starts the dashboard from the checkout's source. When

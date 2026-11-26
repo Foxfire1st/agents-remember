@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -24,8 +25,12 @@ from .lock import HeldLock
 from .procfs import ProcessIdentity, environment, started_identity
 from .record import verified_supervisor
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mcp" / "src"))
+from agents_remember.python_runtime import uv_python_directory
+
 HELPERS = Path(__file__).resolve().parent
 TOOLING_CHECKOUT = HELPERS.parents[1]
+
 # What makes a directory a PNT build: the AR package with the Paseo runtime commands of PNT-R01
 # and the plugin they install, and the dashboard sources the bundle is built from.
 PNT_BUILD_FILES = (
@@ -66,7 +71,29 @@ def checkout_refusal(checkout: Path) -> str | None:
     missing = [name for name in PNT_BUILD_FILES if not (checkout / name).is_file()]
     if missing:
         return f"{checkout} is not a PNT build checkout: it has no {', '.join(missing)}"
+    if not _matches_runtime_contract(checkout):
+        return (
+            f"PNT runtime contract mismatch for {checkout}: "
+            "this tooling requires the uv-managed checkout bootstrap with --ensure. "
+            "Use the PNT tooling from the product checkout's own revision."
+        )
     return None
+
+
+def _matches_runtime_contract(checkout: Path) -> bool:
+    scripts = checkout / "scripts"
+    try:
+        contract = (scripts / "python-runtime-contract.env").read_text(encoding="utf-8")
+        bootstrap = (scripts / "bootstrap-mcp-venv.sh").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False
+    if any(line.partition("=")[0] == "AR_PYTHON_SOURCE_URL" for line in contract.splitlines()):
+        return False
+    return any(
+        "--ensure" in line
+        for line in bootstrap.splitlines()
+        if line.lstrip().startswith('echo "usage:')
+    )
 
 
 class Operations:
@@ -79,6 +106,8 @@ class Operations:
         self.layout = layout
         base = os.environ if environ is None else environ
         self.environment = sandbox_environment(base, layout)
+        # A checkout can outlive this sandbox and its redirected XDG data directory.
+        self.environment["UV_PYTHON_INSTALL_DIR"] = str(uv_python_directory(base))
         self.removed_variables = removed_names(base)
         # Set by the command that holds the sandbox's lock, for the provision run to share.
         self.held_lock: HeldLock | None = None
@@ -113,17 +142,18 @@ class Operations:
         return checkout / "mcp" / ".venv" / "bin" / "python"
 
     def prepare_python(self, checkout: Path) -> list[str]:
-        """Create the checkout's Python environment when it is missing.
-
-        Like the dashboard bundle below it is an ignored build product of the checkout; the
-        checkout's tracked files are never written.
-        """
-        if self.build_python(checkout).is_file():
-            return []
-        self.require(
-            "python environment", ["uv", "sync", "--all-extras"], cwd=checkout / "mcp", timeout=900
+        """Bring the checkout environment onto the managed runtime."""
+        completed = self.require(
+            "python environment",
+            ["bash", "scripts/bootstrap-mcp-venv.sh", "--ensure"],
+            cwd=checkout,
+            timeout=900,
         )
-        return ["created the checkout's Python environment (uv sync --all-extras)"]
+        return [
+            line
+            for line in completed.stdout.splitlines()
+            if line.startswith("[python-runtime] canonical MCP venv ready")
+        ]
 
     def prepare_bundle(self, checkout: Path) -> list[str]:
         """Build the dashboard bundle the checkout serves, when it is missing or stale.

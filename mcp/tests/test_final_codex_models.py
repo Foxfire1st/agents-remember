@@ -524,6 +524,7 @@ def engine_environ(declaration: dict[str, object]) -> dict[str, str]:
             authority.HOST_DECLARATION_ENV,
             authority.HOST_REGISTRY_ROOT_ENV,
             authority.DAGGER_HOST_ENV,
+            authority.DAGGER_RUNNER_HOST_ENV,
         )
     }
     env[authority.HOST_DECLARATION_ENV] = json.dumps(declaration)

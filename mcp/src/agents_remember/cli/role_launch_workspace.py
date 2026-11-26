@@ -30,6 +30,10 @@ from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.store import read_task_doc
 from agents_remember.tasks.task_paths import leaf_enclosure_path, slugify
 from agents_remember.worktrees import outside_scratch
+from agents_remember.worktrees.role_reports import (
+    COLLECTED_REPORT_DIRECTORY,
+    ROLE_REPORT_DIRECTORY,
+)
 from agents_remember.worktrees.start_task_publication import publish_start_task_facts
 from agents_remember.worktrees.task_document_copies import prepare_leaf_workspace_reference
 from agents_remember.worktrees.task_leaf_binding import TaskLeafBindingError
@@ -205,7 +209,7 @@ def _resolve_direct_workspace(
             str(error),
             f"Inspect worktree_status(repo_id={ref.repository!r}, contract_path={contract_path.as_posix()!r}) and repair the series checkouts before repeating this same request.",
         ) from error
-    task_reports = context.task.path.parent / "notes" / "reports"
+    task_reports = context.task.path.parent / COLLECTED_REPORT_DIRECTORY
     workspace = _enclosure_workspace(contract_path, group, series.lifecycle_id)
     with role_launch_enclosure.publication_scope(config.coordination_root, workspace):
         workspace.update(
@@ -352,13 +356,13 @@ def _prepare_enclosed_workspace(
     briefs_problem = status.get("briefsProblem")
     if isinstance(briefs_problem, str):
         workspace["briefsProblem"] = briefs_problem
-    task_reports = task.path.parent / "notes" / "reports"
+    task_reports = task.path.parent / COLLECTED_REPORT_DIRECTORY
     task_reports.mkdir(parents=True, exist_ok=True)
     workspace["taskReportRoot"] = task_reports.resolve().as_posix()
 
 
 def _ensure_role_reports_folder(group: Path) -> str:
-    report_access = group / "role-reports"
+    report_access = group / ROLE_REPORT_DIRECTORY
     report_access.mkdir(exist_ok=True)
     if report_access.is_symlink():
         raise ValueError(

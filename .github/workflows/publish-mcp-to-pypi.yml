@@ -44,31 +44,26 @@ jobs:
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14.8"
-
-      - name: Prove the exact Python runtime
+      - name: Read the uv minor line from the runtime contract
+        id: runtime-contract
         run: |
           . scripts/python-runtime-contract.env
-          python scripts/check-python-runtime.py \
-            --expected-version "$AR_PYTHON_VERSION" \
-            --require-linux-pidfd
+          printf 'uv-version=%s.x\n' "$AR_UV_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        id: setup-uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ steps.runtime-contract.outputs.uv-version }}
+          enable-cache: false
+
+      - name: Record the installed uv version
+        run: |
+          printf 'setup-uv resolved version: %s\n' "${{ steps.setup-uv.outputs.uv-version }}"
+          uv --version
 
       - name: Install locked Python build dependencies
-        run: |
-          . scripts/python-runtime-contract.env
-          python -m pip install --disable-pip-version-check "uv==$AR_UV_VERSION"
-          # Absolute: `--project mcp` resolves a relative UV_PROJECT_ENVIRONMENT against the
-          # project directory, which would create the environment at mcp/mcp/.venv.
-          UV_PROJECT_ENVIRONMENT="$PWD/mcp/.venv" uv sync \
-            --project mcp \
-            --python "$(command -v python)" \
-            --no-managed-python \
-            --frozen \
-            --all-extras
-          uv pip check --python "$PWD/mcp/.venv/bin/python"
+        run: scripts/bootstrap-mcp-venv.sh
 
       - name: Install dashboard dependencies
         working-directory: dashboard
@@ -100,7 +95,7 @@ jobs:
       - name: Verify the distributions ship the dashboard bundle
         working-directory: mcp
         run: |
-          python - <<'PY'
+          .venv/bin/python - <<'PY'
           import pathlib
           import sys
           import tarfile
@@ -139,11 +134,20 @@ jobs:
 
       - name: Install and start the wheel in a clean Python 3.14 environment
         run: |
+          . scripts/python-runtime-contract.env
           wheel="$(find mcp/dist -maxdepth 1 -type f -name '*.whl' -print -quit)"
           test -n "$wheel"
-          python -m venv /tmp/agents-remember-wheel-check
-          /tmp/agents-remember-wheel-check/bin/python -m pip install "$wheel"
-          /tmp/agents-remember-wheel-check/bin/agents-remember-mcp --help
+          smoke_root="$RUNNER_TEMP/agents-remember-wheel-check"
+          uv venv --managed-python --no-python-downloads --python "$AR_PYTHON_MINOR" "$smoke_root"
+          runtime_python="$(uv python find \
+            --system --managed-python --no-python-downloads "$AR_PYTHON_MINOR")"
+          uv_version="$(uv --version)"
+          "$smoke_root/bin/python" scripts/check-python-runtime.py \
+            --expected-version "$AR_PYTHON_MINOR" \
+            --expected-base-prefix "${runtime_python%/bin/*}" \
+            --require-linux-pidfd --uv-version "$uv_version"
+          uv pip install --python "$smoke_root/bin/python" "$wheel"
+          "$smoke_root/bin/agents-remember-mcp" --help
 
       - name: Upload package distributions
         uses: actions/upload-artifact@v5

@@ -5,7 +5,7 @@ description: "Independent reviewer: examine one assigned seam or review round ag
 
 # Reviewer
 
-Review 1 leaf round on owner assignment vs criteria (non-leaf in index); `task_doc` edits, `notes/reports/` verdicts.
+Review 1 leaf round on owner assignment vs criteria (non-leaf in index); `task_doc` edits, local report-folder verdicts (template for `verdictRef`).
 
 <!-- ar:needs leaf-review-intake from manager: mode, task-and-purpose, seam, requirement-set, tools-file -->
 <!-- ar:needs leaf-review-intake from architect: mode, task-and-purpose, seam, requirement-set, tools-file -->

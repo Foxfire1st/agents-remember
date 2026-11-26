@@ -7,7 +7,7 @@ connection-only runner endpoint and one exact reusable layer-store identity. Thi
 module owns that boundary:
 
 * strict host declaration parsing (missing / malformed / unsupported /
-  provisioning-capable / worktree-local / ambiguous all refuse with typed defects
+  worktree-local / ambiguous all refuse with typed defects
   before any Dagger command starts);
 * live engine + layer-store inspection of the already-running runner;
 * an immutable frozen authority snapshot whose safe digest binds the operation
@@ -38,16 +38,20 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Never, Protocol
-from urllib.parse import urlparse
 
 from agents_remember.errors import DaggerRuntimeAuthorityError, LockCapabilityError
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.file_lock import exclusive_file_lock
+from agents_remember.worktrees.modules.quality.dagger_runner import (
+    DAGGER_HOST_ENV,
+    DAGGER_RUNNER_HOST_ENV,
+    RUNTIME_AUTHORITY_DIGEST_ENV,
+    authority_environment,
+    dropped_dagger_selectors,
+)
 
 HOST_DECLARATION_ENV = "AR_DAGGER_RUNTIME_AUTHORITY"
 HOST_REGISTRY_ROOT_ENV = "AR_DAGGER_AUTHORITY_ROOT"
-RUNTIME_AUTHORITY_DIGEST_ENV = "AR_DAGGER_RUNTIME_AUTHORITY_DIGEST"
-DAGGER_HOST_ENV = "DAGGER_HOST"
 DEFAULT_LAYER_STORE = "/var/lib/dagger"
 DEFAULT_ENGINE_VERSION = "v0.21.8"
 AUTHORITY_SCHEMA_VERSION = "dagger-host-declaration/v1"
@@ -55,14 +59,7 @@ SNAPSHOT_SCHEMA_VERSION = "dagger-runtime-authority/v1"
 STATE_SCHEMA_VERSION = "dagger-authority-state/v1"
 OWNERS_SCHEMA_VERSION = "dagger-authority-owners/v1"
 
-# Connection-only URI schemes. docker-container and docker-image would let the
-# engine provision a fresh container/volume; local/auto/empty start the CLI's
-# default engine and an anonymous volume. None of those may name the admitted runner.
-_CONNECTION_ONLY_SCHEMES = frozenset({"container", "tcp", "unix", "grpc"})
-_PROVISIONING_SCHEMES = frozenset(
-    {"docker-container", "docker-image", "local", "auto", "dagger", "start"}
-)
-
+_CONTAINER_ENDPOINT = re.compile(r"container://([a-zA-Z0-9][a-zA-Z0-9_.-]+)")
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 _LOCK_STORE = "dagger-authority-owners"
@@ -169,6 +166,7 @@ class AdmittedDaggerAuthority:
     declaration: DaggerHostDeclaration
     environment: Mapping[str, str]
     owner: DaggerOwner | None = None
+    dropped_selectors: tuple[str, ...] = ()
 
     @property
     def snapshot_digest(self) -> str:
@@ -207,8 +205,11 @@ class DockerEngineInspector:
     this class never creates, starts, or provisions an engine or volume.
     """
 
-    def __init__(self, *, docker_executable: str = "docker") -> None:
+    def __init__(
+        self, *, docker_executable: str = "docker", environ: Mapping[str, str] | None = None
+    ) -> None:
         self.docker_executable = docker_executable
+        self._environ = None if environ is None else dict(environ)
 
     def inspect(self, declaration: DaggerHostDeclaration) -> InspectedRuntime:
         engine = _endpoint_engine_name(declaration.endpoint)
@@ -226,20 +227,7 @@ class DockerEngineInspector:
     def _require_running_engine(self, engine: str) -> None:
         """Prove the declared engine container exists and is running (typed defects)."""
         try:
-            running = subprocess.run(
-                [
-                    self.docker_executable,
-                    "inspect",
-                    "--format",
-                    "{{.State.Running}}",
-                    engine,
-                ],
-                text=True,
-                capture_output=True,
-                timeout=20,
-                check=False,
-                stdin=subprocess.DEVNULL,
-            )
+            running = self._docker("inspect", "--format", "{{.State.Running}}", engine)
         except OSError as error:
             raise DaggerRuntimeAuthorityError(
                 "runtime authority inspection could not start",
@@ -276,20 +264,7 @@ class DockerEngineInspector:
 
     def _require_layer_store(self, engine: str, expected_store: str) -> dict[str, str]:
         """Return the mounted store source/destination or refuse with a typed defect."""
-        mounts = subprocess.run(
-            [
-                self.docker_executable,
-                "inspect",
-                "--format",
-                "{{json .Mounts}}",
-                engine,
-            ],
-            text=True,
-            capture_output=True,
-            timeout=20,
-            check=False,
-            stdin=subprocess.DEVNULL,
-        )
+        mounts = self._docker("inspect", "--format", "{{json .Mounts}}", engine)
         if mounts.returncode != 0:
             raise DaggerRuntimeAuthorityError(
                 "runtime authority store mount could not be inspected",
@@ -320,15 +295,19 @@ class DockerEngineInspector:
 
     def _observed_engine_version(self, engine: str) -> str | None:
         """Best-effort engine CLI version; absence never refuses the authority."""
-        version = subprocess.run(
-            [self.docker_executable, "exec", engine, "dagger", "--version"],
+        version = self._docker("exec", engine, "dagger", "--version")
+        return version.stdout.strip() if version.returncode == 0 else None
+
+    def _docker(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [self.docker_executable, *args],
+            env=self._environ,
             text=True,
             capture_output=True,
             timeout=20,
             check=False,
             stdin=subprocess.DEVNULL,
         )
-        return version.stdout.strip() if version.returncode == 0 else None
 
 
 def _find_store_mount(raw_mounts: str, expected_destination: str) -> dict[str, str] | None:
@@ -371,20 +350,15 @@ def _typed_store_mount(mount: dict, expected_destination: str) -> dict[str, str]
     return {"destination": destination, "source": source}
 
 
-def _endpoint_engine_name(endpoint: str) -> str:
-    parsed = urlparse(endpoint)
-    if parsed.scheme != "container" or not parsed.netloc or "." in parsed.netloc:
-        raise DaggerRuntimeAuthorityError(
-            "runtime authority is not a connection-only container endpoint",
-            (
-                _finding(
-                    "runtime-authority-malformed",
-                    "endpoint",
-                    f"{endpoint!r} does not name one engine container",
-                ),
-            ),
+def _endpoint_engine_name(endpoint: str, *, field: str = "endpoint") -> str:
+    matched = _CONTAINER_ENDPOINT.fullmatch(endpoint)
+    if matched is None:
+        _raise_authority(
+            "runtime-authority-malformed",
+            field,
+            f"{endpoint!r} is invalid. Use container:// followed by one Docker container name or ID.",
         )
-    return parsed.netloc
+    return matched[1]
 
 
 def parse_host_declaration(
@@ -464,26 +438,11 @@ def _declaration_object(raw: object) -> dict[str, object]:
 
 def _endpoint_value(payload: dict[str, object]) -> str:
     endpoint = payload.get("endpoint")
-    if not isinstance(endpoint, str) or not endpoint or endpoint != endpoint.strip():
+    if not isinstance(endpoint, str):
         _raise_authority(
             "runtime-authority-malformed", "declaration.endpoint", "endpoint is invalid"
         )
-    parsed = urlparse(endpoint)
-    if parsed.scheme in _PROVISIONING_SCHEMES or not parsed.scheme:
-        _raise_authority(
-            "runtime-authority-provisioning-capable",
-            "declaration.endpoint",
-            (
-                f"endpoint {endpoint!r} can provision a private engine or anonymous volume; "
-                "only a connection-only endpoint may name the admitted runner"
-            ),
-        )
-    if parsed.scheme not in _CONNECTION_ONLY_SCHEMES:
-        _raise_authority(
-            "runtime-authority-unsupported",
-            "declaration.endpoint",
-            f"endpoint {endpoint!r} is not a supported connection-only scheme",
-        )
+    _endpoint_engine_name(endpoint, field="declaration.endpoint")
     return endpoint
 
 
@@ -542,28 +501,6 @@ def authority_snapshot(
         inspected_at=inspected_at,
         snapshot_digest=_sha256(payload),
     )
-
-
-def authority_environment(
-    snapshot: DaggerAuthoritySnapshot,
-    base: Mapping[str, str],
-) -> dict[str, str]:
-    """The deterministic environment from one admitted authority; refuse conflicts."""
-    ambient = base.get(DAGGER_HOST_ENV)
-    if ambient is not None and ambient.strip() and ambient != snapshot.endpoint:
-        _raise_authority(
-            "runtime-authority-ambient-conflict",
-            DAGGER_HOST_ENV,
-            (
-                f"ambient DAGGER_HOST={ambient!r} conflicts with the admitted authority "
-                f"endpoint {snapshot.endpoint!r}; the admitted authority is never merged "
-                "with ambient or per-worktree selection"
-            ),
-        )
-    env = dict(base)
-    env[DAGGER_HOST_ENV] = snapshot.endpoint
-    env[RUNTIME_AUTHORITY_DIGEST_ENV] = snapshot.snapshot_digest
-    return env
 
 
 def load_host_declaration(environ: Mapping[str, str] | None = None) -> DaggerHostDeclaration:
@@ -954,7 +891,7 @@ def admit_dagger_authority(
 ) -> AdmittedDaggerAuthority:
     """Admit one authority before any Dagger command starts.
 
-    Refuses missing/malformed/unsupported/provisioning-capable declarations, a
+    Refuses missing, malformed or unsupported declarations, a
     non-running engine or missing store mount, ambient conflicts, and an active
     transition barrier with live owners -- all with typed defects. Freezes one
     immutable snapshot and (when owner_factory is supplied) registers the live
@@ -962,7 +899,8 @@ def admit_dagger_authority(
     refused at :func: when it lives inside a repository.
     """
     checked = load_host_declaration(environ)
-    resolved_inspector = inspector or DockerEngineInspector()
+    env = dict(os.environ if environ is None else environ)
+    resolved_inspector = inspector or DockerEngineInspector(environ=env)
     inspected = resolved_inspector.inspect(checked)
     if not inspected.engine_running:
         _raise_authority(
@@ -980,25 +918,18 @@ def admit_dagger_authority(
             ),
         )
     snapshot = authority_snapshot(checked, inspected, inspected_at=_now())
-    env = os.environ if environ is None else environ
-    launch_env = authority_environment(snapshot, base=dict(env))
-    if registry is None:
-        return AdmittedDaggerAuthority(
-            snapshot=snapshot,
-            declaration=checked,
-            environment=launch_env,
-            owner=None,
-        )
-    registered_owner = _admit_with_registry(
-        registry,
-        snapshot,
-        owner_factory=owner_factory,
+    launch_env = authority_environment(snapshot, base=env)
+    owner = (
+        _admit_with_registry(registry, snapshot, owner_factory=owner_factory)
+        if registry is not None
+        else None
     )
     return AdmittedDaggerAuthority(
         snapshot=snapshot,
         declaration=checked,
         environment=launch_env,
-        owner=registered_owner,
+        owner=owner,
+        dropped_selectors=dropped_dagger_selectors(env),
     )
 
 
@@ -1149,6 +1080,7 @@ def _raise_authority(code: str, path: str, detail: str) -> Never:
 
 __all__ = [
     "DAGGER_HOST_ENV",
+    "DAGGER_RUNNER_HOST_ENV",
     "HOST_DECLARATION_ENV",
     "HOST_REGISTRY_ROOT_ENV",
     "RUNTIME_AUTHORITY_DIGEST_ENV",

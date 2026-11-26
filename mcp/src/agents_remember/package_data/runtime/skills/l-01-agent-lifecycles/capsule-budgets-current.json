@@ -6209,9 +6209,9 @@
         "curator/orientation": 650,
         "curator/curation": 406,
         "curator/recovery": 375,
-        "reviewer/orientation": 636,
-        "reviewer/review": 502,
-        "reviewer/recovery": 389,
+        "reviewer/orientation": 640,
+        "reviewer/review": 506,
+        "reviewer/recovery": 393,
         "investigator/orientation": 585,
         "investigator/recovery": 351,
         "bootstrap/orientation": 352,
@@ -6646,8 +6646,8 @@
         "sha256": "867bc51d025a287c4667ffa9dc647579929fd8e466e6551f5d4b120a0b864add"
       },
       "skills/l-01-agent-lifecycles/roles/reviewer.md": {
-        "size_words": 311,
-        "sha256": "2ebc6cb756bc4375b282337dcf8472558e110d12dbe052cc362695a92b5138d2"
+        "size_words": 315,
+        "sha256": "a9597d18cffbc9d1613cce89f32a88b69813b4c12e99c7f8e0ba92d68473ad0c"
       },
       "skills/l-01-agent-lifecycles/roles/worker.md": {
         "size_words": 172,
@@ -6718,8 +6718,8 @@
         "sha256": "d410272dce68cea910aa06ac9c9f6788f8dc4c63231306ee1c4211ef68a40b86"
       },
       "skills/l-01-agent-lifecycles/templates/verdict.md": {
-        "size_words": 3652,
-        "sha256": "d3ebf66be940b45c18d6b49cef3510da4bb78a213860e56d2eb42a9cb3e0de18"
+        "size_words": 3695,
+        "sha256": "9a17d808d00947bf243f385ba4e333b95f9ba7697e17dc77b16537d206322c94"
       }
     },
     "compiler_input_revisions": {
@@ -6790,7 +6790,7 @@
       "roles/investigator.md": "sha256:1f992757e0d459bd02e64fea8039662c7bd5c020fb31fb63dc4de67bc294dd7c",
       "roles/manager.md": "sha256:e2cd502a21767b2c74ec009218f811a8b8c13ab3e25691f2b702f82deeadbc81",
       "roles/orchestrator.md": "sha256:867bc51d025a287c4667ffa9dc647579929fd8e466e6551f5d4b120a0b864add",
-      "roles/reviewer.md": "sha256:2ebc6cb756bc4375b282337dcf8472558e110d12dbe052cc362695a92b5138d2",
+      "roles/reviewer.md": "sha256:a9597d18cffbc9d1613cce89f32a88b69813b4c12e99c7f8e0ba92d68473ad0c",
       "roles/worker.md": "sha256:c9c4f01e52cac7cb674750b8a37019a8d8a0cf39df493f05fba2af9f8896d2c0",
       "templates/turn-report.md": "sha256:d410272dce68cea910aa06ac9c9f6788f8dc4c63231306ee1c4211ef68a40b86"
     }

@@ -614,6 +614,8 @@ class FakeContainer:
 
     def from_(self, image: str) -> FakeContainer:
         self.image = image
+        if image.startswith("ghcr.io/astral-sh/uv:"):
+            self.files.setdefault("/uv", "")
         self.operations.append(("from", image))
         return self
 
@@ -730,8 +732,8 @@ class FakeContainer:
         self.operations.append(("directory", *args))
         return self
 
-    def with_file(self, *args: object) -> FakeContainer:
-        self.operations.append(("file", *args))
+    def with_file(self, *args: object, **kwargs: object) -> FakeContainer:
+        self.operations.append(("file", *args, kwargs) if kwargs else ("file", *args))
         if len(args) == 2 and isinstance(args[0], str) and isinstance(args[1], FakeFile):
             self.files[args[0]] = args[1].value
         return self
@@ -764,6 +766,12 @@ class FakeContainer:
 
     async def exists(self, path: str, **_kwargs: object) -> bool:
         return path in self.files
+
+    async def image_ref(self) -> str:
+        image = self.image or "fixture-image:latest"
+        if "@sha256:" in image:
+            return image
+        return f"{image}@sha256:{hashlib.sha256(image.encode('utf-8')).hexdigest()}"
 
     async def sync(self) -> FakeContainer:
         return self
@@ -858,5 +866,13 @@ class FakeDag:
 
 
 class FakeSource:
-    def file(self, path: str) -> str:
-        return path
+    def __init__(self, files: dict[str, str] | None = None) -> None:
+        self.files = dict(files) if files is not None else {}
+
+    def file(self, path: str) -> FakeFile:
+        if path in self.files:
+            return FakeFile(self.files[path])
+        candidate = REPOSITORY_ROOT / path
+        if candidate.is_file():
+            return FakeFile(candidate.read_text(encoding="utf-8"))
+        return FakeFile(path)

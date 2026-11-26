@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 from datetime import UTC, datetime
 from typing import Annotated
@@ -32,105 +33,121 @@ PLAYWRIGHT_IMAGE = (
 )
 CODEX_VERSION = "0.151.0"
 RETRY_CACHE_ROOT = "/var/cache/agents-remember-quality-retry"
-PYTHON_BUILD_CACHE_ROOT = "/var/cache/agents-remember-python"
-RUNTIME_INSTALLER_ROOT = "/opt/agents-remember-runtime-installer"
-RUNTIME_CONTRACT = f"{RUNTIME_INSTALLER_ROOT}/python-runtime-contract.env"
-RUNTIME_CHECKER = f"{RUNTIME_INSTALLER_ROOT}/check-python-runtime.py"
-RUNTIME_INSTALLER = f"{RUNTIME_INSTALLER_ROOT}/install-python-runtime.sh"
-RUNTIME_ROOT = "/opt/agents-remember-python"
-RUNTIME_CURRENT = f"{RUNTIME_ROOT}/current"
-RUNTIME_PYTHON = f"{RUNTIME_CURRENT}/bin/python3.14"
-RUNTIME_UV = f"{RUNTIME_CURRENT}/bin/uv"
+RUNTIME_PROBE_ROOT = "/opt/ar-runtime-probe"
+RUNTIME_CONTRACT = f"{RUNTIME_PROBE_ROOT}/scripts/python-runtime-contract.env"
+RUNTIME_CHECKER = f"{RUNTIME_PROBE_ROOT}/scripts/check-python-runtime.py"
+RUNTIME_POLICY = "mcp/src/agents_remember/python_runtime.py"
+RUNTIME_UV = "/usr/local/bin/uv"
+UV_IMAGE_REPOSITORY = "ghcr.io/astral-sh/uv"
+UV_VERSION_RE = re.compile(r"^[0-9]+(\.[0-9]+)*$")
+UV_PYTHON_INSTALL_DIR = "/root/.local/share/uv/python"
 RUNTIME_PROOF = "/opt/agents-remember-python-runtime.json"
+RUNTIME_PROOF_CONTEXT = (
+    f". {RUNTIME_CONTRACT}\n"
+    f"runtime_python=$({RUNTIME_UV} python find "
+    '--system --managed-python --no-python-downloads "$AR_PYTHON_MINOR")\n'
+    f"uv_version=$({RUNTIME_UV} --version)\n"
+)
 VENV_ROOT = "/opt/ar-venv"
 VENV_PYTHON = f"{VENV_ROOT}/bin/python"
 VENV_PROOF = "/opt/agents-remember-venv-runtime.json"
 
 
-def _canonical_python_base(
+async def _contract_uv_minor(source: dagger.Directory) -> str:
+    """Read AR_UV_VERSION from the candidate runtime contract."""
+
+    contents = await source.file("scripts/python-runtime-contract.env").contents()
+    for raw_line in contents.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("AR_UV_VERSION="):
+            continue
+        value = line.split("=", 1)[1].strip().strip("'\"")
+        if UV_VERSION_RE.fullmatch(value) is None:
+            raise ValueError(f"malformed contract version AR_UV_VERSION={value!r}")
+        return value
+    raise ValueError("scripts/python-runtime-contract.env does not declare AR_UV_VERSION")
+
+
+def _image_digest_from_ref(image_ref: str) -> str:
+    """Extract the resolved sha256 digest from a Dagger OCI image reference."""
+
+    _, separator, digest = image_ref.rpartition("@sha256:")
+    if separator != "@sha256:" or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise ValueError(f"uv image reference lacks a resolved sha256 digest: {image_ref!r}")
+    return f"sha256:{digest}"
+
+
+async def _canonical_python_base(
     source: dagger.Directory,
     *,
     image_reference: str = PLAYWRIGHT_IMAGE,
 ) -> dagger.Container:
-    """Provision one source-built Python recipe before candidate-specific source."""
+    """Install uv from Astral's minor-line image and its managed Python."""
 
+    uv_minor = await _contract_uv_minor(source)
+    uv_image = dag.container().from_(f"{UV_IMAGE_REPOSITORY}:{uv_minor}")
+    uv_image_ref = await uv_image.image_ref()
+    uv_image_digest = _image_digest_from_ref(uv_image_ref)
     return (
         dag.container()
         .from_(image_reference)
-        .with_mounted_cache("/root/.cache/pip", dag.cache_volume("ar-quality-pip-v1"))
-        .with_mounted_cache(
-            PYTHON_BUILD_CACHE_ROOT,
-            dag.cache_volume("ar-python-source-build-v1"),
-        )
         .with_file(
             RUNTIME_CONTRACT,
             source.file("scripts/python-runtime-contract.env"),
+        )
+        # Candidate setup changes HOME. Both steps must use the same managed Python directory.
+        .with_env_variable("UV_PYTHON_INSTALL_DIR", UV_PYTHON_INSTALL_DIR)
+        .with_env_variable("AR_UV_IMAGE_REF", uv_image_ref)
+        .with_env_variable("AR_UV_IMAGE_DIGEST", uv_image_digest)
+        .with_env_variable("DEBIAN_FRONTEND", "noninteractive")
+        .with_exec(["apt-get", "update"])
+        .with_exec(
+            [
+                "apt-get",
+                "install",
+                "-y",
+                "--no-install-recommends",
+                "ca-certificates",
+                "curl",
+                "git",
+                "tmux",
+            ]
+        )
+        .with_exec(["rm", "-rf", "/var/lib/apt/lists"])
+        .with_file(RUNTIME_UV, uv_image.file("/uv"), permissions=0o755)
+        .with_exec(
+            [
+                "bash",
+                "-euc",
+                f'. {RUNTIME_CONTRACT}\n{RUNTIME_UV} python install --no-bin "$AR_PYTHON_MINOR"',
+            ]
         )
         .with_file(
             RUNTIME_CHECKER,
             source.file("scripts/check-python-runtime.py"),
         )
         .with_file(
-            RUNTIME_INSTALLER,
-            source.file("scripts/install-python-runtime.sh"),
-        )
-        .with_env_variable("DEBIAN_FRONTEND", "noninteractive")
-        .with_exec(["apt-get", "update"])
-        .with_exec(
-            [
-                "bash",
-                "-c",
-                f". {RUNTIME_CONTRACT}; apt-get install -y --no-install-recommends "
-                "$AR_PYTHON_APT_BUILD_DEPS tmux",
-            ]
-        )
-        .with_exec(["rm", "-rf", "/var/lib/apt/lists"])
-        .with_exec(
-            [
-                "bash",
-                "-euc",
-                f". {RUNTIME_CONTRACT}; "
-                f"exec bash {RUNTIME_INSTALLER} "
-                f'--prefix "{RUNTIME_ROOT}/cpython-$AR_PYTHON_VERSION" '
-                f"--cache-root {PYTHON_BUILD_CACHE_ROOT} "
-                f"--tooling-root {PYTHON_BUILD_CACHE_ROOT}/tooling",
-            ]
+            f"{RUNTIME_PROBE_ROOT}/{RUNTIME_POLICY}",
+            source.file(RUNTIME_POLICY),
         )
         .with_exec(
             [
                 "bash",
                 "-euc",
-                f". {RUNTIME_CONTRACT}; mkdir -p {RUNTIME_ROOT}; "
-                f"cd {RUNTIME_ROOT}; "
-                'ln -s "cpython-$AR_PYTHON_VERSION" current',
-            ]
-        )
-        .with_exec(
-            [
-                "bash",
-                "-c",
-                f". {RUNTIME_CONTRACT}; {RUNTIME_PYTHON} {RUNTIME_CHECKER} "
-                '--expected-version "$AR_PYTHON_VERSION" '
-                f"--expected-base-prefix {RUNTIME_CURRENT} "
+                RUNTIME_PROOF_CONTEXT
+                + f'exec "$runtime_python" {RUNTIME_CHECKER} --base-interpreter '
+                '--expected-version "$AR_PYTHON_MINOR" '
+                '--expected-base-prefix "${runtime_python%/bin/*}" '
                 "--require-linux-pidfd "
-                '--source-url "$AR_PYTHON_SOURCE_URL" '
-                '--source-sha256 "$AR_PYTHON_SOURCE_SHA256" '
-                '--builder-commit "$AR_PYTHON_BUILD_COMMIT" '
+                '--uv-version "$uv_version" '
+                '--uv-image-digest "$AR_UV_IMAGE_DIGEST" '
                 f"> {RUNTIME_PROOF}",
-            ]
-        )
-        .with_exec(
-            [
-                "bash",
-                "-c",
-                f". {RUNTIME_CONTRACT}; {RUNTIME_PYTHON} -m pip install "
-                '--disable-pip-version-check "uv==$AR_UV_VERSION"',
             ]
         )
     )
 
 
-def _candidate_base(
+async def _candidate_base(
     source: dagger.Directory,
     repository_bundle: dagger.File,
     *,
@@ -138,18 +155,16 @@ def _candidate_base(
 ) -> dagger.Container:
     """Build the deterministic candidate environment shared by every evidence attempt."""
 
+    base = await _canonical_python_base(source, image_reference=image_reference)
     return (
-        _canonical_python_base(source, image_reference=image_reference)
-        .with_mounted_cache("/root/.npm", dag.cache_volume("ar-quality-npm-v1"))
+        base.with_mounted_cache("/root/.npm", dag.cache_volume("ar-quality-npm-v1"))
         .with_env_variable("HOME", "/tmp/ar-home")
-        .with_env_variable("PIP_CACHE_DIR", "/root/.cache/pip")
         .with_env_variable("TMPDIR", "/tmp/ar-quality")
         .with_env_variable("TMP", "/tmp/ar-quality")
         .with_env_variable("TEMP", "/tmp/ar-quality")
         .with_exec(["mkdir", "-p", "/tmp/ar-home", "/tmp/ar-quality"])
         .with_exec(["npm", "install", "--global", f"@openai/codex@{CODEX_VERSION}"])
         .with_exec(["codex", "--version"])
-        .with_exec([RUNTIME_PYTHON, "-m", "venv", VENV_ROOT])
         .with_directory("/workspace", source)
         .with_file("/tmp/ar-candidate.bundle", repository_bundle)
         .with_workdir("/workspace")
@@ -180,23 +195,23 @@ def _candidate_base(
         .with_exec(
             [
                 "bash",
-                "-c",
+                "-euc",
+                f". {RUNTIME_CONTRACT}\n"
                 f"UV_PROJECT_ENVIRONMENT={VENV_ROOT} {RUNTIME_UV} sync "
-                f"--project /workspace/mcp --python {VENV_PYTHON} "
-                "--no-managed-python --frozen --all-extras",
+                '--project /workspace/mcp --python "$AR_PYTHON_MINOR" '
+                "--managed-python --no-python-downloads --frozen --all-extras",
             ]
         )
         .with_exec(
             [
                 "bash",
-                "-c",
-                f". {RUNTIME_CONTRACT}; {VENV_PYTHON} {RUNTIME_CHECKER} "
-                '--expected-version "$AR_PYTHON_VERSION" '
-                f"--expected-base-prefix {RUNTIME_CURRENT} "
+                "-euc",
+                RUNTIME_PROOF_CONTEXT + f"exec {VENV_PYTHON} {RUNTIME_CHECKER} "
+                '--expected-version "$AR_PYTHON_MINOR" '
+                '--expected-base-prefix "${runtime_python%/bin/*}" '
                 "--require-linux-pidfd "
-                '--source-url "$AR_PYTHON_SOURCE_URL" '
-                '--source-sha256 "$AR_PYTHON_SOURCE_SHA256" '
-                '--builder-commit "$AR_PYTHON_BUILD_COMMIT" '
+                '--uv-version "$uv_version" '
+                '--uv-image-digest "$AR_UV_IMAGE_DIGEST" '
                 f"> {VENV_PROOF}",
             ]
         )
@@ -244,7 +259,7 @@ def _bind_candidate_attempt(
     )
 
 
-def _candidate_container(
+async def _candidate_container(
     source: dagger.Directory,
     repository_bundle: dagger.File,
     *,
@@ -255,7 +270,7 @@ def _candidate_container(
     """Build one reusable candidate base, then bind an exact evidence attempt."""
 
     return _bind_candidate_attempt(
-        _candidate_base(
+        await _candidate_base(
             source,
             repository_bundle,
             image_reference=image_reference,
@@ -349,7 +364,7 @@ class AgentsRememberQuality:
             raise ValueError("certifying Dagger execution requires a git-tree candidate")
         reports = "/reports"
         attempt_nonce = secrets.token_hex(16)
-        container = _candidate_container(
+        container = await _candidate_container(
             source,
             repository_bundle,
             attempt_nonce=attempt_nonce,
@@ -491,11 +506,13 @@ class AgentsRememberQuality:
         started_at = datetime.now(UTC).isoformat()
         reports = "/reports"
         attempt_nonce = secrets.token_hex(16)
-        container = await _candidate_container(
-            source,
-            repository_bundle,
-            attempt_nonce=attempt_nonce,
-            reports=reports,
+        container = await (
+            await _candidate_container(
+                source,
+                repository_bundle,
+                attempt_nonce=attempt_nonce,
+                reports=reports,
+            )
         ).sync()
         exit_code = await container.exit_code()
         completed = ["environment"]

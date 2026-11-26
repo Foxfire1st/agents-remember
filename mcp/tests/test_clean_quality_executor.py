@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -9,6 +10,7 @@ from pathlib import Path
 from typing import cast
 from unittest import mock
 
+import pytest
 from agents_remember.certification.models import CandidateIdentity
 from agents_remember.certification.repository_profiles.authority import load_repository_profile
 from agents_remember.certification.repository_profiles.execution import (
@@ -65,15 +67,24 @@ class _AuthorityProbe:
         )
 
 
-def _test_authority() -> authority_module.AdmittedDaggerAuthority:
+def _host_declaration(endpoint: str) -> str:
     declaration = {
         "schemaVersion": "dagger-host-declaration/v1",
-        "endpoint": "container://clean-quality-test-engine",
+        "endpoint": endpoint,
         "layerStore": "/var/lib/dagger",
         "engineVersion": "v0.21.8",
     }
+    return json.dumps(declaration)
+
+
+def _test_authority(**environ: str) -> authority_module.AdmittedDaggerAuthority:
     return authority_module.admit_dagger_authority(
-        environ={authority_module.HOST_DECLARATION_ENV: json.dumps(declaration)},
+        environ={
+            **environ,
+            authority_module.HOST_DECLARATION_ENV: _host_declaration(
+                "container://clean-quality-test-engine"
+            ),
+        },
         inspector=_AuthorityProbe(),
     )
 
@@ -115,6 +126,75 @@ def repository(root: Path) -> Path:
     git(repo, "add", "-A")
     git(repo, "commit", "-m", "base")
     return repo
+
+
+def _write_docker_stub(path: Path, client: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s|%s|%s|%s\\n' '{client}' \"$DOCKER_CONTEXT\" \"$DOCKER_CONFIG\" "
+        '"$*" >> "$DOCKER_CALLS"\n'
+        'case "$1:$3" in\n'
+        "  'inspect:{{.State.Running}}') printf '%s\\n' true ;;\n"
+        "  'inspect:{{json .Mounts}}') printf '%s\\n' "
+        """'[{"Destination":"/var/lib/dagger","Source":"/stub-store"}]' ;;\n"""
+        "  'exec:dagger') printf '%s\\n' 'dagger 0.21.8' ;;\n"
+        "  'exec:dagger-child') exit 8 ;;\n"
+        "  *) exit 2 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o700)
+
+
+def test_clean_quality_inspects_and_launches_through_the_same_docker_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = repository(tmp_path)
+    local_bin = tmp_path / "home/.local/bin"
+    _write_docker_stub(tmp_path / "caller-bin/docker", "caller")
+    _write_docker_stub(local_bin / "docker", "native")
+    dagger = local_bin / "dagger"
+    dagger.write_text(
+        "#!/bin/sh\n"
+        'exec docker exec "${_EXPERIMENTAL_DAGGER_RUNNER_HOST#container://}" dagger-child\n',
+        encoding="utf-8",
+    )
+    dagger.chmod(0o700)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", "caller-bin", prepend=os.pathsep)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("DOCKER_CONFIG", "docker-config")
+    monkeypatch.setenv("DOCKER_CONTEXT", "test-engine-context")
+    calls = tmp_path / "docker-calls"
+    monkeypatch.setenv("DOCKER_CALLS", str(calls))
+    monkeypatch.setenv(authority_module.HOST_REGISTRY_ROOT_ENV, str(tmp_path / "authority"))
+    monkeypatch.setenv(
+        authority_module.HOST_DECLARATION_ENV,
+        _host_declaration("container://test.engine"),
+    )
+    monkeypatch.delenv("DAGGER_HOST", raising=False)
+    monkeypatch.delenv("_EXPERIMENTAL_DAGGER_RUNNER_HOST", raising=False)
+
+    def run_stub(
+        command: list[str], cwd: Path, env: Mapping[str, str]
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            command, cwd=cwd, env=dict(env), text=True, capture_output=True, check=False
+        )
+
+    outcome = run_clean_quality(
+        quality_request(repo, tmp_path / "enclosure", "targeted"), runner=run_stub
+    )
+
+    prefix = f"native|test-engine-context|{tmp_path / 'docker-config'}|"
+    assert calls.read_text(encoding="utf-8").splitlines() == [
+        prefix + "inspect --format {{.State.Running}} test.engine",
+        prefix + "inspect --format {{json .Mounts}} test.engine",
+        prefix + "exec test.engine dagger --version",
+        prefix + "exec test.engine dagger-child",
+    ]
+    assert outcome.returncode == 8
 
 
 class CleanQualityExecutorTests(unittest.TestCase):
@@ -238,6 +318,44 @@ class CleanQualityExecutorTests(unittest.TestCase):
                 authority=_test_authority(),
             )
             self.assertFalse((sandbox / "obsolete").exists())
+
+    def test_dagger_launch_receipt_and_result_name_dropped_selectors(self) -> None:
+        dropped = {
+            "DAGGER_CLOUD_ENGINE": "",
+            "DAGGER_SESSION_PORT": "fixture-port",
+            "DAGGER_SESSION_TOKEN": "fixture-token",
+        }
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
+            root = Path(tmp)
+            repo = repository(root)
+            group = root / "enclosure"
+            admitted = _test_authority(**dropped)
+            receipt = group / "reports/test-sandbox/manifest.json"
+
+            def runner(
+                command: list[str], cwd: Path, env: Mapping[str, str]
+            ) -> subprocess.CompletedProcess[str]:
+                self.assertTrue(dropped.keys().isdisjoint(env))
+                self.assertEqual(
+                    env["_EXPERIMENTAL_DAGGER_RUNNER_HOST"], admitted.snapshot.endpoint
+                )
+                self.assertTrue(receipt.is_file())
+                return subprocess.CompletedProcess(command, 1, stdout="fixture failure", stderr="")
+
+            result = run_clean_quality(
+                quality_request(repo, group, "full"),
+                runner=runner,
+                executor_resolver=lambda _env: "/usr/local/bin/dagger",
+                authority=admitted,
+            )
+
+            receipt_text = receipt.read_text(encoding="utf-8")
+            self.assertEqual(json.loads(receipt_text)["droppedDaggerSelectors"], sorted(dropped))
+            self.assertEqual(list(result.dropped_selectors), sorted(dropped))
+            self.assertEqual(result.returncode, 1)
+            for value in ("fixture-port", "fixture-token"):
+                self.assertNotIn(value, receipt_text)
+                self.assertNotIn(value, repr(result))
 
     def test_exported_failure_is_the_authoritative_pipeline_exit(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp") as tmp:

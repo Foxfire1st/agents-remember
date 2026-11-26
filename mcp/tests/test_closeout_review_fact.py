@@ -28,6 +28,7 @@ from agents_remember.application.knowledge_gate.direct import _closing_of
 from agents_remember.application.task_docs.review_round_stamp import memory_round_stamp
 from agents_remember.application.task_docs.task_doc_route_review import (
     _record_task_review_bound,
+    _RouteReviewBinding,
 )
 from agents_remember.cli.role_message_files import (
     MessageContent,
@@ -102,7 +103,7 @@ def _round(number: int, *, passed: bool, **facts: Any) -> dict[str, Any]:
         "round": number,
         "kind": "memory",
         "findingsRemain": not passed,
-        "verdictRef": f"reports/memory-{number}.md",
+        "verdictRef": f"notes/reports/memory-{number}.md",
         **facts,
     }
 
@@ -121,6 +122,7 @@ class _World:
         self.coordination = root / "coordination"
         self.folder = self.coordination / "tasks" / "agents-remember" / FOLDER
         self.folder.mkdir(parents=True)
+        self.worktree_group = root / "worktree-group"
         self.memory = root / "memory"
         (self.memory / "knowledge" / "history").mkdir(parents=True)
         for args in (["init", "-q"], ["config", "user.email", "t@e"], ["config", "user.name", "t"]):
@@ -234,6 +236,7 @@ class _World:
                 # folder, never the leaf's own document: the fact is found by the leaf's id.
                 task_root=self.folder,
                 task_artifact=self.folder / "task.md",
+                worktree_group=self.worktree_group,
                 memory_worktree=self.memory,
                 memory_repo_path=None,
                 leaf_id=LEAF,
@@ -398,6 +401,8 @@ def test_record_review_stamps_the_recording_reviewer_from_its_binding(tmp_path: 
         report_path=(tmp_path / "report.md").as_posix(),
         task_ref=TaskDocumentRef(repository="agents-remember", path="review-api/review_api.json"),
     )
+    verdict = folder / "notes" / "reports" / "review-api-memory-verdict.md"
+    verdict.write_text("# Memory verdict\n", encoding="utf-8")
     _call(config, "begin_review", review={"reviewKind": "memory"})
     with mock.patch(
         "agents_remember.application.writer_stamp_source.read_agent_binding",
@@ -467,7 +472,7 @@ def test_the_closeout_writes_the_fact_before_the_derived_files_are_renewed(
     assert seen == [closed]  # the renewal ran on the closed file that holds the fact
     assert closed["closed"] is True
     review = closed["review"]
-    assert (review["round"], review["verdictRef"]) == (2, "reports/memory-2.md")
+    assert (review["round"], review["verdictRef"]) == (2, "notes/reports/memory-2.md")
     assert review["reviewer"] == REVIEWER
     assert review["handedOverBy"] == CURATOR
     assert outcome.review_note == ""
@@ -479,7 +484,7 @@ def test_the_fact_binds_the_real_reviewed_tree_and_its_verdict(world: _World) ->
     world.leaf(rounds=[_passed(world)])
     outcome = _closeout(world)
     review = world.read()["review"]
-    assert (review["tree"], review["verdictRef"]) == (passed_tree, "reports/memory-1.md")
+    assert (review["tree"], review["verdictRef"]) == (passed_tree, "notes/reports/memory-1.md")
     assert outcome.review_note == ""
 
 
@@ -679,17 +684,21 @@ def _record_pass_through_the_task_layer(world: _World) -> dict[str, Any]:
 
     document = read_task_doc(world.folder / "leaf.json")
     begun = begin_task_review(document, {"reviewKind": "memory"})
+    verdict = world.folder / "notes" / "reports" / "memory-1.md"
+    verdict.parent.mkdir(parents=True, exist_ok=True)
+    verdict.write_text("# Memory verdict\n", encoding="utf-8")
     payload = {
         "reviewKind": "memory",
         "verdict": "pass",
         "findings": [],
         "candidateTree": world.tree(),
-        "verdictRef": "reports/memory-1.md",
+        "verdictRef": "notes/reports/memory-1.md",
     }
     stamps = memory_round_stamp(
         world.coordination, world.folder, begun, payload, repository="agents-remember"
     )
-    recorded = _record_task_review_bound(begun, payload, recorded_by=stamps)
+    binding = _RouteReviewBinding(world.contract, world.folder, world.folder / "leaf.json")
+    recorded = _record_task_review_bound(begun, payload, binding=binding, recorded_by=stamps)
     (world.folder / "leaf.json").write_text(
         recorded.model_dump_json(by_alias=True, exclude_none=True), encoding="utf-8"
     )
@@ -709,16 +718,20 @@ def test_an_open_memory_amendment_withholds_the_prior_stamped_pass(world: _World
     assert original_fact.handed_over_by.seat == "01KCURATOR"
     assert last_passed_memory_round(passed.memoryReviewState, leaf) is not None
 
+    amendment_verdict = world.folder / "notes" / "reports" / "amendment.md"
+    amendment_verdict.parent.mkdir(parents=True, exist_ok=True)
+    amendment_verdict.write_text("# Amendment verdict\n", encoding="utf-8")
     amended = _record_task_review_bound(
         passed,
         {
             "reviewKind": "memory",
             "verdict": "block",
-            "verdictRef": "reports/amendment.md",
+            "verdictRef": "notes/reports/amendment.md",
             "addedFindings": [
                 {"findingId": "M2", "description": "Open evidence finding", "route": "curator"}
             ],
         },
+        binding=_RouteReviewBinding(world.contract, world.folder, leaf),
     )
     lane = amended.memoryReviewState
     assert lane is not None and lane.round == passed.memoryReviewState.round

@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable, Collection, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import BinaryIO
@@ -29,7 +29,10 @@ from agents_remember.certification.repository_profiles.models import (
     ProfilePurpose,
     PublishedArtifactDefinition,
 )
-from agents_remember.errors import CertificationExecutorPrerequisiteError
+from agents_remember.errors import (
+    CertificationExecutorPrerequisiteError,
+    DaggerRuntimeAuthorityError,
+)
 from agents_remember.kernel.atomic_write import (
     atomic_write_bytes,
     atomic_write_text,
@@ -37,7 +40,6 @@ from agents_remember.kernel.atomic_write import (
 from agents_remember.kernel.git_command import GitRunnerOptions, run_git
 from agents_remember.kernel.platform_subprocess import (
     native_command,
-    native_path_environment,
     windows_interop_reason,
 )
 from agents_remember.models.test_evidence import (
@@ -55,12 +57,12 @@ from agents_remember.worktrees.modules.quality.dagger_authority import (
     AuthorityRegistry,
     DaggerOwner,
     admit_dagger_authority,
-    authority_environment,
     current_process_fingerprint,
     default_registry_root,
     owner_identity,
     release_dagger_authority,
 )
+from agents_remember.worktrees.modules.quality.dagger_runner import native_dagger_environment
 from agents_remember.worktrees.modules.quality.execution.models import CodeCertificationExecution
 from agents_remember.worktrees.modules.quality.execution.sandbox import (
     _admit_prepared_profile,
@@ -117,6 +119,7 @@ class CleanQualityOutcome:
     process: subprocess.CompletedProcess[str]
     evidence: CertifyingTestEvidence | None
     manifest: PublishedQualityManifest | None
+    dropped_selectors: tuple[str, ...] = ()
 
     @property
     def args(self) -> object:
@@ -179,6 +182,7 @@ def run_clean_quality(
     if admitted is None:
         registry = AuthorityRegistry(default_registry_root())
         admitted = admit_dagger_authority(
+            environ=native_dagger_environment(os.environ),
             registry=registry,
             owner_factory=lambda snapshot: _quality_owner(request, snapshot),
         )
@@ -186,14 +190,14 @@ def run_clean_quality(
         prepared = _prepare_sandbox(request)
         source = prepared.root / "source"
         profile_execution = _admit_prepared_profile(request, prepared)
-        _write_sandbox_manifest(request, prepared, profile_execution, admitted)
-        env, command = _executor_command(
+        env, command, dropped_selectors = _executor_command(
             request,
             prepared,
             profile_execution,
             executor_resolver=executor_resolver,
             authority=admitted,
         )
+        _write_sandbox_manifest(request, prepared, profile_execution, admitted, dropped_selectors)
         execute = runner or (
             lambda command, cwd, command_env: _stream_dagger(
                 command,
@@ -227,8 +231,8 @@ def run_clean_quality(
             _write_current(
                 request.worktree_group, "failed", "Dagger pipeline/export failed", status="failed"
             )
-            return CleanQualityOutcome(exported, None, None)
-        return _publish_executor_outcome(
+            return CleanQualityOutcome(exported, None, None, dropped_selectors)
+        outcome = _publish_executor_outcome(
             request,
             prepared,
             profile_execution,
@@ -239,6 +243,7 @@ def run_clean_quality(
                 protected_generations=request.protected_generations,
             ),
         )
+        return replace(outcome, dropped_selectors=dropped_selectors)
     finally:
         if registry is not None and admitted.owner is not None:
             release_dagger_authority(admitted, registry=registry)
@@ -259,15 +264,16 @@ def _executor_command(
     *,
     executor_resolver: ExecutorResolver | None,
     authority: AdmittedDaggerAuthority,
-) -> tuple[dict[str, str], list[str]]:
+) -> tuple[dict[str, str], list[str], tuple[str, ...]]:
+    env = dict(authority.environment)
     try:
-        native = native_path_environment(os.environ)
-        env = authority_environment(authority.snapshot, base=native)
         executable = (
             executor_resolver(env)
             if executor_resolver is not None
             else _resolve_executor(execution.executor.executable, env)
         )
+    except DaggerRuntimeAuthorityError:
+        raise
     except (OSError, RuntimeError, ValueError) as error:
         raise _executor_prerequisite_failure(execution) from error
     executor = execution.executor.model_copy(update={"executable": executable})
@@ -285,7 +291,7 @@ def _executor_command(
             else None,
         ),
     )
-    return env, list(command)
+    return env, list(command), authority.dropped_selectors
 
 
 def _publish_executor_outcome(
