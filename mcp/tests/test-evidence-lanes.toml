@@ -117,6 +117,7 @@ unit-regression = [
   "mcp/tests/test_closeout_review_fact.py",
   "mcp/tests/test_code_certification_execution.py",
   "mcp/tests/test_code_quality_check_scope.py",
+  "mcp/tests/test_code_quality_dashboard_lint_scope.py",
   "mcp/tests/test_code_quality_targeted.py",
   "mcp/tests/test_collaboration_reference_pointers.py",
   "mcp/tests/test_compact_content.py",

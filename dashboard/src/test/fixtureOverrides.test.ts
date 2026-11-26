@@ -1,4 +1,4 @@
-import ts from 'typescript';
+import ts from 'typescript-compiler-api';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 

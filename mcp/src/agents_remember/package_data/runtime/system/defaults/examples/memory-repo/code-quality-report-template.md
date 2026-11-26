@@ -34,7 +34,7 @@ The same test applies to every row you add — if a tool cannot fail, do not giv
 it a result that says it did not.
 
 Adjust this table for the project. For example, a TypeScript project might use
-ESLint, TypeScript, Vitest, Playwright, and bundle checks instead of the Python
+oxlint, TypeScript, Vitest, Playwright, and bundle checks instead of the Python
 tools listed above.
 
 ## Findings

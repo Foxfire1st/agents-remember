@@ -192,8 +192,8 @@ environment variable `AR_DASHBOARD_API` names another address.
 | Command | What it runs |
 | --- | --- |
 | `npm --prefix dashboard test` | The Vitest unit and component tests. |
-| `npm --prefix dashboard run lint` | ESLint. |
-| `npm --prefix dashboard run typecheck` | The TypeScript compiler. |
+| `npm --prefix dashboard run lint` | oxlint. |
+| `npm --prefix dashboard run typecheck` | The TypeScript 7 compiler (`tsc -b`). |
 | `npm --prefix dashboard run codegen` | Panda's code generation, which the type check needs. |
 | `npm --prefix dashboard run e2e` | The Playwright tests. |
 
@@ -332,9 +332,8 @@ The Python checks cover every Python file that Git tracks (`git ls-files '*.py'`
 (falling back to native defaults elsewhere). Hook scope banners emit in one Python invocation.
 After generated-copy checks pass, the Python rail (Ruff, `ruff format --check`, Pyright with
 wrapper update notices silenced, and the test catalogs) and the dashboard rail (Panda codegen,
-ESLint with a gitignored content-hashed `dashboard/.eslintcache`, and incremental `tsc -b` with
-gitignored `*.tsbuildinfo`) run concurrently and print their buffered output in fixed order
-(Python, then dashboard); either rail failing fails the hook.
+oxlint, and incremental `tsc -b` with gitignored `*.tsbuildinfo`) run concurrently and print their
+buffered output in fixed order (Python, then dashboard); either rail failing fails the hook.
 
 The pre-push hook passes on the list of pushed refs that Git gives it, for the report only. It
 stages nothing, stashes nothing and does not claim to have checked the pushed commits.

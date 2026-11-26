@@ -98,10 +98,45 @@ if (typeof Element !== "undefined" && typeof Element.prototype.scrollIntoView !=
 }
 
 // jsdom 25 omits CSS.escape; React Aria calls it when building attribute selectors for
-// meta-tag and collection lookups. Escape non-identifier characters for selector safety.
+// meta-tag and collection lookups. Follow the CSSOM identifier serialization rules so
+// leading digits, hyphen-followed-by-digit, standalone hyphen, and control characters
+// produce valid CSS selectors.
 if (typeof globalThis.CSS === "undefined" || typeof globalThis.CSS.escape !== "function") {
-  const escapeCssIdent = (value: string): string =>
-    String(value).replace(/([^\w-])/g, "\\$1");
+  const escapeCssIdent = (value: string): string => {
+    const str = String(value);
+    const { length } = str;
+    let result = "";
+    const firstCodeUnit = length > 0 ? str.charCodeAt(0) : -1;
+    for (let index = 0; index < length; index += 1) {
+      const codeUnit = str.charCodeAt(index);
+      if (codeUnit === 0x0000) {
+        result += "\uFFFD";
+        continue;
+      }
+      const isControl = (codeUnit >= 0x0001 && codeUnit <= 0x001f) || codeUnit === 0x007f;
+      const isDigit = codeUnit >= 0x0030 && codeUnit <= 0x0039;
+      if (
+        isControl ||
+        (index === 0 && isDigit) ||
+        (index === 1 && isDigit && firstCodeUnit === 0x002d)
+      ) {
+        result += `\\${codeUnit.toString(16)} `;
+        continue;
+      }
+      if (index === 0 && length === 1 && codeUnit === 0x002d) {
+        result += "\\-";
+        continue;
+      }
+      const isAsciiAlpha =
+        (codeUnit >= 0x0041 && codeUnit <= 0x005a) || (codeUnit >= 0x0061 && codeUnit <= 0x007a);
+      if (codeUnit >= 0x0080 || codeUnit === 0x002d || codeUnit === 0x005f || isDigit || isAsciiAlpha) {
+        result += str.charAt(index);
+        continue;
+      }
+      result += `\\${str.charAt(index)}`;
+    }
+    return result;
+  };
   globalThis.CSS = {
     ...(globalThis.CSS ?? {}),
     escape: escapeCssIdent,
