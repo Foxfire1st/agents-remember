@@ -17,6 +17,8 @@ from agents_remember.cli import role_launch_receipts as receipts
 from agents_remember.models.role_agents import RoleStartSetCall
 from agents_remember.serving import _app_lifespan
 from agents_remember.serving.projections import host_activity
+from agents_remember.tasks import write_task_doc
+from agents_remember.tasks.document import SubTaskRef
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from paseo_role_tools_test_support import ARCHIVED_AT, RoleToolsTestCase, binding, selection_of
 from test_native_retire import retire
@@ -26,6 +28,13 @@ LIMIT = {"limitedUntil": "2099-01-01T00:00:00Z", "detail": "test provider limit"
 
 
 class ClosedHeldStoreTests(RoleToolsTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        master = self.master.document.model_copy(
+            update={"subTasks": [SubTaskRef(number="01_LEAF", name="Leaf", file="01_leaf.json")]}
+        )
+        write_task_doc(self.master.path.parent, master)
+
     def _worker(self):
         manager = binding("manager")
         worker = self.start(manager, "worker")["agentId"]

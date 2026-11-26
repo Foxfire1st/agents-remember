@@ -32,7 +32,7 @@ Architect, Orchestrator, Manager: After a start with overrides, immediately chec
 
 Architect, Orchestrator, Manager, Worker, Investigator, Reviewer, Curator: During provider degradation, continue valid native reads and report blockers. Start no providers. Leave state changes to the owning Worker under explicit authorization.
 
-Architect, Orchestrator, Manager: The agent that started a seat retires the agent in it with `retire_child`; the tool refuses any other caller.
+Architect, Orchestrator, Manager: Use `retire_child` on other seats. Architects cover all scopes. Managers cover their master and leaves. Orchestrators cover their sprint, masters and leaves.
 
 ## Questions, decisions and scope
 

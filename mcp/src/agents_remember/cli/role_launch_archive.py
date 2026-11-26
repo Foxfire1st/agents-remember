@@ -31,6 +31,7 @@ from agents_remember.cli.role_launch_receipts import (
     _write_receipt,
     read_enumerated_receipt,
 )
+from agents_remember.cli.role_retirement_receipt import Retirement, settle_retirement
 from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.controlplane.held_store_layout import _read_store_file, product_held_dir
 from agents_remember.errors import AuthorityError
@@ -43,6 +44,10 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 ARCHIVE_BUDGET_SECONDS = 8.0
 ARCHIVE_CALL_SECONDS = 2.0
+
+_TASK_FINISHED_RETIREMENT = Retirement(
+    "LeafAgentArchive", None, "task finished", "Retired because the leaf task finished."
+)
 
 
 def receipt_paths(directory: Path) -> Iterator[Path]:
@@ -176,6 +181,8 @@ def refuse_retired_start(
         else:
             current.pop("pendingArchiveAgentId", None)
         _write_receipt(path, current, archive_update=True)
+        if not own_owed:
+            return settle_retirement(path, current, _TASK_FINISHED_RETIREMENT).receipt
         return current
 
 
@@ -330,6 +337,7 @@ class ArchiveAttempt:
         if prior.get("state") == "archived" or (
             prior.get("state") == "gone" and not pending_creation
         ):
+            self._record_retired_target(path, receipt, agent_id)
             key = "alreadyArchived" if prior["state"] == "archived" else "gone"
             self.report[key].append(row)
             return debt_head
@@ -343,6 +351,8 @@ class ArchiveAttempt:
             debt_head = debt_head or agent_id
         outcomes[agent_id] = {**outcome, "at": _now_iso()}
         self._save(path, receipt, outcomes, pending=debt_head)
+        if outcome["state"] in {"archived", "gone"}:
+            self._record_retired_target(path, receipt, agent_id)
         key = "alreadyArchived" if outcome.get("alreadyArchived") else outcome["state"]
         self.report[key].append({**row, **outcome})
         return debt_head
@@ -378,6 +388,33 @@ class ArchiveAttempt:
         except PaseoBridgeFailure as error:
             return AgentReading(reachable=False, unreachable_reason=str(error))
         return _reading(reply, agent_id)
+
+    def _record_retired_target(self, path: Path, receipt: dict[str, Any], agent_id: str) -> None:
+        try:
+            if receipt["agentId"] != agent_id:
+                predecessor = receipt.get("predecessorReports")
+                predecessor_id = _uuid(
+                    predecessor.get("requestId") if isinstance(predecessor, dict) else None
+                )
+                if predecessor_id is None:
+                    return
+                history = path.parent if path.parent.name == "history" else path.parent / "history"
+                path = history / f"{predecessor_id}.json"
+                require_within_coordination(self.config, str(path), "launch receipt")
+                predecessor_receipt = _read_receipt(path)
+                if (
+                    predecessor_receipt is None
+                    or leaf_receipt_ref(predecessor_receipt) != self.task_ref
+                ):
+                    return
+                receipt = predecessor_receipt
+            if receipt["agentId"] == agent_id:
+                settle_retirement(path, receipt, _TASK_FINISHED_RETIREMENT)
+        except (OSError, ValueError, HTTPException) as error:
+            reason = str(error.detail) if isinstance(error, HTTPException) else str(error)
+            self.report["leftAlone"].append(
+                {"recordPath": str(path), "reason": f"Retirement could not be recorded: {reason}."}
+            )
 
     def _save(
         self, path: Path, receipt: dict[str, Any], outcomes: dict[str, Any], *, pending: str | None

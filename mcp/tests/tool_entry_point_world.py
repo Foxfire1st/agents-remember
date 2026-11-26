@@ -690,7 +690,11 @@ class EntryPointWorld:
             "context_packet": {"repo_id": REPO},
             "read_ar_files": {"repo_id": REPO, "files": [{"path": "not-covered.md"}]},
             "runtime_install": {"dry_run": True, "install_provider_deps": False},
-            "retire_child": {"task_document_ref": self.task_ref, "role": "worker"},
+            "retire_child": {
+                "agent_id": "00000000-0000-4000-8000-000000000002",
+                "task_document_ref": self.leaf_ref,
+                "role": "worker",
+            },
             "user_settings_init": {"target": "host-authority", "dry_run": True},
             "memory_quality_check": {
                 "request": {"mode": "sync", "repo_id": REPO, "contract_path": contract}

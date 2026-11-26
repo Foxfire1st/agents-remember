@@ -276,15 +276,13 @@ def _start_role(
     except (ValidationError, ValueError) as error:
         raise _launch_refused(f"The start request is not valid: {error}") from error
     if binding is None:
-        # MIK-R113 rule 6: no parent, so no replacement: only the agent that
-        # started a seat, or the launcher, may replace its holder. The
-        # parentless table itself is checked by the dispatch endpoint, through
-        # the same table as the dashboard's start.
+        # The shared dispatch table admits parentless starts. Replacing a seat
+        # requires a bound caller with scope over it or the dashboard launcher.
         if call.replaces_agent_id is not None:
             raise _Refused(
                 "role-may-not-start-role",
-                "A chat without a role may start an agent but may not replace the holder "
-                "of a seat; only the agent that started the seat, or the launcher, may.",
+                "A chat without a role may not replace the holder of a seat. "
+                "Use a role agent with scope over the seat or the dashboard launcher.",
                 "Start again without a replacement, or replace the holder from the dashboard.",
             )
         starter = None

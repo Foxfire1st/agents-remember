@@ -13,7 +13,6 @@ import stat
 import tempfile
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +23,7 @@ from agents_remember.application.role_launch_context import (
     RoleLaunchContext,
     selection_binding,
 )
+from agents_remember.cli import role_receipt_files
 from agents_remember.cli.investigator_receipts import (
     investigator_receipt_path,
     investigator_receipts,
@@ -33,7 +33,7 @@ from agents_remember.cli.message_binding_files import (
     message_binding_projection_bytes,
     message_binding_projection_matches,
 )
-from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, LaunchOutcome, run_launch_call
+from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, run_launch_call
 from agents_remember.cli.role_activity import publish_receipt_role_agent
 from agents_remember.cli.role_handover_restore import HandoverFileRefusal, restore_launch_files
 from agents_remember.cli.role_held_store import (
@@ -49,6 +49,9 @@ from agents_remember.cli.role_launch_choices import (
 )
 from agents_remember.cli.role_launch_outcome import publish_launch_outcome
 from agents_remember.cli.role_receipt_files import (
+    RECEIPT_SCHEMA as RECEIPT_SCHEMA,  # noqa: PLC0414 - receipt caller surface
+)
+from agents_remember.cli.role_receipt_files import (
     _archive_receipt as _archive_receipt,  # noqa: PLC0414 - receipt caller surface
 )
 from agents_remember.cli.role_receipt_files import (
@@ -58,9 +61,22 @@ from agents_remember.cli.role_receipt_files import (
     _leaf_before_create,
     _predecessor_held_ref,
     _require_live_launch_scope,
-    _write_receipt_aside,
+)
+from agents_remember.cli.role_receipt_files import (
+    _now_iso as _now_iso,  # noqa: PLC0414 - receipt caller surface
+)
+from agents_remember.cli.role_receipt_files import (
+    _read_receipt as _read_receipt,  # noqa: PLC0414 - receipt caller surface
+)
+from agents_remember.cli.role_receipt_files import (
+    read_enumerated_receipt as read_enumerated_receipt,  # noqa: PLC0414 - receipt caller surface
 )
 from agents_remember.cli.role_receipt_listing import taskless_execution_receipts
+from agents_remember.cli.role_retirement_receipt import (
+    finish_replacing_predecessor,
+    preserve_retirement,
+    replacement_request_of,
+)
 from agents_remember.cli.role_step_up_decisions import record_step_up
 from agents_remember.controlplane.held_store_discovery import (
     receipt_holder,
@@ -77,13 +93,18 @@ from agents_remember.models.role_launcher import (
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees.role_reports import (
     LEGACY_ROLE_REPORT_ALIAS,
-    RoleReportCollectionError,
-    close_execution_role_folders,
     collect_execution_reports,
 )
 
-# The schema name every receipt of this line carries; a file without it is not read as a receipt.
-RECEIPT_SCHEMA = "ar-role-execution/v1"
+__all__ = [
+    "RECEIPT_SCHEMA",
+    "_archive_receipt",
+    "_create_receipt",
+    "_now_iso",
+    "_read_receipt",
+    "read_enumerated_receipt",
+]
+
 # The link in a leaf's enclosure group folder through which its agents reach the task's reports.
 REPORT_ACCESS_LINK = LEGACY_ROLE_REPORT_ALIAS
 
@@ -168,13 +189,13 @@ def _run_prepared_launch(
         )
     else:
         outcome = run_launch_call(config, launch_call)
-    if prior is not None and outcome.predecessor_settled:
-        settle_held_store(prior, host_state="archived")
     with exclusive_file_lock(path, "role execution receipt"):
         current = _same_request_receipt(path, current)
-        _settle_predecessor_reports(current, outcome)
+        settled = finish_replacing_predecessor(path, current, launch_call, outcome)
+        if prior is not None and settled.predecessor_settled:
+            settle_held_store(prior, host_state="archived")
         if not _leaf_is_closing(current):
-            response = _publish_launch_outcome(path, current, launch_call, outcome)
+            response = publish_launch_outcome(path, current, launch_call, settled)
             record_step_up(config, current)
             return response
         if outcome.kind == "created":
@@ -258,24 +279,6 @@ def _refuse_closing_launch(
 
     refused = refuse_retired_start(config, path, receipt, creation_returned=creation_returned)
     return JSONResponse(_public_execution(refused), status_code=409)
-
-
-def _publish_launch_outcome(
-    path: Path, receipt: dict[str, Any], launch_call: dict[str, Any], outcome: LaunchOutcome
-) -> JSONResponse:
-    return publish_launch_outcome(path, receipt, launch_call, outcome)
-
-
-def _settle_predecessor_reports(receipt: dict[str, Any], outcome: LaunchOutcome) -> None:
-    predecessor = receipt.get("predecessorReports")
-    if outcome.predecessor_settled and isinstance(predecessor, dict):
-        receipt["predecessorSettled"] = True
-        try:
-            close_execution_role_folders(predecessor)
-        except RoleReportCollectionError as error:
-            # The host already answered: retain its actual result and the source folder,
-            # rather than misreporting a created agent as a pre-creation refusal.
-            receipt["predecessorCollectionError"] = str(error)
 
 
 def _lost_agent_advice(receipt: dict[str, Any], lost_agent_id: str) -> str:
@@ -777,69 +780,6 @@ def _public_instruction_fields(public: dict[str, Any]) -> dict[str, Any]:
     return public
 
 
-def _read_receipt(path: Path) -> dict[str, Any] | None:
-    try:
-        mode = path.lstat().st_mode
-    except FileNotFoundError:
-        return None
-    except OSError as error:
-        raise HTTPException(
-            status_code=409,
-            detail="The saved role execution receipt cannot be inspected; reconcile it before launching.",
-        ) from error
-    if not stat.S_ISREG(mode):
-        raise HTTPException(
-            status_code=409,
-            detail="The role execution receipt is not a regular file; refusing a new launch.",
-        )
-    try:
-        receipt = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        # Start can archive the receipt between inspection and an unlocked snapshot read.
-        return None
-    except (OSError, ValueError, RecursionError) as error:
-        # Bytes that are not UTF-8 or not JSON, a number too long to convert (all ValueError),
-        # and a nesting beyond the parser's depth are one answer: the record cannot be read.
-        raise HTTPException(
-            status_code=409,
-            detail="The role execution receipt is unreadable; reconcile it before launching.",
-        ) from error
-    if not isinstance(receipt, dict) or receipt.get("schema") != RECEIPT_SCHEMA:
-        raise HTTPException(
-            status_code=409,
-            detail="The role execution receipt is malformed; reconcile it before launching.",
-        )
-    return receipt
-
-
-def read_enumerated_receipt(path: Path) -> dict[str, Any] | None:
-    """One file met while enumerating a report folder that also holds other JSON documents.
-
-    Message attachments and other JSON documents are filed under the same report folders as
-    launch receipts, so an enumeration cannot assume every ``*.json`` there is one. A file whose
-    text parses as JSON but is not an object carrying this line's receipt schema is not a launch
-    record and answers ``None``. A file that cannot be read at all keeps the ordinary refusal: it
-    may be a receipt that was written part-way, and no seat may be retired over a guess.
-    """
-
-    try:
-        return _read_receipt(path)
-    except HTTPException:
-        if _names_another_document(path):
-            return None
-        raise
-
-
-def _names_another_document(path: Path) -> bool:
-    """Whether the file's JSON is something other than a receipt of this line."""
-
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, RecursionError):
-        return False
-    return not (isinstance(value, dict) and value.get("schema") == RECEIPT_SCHEMA)
-
-
 def _write_receipt(
     path: Path,
     receipt: dict[str, Any],
@@ -852,40 +792,34 @@ def _write_receipt(
         if current is None:
             raise HeldSeatClosed(str(receipt.get("agentId")), "receipt-moved")
         preserve_held_closure(current, receipt, prior_generation)
-        if (
-            current is not None
-            and current.get("requestId") == receipt.get("requestId")
-            and current.get("leafCreateEntered") is True
-            and prior_generation is None
-        ):
-            receipt["leafCreateEntered"] = True
-        if (
-            not archive_update
-            and current is not None
-            and current.get("requestId") == receipt.get("requestId")
-            and _leaf_is_closing(current)
-        ):
-            receipt["leafArchive"] = current["leafArchive"]
-            if "pendingArchiveAgentId" in current:
-                receipt["pendingArchiveAgentId"] = current["pendingArchiveAgentId"]
+        if current.get("requestId") == receipt.get("requestId"):
+            if current.get("leafCreateEntered") is True and prior_generation is None:
+                receipt["leafCreateEntered"] = True
+            if not archive_update and _leaf_is_closing(current):
+                _preserve_leaf_archive(current, receipt)
+            if prior_generation is None:
+                preserve_retirement(current, receipt)
+        role_receipt_files._replace_receipt_bytes(path, receipt)
+
+
+def _preserve_leaf_archive(current: dict[str, Any], receipt: dict[str, Any]) -> None:
+    receipt["leafArchive"] = current["leafArchive"]
+    if "pendingArchiveAgentId" in current:
+        receipt["pendingArchiveAgentId"] = current["pendingArchiveAgentId"]
+    else:
+        receipt.pop("pendingArchiveAgentId", None)
+    if current["leafArchive"].get("startRefused") is True:
+        for key in ("status", "detail", "replayRequest"):
+            if key in current:
+                receipt[key] = current[key]
             else:
-                receipt.pop("pendingArchiveAgentId", None)
-            if current["leafArchive"].get("startRefused") is True:
-                for key in ("status", "detail", "replayRequest"):
-                    if key in current:
-                        receipt[key] = current[key]
-                    else:
-                        receipt.pop(key, None)
-                receipt["canRevive"] = False
-        temporary = _write_receipt_aside(path, receipt)
-        try:
-            temporary.replace(path)
-        except BaseException:
-            temporary.unlink(missing_ok=True)
-            raise
+                receipt.pop(key, None)
+        receipt["canRevive"] = False
 
 
-def _archived_receipt_for_selection(path: Path, selection: RoleSelection) -> dict[str, Any] | None:
+def _archived_receipt_for_selection(
+    path: Path, selection: RoleDispatchRequest
+) -> dict[str, Any] | None:
     """The agent to archive when a task-bound selection has no receipt but an archived one.
 
     The newest receipt in the history that belongs to this selection names it, as
@@ -906,7 +840,14 @@ def _archived_receipt_for_selection(path: Path, selection: RoleSelection) -> dic
             archived.append(receipt)
     if not archived:
         return None
-    return max(archived, key=lambda row: str(row.get("createdAt", "")))
+    previous = max(archived, key=lambda row: str(row.get("createdAt", "")))
+    reserved = replacement_request_of(previous)
+    if reserved is not None and reserved != str(selection.request_id):
+        raise HTTPException(
+            status_code=409,
+            detail=f"This predecessor has an unfinished replacement. Retry start request {reserved}.",
+        )
+    return previous
 
 
 def _refuse_reused_request_id(
@@ -963,7 +904,3 @@ def _discard_message_binding_projection(config: McpRuntimeConfig, request_id: uu
     """Remove the binding file of a request that was refused after the file was written."""
 
     message_binding_projection_path(config, request_id).unlink(missing_ok=True)
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()

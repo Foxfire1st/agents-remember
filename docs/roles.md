@@ -25,7 +25,7 @@ The product has eight roles. A role agent holds exactly one of them.
 | Worker | Builds one task in the task's code worktree and writes one report. | one task |
 | Reviewer | Reviews one task against its requirement and records a verdict with its findings. It reviews the code change and the memory change. | one task |
 | Curator | Brings the memory of the code repository in line with the reviewed code change of one task. | one task |
-| Investigator | Looks into one question that belongs to no task and writes one report. It changes no code, no memory and no task document. | no task document, one sprint, or one sprint and one of its masters |
+| Investigator | Looks into one question that belongs to no task and writes one report. It changes no code, no memory and no task document. | no task document, one sprint, one standalone master, or one sprint and one of its masters |
 | Bootstrap | Sets up one code repository for a new user. It is the role of the first run. | no task document |
 
 Two names stand beside the roles:
@@ -416,11 +416,9 @@ status `waiting for subagents` or `waiting for background`.
 
 ## Close a role agent
 
-- The role agent that started a Worker, a Reviewer or a Curator closes it with `retire_child`. The
-  call names the task document, the role and a reason. The host archives the role agent without
-  giving it a turn; a role agent in a running turn is archived only with `interrupt_turn`.
+- Use [`retire_child`](tool-details.md#retire_child) to close any other role agent within the caller's
+  scope. Open child seats must be retired first.
 - A message to an archived role agent is refused.
-- When the worktree of a task is finalized, cleaned up or abandoned, the product archives the role
-  agents of that task on the host.
-- The dashboard has no control that closes a role agent. Its role launcher resumes a closed
-  role agent with "Revive"; see [Dashboard](dashboard.md).
+- When a leaf is finalized, cleaned up or abandoned, the product archives its leaf role agents.
+- When the developer archives an agent in Paseo, AR records its retirement on the next host-state
+  refresh. The AR dashboard offers "Revive" for closed role agents. See [Dashboard](dashboard.md).
