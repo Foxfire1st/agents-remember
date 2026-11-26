@@ -48,6 +48,7 @@ RecordKind = Literal[
 ]
 EntryKind = Literal["realization", "proof"]
 RowKind = Literal["history_row"]
+DeferralKind = Literal["deferral"]
 
 # The one table of record kinds: kind -> (ID prefix, directory under ``knowledge/``, schema name).
 RECORD_PREFIXES: Final[Mapping[RecordKind, str]] = {
@@ -67,6 +68,7 @@ RECORD_PREFIXES: Final[Mapping[RecordKind, str]] = {
 ENTRY_PREFIXES: Final[Mapping[EntryKind, str]] = {"realization": "RLZ", "proof": "PRF"}
 # A history row's ID (MIK-R07 rule 1): minted by the writer like every other ID, never derived.
 ROW_PREFIXES: Final[Mapping[RowKind, str]] = {"history_row": "ROW"}
+DEFERRAL_PREFIXES: Final[Mapping[DeferralKind, str]] = {"deferral": "DFR"}
 
 _BODY: Final = f"[{CROCKFORD_ALPHABET}]{{{MINTED_BODY_LENGTH}}}(?:[{CROCKFORD_ALPHABET}]{{2}})?"
 
@@ -82,19 +84,25 @@ REALIZATION_ID_PATTERN: Final = id_pattern(ENTRY_PREFIXES["realization"])
 PROOF_ID_PATTERN: Final = id_pattern(ENTRY_PREFIXES["proof"])
 ENTRY_ID_PATTERN: Final = id_pattern(*ENTRY_PREFIXES.values())
 ROW_ID_PATTERN: Final = id_pattern(ROW_PREFIXES["history_row"])
+DEFERRAL_ID_PATTERN: Final = id_pattern(DEFERRAL_PREFIXES["deferral"])
 
 
-_ALL_PREFIXES: Final[Mapping[str, str]] = {**RECORD_PREFIXES, **ENTRY_PREFIXES, **ROW_PREFIXES}
+_ALL_PREFIXES: Final[Mapping[str, str]] = {
+    **RECORD_PREFIXES,
+    **ENTRY_PREFIXES,
+    **ROW_PREFIXES,
+    **DEFERRAL_PREFIXES,
+}
 
 
-def _prefix(kind: RecordKind | EntryKind | RowKind) -> str:
+def _prefix(kind: RecordKind | EntryKind | RowKind | DeferralKind) -> str:
     try:
         return _ALL_PREFIXES[kind]
     except KeyError:
         raise ValueError(f"unknown knowledge ID kind: {kind!r}") from None
 
 
-def mint_id(kind: RecordKind | EntryKind | RowKind) -> str:
+def mint_id(kind: RecordKind | EntryKind | RowKind | DeferralKind) -> str:
     """Mint a new random ID for ``kind``, for example ``INV-7K3F9Q``."""
 
     body = "".join(secrets.choice(CROCKFORD_ALPHABET) for _ in range(MINTED_BODY_LENGTH))

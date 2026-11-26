@@ -41,6 +41,11 @@ from agents_remember.application.knowledge_currentness.observe import (
     observe_entry,
     open_code_tree,
 )
+from agents_remember.application.knowledge_reader.deferrals import (
+    derive_deferrals,
+    infer_reading_leaf,
+    opened_code_files,
+)
 from agents_remember.application.knowledge_reader.selection import READ_FAILURES, ReaderSelection
 from agents_remember.application.knowledge_reader.weakness_closure import closure_document
 from agents_remember.kernel.git_command import (
@@ -54,6 +59,7 @@ from agents_remember.models.knowledge_files.records import (
     DependentRecord,
     WeaknessRecord,
 )
+from agents_remember.tasks.task_facts import TaskFact, load_task_facts
 
 PRODUCT_VERSION_FILE = "mcp/pyproject.toml"
 
@@ -61,6 +67,7 @@ __all__ = [
     "DEPENDENT_VIEW",
     "WEAKNESS_VIEW",
     "dependent_counts",
+    "dependent_detail",
     "dependent_list",
     "dependent_state",
     "open_weakness_counts",
@@ -199,7 +206,10 @@ def _dependents(selection: ReaderSelection) -> list[DependentRecord]:
 
 
 def dependent_state(
-    selection: ReaderSelection, record: DependentRecord
+    selection: ReaderSelection,
+    record: DependentRecord,
+    *,
+    code: Any = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     """``(state, moved links)`` for one dependent at the selection's code tree (rule 3)."""
 
@@ -210,7 +220,7 @@ def dependent_state(
     return dependent_movement(
         record,
         revision_of=revision_of,
-        code=open_code_tree(selection.code_tree),
+        code=open_code_tree(selection.code_tree) if code is None else code,
         tree=selection.code_tree,
     )
 
@@ -616,14 +626,33 @@ def dependent_list(
     """
 
     wanted = {stands_on} if stands_on is not None else set(code_path or ())
+    opened_code = open_code_tree(selection.code_tree)
+    code_files = opened_code_files(opened_code)
+    task_facts: dict[str, TaskFact] | None = None
+    current_leaf: str | None = None
+    leaf_resolved = False
     rows: list[dict[str, Any]] = []
     for record in _dependents(selection):
         if folder is not None and not record.document.startswith(f"{folder.rstrip('/')}/"):
             continue
         if wanted and not _stands_on_any(record, wanted):
             continue
-        state, moved = dependent_state(selection, record)
-        if stale_only and state != "stale":
+        base_state, moved = dependent_state(selection, record, code=opened_code)
+        if record.deferrals:
+            if task_facts is None:
+                task_facts = load_task_facts(selection.coordination_root)
+            if not leaf_resolved:
+                current_leaf = infer_reading_leaf(selection)
+                leaf_resolved = True
+        deferrals = derive_deferrals(
+            record,
+            code_files=code_files,
+            task_facts=task_facts or {},
+            current_leaf=current_leaf,
+        )
+        state = "deferred" if deferrals else base_state
+        # L52-R8: deferred documents stay visible in staleOnly reads under their own state.
+        if stale_only and state not in ("stale", "deferred"):
             continue
         row: dict[str, Any] = {
             "id": record.id,
@@ -632,10 +661,40 @@ def dependent_list(
             "confirmed": record.confirmed.to_document(),
             "revision": record.revision,
         }
+        if deferrals:
+            row["deferred"] = True
+            row["deferrals"] = deferrals
+            row["stalenessState"] = base_state
         if moved:
             row["movedLinks"] = moved
         rows.append(row)
     return rows
+
+
+def dependent_detail(selection: ReaderSelection, record: DependentRecord) -> dict[str, Any]:
+    """Derived state, open deferrals and moved links of one dependent for ``record_view``."""
+
+    opened_code = open_code_tree(selection.code_tree)
+    base_state, moved = dependent_state(selection, record, code=opened_code)
+    task_facts = load_task_facts(selection.coordination_root) if record.deferrals else {}
+    current_leaf = infer_reading_leaf(selection) if record.deferrals else None
+    deferrals = derive_deferrals(
+        record,
+        code_files=opened_code_files(opened_code),
+        task_facts=task_facts,
+        current_leaf=current_leaf,
+    )
+    detail: dict[str, Any] = {
+        "document": record.document,
+        "state": "deferred" if deferrals else base_state,
+        "deferred": bool(deferrals),
+    }
+    if deferrals:
+        detail["deferrals"] = deferrals
+        detail["stalenessState"] = base_state
+    if moved:
+        detail["movedLinks"] = moved
+    return detail
 
 
 def _stands_on_any(record: DependentRecord, paths: set[str]) -> bool:
@@ -677,6 +736,8 @@ def dependent_state_at(selection: ReaderSelection, record_id: str) -> str | None
         record = DependentRecord.model_validate(found.document)
     except ValidationError:
         return "unverifiable"
+    if record.deferrals:
+        return "deferred"
     try:
         state, _moved = dependent_state(selection, record)
     except (*READ_FAILURES, ValueError) as error:

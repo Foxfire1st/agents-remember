@@ -74,7 +74,7 @@ For a leaf:
 
 Every handover names the leaf, exact object, report or verdict path, and whole next stretch. Identify a code candidate by the head and change hash in the Worker's report, or identify the exact memory change. Use the sibling role and exact leaf task references from the handover, preserving product-supplied identifiers whole and unchanged.
 
-The Worker's message names the freeze and report. Its factual handover neither briefs nor limits the review. The Reviewer does not read the Worker's chat.
+The Worker's factual freeze-and-report handover neither briefs nor limits the review; the Reviewer does not read the Worker's chat.
 
 For a cleanly synced leaf, expect no new freeze and open no round. The Worker reruns focused tests. Before routine closeout, the Manager gets the Curator’s read for a changed pair. If paths overlap or tests fail, review exactly the repair.
 
@@ -125,6 +125,8 @@ Manager notices beyond those two concern only authority, ownership, recovery, be
 
 <!-- ar:roles reviewer -->
 Before answering a Curator code finding, read [Curation failure handling](curation.md#failure-handling) for the Curator's evidenced concern and the Reviewer's recorded finding or explained rejection. Send your answer directly to the Curator and Worker.
+
+In memory verdicts, sign each flagged pre-base-stale dependent confirmation and `deferral_lifted` row per `OM-6` in `criteria/onboarding-memory.md`, attach base and candidate `knowledge_read` (`view="dependent"`, `staleOnly=true`) receipts from `agents-remember-task`, and block if any lacks a holding whole-document check or confirms a deferred document unedited.
 
 States built by hand to defeat a check — forged or copied stamps, files rewound by Git while their history stays, edited histories, clones the product never makes — get no finding and no guard.
 

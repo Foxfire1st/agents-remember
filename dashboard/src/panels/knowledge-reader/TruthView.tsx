@@ -4,6 +4,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { css } from '../../../styled-system/css';
 import type {
+  DependentDeferralView,
+  DependentPartView,
   LinkTarget,
   RecordViewAnswer,
   StatesHeader,
@@ -48,6 +50,7 @@ const LEAD: Record<string, string> = {
   scenario: 'situation',
   diagnostic: 'condition',
   term: 'definition',
+  dependent: 'document',
 };
 const ORDER: Record<string, string[]> = {
   invariant: ['applicability', 'conditions', 'exclusions'],
@@ -60,6 +63,7 @@ const ORDER: Record<string, string[]> = {
   scenario: ['given', 'when', 'then'],
   diagnostic: ['signals', 'interpretation', 'action'],
   term: ['term', 'scope'],
+  dependent: ['confirmed', 'stands_on'],
 };
 const FRAME = new Set([
   'schema',
@@ -74,7 +78,13 @@ const FRAME = new Set([
   'members',
   'routes',
   'supersedes',
+  'deferrals',
 ]);
+const DEFERRAL_TONE: Record<DependentDeferralView['state'], string> = {
+  open: css({ color: 'muted' }),
+  due: css({ color: 'amber' }),
+  orphaned: css({ color: 'alarm' }),
+};
 
 function show(value: unknown): string {
   if (value === null || value === undefined) return '—';
@@ -167,7 +177,7 @@ function TruthHeader({ answer }: { answer: RecordViewAnswer }) {
   return (
     <h2 className={heading}>
       {record.kind} {record.id}
-      <StateBadge state={answer.invariant?.state} testid="record-state" />
+      <StateBadge state={answer.invariant?.state ?? answer.dependent?.state} testid="record-state" />
       {status ? (
         <span className={muted} data-testid="record-status">
           {' '}
@@ -295,6 +305,7 @@ export function TruthView({ answer }: { answer: RecordViewAnswer }) {
           <DecisionCard decision={answer.decision} detailsOnly />
         </Section>
       ) : null}
+      {answer.dependent ? <DependentPart part={answer.dependent} /> : null}
       <OutgoingSection answer={answer} />
       <IncomingSection answer={answer} />
       <TimelineSection key={record.id} initial={answer} />
@@ -426,6 +437,87 @@ function FamilyPart({ part }: { part: NonNullable<RecordViewAnswer['family']> })
                     <EntryRow key={entry.id} entry={entry} showInvariant />
                   ))}
                 </ul>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+    </>
+  );
+}
+
+function DeferralConditionRow({ condition }: { condition: DependentDeferralView['condition'] }) {
+  return (
+    <div className={muted} data-testid="deferral-condition">
+      condition:
+      {condition.task ? <span> task {condition.task}</span> : null}
+      {condition.file ? (
+        <span>
+          {condition.task ? ' · ' : ' '}file <PathLink path={condition.file} />
+        </span>
+      ) : null}
+      {condition.note ? (
+        <span>
+          {condition.task || condition.file ? ' · ' : ' '}
+          {condition.note}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function DependentPart({ part }: { part: DependentPartView }) {
+  const deferrals = part.deferrals ?? [];
+  const movedLinks = part.movedLinks ?? [];
+  return (
+    <>
+      {deferrals.length ? (
+        <Section title={`Deferrals (${deferrals.length})`} testid="dependent-deferrals">
+          <ul className={list}>
+            {deferrals.map((deferral) => (
+              <li
+                key={deferral.id}
+                className={card}
+                data-testid="dependent-deferral"
+                data-deferral={deferral.id}
+                data-state={deferral.state}
+              >
+                <div>
+                  <strong>{deferral.id}</strong>
+                  <span className={DEFERRAL_TONE[deferral.state]}>
+                    <StateBadge state={deferral.state} testid="deferral-state" />
+                  </span>
+                  <span className={muted}>
+                    {' '}
+                    · {deferral.owner} · {deferral.age}
+                  </span>
+                </div>
+                <div>{deferral.passage}</div>
+                <div className={muted}>reason: {deferral.reason}</div>
+                <DeferralConditionRow condition={deferral.condition} />
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      {movedLinks.length ? (
+        <Section title={`Moved links (${movedLinks.length})`} testid="dependent-moved-links">
+          <ul className={list}>
+            {movedLinks.map((link, index) => (
+              <li key={index} className={card} data-testid="dependent-moved-link">
+                <div>
+                  <span className={muted}>
+                    {link.kind ?? 'link'}
+                    {link.position !== undefined ? ` #${link.position}` : ''}
+                  </span>
+                  <StateBadge state={link.state} />{' '}
+                  {link.path ? (
+                    <PathLink path={link.path} />
+                  ) : link.id ? (
+                    <RecordLink summary={{ id: link.id }} />
+                  ) : null}
+                </div>
+                {link.reason ? <div className={muted}>{link.reason}</div> : null}
               </li>
             ))}
           </ul>

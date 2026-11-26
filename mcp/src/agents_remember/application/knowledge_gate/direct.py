@@ -321,6 +321,8 @@ def _verdict(
         validation_bases=(head,),
         base_code_commit=published or code_commit,
         cache_directory=default_base_cache_directory(contract.coordination_root),
+        coordination_root=contract.coordination_root,
+        repo_name=contract.repo_name,
     )
     result = judge(document, None, trees, owner)
     return DirectGateVerdict(True, owner, result.refusal())

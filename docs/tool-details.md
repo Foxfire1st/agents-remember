@@ -386,10 +386,14 @@ The checklist lists them as information, not as a gate. An item of the
 each path it names, the [families](concepts.md#family) whose [routes](concepts.md#route) the path
 lies under, each with its `id`, `title` and `routes`.
 
-A check on a task also reports two findings that refuse nothing and do not count as actionable:
-`landing-cut-card` for a card that lost text against the task's memory base (at least 8 lines
-removed, and more than twice the lines it adds), and `landing-added-file` for a file that the
-task adds outside the knowledge folders.
+A check on a task also reports non-blocking findings that refuse nothing and do not count as actionable
+(`reportOnlyFindings`): `landing-cut-card` for a card that lost text against the task's memory base
+(at least 8 lines removed, and more than twice the lines it adds), `landing-added-file` for a file
+that the task adds outside the knowledge folders, and four `dependent_flags` findings:
+`pre_base_stale_confirmation` (a dependent confirmed without editing its document while already stale at
+the leaf's base), `deferral_lifted` (a lifted deferral in the leaf's history), `deferral_orphaned` (an
+open deferral targeting a terminal task), and `deferral_due_warning` (an open deferral whose watched file
+changed before the leaf's base without this leaf editing it).
 
 The synchronous check uses Git's tracked and non-ignored untracked
 source files. Its `sourceFiles` listing counts the files it lists (`listedCount`), the files it

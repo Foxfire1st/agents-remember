@@ -148,6 +148,8 @@ class ReaderSelection:
     """A held working-tree capture, alive until this selection is closed."""
     coordination_root: Path | None = None
     """The task plane whose requirement owner resolves record links, when available."""
+    leaf_id: str | None = None
+    """The leaf task ID when opened directly as a ``leaf:<scope>`` selection."""
 
     def close(self) -> None:
         self.index.close()
@@ -257,21 +259,27 @@ def _leaf_selection(
     scope_id = spelled[len(LEAF_PREFIX) :]
     if not scope_id or scope_id == "mainline":
         return ReaderUnavailable("invalid-request", "a leaf selection names its scope")
-    if spelled not in {leaf["commit"] for leaf in _leaves(config, repository_id)}:
+    matched = next(
+        (leaf for leaf in _leaves(config, repository_id) if leaf["commit"] == spelled), None
+    )
+    if matched is None:
         return ReaderUnavailable(
             "unavailable", f"no active enclosure of {repository_id} has the scope {scope_id}"
         )
     scope = resolve_scope(config, repository_id, scope_id)
-    return _directory_selection(config, repository_id, spelled, scope, kind="leaf")
+    raw_leaf = matched.get("leafId")
+    leaf_id = raw_leaf if isinstance(raw_leaf, str) and raw_leaf.strip() else None
+    return _directory_selection(config, repository_id, spelled, scope, kind="leaf", leaf_id=leaf_id)
 
 
-def _directory_selection(
+def _directory_selection(  # noqa: PLR0913 - selection identity, scope, and optional leaf id
     config: McpRuntimeConfig,
     repository_id: str,
     spelled: str,
     scope: FileScope,
     *,
     kind: SelectionKind = "published",
+    leaf_id: str | None = None,
 ) -> ReaderSelection | ReaderUnavailable:
     memory_root = scope.memory_root
     if memory_root is None:
@@ -312,6 +320,7 @@ def _directory_selection(
         code_state=code_state,
         code_capture=capture,
         coordination_root=config.coordination_root,
+        leaf_id=leaf_id,
     )
 
 

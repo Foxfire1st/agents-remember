@@ -144,6 +144,8 @@ unit-regression = [
   "mcp/tests/test_dashboard_build_currentness.py",
   "mcp/tests/test_dashboard_host.py",
   "mcp/tests/test_definition_scope.py",
+  "mcp/tests/test_dependent_deferrals.py",
+  "mcp/tests/test_dependent_deferrals_gate_and_replay.py",
   "mcp/tests/test_dependent_version_only_change.py",
   "mcp/tests/test_developer_messages.py",
   "mcp/tests/test_developer_question_wording.py",

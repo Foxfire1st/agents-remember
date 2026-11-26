@@ -73,6 +73,7 @@ _ROW_KEYS: Final = frozenset(
         "considered",
         "ref",
         "repoint",
+        "deferralIds",
     }
 )
 # The architect's ruling (L21 review, finding 6): the template's ``incidental`` has no spelling in the
@@ -313,6 +314,8 @@ class RowRequest:
     """A planned row's ``ref`` (MIK-R11 rule 5)."""
     repoint: tuple[RepointRequest, ...] = ()
     """The fired links a ``still_rejected`` row re-points, where the code they name now lives."""
+    deferral_ids: list[str] | None = None
+    """Deferral IDs (``DFR-...``) referenced by a dependent record history row."""
 
 
 @dataclass(frozen=True)
@@ -891,6 +894,19 @@ def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:
         if (cover := _cover(one, f"{where}.covers[{index}]", problems)) is not None
     ]
     because = raw.get("because") or []
+    deferral_ids_raw = raw.get("deferralIds")
+    deferral_ids: list[str] | None = None
+    if deferral_ids_raw is not None:
+        if (
+            not isinstance(deferral_ids_raw, list)
+            or not deferral_ids_raw
+            or not all(isinstance(one, str) and one.strip() for one in deferral_ids_raw)
+        ):
+            problems.append(
+                Problem(where, "'deferralIds' is a non-empty list of deferral IDs (DFR-...)")
+            )
+        else:
+            deferral_ids = list(deferral_ids_raw)
     items, refusals = read_row_items(raw.get("items"))
     problems.extend(Problem(f"{where} ({subject})", refusal) for refusal in refusals)
     return RowRequest(
@@ -907,4 +923,5 @@ def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:
         considered=_identifiers(raw.get("considered")),
         ref=raw["ref"] if isinstance(raw.get("ref"), Mapping) else None,
         repoint=_repoints(raw.get("repoint"), f"{where} ({subject})", problems),
+        deferral_ids=deferral_ids,
     )

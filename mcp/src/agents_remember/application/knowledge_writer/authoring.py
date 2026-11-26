@@ -37,6 +37,11 @@ from agents_remember.application.knowledge_writer.code_anchors import (
     AnchorResolutionError,
     CodeSnapshot,
 )
+from agents_remember.application.knowledge_writer.deferrals import (
+    DeferralRecordOps,
+    author_dependent,
+    verify_lifted_deferral_rows,
+)
 from agents_remember.application.knowledge_writer.entry_handles import (
     assign_entries,
     ordered_entries,
@@ -96,6 +101,7 @@ from agents_remember.models.knowledge_files.ids import (
 )
 from agents_remember.models.knowledge_files.records import schema_name
 from agents_remember.models.knowledge_files.writer_stamp import WriterStamp
+from agents_remember.tasks.task_facts import TaskFact
 
 DecisionResolver = Callable[[str], str | None]
 """The task owner's answer about one decision entry of the leaf's task document: ``None`` when it
@@ -183,8 +189,12 @@ class Authoring(RepointRowAuthoring):
     # The leaf's recorded memory base for a fresh card comparison.
     memory_base: str | None = None
     coordination_root: Path | None = None
+    repo_name: str | None = None
+    base_code_blobs: Mapping[str, str] | None = None
     # The stamp of this operation's caller, resolved once by the write's route.
     stamp: WriterStamp | None = None
+    _deferral_ops: dict[str, DeferralRecordOps] = field(default_factory=dict)
+    _task_facts: Mapping[str, TaskFact] | None = None
 
     # -- the operation ------------------------------------------------------------------------
 
@@ -207,6 +217,7 @@ class Authoring(RepointRowAuthoring):
             self._write_record(record, by_entry.get(record.entry or ""))
         if document.rows:
             self._write_rows(document.rows)
+        verify_lifted_deferral_rows(self)
         for record_id, pending in sorted(self._foreign_evidence.items()):
             for handoff_entry, _evidence in pending:
                 self.problem(
@@ -437,7 +448,7 @@ class Authoring(RepointRowAuthoring):
         if request.kind == "weakness":
             author_weakness(self, document, where, before)
         elif request.kind == "dependent":
-            self._confirm_dependent(document, record_id, where, fields)
+            author_dependent(self, document, where, before, fields)
         evidence = entry.evidence if entry is not None else ()
         document["origin"], stored = self._origin(
             before, request.handoff_entry, evidence, entry.replace_evidence if entry else False

@@ -60,7 +60,6 @@ from agents_remember.serving.capsule_delivery import capsule_delivery_from
 from agents_remember.worktrees.worktree_contract import load_contract
 from landing_report_test_support import (
     CURATOR_HANDOVER_HEADING,
-    CURATOR_SENTENCE_EQUIVALENTS,
     CURATOR_SENTENCES,
     REVIEWER_SENTENCES,
     SIDECAR,
@@ -74,6 +73,7 @@ from landing_report_test_support import (
     _rename_pair,
     _report,
     _reviewer_landing_roots,
+    curator_sentence_variants,
 )
 from test_worktree_support import git, init_repo
 
@@ -362,7 +362,7 @@ def _assert_curator_landing_text(text: str) -> None:
     assert _curator_landing_missing(text) == []
     for sentence in CURATOR_SENTENCES:
         mutant = text
-        for variant in (sentence, CURATOR_SENTENCE_EQUIVALENTS.get(sentence, sentence)):
+        for variant in curator_sentence_variants(sentence):
             pattern = re.escape(" ".join(variant.split())).replace(r"\ ", r"\s+")
             mutant = re.sub(pattern, "", mutant)
         assert mutant != text
@@ -371,7 +371,7 @@ def _assert_curator_landing_text(text: str) -> None:
     sentence = CURATOR_SENTENCES[0]
     no_handover = text.replace(CURATOR_HANDOVER_HEADING, "## Unrelated working step", 1)
     outside_handover = text
-    for variant in (sentence, CURATOR_SENTENCE_EQUIVALENTS.get(sentence, sentence)):
+    for variant in curator_sentence_variants(sentence):
         pattern = re.escape(" ".join(variant.split())).replace(r"\ ", r"\s+")
         outside_handover = re.sub(pattern, "", outside_handover)
     assert outside_handover != text
@@ -380,7 +380,7 @@ def _assert_curator_landing_text(text: str) -> None:
         assert mutant != text
         assert any(
             " ".join(variant.split()) in " ".join(mutant.split())
-            for variant in (sentence, CURATOR_SENTENCE_EQUIVALENTS.get(sentence, sentence))
+            for variant in curator_sentence_variants(sentence)
         )
         assert sentence in _curator_landing_missing(mutant)
 

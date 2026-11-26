@@ -137,6 +137,7 @@ class KnowledgeReadResponse(ToolResponse):
     family: dict[str, Any] | None = None
     decision: dict[str, Any] | None = None
     facet: dict[str, Any] | None = None
+    dependent: dict[str, Any] | None = None
     # MIK-R118 rule 6 and MIK-R124 rule 7: the `weakness` and `dependent` views answer rows of
     # those two record kinds, their counts, and -- when rows remain -- how to read on.
     rows: list[dict[str, Any]] | None = None

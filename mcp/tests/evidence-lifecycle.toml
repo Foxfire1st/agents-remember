@@ -256,6 +256,8 @@ consumers = [
   "mcp/tests/test_definition_scope_boundaries.py",
   "mcp/tests/test_dependency_facts_store.py",
   "mcp/tests/test_dependency_ownership_ast_helpers.py",
+  "mcp/tests/test_dependent_deferrals.py",
+  "mcp/tests/test_dependent_deferrals_gate_and_replay.py",
   "mcp/tests/test_dependent_version_only_change.py",
   "mcp/tests/test_developer_messages.py",
   "mcp/tests/test_developer_question_wording.py",
@@ -1380,6 +1382,25 @@ consumers = [
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
+]
+
+[[artifact]]
+path = "mcp/tests/dependent_deferrals_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mcp/tests/dependent_deferrals_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "real Git code/memory repositories and task-fact trees built under tmp_path for BUG-R52@v2 dependent-deferral tests"
+introduced_by = "261112-BUG-L52"
+lifetime = "permanent"
+permanence_rationale = "Both BUG-R52@v2 dependent-deferral test modules share one task-fact, writer, gate, reader, and MQC fixture builder."
+replacement_contract = "node:mcp/tests/test_dependent_deferrals.py::test_01_deferral_validation_refuses_invalid_inputs"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_dependent_deferrals.py",
+  "mcp/tests/test_dependent_deferrals_gate_and_replay.py",
 ]
 
 [[artifact]]
@@ -2739,6 +2760,8 @@ consumers = [
   "mcp/tests/test_definition_scope_boundaries.py",
   "mcp/tests/test_dependency_facts_store.py",
   "mcp/tests/test_dependency_ownership_ast_helpers.py",
+  "mcp/tests/test_dependent_deferrals.py",
+  "mcp/tests/test_dependent_deferrals_gate_and_replay.py",
   "mcp/tests/test_dependent_version_only_change.py",
   "mcp/tests/test_developer_messages.py",
   "mcp/tests/test_developer_question_wording.py",
@@ -4020,6 +4043,8 @@ consumers = [
   "mcp/tests/test_crossing_dependent_writer.py",
   "mcp/tests/test_crossing_history_interruption.py",
   "mcp/tests/test_crossing_knowledge_writer.py",
+  "mcp/tests/test_dependent_deferrals.py",
+  "mcp/tests/test_dependent_deferrals_gate_and_replay.py",
   "mcp/tests/test_family_history_judgments.py",
   "mcp/tests/test_fresh_repository_knowledge_path.py",
   "mcp/tests/test_generated_copy_worklist.py",
