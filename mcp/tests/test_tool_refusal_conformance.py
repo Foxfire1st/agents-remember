@@ -662,11 +662,11 @@ class FailurePathControlTests:
         """The predicate must be able to fail. Each axis is stripped from a REAL refusal."""
         refusal = {
             "ok": False,
-            "status": "provider-capability-unavailable",
-            "detail": "the grepai-memory provider is not configured",
+            "status": "closeout-gate-blocked",
+            "detail": "closeout review has not passed for the current tree",
             "nextStep": {
-                "summary": "arm the provider",
-                "nextTool": "provider_watchers",
+                "summary": "preview closeout blockers before retrying",
+                "nextTool": "worktree_closeout_preview",
             },
         }
         assert refusal_axes(refusal) == (True, True, True), "the control's own fixture is wrong"
@@ -788,6 +788,8 @@ def test_the_module_runs_in_seconds_and_touches_no_real_state() -> None:
                 f"{repo_id} memory points outside the disposable world"
             )
         assert settings["coordinationRoot"] == world.coord.as_posix()
-        assert settings["providers"] == {}, "a configured provider would make this census live"
+        assert "providers" not in settings, (
+            "no removed provider section may appear in census settings"
+        )
     finally:
         world.close()

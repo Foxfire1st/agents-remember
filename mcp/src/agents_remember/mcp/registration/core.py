@@ -62,7 +62,7 @@ def _register_identity_tools(
         )
     )
     def server_info() -> dict[str, Any]:
-        """Report resolved server config: build, roots, allowed repos, unused provider keys, and (when role-launched) tool server name and agent binding. Read-only snapshot of startup state. Docs: docs/tool-details.md."""
+        """Report resolved server config: build, roots, allowed repos, unused settings keys, and (when role-launched) tool server name and agent binding. Read-only snapshot of startup state. Docs: docs/tool-details.md."""
         return server_info_payload(config, serving_build)
 
 
@@ -116,20 +116,16 @@ def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> N
     def runtime_install(
         dry_run: bool = False,
         include_benchmarks: bool = False,
-        install_provider_deps: bool = True,
-        no_cache: bool = False,
         experiment: str | None = None,
         *,
         reconcile_shared_held_stores: bool = False,
     ) -> dict[str, Any]:
-        """Install/refresh coordinator scaffold (docs, provider assets), preserving memory-repos/ and providers/data/. Skills stay package-served. Stops leftover watchers (starts none), provisions pinned paseoRuntime host/plugin (defers host restart; keeps user-settings protections), refreshes running dashboard, reports server currentness. Preview with dry_run=true; opt into reconcile_shared_held_stores after restart. Docs: docs/tool-details.md."""
+        """Install/refresh coordinator scaffold (docs, user dirs), preserving memory-repos/. Skills stay package-served. Reports leftover removed stores without deleting them, provisions pinned paseoRuntime host/plugin (defers host restart; keeps user-settings protections), refreshes running dashboard, reports server currentness. Preview with dry_run=true; opt into reconcile_shared_held_stores after restart. Docs: docs/tool-details.md."""
         return tools.runtime_install_payload(
             config,
             import_module("agents_remember.application.runtime.install").RuntimeInstallRequest(
                 dry_run=dry_run,
                 include_benchmarks=include_benchmarks,
-                install_provider_deps=install_provider_deps,
-                no_cache=no_cache,
                 experiment=experiment,
                 reconcile_shared_held_stores=reconcile_shared_held_stores,
             ),

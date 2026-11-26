@@ -126,7 +126,6 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
             "coordinationRoot": str(self.root / "live-ar-coordination"),
             "workspaceRoot": str(self.root / "workspace"),
             "repositories": {"agents-remember": {}},
-            "providers": {},
         }
         path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -168,7 +167,6 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
             config.repositories["agents-remember"].memory_root,
             expected_root / "memory-repos" / "ar-agents-remember",
         )
-        self.assertEqual(config.providers, {})
         self.assertFalse(config.dashboard.auto_start)
         self.assertFalse(config.benchmarks_enabled)
         self.assertFalse(live_settings.parent.joinpath("live-ar-coordination").exists())

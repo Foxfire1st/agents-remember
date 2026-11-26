@@ -51,17 +51,10 @@ Agents Remember context through the [context_packet tool reference](skills/l-01-
 
 After resolving the target repository and coordination root, prefer the
 Agents Remember `context_packet` MCP tool when that server is configured.
-Provider authority comes from the MCP settings file.
-
-The call carries no provider selection: the retired search providers are not queried, so
-there is no provider flag to pass and nothing to request on their behalf.
 
 ```text
 context_packet(repo_id="agents-remember")
 ```
-
-Legacy provider keys in the settings are still reported by the product's own provider summary
-and cleanup routes; they change nothing about how this packet is asked for.
 
 Then use the [memory-quality tool guidance](skills/l-01-agent-lifecycles/reference/knowledge/commands.md) for the resolved context before
 reasoning from onboarding or source files.
@@ -81,12 +74,11 @@ runtime settings live under the selected `ar-coordination/` or memory root.
 
 ### Memory Retrieval Strategies
 
-- `Semantics` (retired — no semantic-query provider): a fuzzy concept is known, but structure,
-  route, or file location is unknown. Answer it with route-index and onboarding search, then
-  bounded native reads.
-- `Relationship` (retired — no relationship-query provider): an anchor is known, but callers,
-  callees, dependencies, ownership, inheritance, impact paths, or neighboring code are unknown.
-  Answer it with native search from the anchor symbol.
+- `Semantics`: a fuzzy concept is known, but structure, route, or file location is unknown. Answer
+  it with route-index and onboarding search, then bounded native reads.
+- `Relationship`: an anchor is known, but callers, callees, dependencies, ownership, inheritance,
+  impact paths, or neighboring code are unknown. Answer it with native search from the anchor
+  symbol.
 - `Intent`: an anchor/location + relationships are known, but hidden contracts, invariants,
   branch-valid truths, behavioral expectations, or code intent are unknown. Use
   onboarding plus bounded source confirmation.
@@ -101,16 +93,15 @@ Read [knowledge use at the working step](skills/l-01-agent-lifecycles/reference/
   generated skill copy: the tool server serves skills to a
   harness as MCP resources, and no harness starter package carries a skill
   folder (MIK-R196). Run it after any skill edit.
-- `benchmarks/`, `providers/`, and `system/` are canonical
-  runtime asset source folders. Edit them at the root and run
-  `python3 scripts/sync-runtime.py` to refresh MCP package data.
+- `benchmarks/` and `system/` are canonical runtime asset source folders.
+  Edit them at the root and run `python3 scripts/sync-runtime.py` to refresh
+  MCP package data.
 - Harness configuration belongs to user-level harness settings; this source checkout carries no harness starter packages.
 - `mcp/` contains the MCP server, tool surface, and package-owned runtime
   services.
 - `mcp/src/agents_remember/package_data/runtime/skills/` is the generated
   package-owned skill copy used by `runtime_install`.
-- `mcp/src/agents_remember/package_data/runtime/providers/`,
-  `mcp/src/agents_remember/package_data/runtime/system/`, and
+- `mcp/src/agents_remember/package_data/runtime/system/` and
   `mcp/src/agents_remember/package_data/benchmarks/` are generated package-data
   copies of the matching root runtime asset folders.
 - `README.md` documents the current user-facing install and usage model.

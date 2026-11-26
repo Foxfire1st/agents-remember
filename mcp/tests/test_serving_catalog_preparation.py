@@ -92,7 +92,7 @@ class CatalogPreparationLifetimeTests(unittest.IsolatedAsyncioTestCase):
         primed = asyncio.Event()
         runtime = self._runtime(prime=mock.AsyncMock(side_effect=primed.set))
         with self._quiet_other_owners():
-            context = serving._serving_lifespan(runtime, mock.Mock())(FastAPI())
+            context = serving._serving_lifespan(runtime)(FastAPI())
             await asyncio.wait_for(context.__aenter__(), HANG_GUARD_SECONDS)
             closing = None
             try:
@@ -148,7 +148,7 @@ class CatalogPreparationLifetimeTests(unittest.IsolatedAsyncioTestCase):
             prepare_inputs=prepare_inputs, aclose=mock.AsyncMock()
         )
         with self._quiet_other_owners():
-            context = serving._serving_lifespan(runtime, mock.Mock())(FastAPI())
+            context = serving._serving_lifespan(runtime)(FastAPI())
             await asyncio.wait_for(context.__aenter__(), HANG_GUARD_SECONDS)
             try:
                 await asyncio.wait_for(projection_entered.wait(), HANG_GUARD_SECONDS)
@@ -177,9 +177,7 @@ class CatalogPreparationLifetimeTests(unittest.IsolatedAsyncioTestCase):
             raise OSError("catalog unavailable")
 
         with self._quiet_other_owners(), mock.patch.object(serving, "logger") as logger:
-            async with serving._serving_lifespan(self._runtime(prepare=fail_catalog), mock.Mock())(
-                FastAPI()
-            ):
+            async with serving._serving_lifespan(self._runtime(prepare=fail_catalog))(FastAPI()):
                 await asyncio.wait_for(async_seen.wait(), HANG_GUARD_SECONDS)
                 # Let the failure reach its coroutine handler without elapsed-time polling.
                 for _ in range(3):

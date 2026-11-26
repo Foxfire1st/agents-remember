@@ -320,14 +320,13 @@ def test_route_multiplexes_native_and_real_projector_and_reconnects(tmp_path, mo
 
 
 def _runtime(tmp_path, port):
-    runtime, _metrics = _build_serving_runtime(
+    return _build_serving_runtime(
         _config(tmp_path),
         ProjectionCadence(interval=100),
         LIVE_PROJECTION_CLOCK,
         LiveProjectionInputs(landing_state=False, change_watch=False),
         ServingCollaborators(review_memory_root=port),
     )
-    return runtime
 
 
 def _stream_endpoint(app):

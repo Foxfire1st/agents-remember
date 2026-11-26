@@ -2,8 +2,7 @@
 
 The shipped tool (``mcp/src/agents_remember/mcp/registration/core.py``) and the internal
 ``ContextPacketRequest`` admit ``repo_id``, ``include_drift``, ``include_freshness`` and the
-leaf's ``task_context``; ``include_providers`` is gone, and the packet's provider projection is
-fixed to ``include_providers=False``.  Advice that still tells a reader to pass the removed flag
+leaf's ``task_context``; ``include_providers`` is gone along with search providers.  Advice that still tells a reader to pass the removed flag
 therefore names an invalid invocation of a shipped tool.
 
 These tests derive the admitted parameter set from the real advertised schema -- one FastMCP
@@ -240,4 +239,4 @@ def test_the_carrier_inventory_covers_every_shipped_surface() -> None:
     # MIK-R196 retired the per-harness skill folders, so the package-data copy is the only
     # generated one now; an empty tuple would silently switch off the per-copy assertion above.
     assert GENERATED_SKILL_COPIES, GENERATED_SKILL_COPIES
-    assert len(carrier_calls(base)) >= 10, [call.location() for call in carrier_calls(base)]
+    assert len(carrier_calls(base)) >= 8, [call.location() for call in carrier_calls(base)]

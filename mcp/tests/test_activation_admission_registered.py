@@ -58,7 +58,6 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
                     "coordinationRoot": self.fixture.coord.as_posix(),
                     "workspaceRoot": workspace.as_posix(),
                     "repositories": {"repo-a": {"path": self.fixture.code.as_posix()}},
-                    "providers": {},
                 }
             ),
             encoding="utf-8",

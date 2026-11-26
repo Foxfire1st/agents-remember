@@ -1,8 +1,8 @@
 """Service ports the worktree lifecycle needs from packages above it.
 
-Worktrees ranks below providers, memory_quality and code_quality, so the
+Worktrees ranks below memory_quality and code_quality, so the
 lifecycle modules never import them. The composition layer binds one
-``WorktreeServices`` bundle (provider lifecycle, memory-quality gate,
+``WorktreeServices`` bundle (memory-quality gate,
 citation-cache guard, knowledge validator,
 knowledge crossing, knowledge worklist, the mandatory invariant gate, review-artifact cleanup) before
 invoking worktree operations.
@@ -61,51 +61,6 @@ class CitationGuardPort(Protocol):
         requested_contract_path: Path,
         completed_contract_with_remains: bool = False,
     ) -> AbstractContextManager[TerminalGuard]: ...
-
-
-class ProviderLifecyclePort(Protocol):
-    def load_settings(self, settings_path: Path) -> dict[str, Any] | None: ...
-    def provider_enabled(self, settings: dict[str, Any], provider_id: str) -> bool: ...
-    def settings_path(self, settings_path: Path) -> Path: ...
-    def setup_request(self, *, spec: ProviderSetupRequestSpec) -> Any: ...
-    def cgc_seed_options(
-        self,
-        *,
-        source_coordination_root: Path,
-        repo_id: str,
-        source_repo_root: Path,
-        target_repo_root: Path,
-    ) -> Any: ...
-    def isolated_cgc_options(self, *, runtime_root: Path) -> Any: ...
-    def grepai_seed_options(
-        self,
-        *,
-        source_coordination_root: Path,
-        source_settings_path: Path,
-        project_id: str,
-        target_memory_root: Path | None,
-    ) -> Any: ...
-    def isolated_grepai_options(
-        self,
-        *,
-        runtime_root: Path,
-        project_id: str,
-        target_memory_root: Path | None,
-        allow_missing_roots: bool,
-    ) -> Any: ...
-    def run_setup(self, request: Any) -> dict[str, Any]: ...
-    def launch_setup(
-        self,
-        *,
-        request: Any,
-        contract: WorktreeContract,
-        write_state_file: Callable[[dict[str, Any]], Path],
-        settings_cleanup: Path | None,
-    ) -> dict[str, Any]: ...
-    def setup_running(self, contract: WorktreeContract) -> bool: ...
-    def setup_status(self, contract: WorktreeContract) -> dict[str, Any] | None: ...
-    def teardown(self, contract: WorktreeContract, *, dry_run: bool) -> dict[str, Any]: ...
-    def remove_tree(self, path: Path, *, dry_run: bool) -> dict[str, Any]: ...
 
 
 class CertificationMemoryRailsPort(Protocol):
@@ -377,7 +332,6 @@ class ReviewArtifactCleanupPort(Protocol):
 
 @dataclass(frozen=True)
 class WorktreeServices:
-    provider_lifecycle: ProviderLifecyclePort
     memory_quality: MemoryQualityPort
     citation_guard: CitationGuardPort
     certification_memory_rails: CertificationMemoryRailsPort | None = None
@@ -414,26 +368,6 @@ class LeafAgentArchivePort(Protocol):
     ) -> dict[str, object]: ...
 
 
-@dataclass(frozen=True)
-class ProviderSetupRequestSpec:
-    """Everything one provider setup request needs, as the worktree layer sees it.
-
-    The provider-owned option payloads (cgc/grepai seed and isolation options)
-    are opaque to worktrees: the port builds them from the primitive fields.
-    """
-
-    action: str
-    coordination_root: Path
-    settings_path: Path
-    timeout: int
-    dry_run: bool
-    skip_grepai: bool
-    cgc_seed: Any
-    cgc_isolated: Any
-    grepai_seed: Any
-    grepai_isolated: Any
-
-
 __all__ = [
     "CertificationMemoryRailsPort",
     "CitationGuardPort",
@@ -448,7 +382,6 @@ __all__ = [
     "KnowledgeWorklistPort",
     "LandingGateRequest",
     "MemoryQualityPort",
-    "ProviderLifecyclePort",
     "ReviewArtifactCleanupPort",
     "ReviewArtifactCleanupRequest",
     "TerminalCommit",

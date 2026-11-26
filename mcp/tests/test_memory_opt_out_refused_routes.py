@@ -132,8 +132,7 @@ def _published_disabled_leaf(
                 "coordinationRoot": contract.coordination_root.as_posix(),
                 "workspaceRoot": root.as_posix(),
                 "repositories": {REPO: {}},
-                "providers": {},
-                "timeoutCaps": {"toolSeconds": 30, "providerSetupSeconds": 1800},
+                "timeoutCaps": {"toolSeconds": 30},
                 "benchmarksEnabled": False,
             }
         ),
@@ -205,7 +204,6 @@ def test_status_answers_on_a_legacy_series_contract(tmp_path: Path) -> None:
                 "coordinationRoot": coord.as_posix(),
                 "workspaceRoot": root.as_posix(),
                 "repositories": {REPO: {}},
-                "providers": {},
             }
         ),
         encoding="utf-8",
@@ -485,7 +483,6 @@ def test_abandon_admits_dry_and_real_then_restarts_external(tmp_path: Path) -> N
                 "coordinationRoot": coord.as_posix(),
                 "workspaceRoot": root.as_posix(),
                 "repositories": {REPO: {}},
-                "providers": {},
             }
         ),
         encoding="utf-8",
@@ -597,7 +594,6 @@ def test_abandon_keeps_its_own_refusals_on_a_legacy_contract(tmp_path: Path) -> 
                 "coordinationRoot": coord.as_posix(),
                 "workspaceRoot": root.as_posix(),
                 "repositories": {REPO: {}},
-                "providers": {},
             }
         ),
         encoding="utf-8",

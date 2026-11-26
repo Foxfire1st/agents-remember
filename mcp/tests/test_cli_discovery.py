@@ -242,15 +242,9 @@ def _installation_settings(tmp_path, monkeypatch):
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.delenv("AR_EXPERIMENT", raising=False)
-    monkeypatch.setattr(runtime, "lifecycle_settings_from_config", lambda: {})
-    monkeypatch.setattr(
-        runtime, "stop_provider_watchers_before_refresh", lambda _rebind: {"ok": True}
-    )
     source = tmp_path / "source"
-    for name in ("codegraphcontext.txt", "grepai.txt"):
-        _write(source / "runtime/providers/requirements" / name, "fixture\n")
-    (source / "runtime/skills").mkdir()
-    (source / "runtime/docs").mkdir()
+    (source / "runtime/skills").mkdir(parents=True)
+    (source / "runtime/docs").mkdir(parents=True)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     config = McpRuntimeConfig(
@@ -259,9 +253,7 @@ def _installation_settings(tmp_path, monkeypatch):
         workspace_root=workspace,
         transcript_root=tmp_path / "coordination/logs/mcp",
     )
-    request = runtime.RuntimeInstallRequest(
-        source_root=source, install_provider_deps=False, experiment=""
-    )
+    request = runtime.RuntimeInstallRequest(source_root=source, experiment="")
     return runtime, config, request
 
 
@@ -593,9 +585,7 @@ def _config_help_by_command() -> dict[str, str]:
     return found
 
 
-@pytest.mark.parametrize(
-    "command", ["memory-citations", "providers-remove", "removed-stores", "knowledge-bootstrap"]
-)
+@pytest.mark.parametrize("command", ["memory-citations", "removed-stores", "knowledge-bootstrap"])
 def test_omitted_config_help_names_the_user_settings_file_not_the_directory(command: str) -> None:
     """L84-CUR-01: an omitted --config reads the user settings file, whatever the directory."""
 
@@ -610,7 +600,8 @@ def test_no_config_help_claims_directory_discovery() -> None:
     """L84-CUR-01: discover_config() never searches the caller's directory, so no help says so."""
 
     helps = _config_help_by_command()
-    assert {"dashboard", "memory-citations", "providers-remove", "removed-stores"} <= set(helps)
+    assert {"dashboard", "memory-citations", "removed-stores"} <= set(helps)
+    assert "providers-remove" not in helps
     claims = {
         command: text
         for command, text in helps.items()

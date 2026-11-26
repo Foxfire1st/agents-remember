@@ -142,7 +142,6 @@ def test_real_closeout_phase_passes_with_landing_aboard(tmp_path: Path) -> None:
 
     bind_worktree_services(
         WorktreeServices(
-            provider_lifecycle=mock.Mock(),
             memory_quality=MemoryQualityAdapter(),
             citation_guard=mock.Mock(),
             knowledge_validation=mock.Mock(),

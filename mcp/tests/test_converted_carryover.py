@@ -353,7 +353,6 @@ def test_real_l47_public_apply_in_managed_scratch_recovery_leaf():
                 "coordinationRoot": str(coordination),
                 "workspaceRoot": str(output),
                 "repositories": {"agents-remember": {"path": str(code)}},
-                "providers": {},
             },
             indent=2,
         )
@@ -440,7 +439,7 @@ def test_real_l47_public_apply_in_managed_scratch_recovery_leaf():
             parent_task="r56-real-recovery",
         ),
         bases=TaskBases(source_branch="super", memory_mode="external"),
-        execution=StartExecution(skip_provider_setup=True),
+        execution=StartExecution(),
     )
     (output / "start.json").write_text(json.dumps(started, indent=2) + "\n")
     assert started["ok"], started

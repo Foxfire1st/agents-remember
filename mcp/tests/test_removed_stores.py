@@ -15,11 +15,9 @@ import os
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 from agents_remember.cli import removed_stores
-from agents_remember.install import provider_watchers as install_provider_watchers
 from agents_remember.install import runtime as install_runtime
 from agents_remember.install.removed_stores import (
     REMOVED_PART_STORE_PATHS,
@@ -38,7 +36,7 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 from test_config import settings_payload
-from test_install_runtime import call_registered_tool, create_runtime_source, watcher_result
+from test_install_runtime import call_registered_tool, create_runtime_source
 
 WORKSPACE = "logs/observer/workspace"
 # Three folders, some 350 characters. The paths in an install's answer grow with its root, and
@@ -187,7 +185,7 @@ def test_every_listed_store_lies_under_the_observer_dashboard_or_runtime_folders
     for relative in (*REMOVED_PART_STORE_PATHS, *STORED_GATE_LOG_PATTERNS):
         assert not Path(relative).is_absolute()
         assert ".." not in Path(relative).parts
-        assert relative.startswith(
+        assert relative in {"providers", "logs/providers"} or relative.startswith(
             (f"{WORKSPACE}/", "logs/dashboard/", "logs/observer/", "runtime/")
         )
 
@@ -249,19 +247,11 @@ def test_the_install_names_the_stores_once_and_deletes_none(tmp_path: Path) -> N
     root = tmp_path / "ar-coordination"
     files = _populate(root)
 
-    with patch.object(
-        install_provider_watchers.lifecycle,
-        "watchers_run",
-        side_effect=lambda _args, action: watcher_result(action),
-    ):
-        summary = install_runtime.install_runtime(
-            source_root,
-            root,
-            dry_run=False,
-            provider_deps=install_runtime.ProviderDependencyInstall(
-                settings={}, timeout=1800, enabled=False
-            ),
-        )
+    summary = install_runtime.install_runtime(
+        source_root,
+        root,
+        dry_run=False,
+    )
 
     report = summary.report()
     assert all(path.is_file() for path in files.values())
@@ -316,12 +306,7 @@ def test_the_registered_install_files_the_stores_and_answers_their_count(tmp_pat
         stores = [path for name, path in files.items() if name not in STAYING]
         before = {path: path.read_bytes() for path in stores}
 
-        with patch.object(
-            install_provider_watchers.lifecycle,
-            "watchers_run",
-            side_effect=lambda _args, action: watcher_result(action),
-        ):
-            answer = call_registered_tool(load_config(settings), "runtime_install", {})
+        answer = call_registered_tool(load_config(settings), "runtime_install", {})
 
         assert answer["ok"] is True
         assert {path: path.read_bytes() for path in stores} == before
@@ -533,3 +518,41 @@ def test_a_folder_that_cannot_be_removed_holds_up_no_folder_beside_it(
     assert captured.err.count("Permission denied") == 1
     assert not beside.exists() and list(stuck.iterdir()) == []
     assert "incomplete, removed 2 of 2 files, freed 4 bytes." in captured.out
+
+
+def test_legacy_provider_trees_including_empty_dir_are_reported_and_removed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Legacy provider directories are reported by runtime_install and deleted by removed-stores."""
+    settings, root = _coordination_root(tmp_path)
+    providers_data = _write(root / "providers" / "data" / "graph.db", "graph")
+    empty_logs_providers = root / "logs" / "providers"
+    empty_logs_providers.mkdir(parents=True, exist_ok=True)
+    observer_metrics = _write(root / "logs" / "observer" / "providers" / "metrics.jsonl", "{}\n")
+
+    answer = call_registered_tool(load_config(settings), "runtime_install", {})
+    assert answer["ok"] is True
+    assert providers_data.is_file()
+    assert empty_logs_providers.is_dir()
+    assert observer_metrics.is_file()
+    [report] = (root / "temp/tool-reports/runtime_install").glob("*-install.json")
+    filed = json.loads(report.read_text(encoding="utf-8"))["removedPartStores"]
+    assert {Path(item["path"]).relative_to(root).as_posix() for item in filed["stores"]} == {
+        "providers",
+        "logs/providers",
+        "logs/observer/providers",
+    }
+
+    assert removed_stores.run(_args(settings, dry_run=True)) == 0
+    assert providers_data.is_file()
+    assert empty_logs_providers.is_dir()
+    assert observer_metrics.is_file()
+    capsys.readouterr()
+
+    assert removed_stores.run(_args(settings)) == 0
+    assert not (root / "providers").exists()
+    assert not empty_logs_providers.exists()
+    assert not (root / "logs" / "observer" / "providers").exists()
+    assert removed_part_stores(root) == []
+    out = capsys.readouterr().out
+    assert "removed 3 stores" in out

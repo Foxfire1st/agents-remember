@@ -2802,53 +2802,181 @@
   },
   {
    "id": "LF1.5",
-   "audience": [
-    "architect",
-    "orchestrator"
-   ],
-   "file": "core/lifecycle-frame.md",
-   "disposition": "reference",
-   "reason": "stage procedure reached through its operation file",
-   "evidence": [
-    {
-     "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
-     "capsule": "investigator/orientation"
-    },
-    {
-     "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
-     "capsule": "investigator/orientation"
-    }
-   ]
+   "disposition": "retired (D1000, D1001)",
+   "retirementDecision": {
+    "requirement": "DEP-R02@v1",
+    "decisions": [
+     "D1000",
+     "D1001",
+     "D1005"
+    ],
+    "sha256": "901c3ff4dfd7e9cb816e4e78900c81b9c3efbe0353be351051643c9d20c85b9b"
+   },
+   "retiredBinding": {
+    "file": "core/lifecycle-frame.md",
+    "lines": [
+     26,
+     26
+    ],
+    "sha256": "8aaa90360c607aa98a91ac4c9894822712c9f84403bd63df06c6de2b7a58dcec",
+    "audience": [
+     "architect",
+     "orchestrator"
+    ],
+    "disposition": "reference",
+    "reason": "stage procedure reached through its operation file",
+    "evidence": [
+     {
+      "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
+      "lines": [
+       80,
+       84
+      ],
+      "sha256": "47eb1d6e762b505cdb4c3fb2aa050b955001d3d3ad903f13db0e65684b841a72",
+      "capsule": "investigator/orientation"
+     },
+     {
+      "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
+      "lines": [
+       38,
+       42
+      ],
+      "sha256": "3b5ae8eb57f524d004f47cbf01bb0b162fc9bf2d06c12a56e324d4d31941925a",
+      "capsule": "investigator/orientation"
+     }
+    ]
+   }
   },
   {
    "id": "LF2.1",
-   "file": "core/lifecycle-frame.md",
-   "disposition": "reference",
-   "reason": "no action",
-   "evidence": [
-    {
-     "path": "skills/l-01-agent-lifecycles/core/lifecycle-frame.md",
-     "basis": "definition, product description or authoring metadata; no started-role action"
-    }
-   ]
+   "disposition": "retired (D1000, D1001)",
+   "retirementDecision": {
+    "requirement": "DEP-R02@v1",
+    "decisions": [
+     "D1000",
+     "D1001",
+     "D1005"
+    ],
+    "sha256": "901c3ff4dfd7e9cb816e4e78900c81b9c3efbe0353be351051643c9d20c85b9b"
+   },
+   "retiredBinding": {
+    "file": "core/lifecycle-frame.md",
+    "lines": [
+     30,
+     30
+    ],
+    "sha256": "f50f76c8a51c724b199ba19107b8dd7d0c34ba59c1a997f28e58ebe273c1f54a",
+    "audience": [],
+    "disposition": "reference",
+    "reason": "no action",
+    "evidence": [
+     {
+      "path": "skills/l-01-agent-lifecycles/core/lifecycle-frame.md",
+      "lines": [
+       30,
+       30
+      ],
+      "sha256": "f50f76c8a51c724b199ba19107b8dd7d0c34ba59c1a997f28e58ebe273c1f54a",
+      "basis": "definition, product description or authoring metadata; no started-role action"
+     }
+    ]
+   }
   },
   {
    "id": "LF2.2",
-   "file": "core/lifecycle-frame.md",
-   "disposition": "digest",
-   "digestPlace": "place-06"
+   "disposition": "retired (D1000, D1001)",
+   "retirementDecision": {
+    "requirement": "DEP-R02@v1",
+    "decisions": [
+     "D1000",
+     "D1001",
+     "D1005"
+    ],
+    "sha256": "901c3ff4dfd7e9cb816e4e78900c81b9c3efbe0353be351051643c9d20c85b9b"
+   },
+   "retiredBinding": {
+    "file": "core/lifecycle-frame.md",
+    "lines": [
+     32,
+     32
+    ],
+    "sha256": "82810e98b8f03c7840e7746112f2b485861e5986a2e672ca2384509b5c89fc92",
+    "audience": [
+     "architect",
+     "curator",
+     "investigator",
+     "manager",
+     "orchestrator",
+     "reviewer",
+     "worker"
+    ],
+    "disposition": "digest",
+    "digestPlace": "place-06"
+   }
   },
   {
    "id": "LF2.3",
-   "file": "core/lifecycle-frame.md",
-   "disposition": "digest",
-   "digestPlace": "place-06"
+   "disposition": "retired (D1000, D1001)",
+   "retirementDecision": {
+    "requirement": "DEP-R02@v1",
+    "decisions": [
+     "D1000",
+     "D1001",
+     "D1005"
+    ],
+    "sha256": "901c3ff4dfd7e9cb816e4e78900c81b9c3efbe0353be351051643c9d20c85b9b"
+   },
+   "retiredBinding": {
+    "file": "core/lifecycle-frame.md",
+    "lines": [
+     34,
+     34
+    ],
+    "sha256": "8b9d8df66dfc42d62dbcd2c15a432ac4cbed9ea011ee6d3455147ed36c674720",
+    "audience": [
+     "architect",
+     "curator",
+     "investigator",
+     "manager",
+     "orchestrator",
+     "reviewer",
+     "worker"
+    ],
+    "disposition": "digest",
+    "digestPlace": "place-06"
+   }
   },
   {
    "id": "LF2.4",
-   "file": "core/lifecycle-frame.md",
-   "disposition": "digest",
-   "digestPlace": "place-06"
+   "disposition": "retired (D1000, D1001)",
+   "retirementDecision": {
+    "requirement": "DEP-R02@v1",
+    "decisions": [
+     "D1000",
+     "D1001",
+     "D1005"
+    ],
+    "sha256": "901c3ff4dfd7e9cb816e4e78900c81b9c3efbe0353be351051643c9d20c85b9b"
+   },
+   "retiredBinding": {
+    "file": "core/lifecycle-frame.md",
+    "lines": [
+     36,
+     36
+    ],
+    "sha256": "69e232141e5cc90800f091041da8fb004dd3b4dadb9199e8174a5f89f3c049bc",
+    "audience": [
+     "architect",
+     "curator",
+     "investigator",
+     "manager",
+     "orchestrator",
+     "reviewer",
+     "worker"
+    ],
+    "disposition": "digest",
+    "digestPlace": "place-06"
+   }
   },
   {
    "id": "LO0.1",
@@ -3983,23 +4111,6 @@
      {
       "units": [
        "AU4.2"
-      ]
-     }
-    ]
-   },
-   {
-    "id": "place-06",
-    "units": [
-     "LF2.2",
-     "LF2.3",
-     "LF2.4"
-    ],
-    "clauses": [
-     {
-      "units": [
-       "LF2.2",
-       "LF2.3",
-       "LF2.4"
       ]
      }
     ]
@@ -5867,7 +5978,7 @@
          3,
          3
        ],
-       "sha256": "2ba4fa142889d3f4511ed2e44a6e8859a5c90f0b5b78f29aae8e2c6ce4e8caef"
+       "sha256": "c6005eb4ca1fdd587ab7674be407be49e73cf88add3f90f3545cd88c16c0fde9"
      },
      "LF0.2": {
        "lines": [
@@ -5938,68 +6049,6 @@
          25
        ],
        "sha256": "d5f4eb1bb94b997e4aa7d7d811752d4d3d6d5ca74d4751327ee32246c8b82706"
-     },
-     "LF1.5": {
-       "lines": [
-         26,
-         26
-       ],
-       "sha256": "8aaa90360c607aa98a91ac4c9894822712c9f84403bd63df06c6de2b7a58dcec"
-     },
-     "LF2.1": {
-       "lines": [
-         30,
-         30
-       ],
-       "sha256": "f50f76c8a51c724b199ba19107b8dd7d0c34ba59c1a997f28e58ebe273c1f54a"
-     },
-     "LF2.2": {
-       "lines": [
-         32,
-         32
-       ],
-       "sha256": "82810e98b8f03c7840e7746112f2b485861e5986a2e672ca2384509b5c89fc92",
-       "audience": [
-         "architect",
-         "curator",
-         "investigator",
-         "manager",
-         "orchestrator",
-         "reviewer",
-         "worker"
-       ]
-     },
-     "LF2.3": {
-       "lines": [
-         34,
-         34
-       ],
-       "sha256": "8b9d8df66dfc42d62dbcd2c15a432ac4cbed9ea011ee6d3455147ed36c674720",
-       "audience": [
-         "architect",
-         "curator",
-         "investigator",
-         "manager",
-         "orchestrator",
-         "reviewer",
-         "worker"
-       ]
-     },
-     "LF2.4": {
-       "lines": [
-         36,
-         36
-       ],
-       "sha256": "69e232141e5cc90800f091041da8fb004dd3b4dadb9199e8174a5f89f3c049bc",
-       "audience": [
-         "architect",
-         "curator",
-         "investigator",
-         "manager",
-         "orchestrator",
-         "reviewer",
-         "worker"
-       ]
      },
      "LO0.1": {
        "lines": [
@@ -6680,8 +6729,8 @@
        },
        "6": {
          "lines": [
-           68,
-           76
+           66,
+           74
          ],
          "sha256": "25465e959c9897563dc376b40e4ca36117369b1c5adb903e830dfe4b39a863ee"
        },
@@ -6738,8 +6787,8 @@
        },
        "6": {
          "lines": [
-           68,
-           76
+           66,
+           74
          ],
          "sha256": "25465e959c9897563dc376b40e4ca36117369b1c5adb903e830dfe4b39a863ee"
        },
@@ -6805,8 +6854,8 @@
        },
        "6": {
          "lines": [
-           60,
-           66
+           58,
+           64
          ],
          "sha256": "ba60da59cd4450a90ac49ce501cec2e446b8c1df6d32eb560019c391f05b101b"
        },
@@ -6863,8 +6912,8 @@
        },
        "6": {
          "lines": [
-           60,
-           66
+           58,
+           64
          ],
          "sha256": "ba60da59cd4450a90ac49ce501cec2e446b8c1df6d32eb560019c391f05b101b"
        },
@@ -6921,10 +6970,10 @@
        },
        "6": {
          "lines": [
-           80,
-           84
+           78,
+           82
          ],
-         "sha256": "47eb1d6e762b505cdb4c3fb2aa050b955001d3d3ad903f13db0e65684b841a72"
+         "sha256": "860f358fa18222183c76a7848049f1ec811080cfdc50e2583b3d0c41962fb7d8"
        },
        "7": {
          "lines": [
@@ -6988,8 +7037,8 @@
        },
        "6": {
          "lines": [
-           44,
-           58
+           42,
+           56
          ],
          "sha256": "b01c7ab3a9212b35c9b9defe5d3a7963d59c267444a54e790fdd3e6acdcaf0ec"
        },
@@ -7046,8 +7095,8 @@
        },
        "6": {
          "lines": [
-           44,
-           58
+           42,
+           56
          ],
          "sha256": "b01c7ab3a9212b35c9b9defe5d3a7963d59c267444a54e790fdd3e6acdcaf0ec"
        },
@@ -7164,7 +7213,7 @@
            3,
            3
          ],
-         "sha256": "2ba4fa142889d3f4511ed2e44a6e8859a5c90f0b5b78f29aae8e2c6ce4e8caef"
+         "sha256": "c6005eb4ca1fdd587ab7674be407be49e73cf88add3f90f3545cd88c16c0fde9"
        }
      },
      "LF0.2": {
@@ -7239,8 +7288,8 @@
        },
        "6": {
          "lines": [
-           68,
-           76
+           66,
+           74
          ],
          "sha256": "25465e959c9897563dc376b40e4ca36117369b1c5adb903e830dfe4b39a863ee"
        },
@@ -7307,31 +7356,6 @@
            80
          ],
          "sha256": "160fbd3731e00ce0ba9bd5f5af6ce1c71fd03dfe7f5739c10c8e620ba7a7c81f"
-       }
-     },
-     "LF1.5": {
-       "0": {
-         "lines": [
-           80,
-           84
-         ],
-         "sha256": "47eb1d6e762b505cdb4c3fb2aa050b955001d3d3ad903f13db0e65684b841a72"
-       },
-       "1": {
-         "lines": [
-           38,
-           42
-         ],
-         "sha256": "3b5ae8eb57f524d004f47cbf01bb0b162fc9bf2d06c12a56e324d4d31941925a"
-       }
-     },
-     "LF2.1": {
-       "0": {
-         "lines": [
-           30,
-           30
-         ],
-         "sha256": "f50f76c8a51c724b199ba19107b8dd7d0c34ba59c1a997f28e58ebe273c1f54a"
        }
      },
      "LO0.1": {
@@ -7668,15 +7692,15 @@
      "AC1.6": {
        "0": {
          "lines": [
-           44,
-           58
+           42,
+           56
          ],
          "sha256": "b01c7ab3a9212b35c9b9defe5d3a7963d59c267444a54e790fdd3e6acdcaf0ec"
        },
        "1": {
          "lines": [
-           44,
-           58
+           42,
+           56
          ],
          "sha256": "b01c7ab3a9212b35c9b9defe5d3a7963d59c267444a54e790fdd3e6acdcaf0ec"
        }
@@ -7797,10 +7821,10 @@
        },
        "6": {
          "lines": [
-           80,
-           84
+           78,
+           82
          ],
-         "sha256": "47eb1d6e762b505cdb4c3fb2aa050b955001d3d3ad903f13db0e65684b841a72"
+         "sha256": "860f358fa18222183c76a7848049f1ec811080cfdc50e2583b3d0c41962fb7d8"
        },
        "7": {
          "lines": [
@@ -7812,8 +7836,8 @@
      }
    },
    "digest": {
-     "sha256": "4784d11facb09568de64bb96b0a83bb6bbaab872aba5ab086366e8ee8903f4dc",
-     "sizeWords": 2325
+     "sha256": "68e960fd780493a3aa6cef46f6a8f5edf5643bd863f03b0933295911a9fda68b",
+     "sizeWords": 2295
    },
    "places": {
      "place-01": {
@@ -8084,44 +8108,18 @@
          }
        ]
      },
-     "place-06": {
+     "place-56": {
        "heading": "Start and configure role agents",
        "lines": [
          33,
          33
        ],
-       "sha256": "8d1a8189c6bc7706ee72bd70660e82596c8a65c36f137a2daadeb252b589e281",
+       "sha256": "00cdc574e73251c7f9af0d516f48cb189cee3fb8edf331eef0e356a991f65740",
        "clauses": [
          {
            "lines": [
              33,
              33
-           ],
-           "sha256": "8d1a8189c6bc7706ee72bd70660e82596c8a65c36f137a2daadeb252b589e281",
-           "audience": [
-             "architect",
-             "curator",
-             "investigator",
-             "manager",
-             "orchestrator",
-             "reviewer",
-             "worker"
-           ]
-         }
-       ]
-     },
-     "place-56": {
-       "heading": "Start and configure role agents",
-       "lines": [
-         35,
-         35
-       ],
-       "sha256": "00cdc574e73251c7f9af0d516f48cb189cee3fb8edf331eef0e356a991f65740",
-       "clauses": [
-         {
-           "lines": [
-             35,
-             35
            ],
            "sha256": "00cdc574e73251c7f9af0d516f48cb189cee3fb8edf331eef0e356a991f65740",
            "audience": [
@@ -8135,15 +8133,15 @@
      "place-07": {
        "heading": "Questions, decisions and scope",
        "lines": [
-         39,
-         39
+         37,
+         37
        ],
        "sha256": "c65834aae24b8a1f0e7ef20820349125772673d1cea8ed09c9a27a5d287fb052",
        "clauses": [
          {
            "lines": [
-             39,
-             39
+             37,
+             37
            ],
            "sha256": "c65834aae24b8a1f0e7ef20820349125772673d1cea8ed09c9a27a5d287fb052",
            "audience": [
@@ -8162,15 +8160,15 @@
      "place-08": {
        "heading": "Questions, decisions and scope",
        "lines": [
-         41,
-         41
+         39,
+         39
        ],
        "sha256": "2743c527120937881e9bf3552551a451178785a722f868216fc07efc5bad5bf8",
        "clauses": [
          {
            "lines": [
-             41,
-             41
+             39,
+             39
            ],
            "sha256": "2743c527120937881e9bf3552551a451178785a722f868216fc07efc5bad5bf8",
            "audience": [
@@ -8189,15 +8187,15 @@
      "place-09": {
        "heading": "Questions, decisions and scope",
        "lines": [
-         43,
-         43
+         41,
+         41
        ],
        "sha256": "b978af59b7108d3ab3b5bd7ce82d0afd998b0bb6ffe5ebbcad178459374a51a7",
        "clauses": [
          {
            "lines": [
-             43,
-             43
+             41,
+             41
            ],
            "sha256": "b978af59b7108d3ab3b5bd7ce82d0afd998b0bb6ffe5ebbcad178459374a51a7",
            "audience": [
@@ -8216,15 +8214,15 @@
      "place-10": {
        "heading": "Questions, decisions and scope",
        "lines": [
-         45,
-         45
+         43,
+         43
        ],
        "sha256": "ce76e1da1156cf2a614a8d31027a192626b68d16c01d089400410a6e5c96eea6",
        "clauses": [
          {
            "lines": [
-             45,
-             45
+             43,
+             43
            ],
            "sha256": "ce76e1da1156cf2a614a8d31027a192626b68d16c01d089400410a6e5c96eea6",
            "audience": [
@@ -8236,15 +8234,15 @@
      "place-11": {
        "heading": "Questions, decisions and scope",
        "lines": [
-         47,
-         47
+         45,
+         45
        ],
        "sha256": "825e5255e97e1ed18ad224824476c748187e6c2cff34147662fe796a84204dec",
        "clauses": [
          {
            "lines": [
-             47,
-             47
+             45,
+             45
            ],
            "sha256": "825e5255e97e1ed18ad224824476c748187e6c2cff34147662fe796a84204dec",
            "audience": [
@@ -8263,15 +8261,15 @@
      "place-12": {
        "heading": "Questions, decisions and scope",
        "lines": [
-         49,
-         49
+         47,
+         47
        ],
        "sha256": "d9c1f9130dacadbe73e61398eadc462cfcdae949cddd01864cf30b665c9e660e",
        "clauses": [
          {
            "lines": [
-             49,
-             49
+             47,
+             47
            ],
            "sha256": "d9c1f9130dacadbe73e61398eadc462cfcdae949cddd01864cf30b665c9e660e",
            "audience": [
@@ -8285,15 +8283,15 @@
      "place-13": {
        "heading": "Parallel work and waiting",
        "lines": [
-         53,
-         53
+         51,
+         51
        ],
        "sha256": "9bc5fdb82b26f50c9235119dda34fb753eae2f0a78df5317b11da70f777a1d7a",
        "clauses": [
          {
            "lines": [
-             53,
-             53
+             51,
+             51
            ],
            "sha256": "9bc5fdb82b26f50c9235119dda34fb753eae2f0a78df5317b11da70f777a1d7a",
            "audience": [
@@ -8312,15 +8310,15 @@
      "place-14": {
        "heading": "Parallel work and waiting",
        "lines": [
-         55,
-         55
+         53,
+         53
        ],
        "sha256": "c175f23a0621db90c88e25f9b6de9641207aff2fec205797f0676ea7cc75fc63",
        "clauses": [
          {
            "lines": [
-             55,
-             55
+             53,
+             53
            ],
            "sha256": "c175f23a0621db90c88e25f9b6de9641207aff2fec205797f0676ea7cc75fc63",
            "audience": [
@@ -8339,15 +8337,15 @@
      "place-15": {
        "heading": "Parallel work and waiting",
        "lines": [
-         57,
-         57
+         55,
+         55
        ],
        "sha256": "b3135b991102b9e25fe907a0ae47a084f44b5636fc728a206b3e1e904bfe9cfa",
        "clauses": [
          {
            "lines": [
-             57,
-             57
+             55,
+             55
            ],
            "sha256": "b3135b991102b9e25fe907a0ae47a084f44b5636fc728a206b3e1e904bfe9cfa",
            "audience": [
@@ -8366,15 +8364,15 @@
      "place-16": {
        "heading": "Parallel work and waiting",
        "lines": [
-         59,
-         59
+         57,
+         57
        ],
        "sha256": "c9d0bad5954ffce4206bdd91846cc6f288689c49ce98b871966d55c37b2ed8d5",
        "clauses": [
          {
            "lines": [
-             59,
-             59
+             57,
+             57
            ],
            "sha256": "c9d0bad5954ffce4206bdd91846cc6f288689c49ce98b871966d55c37b2ed8d5",
            "audience": [
@@ -8388,15 +8386,15 @@
      "place-54": {
        "heading": "Parallel work and waiting",
        "lines": [
-         61,
-         63
+         59,
+         61
        ],
        "sha256": "83b47a5bedcb271277e28d206c311a51a5232f98c6c50e1f61dddd07f221eaed",
        "clauses": [
          {
            "lines": [
-             61,
-             61
+             59,
+             59
            ],
            "sha256": "7532f6557f06f86bb9c2cad9f55376c51ce1b75447913573d198b399ab1dafde",
            "audience": [
@@ -8412,8 +8410,8 @@
          },
          {
            "lines": [
-             63,
-             63
+             61,
+             61
            ],
            "sha256": "8b6171f6d9c2fabc63e6b70f78d880c668ac8c4b1c93515861fcba5816a00afa",
            "audience": [
@@ -8432,15 +8430,15 @@
      "place-48": {
        "heading": "Parallel work and waiting",
        "lines": [
-         65,
-         65
+         63,
+         63
        ],
        "sha256": "b468ec0697d5c5f539ac5f0db29d91824bcf796a2f2f4a06766afe4a73f609b7",
        "clauses": [
          {
            "lines": [
-             65,
-             65
+             63,
+             63
            ],
            "sha256": "b468ec0697d5c5f539ac5f0db29d91824bcf796a2f2f4a06766afe4a73f609b7",
            "audience": [
@@ -8458,15 +8456,15 @@
      "place-17": {
        "heading": "Requirements and limits",
        "lines": [
-         69,
-         73
+         67,
+         71
        ],
        "sha256": "25987733ef7b46854af595d96f65359fd21dc63d23813815cb8797a4e70a1a9c",
        "clauses": [
          {
            "lines": [
-             69,
-             69
+             67,
+             67
            ],
            "sha256": "caa387bea71e0891adefc7fc4ca440afacbc1b8dceb8a04c3d3e8577f1fe1a4d",
            "audience": [
@@ -8482,8 +8480,8 @@
          },
          {
            "lines": [
-             71,
-             71
+             69,
+             69
            ],
            "sha256": "d00207b7d3f8c9ca44381cb47764e41f91eee0f714dad26d3495877a0b4f7eb3",
            "audience": [
@@ -8493,8 +8491,8 @@
          },
          {
            "lines": [
-             73,
-             73
+             71,
+             71
            ],
            "sha256": "f08dc3964137c5cde784acc21e0d1e2d11376aef40812b01d29e518c848dee88",
            "audience": [
@@ -8513,15 +8511,15 @@
      "place-60": {
        "heading": "Requirements and limits",
        "lines": [
-         75,
-         75
+         73,
+         73
        ],
        "sha256": "fefb45a25de91db321b2d923fec41b9356086e632a8c974c4ec8f99299aa862a",
        "clauses": [
          {
            "lines": [
-             75,
-             75
+             73,
+             73
            ],
            "sha256": "fefb45a25de91db321b2d923fec41b9356086e632a8c974c4ec8f99299aa862a",
            "audience": [
@@ -8534,15 +8532,15 @@
      "place-41": {
        "heading": "Requirements and limits",
        "lines": [
-         77,
-         77
+         75,
+         75
        ],
        "sha256": "693835076474016d0e4d663842c74f54f1e6346e609e6568ff32d068112b3113",
        "clauses": [
          {
            "lines": [
-             77,
-             77
+             75,
+             75
            ],
            "sha256": "693835076474016d0e4d663842c74f54f1e6346e609e6568ff32d068112b3113",
            "audience": [
@@ -8561,15 +8559,15 @@
      "place-18": {
        "heading": "Requirements and limits",
        "lines": [
-         79,
-         79
+         77,
+         77
        ],
        "sha256": "c7cfa3d4d415e7f98872694e9157aa760eb8ff8a567fe6e8d6feea2394448e71",
        "clauses": [
          {
            "lines": [
-             79,
-             79
+             77,
+             77
            ],
            "sha256": "c7cfa3d4d415e7f98872694e9157aa760eb8ff8a567fe6e8d6feea2394448e71",
            "audience": [
@@ -8582,15 +8580,15 @@
      "place-19": {
        "heading": "Requirements and limits",
        "lines": [
-         81,
-         83
+         79,
+         81
        ],
        "sha256": "c1d3da8bf1987ce48cd90a27ba432a9b77f05e9034774109f4ce027a267eb3a3",
        "clauses": [
          {
            "lines": [
-             81,
-             81
+             79,
+             79
            ],
            "sha256": "ea0134b2b6b8de4de9da1478feb5e6963542acb2e033b877579d52ee75a1f1ec",
            "audience": [
@@ -8603,8 +8601,8 @@
          },
          {
            "lines": [
-             83,
-             83
+             81,
+             81
            ],
            "sha256": "6d47c797c48ff5ba9a98d4802c116216f000b0e7430b6e83c56b039a5a86ad3a",
            "audience": [
@@ -8619,15 +8617,15 @@
      "place-21": {
        "heading": "Requirements and limits",
        "lines": [
-         85,
-         85
+         83,
+         83
        ],
        "sha256": "f645b31633d6cf64ca44780b9c5abb8fcd9a675d7260f14ed7b8912b2698a52c",
        "clauses": [
          {
            "lines": [
-             85,
-             85
+             83,
+             83
            ],
            "sha256": "f645b31633d6cf64ca44780b9c5abb8fcd9a675d7260f14ed7b8912b2698a52c",
            "audience": [
@@ -8639,15 +8637,15 @@
      "place-22": {
        "heading": "Requirements and limits",
        "lines": [
-         87,
-         87
+         85,
+         85
        ],
        "sha256": "a093769d59606cf6bb7cfba669f2f6d8d971c733758b5a9655ec26df68e09413",
        "clauses": [
          {
            "lines": [
-             87,
-             87
+             85,
+             85
            ],
            "sha256": "a093769d59606cf6bb7cfba669f2f6d8d971c733758b5a9655ec26df68e09413",
            "audience": [
@@ -8662,15 +8660,15 @@
      "place-23": {
        "heading": "Use the repository's instructions",
        "lines": [
-         91,
-         91
+         89,
+         89
        ],
        "sha256": "ff12aa752c7fc27263c58e8468909fec2a6f70b2e4794104c130a55e912d4f60",
        "clauses": [
          {
            "lines": [
-             91,
-             91
+             89,
+             89
            ],
            "sha256": "ff12aa752c7fc27263c58e8468909fec2a6f70b2e4794104c130a55e912d4f60",
            "audience": [
@@ -8689,15 +8687,15 @@
      "place-24": {
        "heading": "Use the repository's instructions",
        "lines": [
-         93,
-         93
+         91,
+         91
        ],
        "sha256": "7b7e20942522e21b2287c84623915eb7710d9e1e14a44251fa3ab3c635288f4c",
        "clauses": [
          {
            "lines": [
-             93,
-             93
+             91,
+             91
            ],
            "sha256": "7b7e20942522e21b2287c84623915eb7710d9e1e14a44251fa3ab3c635288f4c",
            "audience": [
@@ -8712,15 +8710,15 @@
      "place-25": {
        "heading": "Use the repository's instructions",
        "lines": [
-         95,
-         95
+         93,
+         93
        ],
        "sha256": "f31605d54e8f9c4692ea6f057450f4fab986344978103a82bd881822fe3949ca",
        "clauses": [
          {
            "lines": [
-             95,
-             95
+             93,
+             93
            ],
            "sha256": "f31605d54e8f9c4692ea6f057450f4fab986344978103a82bd881822fe3949ca",
            "audience": [
@@ -8739,15 +8737,15 @@
      "place-42": {
        "heading": "Use the repository's instructions",
        "lines": [
-         97,
-         97
+         95,
+         95
        ],
        "sha256": "f66d39e74c5c258b858e091616e277210ac739997d05c22af5e56b67768c4dd6",
        "clauses": [
          {
            "lines": [
-             97,
-             97
+             95,
+             95
            ],
            "sha256": "f66d39e74c5c258b858e091616e277210ac739997d05c22af5e56b67768c4dd6",
            "audience": [
@@ -8766,15 +8764,15 @@
      "place-40": {
        "heading": "Use the repository's instructions",
        "lines": [
-         99,
-         99
+         97,
+         97
        ],
        "sha256": "6c8d936f3e6d4d670e418b90f45865f7fe9be3bc1329c56442d294056c76ac9c",
        "clauses": [
          {
            "lines": [
-             99,
-             99
+             97,
+             97
            ],
            "sha256": "6c8d936f3e6d4d670e418b90f45865f7fe9be3bc1329c56442d294056c76ac9c",
            "audience": [
@@ -8793,15 +8791,15 @@
      "place-26": {
        "heading": "Use the repository's instructions",
        "lines": [
-         101,
-         101
+         99,
+         99
        ],
        "sha256": "ff560dbe0ccafe3d57861fd23f10297cb581cf45e3b95e3c48c7b9ba861c875d",
        "clauses": [
          {
            "lines": [
-             101,
-             101
+             99,
+             99
            ],
            "sha256": "ff560dbe0ccafe3d57861fd23f10297cb581cf45e3b95e3c48c7b9ba861c875d",
            "audience": [
@@ -8820,15 +8818,15 @@
      "place-27": {
        "heading": "Use the repository's instructions",
        "lines": [
-         103,
-         103
+         101,
+         101
        ],
        "sha256": "1119f3827261cbcb30a287bbc7a468d2c9399c2aafb1deb3c3d3a24b5c8eb7b8",
        "clauses": [
          {
            "lines": [
-             103,
-             103
+             101,
+             101
            ],
            "sha256": "1119f3827261cbcb30a287bbc7a468d2c9399c2aafb1deb3c3d3a24b5c8eb7b8",
            "audience": [
@@ -8847,15 +8845,15 @@
      "place-28": {
        "heading": "Evidence and handovers",
        "lines": [
-         107,
-         109
+         105,
+         107
        ],
        "sha256": "24329f95643937dab6471f919ccf6811d172bcc4b1fe007f87dc7ec3e360491a",
        "clauses": [
          {
            "lines": [
-             107,
-             107
+             105,
+             105
            ],
            "sha256": "bc5f10c6af625c7f59ddae5ef9a4ce40aef15030644215c68d2a2c16b13cdd38",
            "audience": [
@@ -8871,8 +8869,8 @@
          },
          {
            "lines": [
-             109,
-             109
+             107,
+             107
            ],
            "sha256": "dc15a256933b1deabcb6c2a178e89ac08591425855baefc2babd5c6766d3c106",
            "audience": [
@@ -8891,15 +8889,15 @@
      "place-45": {
        "heading": "Evidence and handovers",
        "lines": [
-         111,
-         111
+         109,
+         109
        ],
        "sha256": "d1a6cbd39249bf1fd492bc7ef52e5b2a7935638b58f452466c323589a52e43c6",
        "clauses": [
          {
            "lines": [
-             111,
-             111
+             109,
+             109
            ],
            "sha256": "d1a6cbd39249bf1fd492bc7ef52e5b2a7935638b58f452466c323589a52e43c6",
            "audience": [
@@ -8918,15 +8916,15 @@
      "place-46": {
        "heading": "Evidence and handovers",
        "lines": [
-         113,
-         113
+         111,
+         111
        ],
        "sha256": "41c60c18df4d0f2046068df29eb3b8f897a085db8ce7ef435ee4c9579ce28263",
        "clauses": [
          {
            "lines": [
-             113,
-             113
+             111,
+             111
            ],
            "sha256": "41c60c18df4d0f2046068df29eb3b8f897a085db8ce7ef435ee4c9579ce28263",
            "audience": [
@@ -8945,15 +8943,15 @@
      "place-57": {
        "heading": "Evidence and handovers",
        "lines": [
-         115,
-         115
+         113,
+         113
        ],
        "sha256": "ebf838cbb37afc2ea937487b803b24297df07b86b90125c2944712ebc05c13ee",
        "clauses": [
          {
            "lines": [
-             115,
-             115
+             113,
+             113
            ],
            "sha256": "ebf838cbb37afc2ea937487b803b24297df07b86b90125c2944712ebc05c13ee",
            "audience": [
@@ -8972,15 +8970,15 @@
      "place-47": {
        "heading": "Evidence and handovers",
        "lines": [
-         117,
-         117
+         115,
+         115
        ],
        "sha256": "2851f4f73c0bd4e98aceac6f854c02997d05d43d0e670a80cd945fe23714d706",
        "clauses": [
          {
            "lines": [
-             117,
-             117
+             115,
+             115
            ],
            "sha256": "2851f4f73c0bd4e98aceac6f854c02997d05d43d0e670a80cd945fe23714d706",
            "audience": [
@@ -8999,15 +8997,15 @@
      "place-58": {
        "heading": "Evidence and handovers",
        "lines": [
-         119,
-         119
+         117,
+         117
        ],
        "sha256": "a73fcc990bb99bda5eb18d884628ef34f56c32a00e146fdf4ede3c4bcabc39c0",
        "clauses": [
          {
            "lines": [
-             119,
-             119
+             117,
+             117
            ],
            "sha256": "a73fcc990bb99bda5eb18d884628ef34f56c32a00e146fdf4ede3c4bcabc39c0",
            "audience": [
@@ -9022,15 +9020,15 @@
      "place-59": {
        "heading": "Evidence and handovers",
        "lines": [
-         120,
-         120
+         118,
+         118
        ],
        "sha256": "f6205ba906432a594e11b5110a87c3db6e9be5efadfdf4d00043dadeaa71b8d5",
        "clauses": [
          {
            "lines": [
-             120,
-             120
+             118,
+             118
            ],
            "sha256": "f6205ba906432a594e11b5110a87c3db6e9be5efadfdf4d00043dadeaa71b8d5",
            "audience": [
@@ -9047,15 +9045,15 @@
      "place-29": {
        "heading": "Evidence and handovers",
        "lines": [
-         121,
-         121
+         119,
+         119
        ],
        "sha256": "a2502b90345834dbdb98331b7d58c283b8d7c1249af9da033ba0b46609dab9dc",
        "clauses": [
          {
            "lines": [
-             121,
-             121
+             119,
+             119
            ],
            "sha256": "a2502b90345834dbdb98331b7d58c283b8d7c1249af9da033ba0b46609dab9dc",
            "audience": [
@@ -9072,15 +9070,15 @@
      "place-30": {
        "heading": "Evidence and handovers",
        "lines": [
-         123,
-         125
+         121,
+         123
        ],
        "sha256": "45040450870ec95bf359f4e1ef2217fb34ca1fac16197fdb24dc0eac1771c6d8",
        "clauses": [
          {
            "lines": [
-             123,
-             123
+             121,
+             121
            ],
            "sha256": "52d02951edb25e7559df7a411701c58363fa68cd02df40425c656ba14adb0e57",
            "audience": [
@@ -9091,8 +9089,8 @@
          },
          {
            "lines": [
-             125,
-             125
+             123,
+             123
            ],
            "sha256": "92aea57c9d8a238c70c32c6eaf5b0182d8ad0f573d45056b89d34dc4a30cac55",
            "audience": [
@@ -9106,15 +9104,15 @@
      "place-31": {
        "heading": "Evidence and handovers",
        "lines": [
-         127,
-         131
+         125,
+         129
        ],
        "sha256": "3fccc8cb065fa4a01b32709b86ff1226418b54a346e18913d85e727c6847c8d6",
        "clauses": [
          {
            "lines": [
-             127,
-             127
+             125,
+             125
            ],
            "sha256": "e4d0b89384449e38a417e1fd4946f7693a70ffbeef5f24f1c079d52ad567358f",
            "audience": [
@@ -9125,8 +9123,8 @@
          },
          {
            "lines": [
-             129,
-             129
+             127,
+             127
            ],
            "sha256": "05b5667ecd63b40db06b3ccc20cffb15fa5782512b647a42dc8f76c53639993d",
            "audience": [
@@ -9137,8 +9135,8 @@
          },
          {
            "lines": [
-             131,
-             131
+             129,
+             129
            ],
            "sha256": "d3ae3c83ff3c9b99f76ce1b70b991e32abd2de228b6f113de4620261ae1ab211",
            "audience": [
@@ -9152,15 +9150,15 @@
      "place-32": {
        "heading": "Evidence and handovers",
        "lines": [
-         133,
-         133
+         131,
+         131
        ],
        "sha256": "3d001bd657415b47a59f704be420aa19ceb3933a1629a2e18166d579ccc59f12",
        "clauses": [
          {
            "lines": [
-             133,
-             133
+             131,
+             131
            ],
            "sha256": "3d001bd657415b47a59f704be420aa19ceb3933a1629a2e18166d579ccc59f12",
            "audience": [
@@ -9179,15 +9177,15 @@
      "place-33": {
        "heading": "Evidence and handovers",
        "lines": [
-         135,
-         135
+         133,
+         133
        ],
        "sha256": "df670b13b3403a8035a44d5ebba9feb22b77cd21ba0ca985b5bd27faa960d9e3",
        "clauses": [
          {
            "lines": [
-             135,
-             135
+             133,
+             133
            ],
            "sha256": "df670b13b3403a8035a44d5ebba9feb22b77cd21ba0ca985b5bd27faa960d9e3",
            "audience": [
@@ -9199,15 +9197,15 @@
      "place-34": {
        "heading": "Evidence and handovers",
        "lines": [
-         137,
-         137
+         135,
+         135
        ],
        "sha256": "1965491b1fe9d033b4812baa05f3eb1a4b72d2155be9132260f46ba8a892964e",
        "clauses": [
          {
            "lines": [
-             137,
-             137
+             135,
+             135
            ],
            "sha256": "1965491b1fe9d033b4812baa05f3eb1a4b72d2155be9132260f46ba8a892964e",
            "audience": [
@@ -9219,15 +9217,15 @@
      "place-35": {
        "heading": "Evidence and handovers",
        "lines": [
-         139,
-         139
+         137,
+         137
        ],
        "sha256": "5553b3eb3180cb9d264d40ca9a27a023558b7fe445c39da2bbad32a352cdd2b9",
        "clauses": [
          {
            "lines": [
-             139,
-             139
+             137,
+             137
            ],
            "sha256": "5553b3eb3180cb9d264d40ca9a27a023558b7fe445c39da2bbad32a352cdd2b9",
            "audience": [
@@ -9240,15 +9238,15 @@
      "place-49": {
        "heading": "Evidence and handovers",
        "lines": [
-         141,
-         141
+         139,
+         139
        ],
        "sha256": "74424015e10669d74b0a615666fba22542d397d434c62d38f257a15f17acf2a5",
        "clauses": [
          {
            "lines": [
-             141,
-             141
+             139,
+             139
            ],
            "sha256": "74424015e10669d74b0a615666fba22542d397d434c62d38f257a15f17acf2a5",
            "audience": [
@@ -9262,15 +9260,15 @@
      "place-36": {
        "heading": "Attempts and repair records",
        "lines": [
-         145,
-         145
+         143,
+         143
        ],
        "sha256": "c2243d724268cc64a454f55c688012d6a1c88bfcf5943588bf82e5e91850fd6a",
        "clauses": [
          {
            "lines": [
-             145,
-             145
+             143,
+             143
            ],
            "sha256": "c2243d724268cc64a454f55c688012d6a1c88bfcf5943588bf82e5e91850fd6a",
            "audience": [
@@ -9282,15 +9280,15 @@
      "place-37": {
        "heading": "Attempts and repair records",
        "lines": [
-         147,
-         147
+         145,
+         145
        ],
        "sha256": "c8606a4379c84808203536f821f9e6d670fcb95084027c414bfdfd6a5d500f3b",
        "clauses": [
          {
            "lines": [
-             147,
-             147
+             145,
+             145
            ],
            "sha256": "c8606a4379c84808203536f821f9e6d670fcb95084027c414bfdfd6a5d500f3b",
            "audience": [
@@ -9302,15 +9300,15 @@
      "place-38": {
        "heading": "Attempts and repair records",
        "lines": [
-         149,
-         149
+         147,
+         147
        ],
        "sha256": "c6fde4e810b516df87e8c8b39a308f4e73cd4f8530499117b94b18ef1e183129",
        "clauses": [
          {
            "lines": [
-             149,
-             149
+             147,
+             147
            ],
            "sha256": "c6fde4e810b516df87e8c8b39a308f4e73cd4f8530499117b94b18ef1e183129",
            "audience": [
@@ -9323,15 +9321,15 @@
      "place-39": {
        "heading": "Attempts and repair records",
        "lines": [
-         151,
-         151
+         149,
+         149
        ],
        "sha256": "bf8dfc60b69aa5909a74841461698285a9100a56a2c5e7b25794976b739cae8b",
        "clauses": [
          {
            "lines": [
-             151,
-             151
+             149,
+             149
            ],
            "sha256": "bf8dfc60b69aa5909a74841461698285a9100a56a2c5e7b25794976b739cae8b",
            "audience": [

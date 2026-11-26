@@ -53,7 +53,6 @@ def _workspace_config(base: Path) -> Path:
             {
                 "coordinationRoot": (base / "coordination").as_posix(),
                 "workspaceRoot": workspace.as_posix(),
-                "providers": {},
             },
             indent=2,
         ),

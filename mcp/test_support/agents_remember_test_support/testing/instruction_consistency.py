@@ -110,7 +110,6 @@ UNDOCUMENTED_COMMANDS = frozenset(
         "knowledge-copies",
         "memory-backfill",
         "upgrade-user-settings",
-        "providers-remove",
         "removed-stores",
     }
 )
@@ -413,7 +412,7 @@ def _historical_path_text(root: Path, surface: Surface) -> str:
         ):
             unit = document["units"][path[1]]
             historical = (
-                unit["disposition"] == "retired (D699, D700)"
+                unit["disposition"] in {"retired (D699, D700)", "retired (D1000, D1001)"}
                 and "retirementDecision" in unit
                 and "evidence" not in unit
                 and "digestPlace" not in unit

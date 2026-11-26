@@ -107,7 +107,6 @@ COORDINATION_WRITE_ZONES = (
     "controlplane/",
     "logs/",
     "notes/",
-    "providers/",
     "skills/",
     "system/",
     "tasks/",
@@ -439,7 +438,6 @@ class EntryPointWorld:
                             "memoryRoot": self.adopt.as_posix(),
                         },
                     },
-                    "providers": {},
                     "benchmarksEnabled": True,
                 }
             ),
@@ -657,7 +655,6 @@ class EntryPointWorld:
                 "leaf_id": LEAF_ID,
                 "parent_task": MASTER,
                 "workflow_kind": "light-task",
-                "skip_provider_setup": True,
             },
         )
         assert self.contract.exists(), (
@@ -689,7 +686,7 @@ class EntryPointWorld:
             "server_info": {},
             "context_packet": {"repo_id": REPO},
             "read_ar_files": {"repo_id": REPO, "files": [{"path": "not-covered.md"}]},
-            "runtime_install": {"dry_run": True, "install_provider_deps": False},
+            "runtime_install": {"dry_run": True},
             "retire_child": {
                 "agent_id": "00000000-0000-4000-8000-000000000002",
                 "task_document_ref": self.leaf_ref,

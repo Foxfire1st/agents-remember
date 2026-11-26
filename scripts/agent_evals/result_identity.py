@@ -17,9 +17,7 @@ SCHEMA = "ar-eval-result-identity/v1"
 SOURCE_ROOTS = ("scripts/agent_evals", "mcp/src/agents_remember", "mcp/test_support")
 CONFIG_FILES = (
     "pyproject.toml",
-    "requirements.txt",
     "mcp/pyproject.toml",
-    "mcp/requirements.txt",
     "mcp/uv.lock",
 )
 

@@ -7,7 +7,6 @@ from pathlib import Path
 
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
-    ProviderScope,
 )
 from agents_remember.observer.projection import (
     Analytics,
@@ -51,15 +50,6 @@ class SnapshotReaderTests(unittest.TestCase):
             coordination_root=coord,
             workspace_root=(self.tmp / "ws").resolve(),
             transcript_root=coord / "logs",
-            providers={
-                "codegraphcontext-code": ProviderScope(
-                    provider_id="codegraphcontext-code",
-                    runtime_root=coord / "rt",
-                    log_root=coord / "lg",
-                    instance_id="projects",
-                    scope="workspace",
-                )
-            },
         )
 
     @staticmethod

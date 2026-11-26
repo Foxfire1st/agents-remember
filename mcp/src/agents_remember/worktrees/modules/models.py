@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TypedDict
 
 # Payload lists that scale with transported history (committed-range closeouts
@@ -34,17 +33,6 @@ class VerifiedChange:
     commit_date: str
     changed_paths: list[str]
     working_paths: list[str] | None = None
-
-
-@dataclass(frozen=True)
-class WorktreeProviderSetupConfig:
-    coordination_root: Path
-    settings_path: Path
-    seed_source_coordination_root: Path | None = None
-    # True when settings_path is a temporary file whose lifetime must extend
-    # into the background setup thread; the launcher then owns the unlink and the
-    # application entry point must skip its own cleanup for a "starting" result.
-    unlink_settings_after_setup: bool = False
 
 
 class OnboardingRefreshPlan(TypedDict):

@@ -106,9 +106,9 @@ a direct landing, the current journal generation and the executable controls. In
 archive-ready from cleanup-completed and reports the surviving contract state; it does not claim
 that the old enclosure remains addressable. If the enclosure locator is archive-ready but contract cleanup is
 not yet `completed` or `abandoned`, retry the archive's exact accepted public disposition with its
-archived arguments: `worktree_cleanup` with the accepted `teardown_providers` value or
-`worktree_abandon` with the accepted `force` value. The archive request identity durably binds this
-typed `cleanupArguments` object. Status and terminal-request conflicts return it with the exact
+archived arguments: `worktree_cleanup` or `worktree_abandon` with the accepted `force` value. The
+archive request identity durably binds this typed `cleanupArguments` object. Status and
+terminal-request conflicts return it with the exact
 public `nextArgs`; a retry with different arguments refuses rather than revising, defaulting, or
 falling back. Do not route that terminal retry through `worktree_operation_control`.
 

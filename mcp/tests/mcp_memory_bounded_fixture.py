@@ -303,7 +303,6 @@ def build_fixture(root: Path, source: Path, interpreter: Path) -> Fixture:
             "repositories": {
                 REPO_ID: {"certificationProfile": str(TEST_CERTIFICATION_PROFILE_REFERENCE)}
             },
-            "providers": {},
             "dashboard": {"autoStart": False},
         },
     )

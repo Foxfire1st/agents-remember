@@ -1,7 +1,7 @@
 # dashboard/ — Mission-Control Frontend
 
 This is the **frontend sub-project** for the Agents Remember dashboard — a root-level
-folder (a sibling of `mcp/`, `skills/`, `providers/`) so the UI dimension of the project is
+folder (a sibling of `mcp/` and `skills/`) so the UI dimension of the project is
 visible at a glance rather than buried inside the Python package.
 
 ## Status

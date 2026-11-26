@@ -306,7 +306,7 @@
           "factState": "not-applicable"
         },
         "missingFacts": ["memory-worktree"],
-        "phase": "provider-setup",
+        "phase": "worktree-started",
         "repoName": "agents-remember",
         "sourceFiles": [],
         "sourceLineage": {
@@ -382,12 +382,12 @@
         "ledgerRows": [],
         "memoryMode": "external",
         "missingFacts": [],
-        "phase": "provider-setup",
+        "phase": "worktree-started",
         "repoName": "agents-remember",
         "sourceFiles": [],
         "summary": "code worktree add failed",
         "taskId": "SIM-4",
-        "taskName": "failed-setup",
+        "taskName": "failed-worktree-add",
         "worktreeGroup": "failed-group"
       },
       {

@@ -213,9 +213,7 @@ def run(args: argparse.Namespace) -> int:
         # Context variables do not cross exec: scope this launch-only recovery here,
         # after root validation, without changing public worktree/task readers.
         with contextlib.redirect_stdout(sys.stderr), tolerate_unreadable_review():
-            created = worktree_start_tool(
-                config, identity, execution=StartExecution(skip_provider_setup=True)
-            )
+            created = worktree_start_tool(config, identity, execution=StartExecution())
     except Exception as error:  # every failure is this command's one reply
         return _reply(str(getattr(error, "code", "") or type(error).__name__), str(error))
     if created.get("ok") is True:

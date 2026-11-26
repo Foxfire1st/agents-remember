@@ -280,7 +280,6 @@ def settings_document(layout: SandboxLayout) -> dict[str, Any]:
         "workspaceRoot": layout.projects.as_posix(),
         "transcriptRoot": (layout.coordination / "logs" / "mcp").as_posix(),
         "repositories": {REPOSITORY_ID: {}},
-        "providers": {},
         # Named explicitly: left out, the port would default to 8765, the developer's own
         # dashboard service.
         "dashboard": {"autoStart": False, "port": layout.dashboard_port},

@@ -34,7 +34,6 @@ export function phaseStage(phase: string): PhaseStage {
     case "worktree-started":
     case "code-worktree":
     case "contract-written":
-    case "provider-setup":
       return "power-up";
     case "closeout-pending":
       return "closeout";

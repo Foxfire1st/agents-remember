@@ -47,8 +47,6 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
         memory_mode: str | None = None,
         memory_choice: str | None = None,
         stale_base_choice: str | None = None,
-        skip_provider_setup: bool = False,
-        retry_provider_setup: bool = False,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Create or load a task contract and its code/memory worktrees (does not enforce packet dependencies; dry_run changes nothing). States: started, would-start, blocked. Reference: docs/reference/mcp-tools.md."""
@@ -71,8 +69,6 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
             ),
             execution=StartExecution(
                 dry_run=dry_run,
-                skip_provider_setup=skip_provider_setup,
-                retry_provider_setup=retry_provider_setup,
             ),
         )
 

@@ -9,8 +9,7 @@ describe("scenario player model (5i)", () => {
 
   it("authors the build-up timeline (B0 worktree_start → B5 idle constellation)", () => {
     expect(buildUp).toBeTruthy();
-    // Four beats, not six: the two provider beats (dim engines, then the seed/clone charge) left
-    // with the search providers, so the timeline is the official line → two checkouts → powered.
+    // Four beats: the official line → two checkouts → powered.
     expect(buildUp!.frames.length).toBe(4);
     expect(buildUp!.frames[0].caption).toMatch(/worktree_start/i);
     expect(buildUp!.frames.at(-1)!.caption).toMatch(/idle constellation/i);
@@ -50,14 +49,11 @@ describe("scenario player model (5i)", () => {
       frame.projection.analytics.engineProcesses.map((node) => node.health),
     );
     expect(healths).toContain("blocked");
-    // The recover runs the ledger-map beat, not a teleport to nominal — and no frame carries the
-    // seed/clone conduits the providers took with them.
+    // The recover runs the ledger-map beat, not a teleport to nominal.
     const kinds = memoryBlock!.frames.flatMap((frame) =>
       frame.projection.analytics.engineProcesses.flatMap((node) => node.edges.map((edge) => edge.kind)),
     );
     expect(kinds).toContain("ledger-map");
-    expect(kinds).not.toContain("cgc-seed");
-    expect(kinds).not.toContain("grepai-clone");
     // one enclosure throughout — every frame drives the SAME worktree group (so the recover animates,
     // not remounts)
     const groups = new Set(
@@ -82,14 +78,11 @@ describe("scenario player model (5i)", () => {
     expect(blocked).toBeTruthy();
     expect(blocked!.codeSource.behindSource ?? 0).toBeGreaterThan(0);
     expect(blocked!.missingFacts.some((fact) => /contract not yet written/i.test(fact))).toBe(true);
-    // the recover adds the code worktree (its own beat), not a teleport to nominal, and no frame
-    // carries a provider seed/clone conduit
+    // the recover adds the code worktree (its own beat), not a teleport to nominal
     const kinds = staleBase!.frames.flatMap((frame) =>
       frame.projection.analytics.engineProcesses.flatMap((node) => node.edges.map((edge) => edge.kind)),
     );
     expect(kinds).toContain("worktree-add");
-    expect(kinds).not.toContain("cgc-seed");
-    expect(kinds).not.toContain("grepai-clone");
     // one enclosure throughout
     const groups = new Set(
       staleBase!.frames.flatMap((frame) =>
@@ -114,13 +107,7 @@ describe("scenario player model (5i)", () => {
     expect(blocked!.edges.some((e) => e.kind === "worktree-add" && e.state === "blocked")).toBe(false);
     expect(blocked!.memorySource?.behindSource ?? 0).toBeGreaterThan(0);
     expect(blocked!.memoryWorktree?.exists).toBe(true);
-    // the recover is a ff/ref diff — the sync gate lifts and nothing else is added. No frame carries
-    // a provider seed/clone conduit, because the surface no longer composes them.
-    const kinds = liveSync!.frames.flatMap((frame) =>
-      frame.projection.analytics.engineProcesses.flatMap((node) => node.edges.map((edge) => edge.kind)),
-    );
-    expect(kinds).not.toContain("cgc-seed");
-    expect(kinds).not.toContain("grepai-clone");
+    // the recover is a ff/ref diff — the sync gate lifts and nothing else is added.
     const last = liveSync!.frames.at(-1)!.projection.analytics.engineProcesses[0];
     expect(last.health).not.toBe("blocked");
     expect(last.memorySource?.behindSource ?? 0).toBe(0);
@@ -150,11 +137,6 @@ describe("scenario player model (5i)", () => {
     // TERMINAL — the scenario ENDS on the STOP (last frame is integration-blocked); no recover tail
     const last = conflict!.frames[conflict!.frames.length - 1];
     expect(last.projection.analytics.engineProcesses.some((node) => node.phase === "integration-blocked")).toBe(true);
-    const kinds = conflict!.frames.flatMap((frame) =>
-      frame.projection.analytics.engineProcesses.flatMap((node) => node.edges.map((edge) => edge.kind)),
-    );
-    expect(kinds).not.toContain("cgc-seed");
-    expect(kinds).not.toContain("grepai-clone");
     // the CONFLICT flash RESOLVES INTO the steady STOP as a PROP DIFF (same boot-audio enclosure), not a
     // remount. The C0 idle lead-in reuses the boot-demo nominal fixture, so the prop-diff invariant is
     // asserted on the flash → STOP pair (the failure-arc frames), which share identity.
@@ -184,14 +166,7 @@ describe("scenario player model (5i)", () => {
     expect(resting?.frames).toHaveLength(1);
   });
 
-  it("authors no provider arc and no provider edge kind (the retired surface)", () => {
-    // The three provider arcs — the GrepAI seed fault, the CGC reindex reroute and the pre-contract
-    // provider-plan block — existed only to animate engines materialising and seed/clone conduits.
-    // Their names and their frames are gone, and no surviving scenario carries an edge kind the
-    // server no longer composes (only worktree-add, ledger-map, sync and the integration lanes).
-    for (const retired of ["seed-fault", "reindex-reroute", "provider-block"]) {
-      expect(SCENARIOS.some((scenario) => scenario.name === retired), retired).toBe(false);
-    }
+  it("pins every scenario edge kind to the served EngineProcessEdge vocabulary", () => {
     const SERVED_EDGE_KINDS = new Set([
       "worktree-add",
       "ledger-map",

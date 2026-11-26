@@ -24,7 +24,6 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 class StartedWorktreeState:
     code: str
     memory: dict[str, object]
-    providers: dict[str, object]
 
 
 def started_result(
@@ -41,14 +40,8 @@ def started_result(
             args,
             state.code,
             state.memory,
-            state.providers,
         )
     summary = "Worktree task started; continue the wrapped workflow before closeout."
-    if state.providers.get("state") == "starting":
-        summary = (
-            "Worktree task started; provider setup is running in the background — "
-            "poll worktree_status until its providers block reaches a terminal state."
-        )
     briefs_problem = _started_briefs_problem(contract, state.memory)
     return WorktreeCommandResult(
         0,
@@ -66,7 +59,7 @@ def started_result(
                 # (260918-TSIP-L8; the same repair as the phase machine's `worktree-started` step).
                 args=contract_next_args(contract, repo_id=contract.repo_name),
             ),
-            **_start_result_facts(contract, state.code, state.memory, state.providers),
+            **_start_result_facts(contract, state.code, state.memory),
             "projectionEffects": projection_effects or [],
             **({"briefsProblem": briefs_problem} if briefs_problem is not None else {}),
         },
@@ -95,7 +88,6 @@ def _start_preview_result(
     args: WorktreeArgs,
     code_state: str,
     memory_state: dict[str, object],
-    provider_state: dict[str, object],
 ) -> WorktreeCommandResult:
     summary = (
         "Worktree start preview passed; apply worktree_start with the same task "
@@ -109,7 +101,6 @@ def _start_preview_result(
         "workflow_kind": contract.workflow_kind,
         "work_branch": contract.code_work_branch,
         "memory_mode": contract.memory_mode,
-        "skip_provider_setup": args.skip_provider_setup,
         "dry_run": False,
     }
     parent_is_planned = (
@@ -132,7 +123,7 @@ def _start_preview_result(
             "summary": summary,
             **guidance,
             "nextStep": {"summary": summary, **guidance},
-            **_start_result_facts(contract, code_state, memory_state, provider_state),
+            **_start_result_facts(contract, code_state, memory_state),
         },
     )
 
@@ -141,12 +132,10 @@ def _start_result_facts(
     contract: WorktreeContract,
     code_state: str,
     memory_state: dict[str, object],
-    provider_state: dict[str, object],
 ) -> dict[str, object]:
     facts: dict[str, object] = {
         "code_worktree": code_state,
         "memory": memory_state,
-        "providers": provider_state,
         "enclosure_path": contract.contract_path.as_posix(),
         "contract_path": contract.contract_path.as_posix(),
         "leaf_id": contract.leaf_id,

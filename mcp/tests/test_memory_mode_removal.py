@@ -674,8 +674,7 @@ def _config(root: Path, contract: WorktreeContract):
         "coordinationRoot": contract.coordination_root.as_posix(),
         "workspaceRoot": (root / "workspace").as_posix(),
         "repositories": {REPO_NAME: {}},
-        "providers": {},
-        "timeoutCaps": {"toolSeconds": 30, "providerSetupSeconds": 1800},
+        "timeoutCaps": {"toolSeconds": 30},
         "benchmarksEnabled": False,
     }
     path.write_text(json.dumps(document, indent=2), encoding="utf-8")

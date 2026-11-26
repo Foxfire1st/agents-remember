@@ -781,8 +781,7 @@ describe('the attention queue behind the bell, on the gallery states the browser
   it('ranks alarms first (state=alarm)', () => {
     const view = openBell('alarm');
     expect(view.getByTestId('attention-queue').textContent).toContain('waiting');
-    // The alarm-severity drift row ranks above the warn-severity blocked start; the
-    // retired provider-down alarm no longer exists to rank at all.
+    // The alarm-severity drift row ranks above the warn-severity blocked start.
     expect(view.getAllByTestId('attn-item')[0].textContent).toContain('actionable drift');
     expect(view.getAllByTestId('attn-item')[1].textContent).toContain('blocked');
   });

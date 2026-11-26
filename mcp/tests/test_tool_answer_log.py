@@ -812,16 +812,13 @@ class ToolAnswerEnclosureTests(unittest.TestCase):
             )
             removed: list[tuple[str, bool]] = []
 
-            class FakeLifecycle:
-                def remove_tree(self, path: Path, *, dry_run: bool) -> dict[str, object]:
-                    removed.append((path.as_posix(), dry_run))
-                    if not dry_run and path.exists():
-                        shutil.rmtree(path, ignore_errors=True)
-                    return {"path": path.as_posix(), "removed": True}
+            def fake_remove_tree(path: Path, *, dry_run: bool) -> dict[str, object]:
+                removed.append((path.as_posix(), dry_run))
+                if not dry_run and path.exists():
+                    shutil.rmtree(path, ignore_errors=True)
+                return {"path": path.as_posix(), "removed": True}
 
-            services = mock.Mock()
-            services.provider_lifecycle = FakeLifecycle()
-            with mock.patch.object(terminal_group, "worktree_services", return_value=services):
+            with mock.patch.object(terminal_group, "remove_tree", side_effect=fake_remove_tree):
                 directories = terminal_group.remove_terminal_group(contract)
             self.assertEqual(removed, [(group.as_posix(), False)])
             self.assertIn("logs", directories)

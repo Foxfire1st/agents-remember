@@ -128,7 +128,6 @@ def _settings_document(coord: Path, root: Path) -> dict:
                 "memoryRoot": (coord / "memory").as_posix(),
             },
         },
-        "providers": {},
         "benchmarksEnabled": True,
     }
 

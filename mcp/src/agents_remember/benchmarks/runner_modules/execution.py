@@ -25,7 +25,6 @@ from agents_remember.benchmarks.runner_modules.manifest import (
     case_prompt,
     manifest_relative_path,
     prompt_variant,
-    selected_provider_ids,
 )
 from agents_remember.benchmarks.runner_modules.models import (
     BenchmarkCase,
@@ -278,17 +277,11 @@ def maybe_prepare_case(
     preparation: BenchmarkPreparation,
     case: BenchmarkCase,
     *,
-    prompt_id: str | None,
-    variant_id: str | None,
     skip_prepare: bool,
 ) -> None:
     if skip_prepare:
         return
-    prepare_case(
-        preparation,
-        case,
-        provider_ids=selected_provider_ids(case, prompt_id=prompt_id, variant_id=variant_id),
-    )
+    prepare_case(preparation, case)
 
 
 def create_output_root(benchmarks_root: Path, case: BenchmarkCase, dry_run: bool) -> Path:
@@ -388,8 +381,6 @@ def run_case(request: BenchmarkRunRequest, case: BenchmarkCase) -> Path:
     maybe_prepare_case(
         preparation,
         case,
-        prompt_id=request.prompt,
-        variant_id=request.variant,
         skip_prepare=request.skip_prepare,
     )
     output_root = create_output_root(benchmarks_root, case, dry_run)

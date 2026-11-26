@@ -24,7 +24,6 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, cast
-from unittest import mock
 
 import pytest
 
@@ -116,7 +115,6 @@ def bound_validation() -> Any:
 
     bind_worktree_services(
         WorktreeServices(
-            provider_lifecycle=mock.Mock(),
             memory_quality=cast(Any, None),
             citation_guard=cast(Any, None),
             knowledge_validation=GitKnowledgeValidation(base_converter=GitBaseConverter()),

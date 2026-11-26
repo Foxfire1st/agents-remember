@@ -344,7 +344,6 @@ def _run_or_verify_cleanup(contract: WorktreeContract, args: FinalizeArgs) -> Wo
                 contract_path=contract.contract_path,
                 approved=not args.dry_run,
                 dry_run=args.dry_run,
-                teardown_providers=args.teardown_providers,
             )
         )
     except RuntimeError as exc:

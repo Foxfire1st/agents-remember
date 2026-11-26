@@ -6,11 +6,8 @@ import stat
 import sys
 from pathlib import Path
 
-from agents_remember.benchmarks.runner_modules.constants import (
-    BENCHMARK_ROOT_MARKER,
-    PROVIDER_ASSET_DIRS,
-)
-from agents_remember.install.assets import long_path, packaged_source_root
+from agents_remember.benchmarks.runner_modules.constants import BENCHMARK_ROOT_MARKER
+from agents_remember.install.assets import long_path
 from agents_remember.install.experiment import RETIRED_STARTUP_TARGETS
 
 
@@ -108,25 +105,23 @@ def remove_path(path: Path) -> None:
 
 
 def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
-    """Sync provider assets and retire coordinator instruction files; copy no skills.
+    """Prepare benchmark coordination directories and retire coordinator instruction files.
 
     Skills reach the workspace's harness from the tool server's own package copy, through the
     benchmark-local MCP registration this workspace also writes; a coordination-root skill
     folder would be a second distribution surface with no reader.
     """
 
-    with packaged_source_root() as source_root:
+    if dry_run:
+        print(f"Would ensure directory {coordination_root}")
+    else:
+        coordination_root.mkdir(parents=True, exist_ok=True)
+    for target_rel in RETIRED_STARTUP_TARGETS:
+        target = coordination_root / target_rel
         if dry_run:
-            print(f"Would ensure directory {coordination_root}")
+            print(f"Would remove retired startup file {target}")
         else:
-            coordination_root.mkdir(parents=True, exist_ok=True)
-        for target_rel in RETIRED_STARTUP_TARGETS:
-            target = coordination_root / target_rel
-            if dry_run:
-                print(f"Would remove retired startup file {target}")
-            else:
-                remove_path(target)
-        sync_provider_assets(source_root, coordination_root, dry_run)
+            remove_path(target)
 
     for folder in (
         "memory-repos",
@@ -136,34 +131,12 @@ def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
         "temp",
         "logs",
         "logs/mcp",
-        "logs/providers",
-        "logs/providers/codegraphcontext",
-        "logs/providers/grepai",
-        "logs/providers/setup",
-        "logs/providers/status",
-        "providers/data",
-        "providers/runners",
     ):
         path = coordination_root / folder
         if dry_run:
             print(f"Would ensure directory {path}")
         else:
             path.mkdir(parents=True, exist_ok=True)
-
-
-def sync_provider_assets(root: Path, coordination_root: Path, dry_run: bool) -> None:
-    providers_source = root / "runtime" / "providers"
-    providers_target = coordination_root / "providers"
-    if dry_run:
-        print(f"Would replace benchmark provider assets in {providers_target}")
-    else:
-        remove_path(providers_target)
-        providers_target.mkdir(parents=True, exist_ok=True)
-
-    for relative in PROVIDER_ASSET_DIRS:
-        source = providers_source / relative
-        if source.exists():
-            copy_tree(source, providers_target / relative, dry_run)
 
 
 def write_benchmark_root_marker(root: Path, dry_run: bool) -> Path:

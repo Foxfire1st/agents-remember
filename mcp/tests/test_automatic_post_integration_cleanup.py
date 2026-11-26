@@ -294,8 +294,8 @@ def test_a_dry_run_finalization_reports_the_cleanup_plan_and_shapes_nothing(
     assert preview["cleanup"]["state"] == "would-cleanup"
     assert "automatic" not in preview["cleanup"]
     assert preview["cleanup"]["summary"] == (
-        "Cleanup would reclaim the worktree provider stack, remove worktrees, and delete "
-        "merged local task branches where Git proves they are merged."
+        "Cleanup would remove worktrees and delete merged local task branches "
+        "where Git proves they are merged."
     )
 
     # A preview retires nothing.

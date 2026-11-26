@@ -27,8 +27,7 @@ TEMPLATE = {
     "workspaceRoot": "<PATH/TO/YOUR/PROJECTS_FOLDER>",
     "transcriptRoot": "<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination/logs/mcp",
     "repositories": {"<YOUR_REPOSITORY_FOLDER_NAME>": {}},
-    "providers": {"codegraphcontext-code": {}, "grepai-memory": {}},
-    "timeoutCaps": {"toolSeconds": 60, "providerSetupSeconds": 1800},
+    "timeoutCaps": {"toolSeconds": 60},
     "dashboard": {"autoStart": False, "port": 8765},
 }
 
@@ -114,7 +113,7 @@ def test_existing_shared_host_file_is_untouched_and_recorded(tmp_path, monkeypat
             "installPrefix": "/opt/developer/paseo/prefix",
             "home": "/home/developer/.local/state/agents-remember/paseo",
             "listen": "127.0.0.1:9786",
-            "providers": {"codegraphcontext-code": {"enabled": True}},
+            "providers": {"hermes": {"extends": "acp", "command": ["hermes", "acp"]}},
             "embed": [
                 {
                     "dashboardOrigin": "http://127.0.0.1:9099",

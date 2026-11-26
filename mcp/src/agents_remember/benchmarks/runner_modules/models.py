@@ -41,9 +41,8 @@ class BenchmarkCase:
 class BenchmarkWorkspace:
     """One benchmark case's materialized with-memory workspace.
 
-    The case plus the roots that were laid down for it and the providers it
-    arms. Prepared once by ``prepare_case`` and then handed as a whole to
-    everything that writes the workspace registration or launches providers.
+    The case plus the roots that were laid down for it. Prepared once by
+    ``prepare_case`` and then handed as a whole to workspace registration.
     """
 
     case: BenchmarkCase
@@ -51,7 +50,6 @@ class BenchmarkWorkspace:
     coordination_root: Path
     source_repo_root: Path
     memory_repo: Path
-    provider_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -80,15 +78,12 @@ class BenchmarkPreparation:
 
     Shared by prepare and run: both requests project onto this via their
     ``preparation`` property, so ``prepare_case`` takes one object instead of
-    the same six fields unpacked at every layer.
+    the same fields unpacked at every layer.
     """
 
     benchmarks_root: Path
     dry_run: bool = True
     force_clone: bool = False
-    provider_timeout: int = 1800
-    # See BenchmarkPrepareRequest.allowed_provider_ids (containment R1).
-    allowed_provider_ids: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -108,14 +103,6 @@ class BenchmarkPrepareRequest:
     case_id: str | None = None
     dry_run: bool = True
     force_clone: bool = False
-    provider_timeout: int = 1800
-    # Containment R1 (260707-HFX-L1): the live MCP authority's provider ids. The
-    # application layer always passes this; manifest-requested providers outside
-    # the set are skipped (and reported), never armed or launched. None = no
-    # authority context (direct script use) and is FAIL-CLOSED by the consumer
-    # (workspace.filter_benchmark_provider_ids) unless
-    # AR_BENCHMARK_ALLOW_UNFILTERED_PROVIDERS=1 — the explicit developer act.
-    allowed_provider_ids: tuple[str, ...] | None = None
 
     @property
     def preparation(self) -> BenchmarkPreparation:
@@ -123,8 +110,6 @@ class BenchmarkPrepareRequest:
             benchmarks_root=self.benchmarks_root.resolve(),
             dry_run=self.dry_run,
             force_clone=self.force_clone,
-            provider_timeout=self.provider_timeout,
-            allowed_provider_ids=self.allowed_provider_ids,
         )
 
 
@@ -140,10 +125,7 @@ class BenchmarkRunRequest:
     dry_run: bool = True
     skip_prepare: bool = False
     force_clone: bool = False
-    provider_timeout: int = 1800
     codex_sandbox: str = CODEX_BENCHMARK_SANDBOX
-    # See BenchmarkPrepareRequest.allowed_provider_ids (containment R1).
-    allowed_provider_ids: tuple[str, ...] | None = None
 
     @property
     def preparation(self) -> BenchmarkPreparation:
@@ -151,6 +133,4 @@ class BenchmarkRunRequest:
             benchmarks_root=self.benchmarks_root.resolve(),
             dry_run=self.dry_run,
             force_clone=self.force_clone,
-            provider_timeout=self.provider_timeout,
-            allowed_provider_ids=self.allowed_provider_ids,
         )

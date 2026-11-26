@@ -10,9 +10,7 @@ import { AttentionQueue } from './AttentionQueue';
 
 vi.mock('../data/actions', () => ({ postAttentionDismiss: vi.fn() }));
 
-// The two kinds the server still publishes. The provider pair that used to sit beside them
-// (`provider-down`, `failed-setup`) went with the search providers: nothing publishes them, so
-// there is nothing here to render, rank or dismiss.
+// Operational attention kinds published by the server.
 const items: AttentionItem[] = [
   attentionItem({
     id: 'actionable-drift:repo:main',
@@ -125,47 +123,6 @@ describe('the attention kinds the server still publishes', () => {
     );
   });
 
-  it('never shows or dismisses an entry whose kind the server retired', () => {
-    // A payload from a server older than the removal can still carry these. Nothing can act on
-    // them any more — there is no provider to retry and no setup run to acknowledge — so the
-    // queue drops them rather than showing an alarm with a × that dismisses nothing.
-    const retired = [
-      attentionItem({
-        id: 'provider-down:codegraphcontext-code',
-        kind: 'provider-down',
-        severity: 'alarm',
-        lane: 'repo',
-        title: 'Provider codegraphcontext-code down',
-        detail: 'stopped',
-      }),
-      attentionItem({
-        id: 'failed-setup:group',
-        kind: 'failed-setup',
-        severity: 'alarm',
-        lane: 'worktree',
-        title: 'Provider setup needs attention',
-        detail: 'cgc index',
-      }),
-    ];
-    seed([...retired, items[0]]);
-    const view = render(<AttentionQueue />);
-    const bell = view.getByTestId('attention-bell');
-    expect(bell.getAttribute('aria-label')).toBe('Attention: 1 waiting');
-    expect(bell.textContent).toBe('1');
-    fireEvent.click(bell);
-    expect(view.getAllByTestId('attn-item')).toHaveLength(1);
-    expect(view.getByTestId('attention-queue').textContent).toContain(items[0].title);
-    for (const item of retired) expect(view.queryByText(item.title)).toBeNull();
-    fireEvent.click(view.getByTestId('attn-dismiss'));
-    expect(postAttentionDismiss).toHaveBeenCalledExactlyOnceWith({
-      itemId: items[0].id,
-      kind: items[0].kind,
-    });
-    for (const item of retired) {
-      expect(postAttentionDismiss).not.toHaveBeenCalledWith({ itemId: item.id, kind: item.kind });
-    }
-  });
-
   it('Clear all sends every listed item', async () => {
     vi.mocked(postAttentionDismiss).mockResolvedValue('dismissed');
     seed(items);
@@ -217,9 +174,7 @@ describe('AttentionQueue bell (MIK-R144 rule 3a)', () => {
   });
 
   it('carries the number and severity, opens the layer and keeps server order', () => {
-    // MIK-R199 retired the two alarm-severity kinds, so no current payload carries one. The
-    // bell's alarm tone still has to hold for a payload an older server sent, so this case
-    // supplies the severity rather than pretending a surviving kind publishes it.
+    // Supply an alarm-severity item directly to verify the bell's alarm tone and severity ordering.
     const queue = [items[1], { ...items[0], severity: 'alarm' as const }];
     seed(queue);
     const view = render(<AttentionQueue />);

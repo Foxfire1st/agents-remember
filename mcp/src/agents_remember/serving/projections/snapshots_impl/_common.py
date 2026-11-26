@@ -1,6 +1,6 @@
 """Shared file-surface helpers for the observer snapshot readers.
 
-The readers split by responsibility (providers, runtime enclosures, analytical
+The readers split by responsibility (runtime enclosures, analytical
 surfaces, task documents) share the task-document payload cache, the status
 payload TTL cache, and the small JSON/stat helpers collected here. No reader
 logic lives in this module; it is the common leaf the split modules import.
@@ -188,16 +188,6 @@ def _file_age_seconds(path: Path, now: datetime) -> float | None:  # pragma: no 
     except OSError:
         return None
     return now.timestamp() - mtime
-
-
-def _current_phase_text(current: Any) -> str | None:  # pragma: no cover
-    if not isinstance(current, dict):
-        return None
-    provider = current.get("provider")
-    action = current.get("action")
-    if provider and action:
-        return f"{provider} {action}"
-    return str(provider or action) if (provider or action) else None
 
 
 def surface_paths(root: Path, pattern: str, observation: AttentionObservation | None) -> list[Path]:

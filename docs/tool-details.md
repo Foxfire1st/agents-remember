@@ -19,9 +19,6 @@ Answer fields:
 - `ok`, `server` (this package's own name), `version`, `transport`;
 - `configPath`, `coordinationRoot`, `workspaceRoot`, `transcriptRoot`;
 - `allowedRepoIds`: the configured repositories;
-- `unusedProviderKeys`: the ids of [search providers](concepts.md#search-provider) that the key
-  `providers` of the settings file lists. Nothing reads them; a settings file that holds them
-  loads without error;
 - `unusedSettingsKeys`: the settings keys that the files hold and that nothing reads;
 - `checkoutBinding`, only on a process that loaded the package from a linked Git worktree of the
   Agents Remember source repository and declared no execution mode before it read its settings.
@@ -70,31 +67,20 @@ startup, before any tool is served.
 ## `runtime_install`
 
 Install or refresh the files that the package owns in the coordination root; safe to re-run.
-The install preserves user data (`<coordination-root>/memory-repos/`,
-`<coordination-root>/providers/data/`, and `<coordination-root>/providers/runners/` when
-`install_provider_deps=false`) and replaces the managed documentation
-(`<coordination-root>/docs/`) with the documentation of the package.
+The install preserves user data (`<coordination-root>/memory-repos/`) and replaces the managed
+documentation (`<coordination-root>/docs/`) with the documentation of the package.
 Skills are served from the package as MCP resources.
 
 An install creates the folders `memory-repos`, `tasks`, `worktrees`, `notes`, `temp` and `logs`
-under the coordination root. It writes the folder `<coordination-root>/providers/` with the
-files of the two [search providers](concepts.md#search-provider) from the package, and the folders
-under `<coordination-root>/logs/providers/`; no part of the product starts, indexes or queries a
-search provider. It creates
-`<workspace-root>/.agents-remember/role-executions/` and adds that folder to
-`<workspace-root>/.gitignore`.
+under the coordination root. It creates `<workspace-root>/.agents-remember/role-executions/` and
+adds that folder to `<workspace-root>/.gitignore`. Leftover `providers/`, `logs/providers/` and
+`logs/observer/providers/` folders from earlier installations are reported as removed stores and
+left untouched until `agents-remember removed-stores` removes them.
 
 Arguments:
 
 - `dry_run=false`: with `true` the call is a preview and changes nothing.
 - `include_benchmarks=false`: with `true` the install copies the benchmark fixtures.
-- `install_provider_deps=true`: the argument installs no dependency of a search provider,
-  because the two search providers, `codegraphcontext-code` and `grepai-memory`, never count as
-  enabled. With `true` the install removes what `<coordination-root>/providers/runners/` holds;
-  with `false` it keeps that folder as it is.
-- `no_cache=false`: the value is carried as the provider-dependency step's cache-reuse flag,
-  where `true` would forbid reuse. No path of the product reads it, so it changes nothing
-  observable.
 - `experiment=null`: selects an experimental install for this one call. It is never a setting,
   and the record of the run names its source.
 - `reconcile_shared_held_stores=false`: set to `true` to inspect the shared workspace's held
@@ -111,12 +97,7 @@ before anything is written. A selected run probes its capabilities and has the d
 returns one record with `experiment`, `source`, `instructionSource`, `mode`, `reason`,
 `selectionSource`, `corpusAnchor` and `capabilities`.
 
-Operations: one install run. No path of the product sets up a search provider: the two
-provider ids never count as enabled, so no install/start/watch runs — no install, prepare,
-seed, watcher start or status. The one provider step of an install is a stop of leftover
-watchers of search providers, reported in `providerWatcherRebind`; with no search provider
-declared, it stops nothing. The [benchmark runner](concepts.md#benchmark-runner) runs
-providerless, that is without any search provider, with the same empty setup.
+Operations: one install run.
 
 The `host` part installs or updates the host and its plug-in at the version that the
 `paseoRuntime` block of the settings file names. The install reads that block at each use and
@@ -136,9 +117,6 @@ stays stopped. A preview reports `would-adopt` or `would-restart`. `agents-remem
 Answer fields (delivered):
 
 - `ok`, `coordinationRoot`, `dryRun`, `includeBenchmarks`;
-- `installProviderDeps`: the value of `install_provider_deps`;
-- `providerWatcherRebind`: the stop of leftover watchers of search providers that every install
-  runs: `attempted`, `ok` and `phases`, each with `phase`, `action` and `ok`;
 - `experiment`: `selection`, `delivery` and `record`, and for a selected run also `capabilities`,
   `withheldStartupTargets` and `rollback`;
 - `host`: `ok`, `changed`, `configured` and `settingsPath`, and, as they apply, `message`,
@@ -154,9 +132,7 @@ Answer fields (delivered):
   preview writes no report, and an executed install records the individual seats in the report
   named by `reportPath`.
 - `summary`: `createdDirs`, `copiedFiles`, `unchangedFiles`, `replacedLinks` and
-  `removedPaths`; `dependencyRuns`, which is `0` on every run; and `unusedProviderKeys`, the ids
-  of the search providers that the settings enable under `contextProviders`, on which the install
-  does not act;
+  `removedPaths`;
 - `messages`: the first 5 inline, the rest in the report;
 - `reportPath`: the report file of an executed install. A dry run files no report and carries no
   `reportPath`;

@@ -52,7 +52,6 @@ class RuntimeDiff:
 
 TARGETS = (
     RuntimeTarget("benchmarks", REPO_ROOT / "benchmarks", PACKAGE_DATA / "benchmarks"),
-    RuntimeTarget("providers", REPO_ROOT / "providers", PACKAGE_DATA / "runtime/providers"),
     RuntimeTarget("system", REPO_ROOT / "system", PACKAGE_DATA / "runtime/system"),
 )
 

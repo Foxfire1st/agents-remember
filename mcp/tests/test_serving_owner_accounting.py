@@ -41,23 +41,9 @@ class _Case:
     failure_continues: bool = False
 
 
-def _cases(runtime: _ServingRuntime, config: McpRuntimeConfig) -> tuple[_Case, ...]:
-    store = SimpleNamespace(record=lambda _: None, compact=lambda: None)
+def _cases(runtime: _ServingRuntime, _config: McpRuntimeConfig) -> tuple[_Case, ...]:
     archives = SimpleNamespace(tick=lambda: None, close=lambda: None)
     return (
-        _Case(
-            "metrics",
-            accounting.OWNER_METRICS,
-            lambda ledger: serving._metrics_loop(
-                config, cast(serving.ProviderMetricsStore, store), ledger
-            ),
-            (
-                (serving, "sample_provider_containers", object()),
-                (store, "record", None),
-                (serving, "evaluate_provider_degradation", None),
-                (store, "compact", None),
-            ),
-        ),
         _Case(
             "held",
             accounting.OWNER_HELD_DELIVERY,

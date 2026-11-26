@@ -11,7 +11,6 @@ from agents_remember.kernel.git_freshness import FreshnessState
 from agents_remember.kernel.memory_mode import ReadableMemoryMode
 from agents_remember.models.base import StrictResponseModel, ToolResponse
 from agents_remember.models.drift import DriftSummary
-from agents_remember.models.providers import ProviderSummary
 from agents_remember.models.worktree import WorktreeSummary
 
 
@@ -107,10 +106,6 @@ class FreshnessSummary(StrictResponseModel):
     ledgerError: str | None = None
 
 
-class ContextDiagnosticsHint(StrictResponseModel):
-    providerDiagnosticsTool: str = "provider_diagnostics"
-
-
 class ContextPacketV2(ToolResponse):
     operation: Literal["context_packet"] = "context_packet"
     contextPacketVersion: Literal[2] = 2
@@ -118,10 +113,8 @@ class ContextPacketV2(ToolResponse):
     paths: ContextPaths
     memory: MemorySummary
     worktree: WorktreeSummary
-    providers: ProviderSummary
     drift: DriftSummary
     freshness: FreshnessSummary = Field(default_factory=FreshnessSummary)
-    diagnostics: ContextDiagnosticsHint = Field(default_factory=ContextDiagnosticsHint)
 
 
 class SlimRoots(StrictResponseModel):

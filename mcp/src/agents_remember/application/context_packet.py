@@ -51,8 +51,6 @@ from agents_remember.models.context_packet import (
     StorageSummary,
 )
 from agents_remember.models.drift import DriftSummary
-from agents_remember.models.providers import ProviderSummary
-from agents_remember.providers.status import provider_summary_packet
 from agents_remember.worktrees.cutover_lock import legacy_format_refusal
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 
@@ -110,9 +108,6 @@ def build_context_packet(
         # in `application.worktree_status` rather than a ValidationError raised from inside the
         # `context_packet` tool handler, where nothing catches it.
         worktree=worktree_status_packet(config, context.contract_path),
-        providers=ProviderSummary.model_validate(
-            provider_summary_packet(config),
-        ),
         drift=DriftSummary.model_validate(_drift_packet(request, context, repo_scope)),
         freshness=FreshnessSummary.model_validate(
             _freshness_packet(request, context_dict, repo_scope, git_facts)

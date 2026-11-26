@@ -90,8 +90,7 @@ RESOLVED_ROOTS = (
     "receipts.taskless", "receipts.messageBindings", "reports.taskless",
     "paseoRuntime.home",
     "productNode.root", "productNode.cache",
-    "paseoRuntime.installPrefix", "providers.grepai-memory.runtimeRoot",
-    "providers.grepai-memory.logRoot",
+    "paseoRuntime.installPrefix",
     TASK_ROOT,
     *(f"{REPOSITORY}.{name}" for name in (
     "path", "memoryRoot", "leafEnclosures", "resolver.code_repository_root",
@@ -244,7 +243,6 @@ class SafetyCheckTests(SandboxCase):
         document = settings_document(self.layout)
         document.update(host_settings_document(self.layout, None))
         del document["transcriptRoot"]
-        document["providers"] = {"grepai-memory": {}}
         # A path relative to the repository names a file in it, not a root.
         document["repositories"][REPOSITORY_ID] = {"certificationProfile": "mcp/profile.json"}
         # A block the build does not know holds paths outside the sandbox: the loader skips an
@@ -349,7 +347,6 @@ class SafetyCheckTests(SandboxCase):
         settings = self.layout.settings_file
         settings.parent.mkdir(parents=True, exist_ok=True)
         document = settings_document(self.layout)
-        document["providers"] = {"grepai-memory": {}}
         settings.write_text(json.dumps(document), encoding="utf-8")
         _write_host(self.layout)
         # The resolver answers for a repository whose memory holds a first commit.
@@ -853,7 +850,6 @@ def _admitted_info(request: dict[str, Any]) -> dict[str, Any]:
         "coordinationRoot": request["expect"]["coordinationRoot"],
         "workspaceRoot": request["expect"]["workspaceRoot"],
         "allowedRepoIds": request["expect"]["allowedRepoIds"],
-        "unusedProviderKeys": [],
         "servingBuild": {"packageRoot": request["expect"]["packageRoot"]},
     }
 
@@ -938,24 +934,6 @@ def test_a_request_that_names_no_sandbox_is_refused(tmp_path, monkeypatch):
     report = asyncio.run(client._run(request))
     assert report["ok"] is False and "names no sandbox" in report["error"]
     assert calls == [] and started == [] and report["results"] == []
-
-
-def test_the_admission_refuses_a_server_with_configured_providers(tmp_path, monkeypatch):
-    client = _helper_under_test()
-    request, layout = _driving_request(tmp_path)
-    info = {**_admitted_info(request), "unusedProviderKeys": ["grepai-memory"]}
-    calls: list[str] = []
-    started: list[Any] = []
-    monkeypatch.setattr(client, "ClientSession", _recording_session({"server_info": info}, calls))
-    monkeypatch.setattr(client, "stdio_client", _recording_stream(started))
-    report = asyncio.run(client._run(request))
-    assert report["ok"] is False and "providers configured" in report["error"]
-    assert calls == ["server_info"] and report["results"] == []
-    assert report["host"] == {
-        "state": "sandbox",
-        "home": layout.paseo_home.as_posix(),
-        "listen": layout.paseo_listen,
-    }
 
 
 def test_a_sandbox_whose_settings_select_another_host_is_refused(tmp_path, monkeypatch):

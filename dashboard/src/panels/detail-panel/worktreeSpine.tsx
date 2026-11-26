@@ -5,11 +5,6 @@ import { lane, laneMeta, laneRepo, laneTitle, lanes, spine, spineHead } from './
 // its memory twin — with the facts the server observes about each (whether the path exists, and
 // the cleanup state that decides whether it still will).
 //
-// The isolated search engines that used to sit on these lanes (CGC over the code checkout,
-// GrepAI over the memory one) are gone from the served projection, so nothing here reads engine
-// or provider state. That is why an enclosure recorded before their removal and one recorded
-// after it render identically: the lanes carry only what the enclosure itself says.
-//
 // `codeWorktreeExists` / `memoryWorktreeExists` are observations of the path *now*, not a
 // creation history: a checkout that existed and was cleaned up answers false exactly like one
 // that was never created. `EnclosureNode` carries no field that separates the two, so an absent

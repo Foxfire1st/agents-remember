@@ -382,7 +382,6 @@ def test_an_aged_away_root_is_not_a_blocker_and_a_remaining_one_is(tmp_path: Pat
 
     def result(entry: dict[str, object], *, preview: bool = False) -> TerminalResult:
         return TerminalResult(
-            providers={},
             worktrees={},
             branches={},
             directories={"outside_scratch": entry},

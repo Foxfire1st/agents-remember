@@ -305,8 +305,8 @@ class EngineProcessEdge(BaseModel):
     id: str
     fromNode: str
     toNode: str
-    # git-base|worktree-add|ledger-map|contract-anchor|cgc-seed|grepai-clone|
-    # watcher-start|sync|closeout|integration|cleanup
+    # git-base|worktree-add|ledger-map|contract-anchor|
+    # sync|closeout|integration|cleanup
     kind: str
     # nominal|running|blocked|failed|stale|skipped|complete|planned|unknown
     state: str
@@ -360,7 +360,7 @@ class EngineProcessNode(BaseModel):
     repoName: str
     lifecycleId: str | None = None
     # preflight|code-worktree|memory-compatibility|contract-written|worktree-started|
-    # provider-setup|sync-needed|commit-approval-pending|closeout-pending|integration-pending|
+    # sync-needed|commit-approval-pending|closeout-pending|integration-pending|
     # integration-blocked|carryover-pending|cleanup-pending|completed|abandoned|unknown
     phase: str
     health: ProcessHealth

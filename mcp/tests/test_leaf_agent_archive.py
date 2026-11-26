@@ -117,7 +117,7 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
             replace(worktree_services(), leaf_agent_archive=archive.LeafAgentArchive(self.config))
         )
         self._assert_terminal_launch_interleaving("agent-create", False, archive_reads_first=True)
-        result = prepare_terminal_group(self.contract, dry_run=True, teardown_providers=True)
+        result = prepare_terminal_group(self.contract, dry_run=True)
         self.assertFalse(result.blockers, result)
         self.assertTrue(result.directories["worktree_group"]["would_remove"])
 
@@ -240,13 +240,13 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
             return prepare(attempt, path, snapshot)
 
         with patch.object(archive.ArchiveAttempt, "prepare", start_after_snapshot):
-            result = prepare_terminal_group(self.contract, dry_run=False, teardown_providers=True)
+            result = prepare_terminal_group(self.contract, dry_run=False)
         agent_id = state.body["agentId"]
         self.assertTrue(result.blockers, "entered native create lost its archive debt")
         self.assertTrue(self.contract.worktree_group.exists())
         self.assertIn(agent_id, {row["agent"] for row in result.blockers})
         self.assertTrue(json.loads(state.path.read_text())["leafArchive"]["creationPending"])
-        preview = prepare_terminal_group(self.contract, dry_run=True, teardown_providers=True)
+        preview = prepare_terminal_group(self.contract, dry_run=True)
         self.assertIn(agent_id, {row["agent"] for row in preview.blockers})
         return result.agent_archive
 
@@ -911,7 +911,6 @@ def test_the_recovery_loop_is_a_background_task_of_the_serving_lifespan_and_keep
             patch.object(lifespan, "compact_workspace_river"),
             patch.object(lifespan, "start_heap_tracing", return_value=False),
             patch.object(lifespan, "malloc_trim_enabled", return_value=False),
-            patch.object(lifespan, "_metrics_loop", partial(record, "metrics")),
             patch.object(lifespan, "_held_delivery_loop", partial(record, "held-delivery")),
             patch.object(lifespan, "_warmup_watch_loop", partial(record, "warmup-watch")),
             patch.object(
@@ -921,14 +920,13 @@ def test_the_recovery_loop_is_a_background_task_of_the_serving_lifespan_and_keep
                 lifespan, "_leaf_archive_recovery_loop", partial(record, "archive-recovery")
             ),
         ):
-            async with lifespan._serving_lifespan(runtime, cast(Any, None))(cast(Any, None)):
+            async with lifespan._serving_lifespan(runtime)(cast(Any, None)):
                 await asyncio.sleep(0)
 
     asyncio.run(scenario())
     assert sorted(started) == [
         "archive-recovery",
         "held-delivery",
-        "metrics",
         "projection",
         "river-compaction",
         "warmup-watch",

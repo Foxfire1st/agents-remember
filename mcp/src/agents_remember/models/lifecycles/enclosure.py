@@ -6,7 +6,7 @@ import hashlib
 from pathlib import PurePosixPath
 from typing import Literal
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_serializer, model_validator
 
 from agents_remember.models.base import StrictResponseModel
 
@@ -234,7 +234,15 @@ class TerminalWorktreeCleanupArguments(StrictResponseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    teardown_providers: bool
+    # Retained as optional so stored pre-removal archives carrying teardown_providers
+    # still validate and re-emit the exact bytes that match their cleanupRequestId.
+    teardown_providers: bool | None = None
+
+    @model_serializer(mode="plain")
+    def _serialize(self) -> dict[str, bool]:
+        if self.teardown_providers is None:
+            return {}
+        return {"teardown_providers": self.teardown_providers}
 
 
 class TerminalWorktreeAbandonArguments(StrictResponseModel):
@@ -248,6 +256,22 @@ class TerminalWorktreeAbandonArguments(StrictResponseModel):
 TerminalCleanupArguments = TerminalWorktreeCleanupArguments | TerminalWorktreeAbandonArguments
 
 
+def cleanup_arguments_match(
+    left: TerminalCleanupArguments,
+    right: TerminalCleanupArguments,
+) -> bool:
+    """Return True when two terminal argument models authorize the same request.
+
+    Any two ``TerminalWorktreeCleanupArguments`` instances match so a retry against
+    a stored pre-removal archive does not conflict with a post-removal cleanup call.
+    """
+    if isinstance(left, TerminalWorktreeCleanupArguments) and isinstance(
+        right, TerminalWorktreeCleanupArguments
+    ):
+        return True
+    return left == right
+
+
 def _require_cleanup_arguments(
     operation: TerminalCleanupOperation,
     arguments: TerminalCleanupArguments,
@@ -256,7 +280,7 @@ def _require_cleanup_arguments(
         arguments,
         TerminalWorktreeCleanupArguments,
     ):
-        raise ValueError("worktree_cleanup requires exact teardown_providers authority")
+        raise ValueError("worktree_cleanup requires terminal cleanup arguments")
     if operation == "worktree_abandon" and not isinstance(
         arguments,
         TerminalWorktreeAbandonArguments,

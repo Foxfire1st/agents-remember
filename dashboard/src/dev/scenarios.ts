@@ -5,11 +5,8 @@
 // MOTION is verifiable end-to-end, not just static frames. Frames reuse the existing engine-room fixtures
 // (no new substrate), so a scenario is a sequence of named states wrapped into full projections.
 //
-// The three provider arcs that used to live here (the GrepAI seed fault, the CGC reindex reroute and
-// the pre-contract provider-plan block) went with the search providers: their frames existed only to
-// animate engine materialisation and seed/clone conduits, neither of which the server composes any
-// more. What is left is enclosure-centred: the worktrees, the ledger gate, the sync gate, the landing
-// arc and the failure modes that survive on those facts.
+// Scenarios are enclosure-centred: the worktrees, the ledger gate, the sync gate, the landing arc
+// and the failure modes built on those facts.
 import { ENGINE_ROOM_SCENARIOS } from "../panels/engine-room/fixtures";
 import type { ObserverEvent } from "../types/event";
 import type { WorkspaceProjection } from "../types/projection";

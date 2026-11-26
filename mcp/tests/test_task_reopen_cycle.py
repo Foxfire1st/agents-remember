@@ -205,7 +205,7 @@ class _LeafWorld:
                 worktree_name=str(args["worktree_name"]),
                 leaf_id=str(args["leaf_id"]),
             ),
-            execution=StartExecution(dry_run=dry_run, skip_provider_setup=True),
+            execution=StartExecution(dry_run=dry_run),
         )
 
     def complete_and_clean_up(self) -> None:
@@ -236,7 +236,7 @@ class _LeafWorld:
         archived = terminal_archive_required_result(
             load_contract(self.contract_path),
             operation="worktree_cleanup",
-            arguments=TerminalWorktreeCleanupArguments(teardown_providers=False),
+            arguments=TerminalWorktreeCleanupArguments(),
             dry_run=False,
         )
         assert archived.returncode == 0, archived.payload
@@ -277,7 +277,6 @@ class ArchivedLeafReopenTests(unittest.TestCase):
                         world.config,
                         contract_path=contract_path,
                         dry_run=dry_run,
-                        teardown_providers=False,
                     )
                     self.assertTrue(
                         retained.is_file(),
@@ -307,7 +306,6 @@ class ArchivedLeafReopenTests(unittest.TestCase):
                 return worktree_tools.worktree_cleanup_tool(
                     world.config,
                     contract_path=world.contract_path.as_posix(),
-                    teardown_providers=False,
                 )
 
             self._assert_old_retry_preserves_successor(
@@ -338,7 +336,7 @@ class ArchivedLeafReopenTests(unittest.TestCase):
                         worktree_name=started.code_worktree.name,
                         leaf_id=started.leaf_id,
                     ),
-                    execution=StartExecution(skip_provider_setup=True),
+                    execution=StartExecution(dry_run=False),
                 )
 
             self._assert_old_retry_preserves_successor(world, abandon, restart, retry)
@@ -454,7 +452,7 @@ class ArchivedLeafReopenTests(unittest.TestCase):
                     worktree_name=world.contract.code_worktree.name,
                     leaf_id=world.contract.leaf_id,
                 ),
-                execution=StartExecution(dry_run=False, skip_provider_setup=True),
+                execution=StartExecution(dry_run=False),
             )
             self.assertIs(started["ok"], True, started)
             self.assertEqual(started["state"], "started")
@@ -541,7 +539,7 @@ class MasterReopenTests(unittest.TestCase):
                     worktree_name="l2",
                     leaf_id="260698-L2",
                 ),
-                execution=StartExecution(dry_run=False, skip_provider_setup=True),
+                execution=StartExecution(dry_run=False),
             )
 
             self.assertIs(started["ok"], True, started)
@@ -598,7 +596,7 @@ class MasterReopenTests(unittest.TestCase):
                     worktree_name="l2",
                     leaf_id="260698-L2",
                 ),
-                execution=StartExecution(dry_run=False, skip_provider_setup=True),
+                execution=StartExecution(dry_run=False),
             )
             self.assertIs(started["ok"], True, started)
             restarted = load_contract(leaf_contract_path)
@@ -704,7 +702,7 @@ class MasterReopenTests(unittest.TestCase):
                 worktree_name="l2",
                 leaf_id="260698-L2",
             ),
-            execution=StartExecution(dry_run=False, skip_provider_setup=True),
+            execution=StartExecution(dry_run=False),
         )
         self.assertIs(started["ok"], True, started)
         contract_path = self._leaf_contract_path(master)
@@ -727,7 +725,7 @@ class MasterReopenTests(unittest.TestCase):
         archived = terminal_archive_required_result(
             load_contract(contract_path),
             operation="worktree_cleanup",
-            arguments=TerminalWorktreeCleanupArguments(teardown_providers=False),
+            arguments=TerminalWorktreeCleanupArguments(),
             dry_run=False,
         )
         self.assertEqual(archived.returncode, 0, archived.payload)

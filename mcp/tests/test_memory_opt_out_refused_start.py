@@ -494,7 +494,6 @@ def _started_abandoned_world(tmp_path: Path, *, cleanup: str) -> _World:
                 "coordinationRoot": coord.as_posix(),
                 "workspaceRoot": tmp_path.as_posix(),
                 "repositories": {REPO: {}},
-                "providers": {},
             }
         ),
         encoding="utf-8",

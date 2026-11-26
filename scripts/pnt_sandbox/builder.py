@@ -207,7 +207,7 @@ def _corpus_request(layout: SandboxLayout, ops: Operations, out: Out) -> dict[st
             {
                 "name": "coordination root",
                 "tool": "runtime_install",
-                "arguments": {"install_provider_deps": False},
+                "arguments": {},
             },
         ),
         (

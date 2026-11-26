@@ -29,7 +29,7 @@ def _contract_reopen_facts(contract: WorktreeContract) -> dict[str, object]:
     """Pure contract facts for reopen responses.
 
     This deliberately does not call ``status_payload``: that interactive projection reads
-    providers, landing state, Git freshness, and descendant source lineage. A cleaned leaf has
+    landing state, Git freshness, and descendant source lineage. A cleaned leaf has
     no branches left for those probes to inspect, and the only actionable fact at this boundary
     is its stable task identity plus the explicit recovery call.
     """

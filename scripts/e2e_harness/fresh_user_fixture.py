@@ -153,7 +153,6 @@ def create_fresh_user_fixture(
                 "workspaceRoot": workspace.as_posix(),
                 "transcriptRoot": (coordination / "logs" / "mcp").as_posix(),
                 "repositories": {repo_id: {}},
-                "providers": {},
                 "dashboard": {"autoStart": False},
             },
             indent=2,

@@ -70,7 +70,7 @@ def _runtime(root: Path):
         LIVE_PROJECTION_CLOCK,
         INFERRED_LIVE_INPUTS,
         OWNED_SERVING_COLLABORATORS,
-    )[0]
+    )
 
 
 class LandingPageCadenceTests(unittest.IsolatedAsyncioTestCase):

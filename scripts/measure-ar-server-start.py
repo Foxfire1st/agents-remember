@@ -72,7 +72,6 @@ def write_world(root: Path, *, explainer: bool) -> tuple[Path, dict[str, str]]:
                 "repositories": {
                     REPO: {"path": str(root / "repo"), "memoryRoot": str(root / "memory")}
                 },
-                "providers": {},
             },
             indent=1,
         ),

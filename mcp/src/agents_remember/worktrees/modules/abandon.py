@@ -2,8 +2,7 @@
 
 Abandon is the discard sibling of cleanup. cleanup runs only after a completed
 integration; abandon exists for worktrees whose work will NOT land (premature
-trials, dead-end experiments, the l-01-agent-lifecycles orchestrator read-only/abandon exit). It reclaims the
-isolated provider stack (containers, networks, provider-runtime tree), removes
+trials, dead-end experiments, the l-01-agent-lifecycles orchestrator read-only/abandon exit). It removes
 the code and memory worktrees, deletes the task branches, and removes the
 worktree group dir.
 
@@ -52,12 +51,12 @@ from agents_remember.worktrees.modules.cleanup import (
     remove_empty_dir,
     remove_registered_worktree,
 )
+from agents_remember.worktrees.modules.filesystem import remove_tree
 from agents_remember.worktrees.modules.git import branch_exists, is_ancestor
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.kept_tool_calls import removal_after_keep
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.state_refusals import (
-    provider_setup_blocked,
     shaped_terminal_blockers,
     task_stage_refusal,
     terminal_state_refusal,
@@ -72,7 +71,6 @@ from agents_remember.worktrees.modules.terminal_group import (
     ENCLOSURE_REPORTS_DIRECTORY,
     preview_group_removal,
     remove_terminal_group,
-    teardown_terminal_providers,
 )
 from agents_remember.worktrees.modules.terminal_inventory import (
     _absent_branch_entries,
@@ -104,7 +102,6 @@ from agents_remember.worktrees.worktree_contract import (
 
 type TerminalItems = dict[str, dict[str, object]]
 type AbandonOutputs = tuple[
-    dict[str, object],
     TerminalItems,
     TerminalItems,
     TerminalItems,
@@ -230,19 +227,6 @@ def _abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
         series_refused = _abandon_series_release_refusal(contract)
         if series_refused is not None:
             return series_refused
-    # The liveness read is side-effect free: the dry run evaluates it too, so
-    # a dry run never promises an abandon the real call would refuse. Force
-    # still overrides; a dry run is not force.
-    if not args.force and worktree_services().provider_lifecycle.setup_running(contract):
-        # Teardown must not race the live background setup thread (GitHub #53);
-        # a dead thread surfaces as a stale heartbeat and does not block.
-        return provider_setup_blocked(
-            contract,
-            summary=(
-                "Provider setup is still running for this worktree; wait for a "
-                "terminal providers state (worktree_status) or pass force=true."
-            ),
-        )
 
     without_remains = terminal_without_remains_reason(contract, operation="worktree_abandon")
     if without_remains is not None:
@@ -369,15 +353,10 @@ def _finish_abandon_without_remains(
             plan_task_stage(contract, "abandoned")
         except ValueError as error:
             return task_stage_refusal(contract, error)
-        providers: dict[str, object] = worktree_services().provider_lifecycle.teardown(
-            contract, dry_run=args.dry_run
-        )
         removed_worktrees = _absent_worktree_entries(contract)
         branches = _absent_branch_entries(contract)
         directories = (
-            preview_group_removal(contract, teardown_providers=True)
-            if args.dry_run
-            else remove_terminal_group(contract)
+            preview_group_removal(contract) if args.dry_run else remove_terminal_group(contract)
         )
         preflight = TerminalPreflight(
             worktrees=dict(removed_worktrees),
@@ -389,7 +368,7 @@ def _finish_abandon_without_remains(
             contract,
             preflight,
             guard,
-            (providers, removed_worktrees, branches, directories),
+            (removed_worktrees, branches, directories),
             terminal_note=reason,
         )
     finally:
@@ -443,7 +422,6 @@ def _already_abandoned(
                 "state": "abandoned",
                 **status_payload(contract),
                 "summary": "Worktree was already abandoned; terminal archive proof remains valid.",
-                "providers": {"state": "already-terminal"},
                 "removed_worktrees": {},
                 "branches": {},
                 "directories": residue.directories,
@@ -466,10 +444,9 @@ def _abandon_outputs_result(  # noqa: PLR0913 -- terminal_note rides the no-rema
     *,
     terminal_note: str | None = None,
 ) -> WorktreeCommandResult:
-    providers, removed_worktrees, branches, directories = outputs
+    removed_worktrees, branches, directories = outputs
     blockers = terminal_result_blockers(
         TerminalResult(
-            providers=providers,
             worktrees=removed_worktrees,
             branches=branches,
             directories=directories,
@@ -487,7 +464,6 @@ def _abandon_outputs_result(  # noqa: PLR0913 -- terminal_note rides the no-rema
                     if args.dry_run
                     else "Abandon terminal mutation failed; cache and contract stayed live."
                 ),
-                "providers": providers,
                 "citation_source_index": _preserved_cache(
                     guard.preview(), "terminal-operation-failed"
                 ),
@@ -504,7 +480,6 @@ def _abandon_outputs_result(  # noqa: PLR0913 -- terminal_note rides the no-rema
                 "state": "would-abandon",
                 **status_payload(contract),
                 "summary": _abandon_summary(True, not preflight.blockers),
-                "providers": providers,
                 "citation_source_index": guard.preview(),
                 "removed_worktrees": removed_worktrees,
                 "branches": branches,
@@ -522,7 +497,7 @@ def _publish_abandon(
     *,
     terminal_note: str | None = None,
 ) -> WorktreeCommandResult:
-    providers, removed_worktrees, branches, directories = outputs
+    removed_worktrees, branches, directories = outputs
     updated = amend_contract(
         contract,
         ContractCells(cleanup="abandoned", terminal_note=terminal_note),
@@ -566,7 +541,6 @@ def _publish_abandon(
             "state": "abandoned",
             **status_payload(updated),
             "summary": _abandon_summary(False, True),
-            "providers": providers,
             "citation_source_index": citation_cache,
             "projectionEffects": projection_effects,
             "removed_worktrees": removed_worktrees,
@@ -590,11 +564,6 @@ def _abandon_terminal_outputs(
         operation="worktree_abandon",
         series_permit=series_permit,
     )
-    providers = teardown_terminal_providers(contract, dry_run=args.dry_run)
-    if not args.dry_run and terminal_result_blockers(
-        TerminalResult(providers=providers, worktrees={}, branches={}, directories={})
-    ):
-        return providers, {}, {}, {}
     removed_worktrees = (
         _abandon_worktrees(
             contract,
@@ -611,11 +580,9 @@ def _abandon_terminal_outputs(
         )
     )
     if not args.dry_run and terminal_result_blockers(
-        TerminalResult(
-            providers=providers, worktrees=removed_worktrees, branches={}, directories={}
-        )
+        TerminalResult(worktrees=removed_worktrees, branches={}, directories={})
     ):
-        return providers, removed_worktrees, {}, {}
+        return removed_worktrees, {}, {}
     branches = (
         preflight.branches
         if args.dry_run
@@ -627,13 +594,11 @@ def _abandon_terminal_outputs(
         )
     )
     if not args.dry_run and terminal_result_blockers(
-        TerminalResult(
-            providers=providers, worktrees=removed_worktrees, branches=branches, directories={}
-        )
+        TerminalResult(worktrees=removed_worktrees, branches=branches, directories={})
     ):
-        return providers, removed_worktrees, branches, {}
+        return removed_worktrees, branches, {}
     directories = directory_preview if args.dry_run else remove_terminal_group(contract)
-    return providers, removed_worktrees, branches, directories
+    return removed_worktrees, branches, directories
 
 
 def _abandon_worktrees(
@@ -859,17 +824,19 @@ def _abandon_directories(
     """Preserve the directory-only retirement used by the sprint archive hook."""
     group = contract.worktree_group
     lifecycle = group / ".lifecycle"
+    provider_runtime_path = group / "provider-runtime"
     outside = outside_scratch.removal_entry_for(contract, dry_run=dry_run)
     if contract.kind == "series":
         reports = group / ENCLOSURE_REPORTS_DIRECTORY
         # Parity with cleanup and the leaf path (MIK-R108 rule 3): the series
         # branch removes <group>/logs/ before it returns; the answer keeps
         # its two keys.
-        worktree_services().provider_lifecycle.remove_tree(
+        remove_tree(
             group / ENCLOSURE_LOGS_DIRECTORY,
             dry_run=dry_run,
         )
-        return {
+        provider_runtime = remove_tree(provider_runtime_path, dry_run=dry_run)
+        series_dirs: dict[str, dict[str, object]] = {
             "reports": (
                 {
                     "path": reports.as_posix(),
@@ -878,20 +845,22 @@ def _abandon_directories(
                     "reason": "child-enclosure",
                 }
                 if legacy_series_reports_is_child_enclosure(contract)
-                else worktree_services().provider_lifecycle.remove_tree(
+                else remove_tree(
                     reports,
                     dry_run=dry_run,
                 )
             ),
-            "lifecycle": worktree_services().provider_lifecycle.remove_tree(
+            "lifecycle": remove_tree(
                 lifecycle,
                 dry_run=dry_run,
             ),
             **outside,
         }
+        if provider_runtime.get("reason") != "already-absent":
+            series_dirs["provider_runtime"] = provider_runtime
+        return series_dirs
     # A leaf's own tool-call lines are kept in its master's
     # notes before either branch below removes <enclosure>/logs/.
-    remove_tree = worktree_services().provider_lifecycle.remove_tree
     role_folders = remove_group_role_folders(contract, dry_run=dry_run)
     if force:
         directories = {
@@ -902,11 +871,12 @@ def _abandon_directories(
         }
     else:
         reports_path = group / ENCLOSURE_REPORTS_DIRECTORY
-        reports = worktree_services().provider_lifecycle.remove_tree(reports_path, dry_run=dry_run)
-        lifecycle_result = worktree_services().provider_lifecycle.remove_tree(
+        reports = remove_tree(reports_path, dry_run=dry_run)
+        lifecycle_result = remove_tree(
             lifecycle,
             dry_run=dry_run,
         )
+        provider_runtime = remove_tree(provider_runtime_path, dry_run=dry_run)
         # Abandon removes <enclosure>/logs/ with the enclosure, as cleanup does
         # (MIK-R108 rule 3): the tool-call log is the product's own trace.
         logs_path = group / ENCLOSURE_LOGS_DIRECTORY
@@ -922,11 +892,14 @@ def _abandon_directories(
             planned.add(lifecycle.resolve())
         if logs.get("removed") or logs.get("would_remove"):
             planned.add(logs_path.resolve())
+        if provider_runtime.get("removed") or provider_runtime.get("would_remove"):
+            planned.add(provider_runtime_path.resolve())
         directories = {
             **role_folders,
             "reports": reports,
             "lifecycle": lifecycle_result,
             "logs": logs,
+            "provider_runtime": provider_runtime,
             "worktree_group": remove_empty_dir(group, dry_run, planned),
             **outside,
         }
@@ -966,9 +939,9 @@ def _abandon_state(dry_run: bool, reclaimed: bool) -> str:
 
 def _abandon_summary(dry_run: bool, reclaimed: bool) -> str:
     if dry_run:
-        return "Abandon preview: the listed provider resources, worktrees, branches, and dirs would be removed."
+        return "Abandon preview: the listed worktrees, branches, and dirs would be removed."
     if reclaimed:
-        return "Worktree abandoned: provider stack reclaimed, worktrees and branches removed, group dir cleared."
+        return "Worktree abandoned: worktrees and branches removed, group dir cleared."
     return (
         "Abandon blocked: some worktrees/branches were kept (dirty or unmerged). "
         "Re-run with force=true to discard them."

@@ -26,25 +26,34 @@ _D700_RETIREMENT_DECISION = {
     "sections": ["Q1", "Q2"],
     "sha256": "ebd655e1327fb427386324d7ad383ffe63398d8daeab1a4e138e19d74c298e68",
 }
+_D1000_RETIRED_CORE_UNITS = frozenset({"LF1.5", "LF2.1", "LF2.2", "LF2.3", "LF2.4"})
+_D1000_RETIREMENT_DECISION = {
+    "requirement": "DEP-R02@v1",
+    "decisions": ["D1000", "D1001", "D1005"],
+    "sha256": "901c3ff4dfd7e9cb816e4e78900c81b9c3efbe0353be351051643c9d20c85b9b",
+}
+_RETIRED_CORE_TABLES = {
+    "retired (D699, D700)": (_D700_RETIRED_CORE_UNITS, _D700_RETIREMENT_DECISION),
+    "retired (D1000, D1001)": (_D1000_RETIRED_CORE_UNITS, _D1000_RETIREMENT_DECISION),
+}
 
 
 def _assert_core_retirements(document: dict) -> None:
-    retired = {
-        row["id"] for row in document["units"] if row["disposition"] == "retired (D699, D700)"
-    }
-    assert retired == _D700_RETIRED_CORE_UNITS, "unknown or missing retired unit"
-    for row in document["units"]:
-        if row["id"] in retired:
-            assert row.get("retirementDecision") == _D700_RETIREMENT_DECISION, (
-                row["id"],
-                "missing or wrong retirement decision",
-            )
-            assert "digestPlace" not in row and "evidence" not in row, (
-                row["id"],
-                "retired unit has live bindings",
-            )
-            assert row["retiredBinding"]["file"] and row["retiredBinding"]["lines"]
-            assert row["retiredBinding"]["sha256"], "missing retired binding history"
+    for disposition, (expected_units, expected_decision) in _RETIRED_CORE_TABLES.items():
+        retired = {row["id"] for row in document["units"] if row["disposition"] == disposition}
+        assert retired == expected_units, "unknown or missing retired unit"
+        for row in document["units"]:
+            if row["id"] in retired:
+                assert row.get("retirementDecision") == expected_decision, (
+                    row["id"],
+                    "missing or wrong retirement decision",
+                )
+                assert "digestPlace" not in row and "evidence" not in row, (
+                    row["id"],
+                    "retired unit has live bindings",
+                )
+                assert row["retiredBinding"]["file"] and row["retiredBinding"]["lines"]
+                assert row["retiredBinding"]["sha256"], "missing retired binding history"
 
 
 def _assert_core_source_map(root: Path, document: dict) -> None:
@@ -52,7 +61,7 @@ def _assert_core_source_map(root: Path, document: dict) -> None:
     _assert_core_retirements(document)
     files: dict[str, list] = {}
     for row in document["units"]:
-        if row["disposition"] == "retired (D699, D700)":
+        if row["disposition"] in _RETIRED_CORE_TABLES:
             continue
         source = (root / row["file"]).read_text().splitlines()
         start, end = row["lines"]
@@ -183,7 +192,7 @@ def _assert_core_dispositions(root: Path, document: dict, text: str) -> None:
         "lead-in",
     }
     for row in rows.values():
-        if row["disposition"] == "retired (D699, D700)":
+        if row["disposition"] in _RETIRED_CORE_TABLES:
             continue
         if row["disposition"] == "digest":
             assert row["digestPlace"], row["id"]
