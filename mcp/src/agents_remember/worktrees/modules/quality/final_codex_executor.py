@@ -83,6 +83,7 @@ from agents_remember.worktrees.modules.quality.dagger_authority import (
     release_dagger_authority,
     reuse_authority_for_continuation,
 )
+from agents_remember.worktrees.modules.quality.dagger_runner import dropped_dagger_selectors
 
 OPERATION_KIND = "final-codex"
 REPETITION_COUNT = 2
@@ -209,7 +210,7 @@ class FinalCodexExecutionEngine:
         Refuses before any scenario step when the exact candidate's Gates 1-3
         are not all green against the exact frozen plan, when an
         authority-transition barrier is live, when the host declaration is
-        missing/malformed/provisioning-capable, when ambient or profile
+        missing or malformed, when ambient or profile
         selection conflicts, when another run is already live for the
         candidate, or when a terminal run already certifies the exact same
         plan identity (retry disabled).
@@ -321,6 +322,7 @@ class FinalCodexExecutionEngine:
             )
 
         if continuation_snapshot is not None:
+            environment = authority_environment(continuation_snapshot, base=self._environ)
             owner = owner_factory(continuation_snapshot)
             reuse_authority_for_continuation(
                 continuation_snapshot,
@@ -334,15 +336,12 @@ class FinalCodexExecutionEngine:
                 engine_version=continuation_snapshot.engine_version,
                 source=f"snapshot:{continuation_snapshot.snapshot_digest}",
             )
-            environment = authority_environment(
-                continuation_snapshot,
-                base=dict(self._environ),
-            )
             return AdmittedDaggerAuthority(
                 snapshot=continuation_snapshot,
                 declaration=declaration,
                 environment=environment,
                 owner=owner,
+                dropped_selectors=dropped_dagger_selectors(self._environ),
             )
         try:
             return admit_dagger_authority(

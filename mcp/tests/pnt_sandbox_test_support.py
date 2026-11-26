@@ -19,7 +19,7 @@ import sys
 import tempfile
 import time
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -113,6 +113,7 @@ __all__ = [
     "host_settings_document",
     "inspect_paseo_record",
     "is_running",
+    "isolated_workspace_harness_markers",
     "launcher_scrub",
     "location_refusal",
     "lock",
@@ -225,6 +226,21 @@ def ended(pid: int, seconds: float = 10.0) -> bool:
     return True
 
 
+@contextlib.contextmanager
+def isolated_workspace_harness_markers(root: Path) -> Iterator[None]:
+    """Read fixture markers without inheriting the machine's ancestor configuration."""
+    exists = Path.exists
+    ancestors = set(root.parents)
+
+    def fixture_exists(path: Path) -> bool:
+        if path.parent in ancestors and path.name in PROJECT_HARNESS_MARKERS:
+            return False
+        return exists(path)
+
+    with mock.patch.object(Path, "exists", fixture_exists):
+        yield
+
+
 class SandboxCase(unittest.TestCase):
     """A sandbox directory, a directory that looks like a PNT build, and real child processes."""
 
@@ -232,17 +248,7 @@ class SandboxCase(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
-        # Only the owned fixture tree supplies harness markers. Ancestor markers
-        # belong to the machine running the tests, including transient /tmp state.
-        exists = Path.exists
-        ancestors = set(self.root.parents)
-
-        def fixture_exists(path: Path) -> bool:
-            if path.parent in ancestors and path.name in PROJECT_HARNESS_MARKERS:
-                return False
-            return exists(path)
-
-        self.enterContext(mock.patch.object(Path, "exists", fixture_exists))
+        self.enterContext(isolated_workspace_harness_markers(self.root))
         self.layout = SandboxLayout(
             self.root / "sandbox", paseo_port=free_port(), dashboard_port=free_port()
         )
@@ -252,6 +258,9 @@ class SandboxCase(unittest.TestCase):
         for name in PNT_BUILD_FILES:
             (self.checkout / name).parent.mkdir(parents=True, exist_ok=True)
             (self.checkout / name).write_text("", encoding="utf-8")
+        for name in ("python-runtime-contract.env", "bootstrap-mcp-venv.sh"):
+            relative = Path("scripts") / name
+            (self.checkout / relative).write_bytes((REPOSITORY_ROOT / relative).read_bytes())
         self.lines: list[str] = []
 
     def mark_built(self, layout: int = builder.LAYOUT_VERSION) -> None:

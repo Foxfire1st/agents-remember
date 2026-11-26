@@ -20,7 +20,7 @@ The site https://foxfire1st.github.io/agents-remember/ shows the folder `docs/` 
 ## What you need
 
 - A Linux x86_64 machine. WSL 2 on Windows counts as Linux.
-- Python 3.14 (`>=3.14,<3.15`), [uv](https://docs.astral.sh/uv/) and Git.
+- [uv](https://docs.astral.sh/uv/) and Git. uv supplies Python 3.14 during installation.
 - One harness, installed and logged in: Claude Code, Codex, Cursor, Hermes, Pi or OpenClaw. The
   host starts no role agent on Cursor or OpenClaw.
 - Network access during the setup, and the free ports 8765 and 8766 on the loopback address.
@@ -35,7 +35,7 @@ tells these five steps in full.
 1. **Install the package.** Install the published package with one command:
 
    ```bash
-   uv tool install --python 3.14 agents-remember-mcp
+   uv tool install --managed-python --python 3.14 agents-remember-mcp
    ```
 
    [Getting started](https://github.com/Foxfire1st/agents-remember/blob/main/docs/getting-started.md#1-install-the-package)

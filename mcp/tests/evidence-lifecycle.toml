@@ -594,6 +594,7 @@ consumers = [
   "mcp/tests/test_planned_knowledge_effects.py",
   "mcp/tests/test_platform_subprocess.py",
   "mcp/tests/test_pnt_sandbox.py",
+  "mcp/tests/test_pnt_sandbox_prepare_python.py",
   "mcp/tests/test_pnt_sandbox_processes.py",
   "mcp/tests/test_pnt_sandbox_provision_fallback.py",
   "mcp/tests/test_pnt_sandbox_settings.py",
@@ -753,6 +754,7 @@ consumers = [
   "mcp/tests/test_role_tool_scope.py",
   "mcp/tests/test_route_index_memory_scope.py",
   "mcp/tests/test_route_review_clean_sync_door.py",
+  "mcp/tests/test_runtime_checkout_environments.py",
   "mcp/tests/test_semantic_topology_refusals.py",
   "mcp/tests/test_semantic_topology_standalone.py",
   "mcp/tests/test_series_finalize_rules.py",
@@ -3106,6 +3108,7 @@ consumers = [
   "mcp/tests/test_planned_knowledge_effects.py",
   "mcp/tests/test_platform_subprocess.py",
   "mcp/tests/test_pnt_sandbox.py",
+  "mcp/tests/test_pnt_sandbox_prepare_python.py",
   "mcp/tests/test_pnt_sandbox_processes.py",
   "mcp/tests/test_pnt_sandbox_provision_fallback.py",
   "mcp/tests/test_pnt_sandbox_settings.py",
@@ -3265,6 +3268,7 @@ consumers = [
   "mcp/tests/test_role_tool_scope.py",
   "mcp/tests/test_route_index_memory_scope.py",
   "mcp/tests/test_route_review_clean_sync_door.py",
+  "mcp/tests/test_runtime_checkout_environments.py",
   "mcp/tests/test_semantic_topology_refusals.py",
   "mcp/tests/test_semantic_topology_standalone.py",
   "mcp/tests/test_series_finalize_rules.py",
@@ -4483,6 +4487,7 @@ replacement_contract = "contract:pnt-sandbox-process-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_pnt_sandbox.py",
+  "mcp/tests/test_pnt_sandbox_prepare_python.py",
   "mcp/tests/test_pnt_sandbox_processes.py",
 ]
 

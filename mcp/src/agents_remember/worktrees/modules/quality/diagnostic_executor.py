@@ -81,6 +81,7 @@ from agents_remember.worktrees.modules.quality.dagger_authority import (
     release_dagger_authority,
     reuse_authority_for_continuation,
 )
+from agents_remember.worktrees.modules.quality.dagger_runner import dropped_dagger_selectors
 
 DiagnosticGate = Literal[4]
 SCENARIO_GATE: DiagnosticGate = 4
@@ -206,7 +207,7 @@ class DiagnosticExecutionEngine:
 
         Refuses before any scenario step when the exact candidate's Gates 1-3
         are not all green, when an authority-transition barrier is live, when
-        the host declaration is missing/malformed/provisioning-capable, when
+        the host declaration is missing or malformed, when
         ambient or profile selection conflicts, or when another diagnostic
         attempt is already live for the candidate.
         """
@@ -296,6 +297,7 @@ class DiagnosticExecutionEngine:
             )
 
         if continuation_snapshot is not None:
+            environment = authority_environment(continuation_snapshot, base=self._environ)
             owner = owner_factory(continuation_snapshot)
             reuse_authority_for_continuation(
                 continuation_snapshot,
@@ -309,15 +311,12 @@ class DiagnosticExecutionEngine:
                 engine_version=continuation_snapshot.engine_version,
                 source=f"snapshot:{continuation_snapshot.snapshot_digest}",
             )
-            environment = authority_environment(
-                continuation_snapshot,
-                base=dict(self._environ),
-            )
             return AdmittedDaggerAuthority(
                 snapshot=continuation_snapshot,
                 declaration=declaration,
                 environment=environment,
                 owner=owner,
+                dropped_selectors=dropped_dagger_selectors(self._environ),
             )
         try:
             return admit_dagger_authority(

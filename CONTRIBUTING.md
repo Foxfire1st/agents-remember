@@ -58,9 +58,10 @@ directory except to hold a file that it may write.
 ## Development environment
 
 A development checkout needs Linux or WSL, Git, [uv](https://docs.astral.sh/uv/) and, for the
-dashboard, Node with npm. `scripts/python-runtime-contract.env` holds the pinned versions:
-Python 3.14.8 and uv 0.12.6 as the lowest accepted uv. The bootstrap, the hooks, both GitHub
-workflows and the Dagger module read this one file.
+dashboard, Node with npm. `scripts/python-runtime-contract.env` names Python 3.14 and the uv
+minor line. On the host this is the minimum supported uv. Both GitHub workflows and the Dagger
+candidate image install the newest patch of that uv minor line. The bootstrap, hooks, workflows
+and Dagger module read this one file.
 
 Set up a clone once, from the repository root:
 
@@ -72,24 +73,22 @@ npm --prefix dashboard ci
 
 `scripts/bootstrap-mcp-venv.sh` does three things.
 
-1. It checks that the `uv` on the `PATH` is the pinned version or newer. It installs no uv and
+1. It checks that the `uv` on the `PATH` is the contract's uv minor line or newer. It installs no uv and
    refuses an older or missing one before it creates anything. It prints the version and the
    path of the uv it builds with.
-2. It builds CPython 3.14.8 from the Python.org source archive, unless a valid build is
-   already there. Before the build it checks the archive's SHA-256, and it builds with
-   pyenv's `python-build` at the commit that the contract pins. The interpreter lands outside
-   the repository, under `~/.local/share/agents-remember/python/`, or under `XDG_DATA_HOME`
-   when that is set. The script leaves the system's Python as it is. The build needs `curl`,
-   `gcc`, `git`, `make`, `sha256sum` and `tar`.
-3. It creates `mcp/.venv` from the locked dependencies with every extra, on the interpreter
-   of step 2. uv may bring no Python of its own. `scripts/check-python-runtime.py` then
-   proves the interpreter's version, its origin, its extension modules and the Linux pidfd
-   calls, and `uv pip check` proves that the installed packages fit together.
+2. It uses uv to install CPython 3.14 into uv's Python directory and find it through the
+   minor-version link. This link lets an environment follow a new patch when you run
+   `uv python upgrade 3.14`. [uv's Python version guide](https://docs.astral.sh/uv/concepts/python-versions/#minor-version-directories)
+   describes the link and the installation directory.
+3. It creates `mcp/.venv` from the locked dependencies with every extra using that interpreter.
+   `scripts/check-python-runtime.py` checks the minor version and the environment's recorded
+   base directory. It reports the interpreter, its modules and the Linux pidfd proof.
+   `uv pip check` verifies that the installed packages fit together.
 
-The script refuses an existing `mcp/.venv`. `scripts/bootstrap-mcp-venv.sh --replace` moves
-the old environment aside, builds a new one and restores the old one when the build fails.
-`--prefix PATH` names another place for the interpreter; the path is absolute and ends in
-`cpython-3.14.8`.
+If an existing `mcp/.venv` uses a different base interpreter, bootstrap moves it aside and
+recreates it from the checkout's lock. Use `scripts/bootstrap-mcp-venv.sh --replace` to recreate
+an environment that already uses the right base. Both routes restore the previous environment
+if recreation fails.
 
 `npm --prefix dashboard ci` installs the dashboard's dependencies. The hooks need them.
 
@@ -324,8 +323,9 @@ as its argument. No hook runs a test or certification.
 | `targeted` | `git push` | the same checks | the files of the checkout as they are |
 | `full` | by hand only | nothing; it ends with an error and says that the tests run only in Dagger | nothing |
 
-Both hooks need `mcp/.venv` with Python 3.14.8 and `dashboard/node_modules`. A hook that
-misses one of them names the command that creates it and stops.
+Both hooks need `mcp/.venv` based on uv's Python 3.14 minor-version link and
+`dashboard/node_modules`. A hook that misses one of them names the command that creates it
+and stops.
 
 The Python checks cover every Python file that Git tracks (`git ls-files '*.py'`), using a
 256 KiB GNU `xargs` batch on Linux so the full list dispatches without splitting below that ceiling
@@ -435,12 +435,20 @@ install `dagger` and run an engine. The environment variable `AR_DAGGER_RUNTIME_
 declares the engine to the command, as one JSON object:
 
 ```json
-{"schemaVersion": "dagger-host-declaration/v1", "endpoint": "container://<engine-container>", "layerStore": "/var/lib/dagger", "engineVersion": "v0.21.8"}
+{"schemaVersion": "dagger-host-declaration/v1", "endpoint": "container://dagger-engine-v0.21.8", "layerStore": "/var/lib/dagger", "engineVersion": "v0.21.8"}
 ```
 
-`endpoint` names the engine's container, and `layerStore` the absolute path at which that
-container mounts its layer store. Without the declaration, or when the container does not run
-or does not mount that path, the command refuses before it starts any Dagger command.
+`endpoint` takes `container://` followed by a container name or ID matching
+`[a-zA-Z0-9][a-zA-Z0-9_.-]+`. The command validates this form before inspecting Docker.
+`layerStore` names the absolute path at which the running container mounts its layer store.
+The command requires the declaration and that mount before it starts the Dagger CLI.
+
+The command passes the admitted endpoint to the Dagger CLI in `_EXPERIMENTAL_DAGGER_RUNNER_HOST`.
+It refuses an ambient value that conflicts with the endpoint in either that variable or
+`DAGGER_HOST`, then removes `DAGGER_HOST` from the child environment.
+The command also drops `DAGGER_SESSION_PORT`, `DAGGER_SESSION_TOKEN`, and `DAGGER_CLOUD_ENGINE`
+from the child environment. The receipt and result give the names of the session and cloud
+selectors that were present and dropped.
 
 Only a passed run of this kind counts as certification. A pytest run on your machine is a
 development check, whatever it reports. The option `--certify` of pytest belongs to the run

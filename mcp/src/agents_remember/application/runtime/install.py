@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from agents_remember.install.checkout_environments import inspect_checkout_environments
 from agents_remember.install.runtime import (
     RuntimeInstallRequest,
     install_runtime_from_config,
@@ -74,4 +75,6 @@ def run_runtime_install(
             )
         result["sharedHeldStores"] = shared_stores
         result["ok"] = result["ok"] and shared_stores["state"] != "blocked"
+    if repository := config.repositories.get("agents-remember"):
+        result["checkoutEnvironments"] = inspect_checkout_environments(repository.path)
     return result

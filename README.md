@@ -116,7 +116,7 @@ intent review.
 Five steps lead from the install of the package to the dashboard in your browser. You need:
 
 - A Linux x86_64 machine. WSL 2 on Windows counts as Linux.
-- Python 3.14 (`>=3.14,<3.15`), [uv](https://docs.astral.sh/uv/) and Git.
+- [uv](https://docs.astral.sh/uv/) and Git. uv supplies Python 3.14 during installation.
 - One harness, installed and logged in: Claude Code, Codex, Cursor, Hermes, Pi or OpenClaw. The
   host starts no role agent on Cursor or OpenClaw.
 - Network access during the setup, and the free ports 8765 and 8766 on the loopback address.
@@ -132,7 +132,7 @@ Docker is not needed. [Getting started](docs/getting-started.md#what-you-need) g
 1. **Install the package.** Install the published package with one command:
 
    ```bash
-   uv tool install --python 3.14 agents-remember-mcp
+   uv tool install --managed-python --python 3.14 agents-remember-mcp
    ```
 
    [Getting started](docs/getting-started.md#1-install-the-package) also tells how to build and

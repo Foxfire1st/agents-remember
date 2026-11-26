@@ -246,6 +246,7 @@ _INSTALL_FIELDS = {
     "recoveryActions": "perform the recovery actions the run lists",
     "removedPartStores": "tell the user that stores of removed parts remain and which command lists or removes them",
     "sharedHeldStores": "read proposed or completed shared-store and lock removals, preserved seats, or the blocker",
+    "checkoutEnvironments": "run each stale checkout's Python bootstrap command once the checkout has the uv-managed bootstrap",
     "log": "open the detail file holding the whole install result",
 }
 

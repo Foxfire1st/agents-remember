@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import stat
 import subprocess
 import sys
@@ -24,7 +23,6 @@ import pytest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP = REPOSITORY_ROOT / "scripts" / "bootstrap-mcp-venv.sh"
 CONTRACT = REPOSITORY_ROOT / "scripts" / "python-runtime-contract.env"
-CHECK_RUNTIME = REPOSITORY_ROOT / "scripts" / "check-python-runtime.py"
 VERSION_RE = re.compile(r"^[0-9]+(\.[0-9]+)*$")
 
 
@@ -105,6 +103,10 @@ def run_driver(source: str, env: dict[str, str]) -> subprocess.CompletedProcess[
 @pytest.mark.parametrize(
     ("observed", "minimum", "accepted"),
     [
+        ("0.12.21", "0.13", False),  # previous minor line is refused under minor pin
+        ("0.13.0", "0.13", True),  # first patch of the contract minor builds
+        ("0.13.10", "0.13", True),  # newer patch in the contract minor builds
+        ("0.14.0", "0.13", True),  # newer minor line is accepted
         ("0.12.21", "0.12.6", True),  # the developer's newer uv beats the contract's
         ("0.12.6", "0.12.6", True),  # the contract's own version builds
         ("0.12.5", "0.12.6", False),  # one patch below is refused
@@ -130,7 +132,7 @@ def test_version_comparison_is_numeric(
     assert proc.stdout.strip() == ("ACCEPT" if accepted else "REFUSE")
 
 
-@pytest.mark.parametrize("version", ["0.12.21", "1.0.0"])
+@pytest.mark.parametrize("version", ["0.13.10", "1.0.0"])
 def test_gate_uses_a_newer_uv_as_it_is(
     version: str, tmp_path: Path, scratch_env: dict[str, str]
 ) -> None:
@@ -161,9 +163,9 @@ def test_gate_uses_the_contract_version_itself(tmp_path: Path, scratch_env: dict
     assert f"building with uv {minimum} at {uv}" in proc.stdout
 
 
-def run_bootstrap(env: dict[str, str], prefix: Path, path: str) -> subprocess.CompletedProcess[str]:
+def run_bootstrap(env: dict[str, str], path: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["bash", str(BOOTSTRAP), "--prefix", str(prefix)],
+        ["bash", str(BOOTSTRAP)],
         capture_output=True,
         check=False,
         text=True,
@@ -178,24 +180,22 @@ def test_older_uv_is_refused_before_anything_is_touched(
     """An older uv is refused with the lowest version, the found version and path (rule 3)."""
 
     minimum = contract_uv_version()
-    uv = write_fake_uv(tmp_path / "bin", "0.12.5")
-    prefix = tmp_path / "cpython-3.14.8"
-    proc = run_bootstrap(scratch_env, prefix, f"{uv.parent}:/usr/bin:/bin")
+    uv = write_fake_uv(tmp_path / "bin", "0.12.21")
+    proc = run_bootstrap(scratch_env, f"{uv.parent}:/usr/bin:/bin")
     assert proc.returncode == 1
     assert (
         f"[python-runtime] uv {minimum} or newer is required to create mcp/.venv; "
-        f"found 0.12.5 at {uv}" in proc.stderr
+        f"found 0.12.21 at {uv}" in proc.stderr
     )
     assert "building with uv" not in proc.stdout
     assert not (Path(scratch_env["XDG_CACHE_HOME"]) / "agents-remember").exists()
 
 
-def test_missing_uv_is_refused(tmp_path: Path, scratch_env: dict[str, str]) -> None:
+def test_missing_uv_is_refused(scratch_env: dict[str, str]) -> None:
     """No uv on the PATH is refused with the lowest accepted version (rule 3)."""
 
     minimum = contract_uv_version()
-    prefix = tmp_path / "cpython-3.14.8"
-    proc = run_bootstrap(scratch_env, prefix, "/usr/bin:/bin")
+    proc = run_bootstrap(scratch_env, "/usr/bin:/bin")
     assert proc.returncode == 1
     assert (
         f"[python-runtime] uv {minimum} or newer is required to create mcp/.venv; "
@@ -215,8 +215,7 @@ def test_unreadable_version_is_refused_with_its_text(
 
     minimum = contract_uv_version()
     uv = write_fake_uv(tmp_path / "bin", version_text)
-    prefix = tmp_path / "cpython-3.14.8"
-    proc = run_bootstrap(scratch_env, prefix, f"{uv.parent}:/usr/bin:/bin")
+    proc = run_bootstrap(scratch_env, f"{uv.parent}:/usr/bin:/bin")
     assert proc.returncode == 1
     assert (
         f"[python-runtime] uv {minimum} or newer is required to create mcp/.venv; "
@@ -256,14 +255,14 @@ def test_bare_version_token_is_accepted(tmp_path: Path, scratch_env: dict[str, s
     """A single-token dotted version is read as the version (F02 sibling)."""
 
     minimum = contract_uv_version()
-    uv = write_fake_uv(tmp_path / "bin", "0.12.21", bare=True)
+    uv = write_fake_uv(tmp_path / "bin", "0.13.10", bare=True)
     proc = run_driver(
         "resolve_uv\n",
         {**scratch_env, "PATH": f"{uv.parent}:/usr/bin:/bin"},
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == (
-        f"[python-runtime] building with uv 0.12.21 at {uv} (requires {minimum} or newer)"
+        f"[python-runtime] building with uv 0.13.10 at {uv} (requires {minimum} or newer)"
     )
 
 
@@ -272,22 +271,19 @@ def test_refusal_leaves_an_existing_environment_alone(
 ) -> None:
     """A refusal moves no existing venv and creates no backup (rule 3, preserved)."""
 
-    venv = REPOSITORY_ROOT / "mcp" / ".venv"
-    marker = venv / ".l139-refusal-marker" if venv.is_dir() else None
-    if marker is not None:
-        marker.write_text("untouched", encoding="utf-8")
+    venv = tmp_path / ".venv"
+    venv.mkdir()
+    marker = venv / ".refusal-marker"
+    marker.write_text("untouched", encoding="utf-8")
     uv = write_fake_uv(tmp_path / "bin", "0.11.0")
-    prefix = tmp_path / "cpython-3.14.8"
-    try:
-        proc = run_bootstrap(scratch_env, prefix, f"{uv.parent}:/usr/bin:/bin")
-        assert proc.returncode == 1
-        assert "or newer is required" in proc.stderr
-        if marker is not None:
-            assert marker.read_text(encoding="utf-8") == "untouched"
-        assert not (Path(scratch_env["XDG_CACHE_HOME"]) / "agents-remember").exists()
-    finally:
-        if marker is not None and marker.exists():
-            marker.unlink()
+    proc = run_driver(
+        'venv="$TEST_VENV"\nmain\n',
+        {**scratch_env, "PATH": f"{uv.parent}:/usr/bin:/bin", "TEST_VENV": str(venv)},
+    )
+    assert proc.returncode == 1
+    assert "or newer is required" in proc.stderr
+    assert marker.read_text(encoding="utf-8") == "untouched"
+    assert not (Path(scratch_env["XDG_CACHE_HOME"]) / "agents-remember").exists()
 
 
 def test_script_brings_no_uv_itself() -> None:
@@ -299,95 +295,63 @@ def test_script_brings_no_uv_itself() -> None:
     assert "uv==" not in text
 
 
-def find_valid_runtime_prefix() -> Path | None:
-    """A canonical runtime prefix the checker accepts, else None to skip.
-
-    The lookup validates by running the checker's own proof (read-only) and
-    never builds: the test process's base runtime first, then the default
-    data-root installation.
-    """
-
-    values = contract_values()
-    minor = values["AR_PYTHON_MINOR"]
-    candidates = [
-        Path(sys.base_prefix),
-        Path.home()
-        / ".local"
-        / "share"
-        / "agents-remember"
-        / "python"
-        / f"cpython-{values['AR_PYTHON_VERSION']}",
-    ]
-    checker_args = [
-        "--expected-version",
-        values["AR_PYTHON_VERSION"],
-        "--require-linux-pidfd",
-        "--source-url",
-        values["AR_PYTHON_SOURCE_URL"],
-        "--source-sha256",
-        values["AR_PYTHON_SOURCE_SHA256"],
-        "--builder-commit",
-        values["AR_PYTHON_BUILD_COMMIT"],
-    ]
-    for prefix in candidates:
-        python = prefix / "bin" / f"python{minor}"
-        if not python.is_file() or not os.access(python, os.X_OK):
-            continue
-        proc = subprocess.run(
-            [str(python), str(CHECK_RUNTIME), *checker_args, "--expected-base-prefix", str(prefix)],
-            capture_output=True,
-            check=False,
-            text=True,
-            timeout=120,
-        )
-        if proc.returncode == 0:
-            return prefix
-    return None
-
-
-def test_sync_failure_names_both_uv_versions(tmp_path: Path, scratch_env: dict[str, str]) -> None:
-    """A sync failure under a newer uv names both versions and restores (rule 5).
-
-    The fake uv passes the gate as newer, then fails `sync`: the script must
-    name the version it ran with and the contract's, and the moved-aside
-    environment must be back in place afterwards.
-    """
-
-    prefix = find_valid_runtime_prefix()
-    if prefix is None:
-        pytest.skip("no checker-valid canonical runtime available")
-    assert prefix is not None
+@pytest.mark.parametrize("linked", [False, True], ids=["directory", "symlink"])
+def test_sync_failure_names_both_uv_versions(
+    tmp_path: Path, scratch_env: dict[str, str], linked: bool
+) -> None:
+    """A failed locked sync restores the stale environment moved by the ordinary bootstrap."""
     minimum = contract_uv_version()
-    uv = write_fake_uv(tmp_path / "bin", "0.12.21")
-    root = tmp_path / "repository"
-    scripts = root / "scripts"
-    scripts.mkdir(parents=True)
-    for name in (BOOTSTRAP.name, CONTRACT.name, CHECK_RUNTIME.name, "install-python-runtime.sh"):
-        shutil.copy2(REPOSITORY_ROOT / "scripts" / name, scripts / name)
-    venv = root / "mcp" / ".venv"
-    venv.mkdir(parents=True)
-    assert venv.is_dir(), "this proof recreates an existing environment"
-    marker = venv / ".l139-sync-failure-marker"
+    venv = tmp_path / ".venv"
+    previous = tmp_path / "previous-venv" if linked else venv
+    previous.mkdir()
+    if linked:
+        venv.symlink_to(previous, target_is_directory=True)
+    marker = venv / ".restore-marker"
     marker.write_text("restore me", encoding="utf-8")
+
+    uv = write_fake_uv(tmp_path / "bin", "0.13.10")
+    uv.write_text(
+        """#!/usr/bin/env bash
+case "$*" in
+    --version) echo "uv 0.13.10 (test shim)" ;;
+    "python install --no-bin $TEST_MINOR") ;;
+    "python find --system --managed-python --no-python-downloads $TEST_MINOR")
+        echo "$TEST_PYTHON" ;;
+    sync*)
+        mkdir "$TEST_VENV"
+        echo failed > "$TEST_VENV/partial"
+        exit 23 ;;
+    *) exit 3 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    runtime_python = tmp_path / "runtime" / "bin" / "python"
+    runtime_python.parent.mkdir(parents=True)
+    runtime_python.write_text(
+        '#!/usr/bin/env bash\nif [[ "$1" == -B ]]; then exec "$TEST_DRIVER_PYTHON" "$@"; fi\n',
+        encoding="utf-8",
+    )
+    runtime_python.chmod(0o755)
+    proc = run_driver(
+        'venv="$TEST_VENV"\nmain\n',
+        {
+            **scratch_env,
+            "PATH": f"{uv.parent}:/usr/bin:/bin",
+            "TEST_MINOR": contract_values()["AR_PYTHON_MINOR"],
+            "TEST_PYTHON": str(runtime_python),
+            "TEST_DRIVER_PYTHON": sys.executable,
+            "TEST_VENV": str(venv),
+        },
+    )
+    assert proc.returncode == 1
+    assert (
+        f"[python-runtime] uv sync failed with uv 0.13.10 at {uv} (requires {minimum} or newer)"
+        in proc.stderr
+    )
+    assert marker.read_text(encoding="utf-8") == "restore me"
+    assert venv.is_symlink() is linked
+    assert not (venv / "partial").exists()
     backup_root = Path(scratch_env["XDG_CACHE_HOME"]) / "agents-remember" / "venv-backups"
-    try:
-        proc = subprocess.run(
-            ["bash", str(scripts / BOOTSTRAP.name), "--replace", "--prefix", str(prefix)],
-            capture_output=True,
-            check=False,
-            text=True,
-            env={**scratch_env, "PATH": f"{uv.parent}:/usr/bin:/bin"},
-            timeout=300,
-        )
-        assert proc.returncode == 1
-        assert f"building with uv 0.12.21 at {uv}" in proc.stdout
-        assert (
-            f"[python-runtime] uv sync failed with uv 0.12.21 at {uv} "
-            f"(requires {minimum} or newer)" in proc.stderr
-        )
-        assert "restored previous venv after failed recreation" in proc.stderr
-        assert marker.read_text(encoding="utf-8") == "restore me"
-        assert not list(backup_root.glob("agents-remember-mcp-*"))
-    finally:
-        if marker.exists():
-            marker.unlink()
+    (failed,) = backup_root.iterdir()
+    assert (failed / "venv/partial").read_text(encoding="utf-8").strip() == "failed"

@@ -255,6 +255,7 @@ RUNTIME_INSTALL_ANSWER_FIELDS = frozenset(
         "recoveryActions",
         "removedPartStores",
         "sharedHeldStores",
+        "checkoutEnvironments",
         "log",
     }
 )

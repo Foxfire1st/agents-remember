@@ -41,6 +41,8 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, RuntimeError, ValueError) as error:
         print(f"clean quality refused: {error}", file=sys.stderr, flush=True)
         return 1
+    if result.dropped_selectors:
+        print(f"Dagger launch omitted {', '.join(result.dropped_selectors)}", file=sys.stderr)
     if result.stdout:
         print(result.stdout, end="" if result.stdout.endswith("\n") else "\n", flush=True)
     return result.returncode

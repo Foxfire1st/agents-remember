@@ -100,21 +100,23 @@ describes the sandbox.
 These checks run on a wheel that is built from the release checkout. Build the wheel from the
 root of that checkout with the commands that
 [step 1 of Getting started](getting-started.md#1-install-the-package) gives for a checkout of
-the repository, up to `uv build --wheel mcp`:
+the repository, through the wheel build:
 
 ```bash
 npm --prefix dashboard ci
 npm --prefix dashboard run build
-python3 scripts/sync-dashboard.py
-uv build --wheel mcp
+uv python install --no-bin 3.14
+ar_python="$(uv python find --system --managed-python --no-python-downloads 3.14)"
+"$ar_python" scripts/sync-dashboard.py
+uv build --python "$ar_python" --wheel mcp
 ```
 
-- [ ] The wheel installs into an empty virtual environment of Python 3.14, and the tool server
-      prints its help text there. The help text names the one option `--config`.
+- [ ] The wheel installs into an empty environment on uv-managed Python 3.14, and the tool
+      server prints its help text there. The help text names the one option `--config`.
 
       ```bash
-      python3 -m venv <scratch-folder>/venv
-      <scratch-folder>/venv/bin/python -m pip install mcp/dist/agents_remember_mcp-<version>-py3-none-any.whl
+      uv venv --managed-python --python 3.14 <scratch-folder>/venv
+      uv pip install --python <scratch-folder>/venv/bin/python mcp/dist/agents_remember_mcp-<version>-py3-none-any.whl
       <scratch-folder>/venv/bin/agents-remember-mcp --help
       ```
 
@@ -140,13 +142,15 @@ describes what the check refuses.
       publishes the two files to PyPI. It runs no test and no certification.
 - [ ] The release job passed, and PyPI lists `<version>`.
 - [ ] The index answers `<version>` in the form the installer reads, not only in its JSON record.
-      Run `python3 -m pip index versions agents-remember-mcp` and repeat it until `<version>` is the
-      newest version it names. A wheel published from the job's clean environment proves the
-      upload; the index's own copy for installers can still trail it, and an install started
-      before it catches up fails with "No matching distribution found" although the upload
-      succeeded.
-- [ ] A scratch install of the published version works after that:
-      `python3 -m venv <scratch-folder>/venv` and
-      `<scratch-folder>/venv/bin/python -m pip install agents-remember-mcp==<version>`, then
-      `<scratch-folder>/venv/bin/agents-remember-mcp --help`.
+      Run `uvx --managed-python --python 3.14 pip index versions agents-remember-mcp` and
+      repeat it until `<version>` is the newest version it names. The installer index can lag
+      behind a successful upload. An install before it catches up fails with
+      "No matching distribution found".
+- [ ] A scratch install of the published version works after that. Use a fresh scratch folder.
+
+      ```bash
+      uv venv --managed-python --python 3.14 <scratch-folder>/venv
+      uv pip install --python <scratch-folder>/venv/bin/python agents-remember-mcp==<version>
+      <scratch-folder>/venv/bin/agents-remember-mcp --help
+      ```
 - [ ] The GitHub release of the tag exists and holds the release notes.

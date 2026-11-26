@@ -58,11 +58,11 @@ fi
 dev_python_ready() {
   if [ "$(uname -s)" = "Linux" ]; then
     "$1" "$root/scripts/check-python-runtime.py" \
-      --expected-version "$AR_PYTHON_VERSION" \
+      --expected-version "$AR_PYTHON_MINOR" \
       --require-linux-pidfd >/dev/null 2>&1 || return 1
   else
     "$1" "$root/scripts/check-python-runtime.py" \
-      --expected-version "$AR_PYTHON_VERSION" >/dev/null 2>&1 || return 1
+      --expected-version "$AR_PYTHON_MINOR" >/dev/null 2>&1 || return 1
   fi
   "$1" -c \
     'import pyright, ruff; import agents_remember_test_support.code_quality.scope_reporting' \

@@ -50,7 +50,7 @@
       "reportsField": "reports",
       "repositoryBundleArgument": "repository-bundle",
       "retainedReportsArgument": "retained-reports",
-      "runtimeDigest": "2aee8c39a0d5b9af5cf35d81d9e1a2546e48f750a703e299c709df683d25a8ea",
+      "runtimeDigest": "145ea7d980e718cb6f2a651814b19e183341df3d33b391857c5c6e601a5d980a",
       "sourceArgument": "source",
       "version": "0.21.8"
     }
@@ -109,7 +109,7 @@
       ]
     }
   ],
-  "profileDigest": "66f06916c41c8c13033a92e1e7e851c2c5cd044c9ca534ce3d5d24ecf4309b9b",
+  "profileDigest": "cddaa7ff9424112d0ffe29dfee2bc90576c10d4d100335729d6d201cdaadc0d5",
   "profileId": "agents-remember-certification",
   "publishedArtifacts": [
     {
@@ -593,7 +593,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -680,7 +680,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -1268,7 +1268,7 @@
         "adapterKind": "container-command",
         "cleanRoom": false,
         "command": [
-          "/opt/agents-remember-python/current/bin/uv",
+          "/usr/local/bin/uv",
           "pip",
           "check",
           "--python",
@@ -1310,7 +1310,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -1373,7 +1373,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -1439,7 +1439,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -1500,7 +1500,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -1561,7 +1561,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -1622,7 +1622,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -1683,7 +1683,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -1746,7 +1746,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -1814,7 +1814,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -1887,7 +1887,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -1971,7 +1971,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -2055,7 +2055,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -2152,7 +2152,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -2222,7 +2222,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -2290,7 +2290,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -2355,7 +2355,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -2421,7 +2421,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -2442,13 +2442,9 @@
         "adapterKind": "container-command",
         "cleanRoom": false,
         "command": [
-          "/opt/ar-venv/bin/python",
-          "scripts/check-python-runtime.py",
-          "--expected-version",
-          "3.14.8",
-          "--expected-base-prefix",
-          "/opt/agents-remember-python/current",
-          "--require-linux-pidfd"
+          "bash",
+          "-euc",
+          ". scripts/python-runtime-contract.env\nruntime_python=$(/usr/local/bin/uv python find --system --managed-python --no-python-downloads \"$AR_PYTHON_MINOR\")\nuv_version=$(/usr/local/bin/uv --version)\nexec /opt/ar-venv/bin/python scripts/check-python-runtime.py --expected-version \"$AR_PYTHON_MINOR\" --expected-base-prefix \"$(dirname -- \"$(dirname -- \"$runtime_python\")\")\" --require-linux-pidfd --uv-version \"$uv_version\""
         ],
         "environmentContract": [
           "AR_QUALITY_INVOCATION",
@@ -2486,7 +2482,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
@@ -2560,7 +2556,7 @@
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
         "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
+        "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },

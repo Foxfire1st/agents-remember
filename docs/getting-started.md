@@ -13,8 +13,8 @@ in [Concepts](concepts.md).
   macOS as its platforms. The host, which runs the role agents, supports Linux x86_64 only: on
   another platform step 4 installs no host and refuses, and no role agent starts.
   [Platforms without a host](host.md#platforms-without-a-host) tells what the call does there.
-- **Python 3.14.** The package supports `>=3.14,<3.15`.
-- **[uv](https://docs.astral.sh/uv/).** It installs the package.
+- **[uv](https://docs.astral.sh/uv/).** It supplies Python 3.14 and installs the package. The
+  package supports `>=3.14,<3.15`.
 - **Git.** Memory repositories and worktrees are Git repositories. Set `user.name` and
   `user.email`. Without them Agents Remember commits as `Agents Remember` with the address
   `agents-remember@example.invalid`.
@@ -27,8 +27,9 @@ in [Concepts](concepts.md).
   starts role agents with it. Agents Remember asks for no minimum version of a harness. The page
   of each harness, which the page [Install](install/README.md) lists, says whether the host can
   start role agents with that harness and what the harness needs.
-- **Network access in steps 1 and 4.** Step 1 downloads the package. In step 4 Agents Remember
-  downloads Node from `nodejs.org` and installs the host from the npm registry.
+- **Network access in steps 1 and 4.** Step 1 downloads the package and Python if uv needs it.
+  In step 4 Agents Remember downloads Node from `nodejs.org` and installs the host from the
+  npm registry.
 - **Two free ports on the loopback address.** The dashboard listens on `127.0.0.1:8765` and the
   host on `127.0.0.1:8766`. For another port of the dashboard, add `"dashboard": {"port": 8770}`
   with your port to the settings file of step 2. [The Host](host.md#ports) says how to choose
@@ -43,7 +44,7 @@ Docker is not needed.
 Install the published package `agents-remember-mcp` with one command:
 
 ```bash
-uv tool install --python 3.14 agents-remember-mcp
+uv tool install --managed-python --python 3.14 agents-remember-mcp
 ```
 
 The package installs two commands: `agents-remember-mcp`, the tool server, and
@@ -65,15 +66,17 @@ git clone https://github.com/Foxfire1st/agents-remember.git
 cd agents-remember
 npm --prefix dashboard ci
 npm --prefix dashboard run build
-python3 scripts/sync-dashboard.py
-uv build --wheel mcp
-uv tool install --python 3.14 mcp/dist/agents_remember_mcp-*.whl
+uv python install --no-bin 3.14
+ar_python="$(uv python find --system --managed-python --no-python-downloads 3.14)"
+"$ar_python" scripts/sync-dashboard.py
+uv build --python "$ar_python" --wheel mcp
+uv tool install --managed-python --python 3.14 mcp/dist/agents_remember_mcp-*.whl
 ```
 
-The two `npm` commands build the dashboard. The script copies the built dashboard into the
-package. A wheel that is built without these three commands contains no dashboard, and the
-dashboard address then answers with an error that names the build commands. The pattern in the
-last command matches the one wheel that the build wrote.
+The two `npm` commands build the dashboard. The script copies the build into the package using
+the same uv-managed Python that builds the wheel. If the wheel lacks the bundle, the dashboard
+returns an error that names the build commands. The pattern in the last command matches the
+one wheel that the build wrote.
 
 ### 2. Write the settings file
 

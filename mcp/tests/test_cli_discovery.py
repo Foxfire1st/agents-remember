@@ -647,7 +647,18 @@ _UVX_VALUE_OPTIONS = frozenset(
     }
 )
 _UVX_FLAGS = frozenset(
-    {"--refresh", "--isolated", "--offline", "--no-cache", "-n", "--quiet", "-q", "--verbose", "-v"}
+    {
+        "--refresh",
+        "--isolated",
+        "--managed-python",
+        "--offline",
+        "--no-cache",
+        "-n",
+        "--quiet",
+        "-q",
+        "--verbose",
+        "-v",
+    }
 )
 
 
@@ -686,7 +697,11 @@ def test_the_example_registration_parses_as_uvx_options_then_the_package_command
     )
     assert example["command"] == "uvx"
     options, command, command_args = _uvx_split(example["args"])
-    assert options == [("--refresh-package", "agents-remember-mcp")]
+    assert options == [
+        ("--managed-python", None),
+        ("--python", "3.14"),
+        ("--refresh-package", "agents-remember-mcp"),
+    ]
     assert command == "agents-remember-mcp@latest"
     assert command_args == [
         "--config",

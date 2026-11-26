@@ -26,31 +26,26 @@ jobs:
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14.8"
-
-      - name: Prove the exact Python runtime
+      - name: Read the uv minor line from the runtime contract
+        id: runtime-contract
         run: |
           . scripts/python-runtime-contract.env
-          python scripts/check-python-runtime.py \
-            --expected-version "$AR_PYTHON_VERSION" \
-            --require-linux-pidfd
+          printf 'uv-version=%s.x\n' "$AR_UV_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        id: setup-uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ steps.runtime-contract.outputs.uv-version }}
+          enable-cache: false
+
+      - name: Record the installed uv version
+        run: |
+          printf 'setup-uv resolved version: %s\n' "${{ steps.setup-uv.outputs.uv-version }}"
+          uv --version
 
       - name: Install locked Python development dependencies
-        run: |
-          . scripts/python-runtime-contract.env
-          python -m pip install --disable-pip-version-check "uv==$AR_UV_VERSION"
-          # Absolute: `--project mcp` resolves a relative UV_PROJECT_ENVIRONMENT against the
-          # project directory, which would create the environment at mcp/mcp/.venv.
-          UV_PROJECT_ENVIRONMENT="$PWD/mcp/.venv" uv sync \
-            --project mcp \
-            --python "$(command -v python)" \
-            --no-managed-python \
-            --frozen \
-            --all-extras
-          uv pip check --python "$PWD/mcp/.venv/bin/python"
+        run: scripts/bootstrap-mcp-venv.sh
 
       - name: Install dashboard dependencies
         working-directory: dashboard
