@@ -68,6 +68,7 @@ class _ParsedPublication(NamedTuple):
     """
 
     stamp: tuple[int, int, int, int]
+    boot_id: str
     endings: tuple[tuple[str, str], ...]
     idle: tuple[tuple[str, str], ...]
     ended: frozenset[str]
@@ -106,9 +107,9 @@ def agent_in_turn(config: McpRuntimeConfig, agent_id: str) -> bool:
 def turn_ended_agents(config: McpRuntimeConfig, seen: dict[str, str]) -> list[str]:
     """The agents whose turn the host's activity record reports ended since the last look.
 
-    An idle, closed or ended session lets delivery recheck the recipient. When the
-    publication supplies an ``eventAt``, ``seen`` carries that stamp between looks so
-    one transition is handed over once. This reader takes the latest publication as
+    An idle, closed or ended session lets delivery recheck the recipient. The
+    bookmark in ``seen`` is the published ``eventAt`` or, for an unstamped entry,
+    a key scoped to the plugin boot. This reader takes the latest publication as
     it is, without the boot reconciliation required to project task activity.
     """
 
@@ -120,12 +121,12 @@ def turn_ended_agents(config: McpRuntimeConfig, seen: dict[str, str]) -> list[st
         return []
     ended: list[str] = []
     for agent_id, stamp in parsed.endings:
-        if stamp and seen.get(agent_id) == stamp:
+        key = stamp or f"unstamped:{parsed.boot_id}"
+        if seen.get(agent_id) == key:
             continue
-        if stamp:
-            if len(seen) >= _TURN_END_SEEN_LIMIT:
-                seen.clear()
-            seen[agent_id] = stamp
+        if len(seen) >= _TURN_END_SEEN_LIMIT:
+            seen.clear()
+        seen[agent_id] = key
         ended.append(agent_id)
     return ended
 
@@ -241,7 +242,13 @@ def _parsed_publication(path: Path) -> _ParsedPublication | None:
     ended = frozenset(
         agent_id for agent_id, activity in publication.agents.items() if activity.state == "ended"
     )
-    parsed = _ParsedPublication(stamp=stamp, endings=endings, idle=idle, ended=ended)
+    parsed = _ParsedPublication(
+        stamp=stamp,
+        boot_id=publication.bootId,
+        endings=endings,
+        idle=idle,
+        ended=ended,
+    )
     while len(_ENDINGS) >= _ENDINGS_LIMIT:
         _ENDINGS.pop(next(iter(_ENDINGS)))
     _ENDINGS[key] = parsed

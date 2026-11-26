@@ -40,6 +40,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from fastapi import HTTPException
+
 from agents_remember.cli.paseo_bridge import (
     BRIDGE_REFUSED,
     BRIDGE_TIMEOUT,
@@ -64,7 +66,7 @@ from agents_remember.cli.role_held_store import (
     settle_held_store,
 )
 from agents_remember.cli.role_held_store import (
-    refresh_waiting_count as _refresh_waiting_count,
+    refresh_waiting_count as _refresh_store_waiting_count,
 )
 from agents_remember.cli.role_launch_confirmation import (
     apply_held_open_confirmation,
@@ -1044,7 +1046,8 @@ def _readable_queued_receipt(path: Path) -> dict[str, Any] | None:
 
     try:
         return _read_receipt(path)
-    except ValueError:
+    except (ValueError, HTTPException) as error:
+        logger.warning("Could not read held-message receipt %s: %s.", path, error)
         return None
 
 
@@ -1079,7 +1082,7 @@ def _sweep_receipt(config: McpRuntimeConfig, path: Path) -> str | None:
 
     try:
         receipt = _read_receipt(path)
-    except ValueError as error:
+    except (ValueError, HTTPException) as error:
         logger.warning("A held-message sweep could not read receipt %s: %s.", path, error)
         return None
     closed = receipt is not None and receipt_is_closed(receipt)
@@ -1149,7 +1152,8 @@ def apply_drain_to_receipt(
 
     try:
         current = _read_receipt(path)
-    except ValueError:
+    except (ValueError, HTTPException) as error:
+        logger.warning("Could not read held-message receipt %s: %s.", path, error)
         return False
     if current is None:
         return False
@@ -1158,6 +1162,9 @@ def apply_drain_to_receipt(
         with open_held_store(ref) as transaction:
             return _apply_drain_result(path, transaction.receipt, result)
     except HeldSeatClosed:
+        return False
+    except (ValueError, HTTPException) as error:
+        logger.warning("Could not read held-message receipt %s: %s.", path, error)
         return False
 
 
@@ -1186,8 +1193,16 @@ def _apply_drain_result(path: Path, current: dict[str, Any], result: dict[str, A
     recount_waiting_for(current)
     try:
         _write_receipt(path, current)
-    except OSError:
+    except (OSError, HTTPException) as error:
+        logger.warning("Could not write held-message receipt %s: %s.", path, error)
         return False
     if rows and endpoints is not None:
         _clear_pending_lines(endpoints[0], endpoints[1], [str(row.get("id")) for row in rows])
     return True
+
+
+def _refresh_waiting_count(ref: HeldSeatRef) -> None:
+    try:
+        _refresh_store_waiting_count(ref)
+    except (ValueError, OSError, HTTPException) as error:
+        logger.warning("Could not refresh held-message receipt %s: %s.", ref.receipt_path, error)

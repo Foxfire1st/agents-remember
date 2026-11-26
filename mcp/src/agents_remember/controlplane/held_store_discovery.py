@@ -17,7 +17,7 @@ EXECUTIONS_DIRECTORY = "paseo-native-executions"
 ENUMERATION_BUDGET = 256
 MAX_HELD_FOLDER_WALKS = 64
 MAX_HELD_FOLDER_STORES = 64
-SKIPPED_RECEIPT_DIRS = frozenset({"history", "message-bindings"})
+SKIPPED_RECEIPT_DIRS = frozenset({"history", "message-bindings", "messages"})
 # D1-D4: arbitrary nested directories under a receipt root are not retained without limit.
 # Beyond 16 open levels the branch is shed and the observation is explicitly incomplete.
 RECEIPT_WALK_DEPTH = 16
