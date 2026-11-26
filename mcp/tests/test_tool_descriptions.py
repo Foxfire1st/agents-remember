@@ -282,7 +282,7 @@ class ToolDescriptionBoundsTests(unittest.TestCase):
             "replaces_interrupt_turn",
             "leaves the others as they are",
             "nothing is archived",
-            "already retired agent changes nothing",
+            "already retired agent leaves the retirement record unchanged",
         )
         for phrase in required:
             self.assertIn(

@@ -436,8 +436,8 @@ def test_the_module_imports_no_host_service_or_bridge() -> None:
         "import sys\n"
         "import agents_remember.canvas.explainer_planned\n"
         "danger = ('explainer_server', 'explainer_service', 'explainer_workspace',\n"
-        "          'explainer_state', 'paseo', 'presenter_host', 'role_launch',\n"
-        "          'worktrees.modules')\n"
+        "          'explainer_state', 'paseo', 'presenter_host', 'cli.role_launch',\n"
+        "          'application.role_launch', 'worktrees.modules')\n"
         "print(sorted(name for name in sys.modules if name.startswith(\n"
         "    'agents_remember') and any(word in name for word in danger)))\n"
     )
