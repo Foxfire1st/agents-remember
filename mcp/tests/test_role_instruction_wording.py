@@ -125,13 +125,13 @@ class InstructionFileWordingTests(unittest.TestCase):
                 "Make decisions within your authority",
                 (
                     "sandbox or scratch instruments that change no product source",
-                    "After a harness, loader or capture fault, you may order one rerun on the same operands",
-                    "A second failure of one cause goes upward with the attempts already made",
+                    "One rerun on the same operands after infrastructure failure",
+                    "A second infrastructure failure of the same kind, with the attempts",
                 ),
             ),
             (
                 "roles/manager.md",
-                "Report through the assigned recipient",
+                "Make decisions within your authority",
                 (
                     "a small item that has cost about an hour, or a second repair round or freeze, with the hours and a proposal",
                 ),
@@ -436,6 +436,16 @@ class InstructionFileWordingTests(unittest.TestCase):
         closeout = " ".join(read(LIFECYCLE / "operations/closeout.md").split())
         self.assertIn(
             "In a flat run with neither Manager nor Orchestrator, the owning Architect may coordinate the same transaction only with the developer's explicit commit approval for that closeout, or with authority the developer delegated for the series and recorded in the task document.",
+            closeout,
+        )
+        self.assertIn(
+            "a clean preview returns `would-closeout`, `commit-approval-pending` and "
+            "`request_commit_approval`.",
+            closeout,
+        )
+        self.assertIn(
+            "use the standing leaf authority as the `intent_note` for `worktree_closeout_apply`, "
+            "with the previewed messages for enabled legs",
             closeout,
         )
         self.assertNotIn(kept, [row.statement for row in RETIRED_CURATION_STATEMENTS])
@@ -868,10 +878,15 @@ class InstructionFileWordingTests(unittest.TestCase):
             assert outcome.result is not None
             return " ".join(outcome.result.render_instructions().split())
 
+        worker_clean_sync = (
+            "When no path changed on both sides, rerun focused tests and report the code "
+            "and memory pair to the Manager. The tools derive mechanical checks again. For a "
+            "changed pair, the Manager gets the Curator\u2019s refreshed read before routine closeout."
+        )
         required = {
             ("worker", "implementation"): [
                 # Rule 9: a clean sync keeps the review and opens no round.
-                "When no path changed on both sides, run the focused tests once more",
+                worker_clean_sync,
                 "Send no new freeze to the Reviewer and begin no round.",
                 # Rule 12: the repair goes ahead of any plan or approval.
                 "no plan, account, census or approval goes ahead of the repair",
@@ -882,7 +897,9 @@ class InstructionFileWordingTests(unittest.TestCase):
             ],
             ("manager", "coordination"): [
                 # Rule 11: a precedent is settled where it falls.
-                "Settle a matter covered by an earlier ruling of the same kind and name that ruling in your record. Send only an uncovered question upward.",
+                "Matters covered by an earlier ruling of the same kind",
+                "record the ruling you apply",
+                "A case reservation covers only what it names",
                 # Rule 9: the Manager decides from the closeout preview, not a new round.
                 (
                     "Before deciding closeout after a leaf sync, read [Synchronize the "
@@ -898,8 +915,13 @@ class InstructionFileWordingTests(unittest.TestCase):
                 # Rule 13: each finding is checked against its entry, with no round counted.
                 "Compare every finding with its entry in the Worker's freeze report",
                 "without counting a round",
-                # Rule 9: a cleanly synced leaf is not sent back for a new freeze.
-                "For a cleanly synced leaf, expect no new freeze and open no round",
+                # A changed pair needs fresh curation evidence while the review carries.
+                (
+                    "For a cleanly synced leaf, expect no new freeze and open no round. "
+                    "The Worker reruns focused tests. Before routine closeout, the Manager "
+                    "gets the Curator\u2019s read for a changed pair. If paths overlap or tests fail, "
+                    "review exactly the repair."
+                ),
             ],
         }
         for (role, operation), clauses in required.items():
@@ -915,8 +937,7 @@ class InstructionFileWordingTests(unittest.TestCase):
             "operations/implementation.md",
             "Boundaries",
             (
-                "When no path changed on both sides, run the focused tests once more and tell the Manager",
-                "The tools derive the mechanical checks again, and the Manager's closeout preview decides",
+                worker_clean_sync,
                 "Send no new freeze to the Reviewer and begin no round",
                 "Request no Reviewer confirmation or receipt",
                 "When a path changed on both sides or a focused test fails, repair exactly that and send the same Reviewer one look at the repair",
@@ -965,9 +986,10 @@ class InstructionFileWordingTests(unittest.TestCase):
             ("worker", "implementation"): (
                 "send that parent what you await and from whom, using `role_message`"
             ),
-            ("manager", "coordination"): (
-                "send what you await, and from whom, to that parent through `role_message`"
-            ),
+            (
+                "manager",
+                "coordination",
+            ): "When ending blocked outside your authority, notify your reporting recipient. While a child works, record its seat and awaited stage in your end line and status file. Send no message for this wait. Follow the shared helper waits.",
             (
                 "reviewer",
                 "review",
@@ -1000,7 +1022,7 @@ class InstructionFileWordingTests(unittest.TestCase):
         self.assertNotIn("needs no second model-authored completion post", acceptance)
         for (role, operation), clause in stage_sentence.items():
             text = capsule(role, operation)
-            with self.subTest(role=role, told="an unfinished turn sends what it waits for"):
+            with self.subTest(role=role, told="the stage uses its assigned reporting route"):
                 self.assertIn(clause, text)
                 self.assertIn("agents-remember-task", text)
             with self.subTest(role=role, told="a chat reply reaches a sender only on its wait"):

@@ -587,11 +587,7 @@ class RoleMessageWordingTests(unittest.TestCase):
                 "Address that final message to the parent's role with its task references.",
             ),
             "recipient change": (
-                "If the Architect that started you names an Orchestrator's agent identifier in a message "
-                "when a second master starts, record the instruction and recipient identifier in your "
-                "durable report. Send developer-needed matters to that Orchestrator from then on. "
-                "This changes your reporting recipient, not your fixed launch parent. "
-                "No other message changes whom you report to.",
+                "If your launching Architect names an Orchestrator\u2019s agent identifier when a second master starts, record the instruction and identifier in your report. Use it as your reporting recipient. Your launch parent stays fixed. Only that instruction changes your recipient.",
             ),
             "parentless": ("A Manager started from the dashboard has no parent and needs none.",),
         }

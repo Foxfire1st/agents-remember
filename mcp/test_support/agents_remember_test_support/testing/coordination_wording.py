@@ -27,8 +27,8 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "master reference and current state; it reuses that Manager "
         "and starts no duplicate.",
         "Name the Orchestrator's agent ID to the existing Manager in one message.",
-        "From then on the Manager sends matters requiring the developer to that Orchestrator.",
-        "This changes its reporting recipient, not its fixed launch parent.",
+        "The Orchestrator becomes its reporting recipient.",
+        "Its launch parent stays fixed.",
         "For each role assignment, call `role_start` on the "
         "`agents-remember-task` tool server with the role, the "
         "exact canonical sprint, master, and leaf references its "
@@ -54,20 +54,14 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "with `role_message` on `agents-remember-task` instead of "
         "starting another Worker.",
         "Under delegation, send it to the Manager or Orchestrator coordinating the work.",
-        "Keep the conversation with the developer, the plan and its "
-        "order, the requirements and their text, and the decision "
-        "on what needs the developer. Hand the Manager or "
-        "Orchestrator the role starts and messages, the order of "
-        "the day, operational problems, ordinary requirement "
-        "interpretation within the intended promise and operational "
-        "rulings, checks before and after a landing, and paired "
-        "closeout within its delegated authority.",
-        "Read the coordinating agent's rulings record, list of "
-        "requirement sentences to change, and status file on your "
-        "own; it sends no routine ruling or landing notice. Bring "
-        "the requirement texts in line with its rulings within the "
-        "intended promise. New or dropped scope and changes to that "
-        "promise still need the developer's decision.",
+        "Keep the conversation with the developer, the plan and its order, the requirements and their text, and the decision on what needs the developer.",
+        "Hand the Manager its [execution decisions and routine closeout](manager.md#make-decisions-within-your-authority).",
+        "Delegate sprint execution and its authority to the Orchestrator.",
+        "Read the coordinating agent's rulings, requirement-change list and status file yourself.",
+        "They send no status-only notices.",
+        "Send new or dropped scope and promise changes to the developer.",
+        "In a case ruling, name only the outcome that needs you.",
+        "Leave each decision that belongs to the Manager with the Manager.",
         "After the handover, release execution coordination to the "
         "Orchestrator or Manager and continue the developer "
         "conversation and status reading. Do not hold a `wait` on "
@@ -218,19 +212,11 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "repair round or freeze; include its hours and a "
         "proposal",
         "a blocker that none of your own decisions can remove",
-        "Send these with `role_message` on "
-        "`agents-remember-task` to the parent agent ID in your "
-        "handover.",
-        "Forward only questions requiring the developer and the "
-        "permission notices described under [Questions received "
-        "from children](#questions-received-from-children).",
-        "Send no other role messages or landing notices to the Architect.",
-        "Ordinary requirement readings and operational rulings "
-        "stay with you; do not ask the Architect to perform "
-        "them.",
-        "Send one further message with your report path when the "
-        "whole assignment is finished or cannot be finished.",
-        "Send no other messages to the Architect.",
+        "Use `role_message` on `agents-remember-task` to the parent agent ID in your handover.",
+        "Forward the Manager's matters for the Architect unchanged.",
+        "Send developer questions and [permission notices](#questions-received-from-children) on the same route.",
+        "Send your report path when the whole assignment is finished or cannot be finished.",
+        "Send no status-only messages or other landing notices.",
         "When the send answers held, follow [the held-delivery rule](../core/every-role.md#parallel-work-and-waiting) for queued delivery, consumption and supersession. For a refusal other than held or full-store, write the matter and the refusal in your status file. Either way, continue the work that does not depend on the developer's decision, and do not decide the developer's question yourself.",
         "For a refusal other than held or full-store, write the matter and the refusal in your status file.",
         "Either way, continue the work that does not depend on "
@@ -267,13 +253,9 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "reporting recipient as described below.",
         "Read each leaf's reports and task records yourself.",
         # A004 pinned this pointer's earlier form; it follows the P5-14/15 content clause.
-        "Before directing handovers, repair loops, review rounds, memory passes or relays, read [leaf coordination procedures](../operations/coordination.md) for stage timing, review records, message delivery and relay limits.",
-        "Decide leaf order, agent starts and replacements, operational "
-        "problems, ordinary requirement interpretation within the intended "
-        "promise, and checks before and after landing.",
+        "Before directing leaf stages or relays, read [leaf coordination procedures](../operations/coordination.md) for timing, records, delivery and relay limits.",
         "Inspect the complete changed-file diff, both verdicts and the Worker's report of the requirement's listed final checks before deciding the gate.",
-        "Reviews supply evidence; you decide the gate and retain closeout, "
-        "integration, status, acceptance writes and landing order.",
+        "You decide the gate and retain closeout, integration, status, acceptance writes and landing order.",
         # P5-07 OP-113 (look 1 F1): the Manager's one home of the relay limit.
         "Relay no freeze, finding, verdict or memory change.",
         "Preserve stable requirement and finding identifiers.",
@@ -286,17 +268,11 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "That completion act remains yours.",
         "A Manager started from the dashboard has no parent and needs none.",
         "Put a needed developer decision in your own chat; invent no Architect identifier.",
-        "Decide leaf order, agent starts and replacements, "
-        "operational problems, ordinary requirement interpretation "
-        "within the intended promise, and checks before and after "
-        "landing.",
-        "Decide paired closeout and integration within your delegated authority.",
-        "You own the task's construction: step order, evidence form, "
-        "which existing test or command demonstrates a property, and "
-        "sandbox or scratch instruments that change no product "
-        "source.",
-        "After a harness, loader or capture fault, you may order one rerun on the same operands.",
-        "A second failure of one cause goes upward with the attempts already made.",
+        "Leaf order, seat starts and replacements, operational problems, ordinary requirement readings within the promise, checks before and after landing, and integration within delegated authority.",
+        "Steps, evidence form, which test or command proves a property, sandbox or scratch instruments that change no product source",
+        "One rerun on the same operands after infrastructure failure.",
+        "A second infrastructure failure of the same kind, with the attempts.",
+        "Skeletons within the planned structure and routine paired closeout.",
         "Assign a check or investigation belonging to no leaf to "
         "an Investigator on your master and sprint if commanded.",
         "Never select a leaf for this role.",
@@ -308,51 +284,31 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "Name their paths in your report.",
         "The Architect reads them independently and aligns requirement text with the rulings.",
         "These records authorize no new or dropped scope and no changed promise.",
-        "When another agent started you, send your parent or "
-        "instructed reporting recipient only matters that require the "
-        "developer:",
+        "**Send to the developer**",
         "new or dropped scope, or a change to a requirement's promise",
         "something only the developer can do or approve",
         "an override of a role default",
         "a small item that has cost about an hour, or a second repair "
         "round or freeze, with the hours and a proposal",
         "a blocker none of your own decisions can remove",
-        "Send these with `role_message` on `agents-remember-task` to "
-        "the instructed reporting-recipient identifier in your report "
-        "when one is recorded; otherwise use the parent agent "
-        "identifier in your handover. If you have neither, put the "
-        "developer question in your own chat.",
-        (
-            "When the Orchestrator owns coordination, do not bypass it to the Architect except for the "
-            "skeleton handover above."
-        ),
-        "Ordinary requirement readings and operational rulings remain yours; keep the work going.",
-        (
-            "Apart from the skeleton handover above, forward only questions requiring the developer and "
-            "the permission notices below."
-        ),
-        (
-            "Apart from that skeleton handover, send no other role messages or landing notices to that "
-            "recipient, except the closeout-result notice below and one further message naming your report "
-            "path when the whole assignment is finished or cannot be finished."
-        ),
+        "Use `role_message` on `agents-remember-task` for these matters and permission notices.",
+        "Address the reporting recipient recorded in your report, otherwise your handover's parent identifier.",
+        "Without either, put developer questions in your own chat.",
+        "Route Architect matters through an assigned Orchestrator, except direct skeleton handovers.",
+        "Send the closeout result as specified below and the report path when your assignment ends.",
+        "Send no status-only messages.",
         "Address that final message to the parent's role with its task references.",
-        "If the Architect that started you names an Orchestrator's "
-        "agent identifier in a message when a second master starts, "
-        "record the instruction and recipient identifier in your "
-        "durable report.",
-        "Send developer-needed matters to that Orchestrator from then on.",
-        "This changes your reporting recipient, not your fixed launch parent.",
-        "No other message changes whom you report to.",
+        "If your launching Architect names an Orchestrator\u2019s agent identifier when a second master starts, record the instruction and identifier in your report.",
+        "Use it as your reporting recipient.",
+        "Your launch parent stays fixed.",
+        "Only that instruction changes your recipient.",
         "If you cannot start a needed role within your permissions, "
         "report the blocker to your parent or instructed recipient "
         "through `role_message` on `agents-remember-task`.",
         "Without a parent, report it in your own chat.",
         "Never start that role yourself or invent an Architect identifier.",
-        "If an upward message cannot be delivered, record the matter "
-        "in your status file and continue all work independent of the "
-        "developer\u2019s decision.",
-        "Do not decide the developer\u2019s question yourself.",
+        "If an upward message cannot be delivered, record it in your status file and continue independent work.",
+        "Leave developer decisions with the developer.",
     ],
     "operations/planning.md": [
         "Before delegating coordination, read [Choose the coordination "

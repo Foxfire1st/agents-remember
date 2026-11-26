@@ -86,8 +86,8 @@ Before preparing a review handoff, read [Keep requirement revisions and attempts
 After that handoff and a current-lineage proof, the Manager closes the leaf out directly:
 
 1. `worktree_closeout_preview`;
-2. the approval stop: the developer's commit approval for standalone or final work, or the recorded delegated series authority;
-3. `worktree_closeout_apply`, with an explicit message for each enabled leg and that authority as its intent note.
+2. The approval stop is the [Manager's standing leaf authority](../roles/manager.md#make-decisions-within-your-authority) or the developer's commit approval for final work. For a routine leaf, the standing authority answers the clean preview’s approval question.
+3. `worktree_closeout_apply` uses that authority as its intent note and an explicit message for each enabled leg.
 
 Before apply, confirm the [required curation evidence](../operations/closeout.md#bind-the-accepted-inputs-and-evidence), including the Curator's coherence validation when the checklist requires it. The apply checks task intent, lineage and the knowledge gate and records transaction evidence per leg. No release by an Orchestrator is needed.
 

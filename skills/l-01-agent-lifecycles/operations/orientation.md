@@ -58,7 +58,7 @@ Before delivering a developer question to a recipient or parent, read [Send a me
 
 For a recipient or parent, use `role_message` on `agents-remember-task` with the instructed address. Say what the question is, what you hold back until it is answered, and what you recommend and why.
 
-Continue every part of your assignment that does not depend on the answer; do not end your turn on the question or hold a wait for the developer. The answer arrives as a message from that recipient. When no independent work remains, record your state in your report and send what you await, and from whom, to that recipient with `role_message` on `agents-remember-task`; the last line may repeat it.
+Continue every part of your assignment that does not depend on the answer; do not end your turn on the question or hold a wait for the developer. The answer arrives as a message from that recipient. When no independent work remains, record the pending answer and its recipient in your report. The Manager records the wait in its end line and status file. Other roles send what they await and from whom to that recipient with `role_message` on `agents-remember-task`.
 
 Before responding to a full-store refusal, read [Handle a full-store refusal](../reference/message-handover.md#handle-a-full-store-refusal) for the pending handover, single retry and second-refusal report.
 

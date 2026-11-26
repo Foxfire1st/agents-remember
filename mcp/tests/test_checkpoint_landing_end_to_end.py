@@ -307,6 +307,10 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
 
         self.assertTrue(preview["ok"], preview)
         self.assertEqual(preview["state"], "would-closeout")
+        self.assertEqual(preview["phase"], "commit-approval-pending")
+        self.assertEqual(preview["nextOperation"], "request_commit_approval")
+        self.assertEqual(preview["nextTool"], "worktree_closeout_apply")
+        self.assertIn("intent_note", preview["nextRequiredArgs"])
         self.assertTrue(preview["commit_approval_required"])
 
     def test_the_ordinary_leaf_route_lands_without_a_cache_file(self) -> None:

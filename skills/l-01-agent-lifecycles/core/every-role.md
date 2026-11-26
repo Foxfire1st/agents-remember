@@ -56,7 +56,7 @@ If work must run in sequence, name the reason: a gate, a dependency on one write
 
 Do not create a watcher, polling loop or timer loop. Answer a message that wakes you before ending the turn.
 
-Architect, Orchestrator, Manager: After receiving a report, check whether its sender is still in a turn. If it ended with unfinished authorized work and no valid named wait or stop, send a continuation at once.
+Architect, Orchestrator, Manager: Check report senders’ turns. Send continuations immediately for ended turns with unfinished authorized work and no valid wait or stop. A Manager’s end line naming the working child and awaited stage declares a named wait.
 
 Collect your helpers' results and continue the work. Use the helper-wait procedure declared by your launch; otherwise preserve the harness's native collection of results within the turn. If your harness offers helpers (sub-agents), they run on your own seat's model unless the developer names another.
 
@@ -104,7 +104,7 @@ Design rules belong in the repository's `system/design-guidelines.md`, not in ro
 
 ## Evidence and handovers
 
-A claim about all members requires checking the complete population named in the claim. Read the producing call before counting. A claim that something is absent requires searching the entire relevant tree; claim absence only from an unfiltered list.
+A claim about all members requires checking the complete named population. Read the producing call before counting. A claim of absence requires searching the entire relevant tree; claim absence only from an unfiltered list.
 
 Record the scope covered, any truncation, and the checks run or left out. Before calling a failure pre-existing, retain evidence that the base fails for the same cause, identified by message and subtest.
 

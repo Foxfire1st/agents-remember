@@ -76,7 +76,7 @@ Every handover names the leaf, exact object, report or verdict path, and whole n
 
 The Worker's message names the freeze and report. Its factual handover neither briefs nor limits the review. The Reviewer does not read the Worker's chat.
 
-For a cleanly synced leaf, expect no new freeze and open no round. When no path changed on both sides, the Worker reruns focused tests and the Manager's closeout preview decides. If a path changed on both sides or a focused test fails, the Worker sends exactly that repair for one look.
+For a cleanly synced leaf, expect no new freeze and open no round. The Worker reruns focused tests. Before routine closeout, the Manager gets the Curator’s read for a changed pair. If paths overlap or tests fail, review exactly the repair.
 
 Compare every finding with its entry in the Worker's freeze report; return one lacking them without counting a round.
 

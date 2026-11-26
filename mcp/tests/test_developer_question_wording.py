@@ -317,6 +317,32 @@ def test_question_operations_keep_conditional_routing_and_pending_recovery() -> 
         )
 
 
+def test_manager_records_an_already_sent_developer_question_wait_locally(tmp_path: Path) -> None:
+    with shipped_composition_corpus() as (root, _manifest):
+        instructions, _ = delivered_step(
+            root,
+            ("manager", "orientation"),
+            MESSAGE_HANDOVER_SOURCE,
+            MESSAGE_HANDOVER_ACTIONS["manager"],
+            tmp_path / "report.md",
+        )
+    section = re.search(r"(?ms)^## Ask for a developer decision\n(.*?)(?=^## |\Z)", instructions)
+    assert section is not None
+    question_text = " ".join(section[1].split())
+    assert (
+        "For a recipient or parent, use `role_message` on `agents-remember-task` "
+        "with the instructed address." in question_text
+    )
+    assert (
+        "When no independent work remains, record the pending answer "
+        "and its recipient in your report. "
+        "The Manager records the wait in its end line and status file. "
+        "Other roles send what they await and from whom to that recipient "
+        "with `role_message` on `agents-remember-task`." in question_text
+    )
+    assert "record your state in your report and send what you await" not in question_text
+
+
 def test_leaf_owner_relation_keeps_peer_results_and_named_parent_occasions() -> None:
     fixture = handover_wording.HandoverTextWordingTests()
     fixture.setUp()
