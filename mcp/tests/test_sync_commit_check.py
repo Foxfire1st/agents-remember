@@ -34,6 +34,7 @@ from agents_remember.worktrees.sync_transaction_state import (
     SyncOperationRecord,
     SyncOperationStore,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from test_worktree_sync import SyncFixture, commit_file, git
 
 
@@ -109,7 +110,7 @@ def _extract_log_path(summary: str) -> Path:
     return Path(match.group(1))
 
 
-def _wait_dead(pid: int, timeout_s: float = 5.0) -> bool:
+def _wait_dead(pid: int, timeout_s: float = HANG_GUARD_SECONDS) -> bool:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if not _pid_alive(pid):
@@ -279,6 +280,7 @@ def test_stale_index_lock_cleared_after_timeout_kill(
         return CommitCheckRunResult(
             outcome=CommitCheckProcessOutcome(returncode=-9, timed_out=True),
             log=log_path,
+            # load-independent: synthetic CommitCheckRunResult stub field; performs no wait
             timeout_seconds=3,
             elapsed_seconds=3.001,
         )
@@ -310,6 +312,7 @@ def test_published_head_proven_when_commit_landed_before_escaped_holder_timeout(
                 returncode=0, timed_out=True, escaped_survivors=(51515,)
             ),
             log=log_path,
+            # load-independent: synthetic CommitCheckRunResult stub field; performs no wait
             timeout_seconds=4,
             elapsed_seconds=4.010,
         )
@@ -342,6 +345,7 @@ def test_timeout_with_missing_merge_head_and_unproven_head_refuses_without_stage
         return CommitCheckRunResult(
             outcome=CommitCheckProcessOutcome(returncode=-9, timed_out=True),
             log=log_path,
+            # load-independent: synthetic CommitCheckRunResult stub field; performs no wait
             timeout_seconds=4,
             elapsed_seconds=4.010,
         )
@@ -372,6 +376,7 @@ def test_escaped_holder_pids_named_in_sync_commit_check_failed(
                 escaped_survivors=(42424, 42425),
             ),
             log=log_path,
+            # load-independent: synthetic CommitCheckRunResult stub field; performs no wait
             timeout_seconds=5,
             elapsed_seconds=5.020,
         )
