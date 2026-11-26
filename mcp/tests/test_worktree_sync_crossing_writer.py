@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 from agents_remember.mcp.tools.knowledge import ReadToolRequest, knowledge_read_payload
-from agents_remember.memory.conversion.crossing_writer import CROSSING_OPERATION
+from agents_remember.memory.conversion.crossing_writer import CROSSING_OPERATION, is_record_path
 from agents_remember.memory.conversion.state_conversion import plan_state_conversion
 from agents_remember.memory.conversion.task_review_facts import TaskOwners
 from agents_remember.models.knowledge_files.canonical import canonical_text
@@ -731,3 +731,47 @@ def test_crossing_preserves_the_standing_of_its_selected_bytes(
 
     standing.assert_retained(lines.leaf, tmp_path, expected, after_credit)
     _assert_ordinary_conflict(lines)
+
+
+def test_unconverted_line_syncing_against_state_converted_main_keeps_conversion(
+    tmp_path: Path,
+) -> None:
+    """An unconverted line merging main converted by plan_state_conversion keeps every conversion."""
+
+    lines = _converted_lines(tmp_path)
+    base_record = lines.read(RECORD)
+    assert base_record.get("status") in LEGACY_STATE_WORDS
+    assert "writer" not in base_record
+
+    leaf_writer = _stamp(lines, "seat-leaf", "2026-01-02T10:00:00+01:00")
+    lines.on_leaf(
+        _record(
+            base_record,
+            leaf_writer,
+            statement="Leaf changed this record.",
+            revision=base_record["revision"] + 1,
+        )
+    )
+
+    main_files = {
+        path.relative_to(lines.line).as_posix(): path.read_bytes()
+        for path in (lines.line / "knowledge").rglob("*.json")
+    }
+    plan = plan_state_conversion(main_files, TaskOwners(), at="2026-11-26T10:00:00+01:00")
+    unchanged_records = [
+        path for path in sorted(plan.changes) if is_record_path(path) and path != RECORD
+    ]
+    assert unchanged_records, "fixture main must convert records that the leaf did not change"
+    lines.on_line(dict(plan.changes), "convert main states")
+
+    merged = lines.merge()
+
+    assert merged["state"] == "synced", merged
+    for path in unchanged_records:
+        assert (lines.leaf / path).read_bytes() == plan.changes[path]
+        stored = lines.read(path)
+        assert stored.get("status") not in LEGACY_STATE_WORDS
+        assert "writer" in stored
+    leaf_changed = lines.read(RECORD)
+    assert leaf_changed["statement"] == "Leaf changed this record."
+    assert leaf_changed["writer"] == leaf_writer
