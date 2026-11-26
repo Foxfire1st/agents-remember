@@ -637,7 +637,7 @@ def run_launch_call(
     predecessor_settled = not predecessor
     try:
         if predecessor:
-            bridge_call(config, "agent-archive", {"agentId": predecessor})
+            _archive_launch_predecessor(config, predecessor)
             predecessor_settled = True
         # Persisted v1 calls contain only cwd; their original replay semantics stay exact.
         opened = bridge_call(config, "workspace-open", workspace)
@@ -663,14 +663,26 @@ def run_launch_call(
                 message=str(native_antigravity_role_start_refusal()),
                 predecessor_settled=predecessor_settled,
             )
-        lost = error.code == AGENT_WITHOUT_MESSAGE_LOST
+        lost = predecessor_settled and error.code == AGENT_WITHOUT_MESSAGE_LOST
+        rejected_launch = predecessor_settled and error.code == BRIDGE_REFUSED
         return LaunchOutcome(
-            kind="refused" if lost or error.code == BRIDGE_REFUSED else "no-answer",
+            kind="refused" if lost or rejected_launch else "no-answer",
             code=error.code,
             message=str(error)[:_TEXT_LIMIT],
             predecessor_settled=predecessor_settled,
             lost_agent_id=agent_id if lost else None,
         )
+
+
+def _archive_launch_predecessor(config: McpRuntimeConfig, predecessor: str) -> None:
+    reply = bridge_call(config, "agent-archive", {"agentId": predecessor})
+    if reply.get("agentId") == predecessor and (
+        reply.get("archived") is True or reply.get("found") is False
+    ):
+        return
+    raise PaseoBridgeFailure(
+        BRIDGE_INVALID_REPLY, f"The archive of predecessor agent {predecessor} was not confirmed."
+    )
 
 
 def opened_workspace_id(reply: dict[str, Any], folder: str) -> str:

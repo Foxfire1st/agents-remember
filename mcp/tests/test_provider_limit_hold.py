@@ -337,7 +337,7 @@ def test_the_send_path_hands_the_limit_and_its_reset_to_the_held_row(monkeypatch
             config=None,
             call=SimpleNamespace(wait=False),
             sender=None,
-            recipient=SimpleNamespace(agent_id=AGENT),
+            recipient=SimpleNamespace(agent_id=AGENT, receipt={}),
             located=None,
             withdrawn=None,
             collection=None,

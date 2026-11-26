@@ -15,6 +15,7 @@ from agents_remember.cli.role_held_store import held_seat_ref, settle_held_store
 def publish_launch_outcome(
     path: Path, receipt: dict[str, Any], launch_call: dict[str, Any], outcome: LaunchOutcome
 ) -> JSONResponse:
+    _record_predecessor_debt(receipt, launch_call, outcome)
     if outcome.kind == "created":
         receipt["execution"] = outcome.execution
         receipt["agent"] = outcome.applied
@@ -42,7 +43,7 @@ def publish_launch_outcome(
         receipts._write_receipt(path, receipt)
         return JSONResponse(receipts._public_execution(receipt))
     if outcome.kind == "refused":
-        return _refused_outcome(path, receipt, launch_call, outcome)
+        return _refused_outcome(path, receipt, outcome)
     receipt.update(
         status="unknown",
         detail=f"The launch has no usable answer ({outcome.code}): {outcome.message} Retry this same request to repeat the saved call under the same agent id.",
@@ -52,13 +53,21 @@ def publish_launch_outcome(
     return JSONResponse(receipts._public_execution(receipt), status_code=202)
 
 
-def _refused_outcome(
-    path: Path, receipt: dict[str, Any], launch_call: dict[str, Any], outcome: LaunchOutcome
-) -> JSONResponse:
+def _record_predecessor_debt(
+    receipt: dict[str, Any], launch_call: dict[str, Any], outcome: LaunchOutcome
+) -> None:
+    predecessor = launch_call.get("archiveAgentId")
+    if not isinstance(predecessor, str):
+        return
+    if not outcome.predecessor_settled:
+        receipt["pendingArchiveAgentId"] = predecessor
+    elif receipt.get("pendingArchiveAgentId") == predecessor:
+        receipt.pop("pendingArchiveAgentId")
+
+
+def _refused_outcome(path: Path, receipt: dict[str, Any], outcome: LaunchOutcome) -> JSONResponse:
     if outcome.lost_agent_id:
         receipt["pendingArchiveAgentId"] = outcome.lost_agent_id
-    elif not outcome.predecessor_settled:
-        receipt["pendingArchiveAgentId"] = launch_call["archiveAgentId"]
     native_replay_missing = outcome.code == NATIVE_ANTIGRAVITY_REPLAY_MISSING
     retry_step_up = (
         bool(receipt.get("stepUp"))

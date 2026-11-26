@@ -433,18 +433,27 @@ do not fail the check.
 
 ## `retire_child`
 
-Retire one role agent of a task. Only the role agent that started it can call it.
+Retire a role agent by agent ID. The Architect can retire any other agent, the Manager can retire
+seats on its master and its leaves, and the Orchestrator can retire seats on its sprint and its
+masters and leaves. A scope refusal names the caller's scope and the seat's selection. Unknown and
+ambiguous IDs are refused by name. An open-child refusal names each open child. For these
+pre-archive refusals, nothing is archived.
 
-The caller retires the role agent
-without giving it a turn, and the launch record names the caller and the
-reason. An agent in a turn is not retired unless interrupt_turn says the
-turn may be interrupted. Any other role agent is refused with the starter
-named; an unknown or ambiguous agent id is refused by name and nothing
-is archived; a repeated call for an already retired agent changes nothing
-and says so.
+Successful retirement archives the agent without a turn, records the caller, reason and time,
+settles waiting held messages as undelivered in `heldStoreClosures` and `heldMessageLines`, and
+unlinks the held-message store (never delivering them to the archived agent). A repeat for an
+already retired agent leaves the retirement record unchanged and settles and unlinks any leftover
+held-message store file if one still exists. Set `interrupt_turn=true` to retire a seat in a turn
+or with running subagents.
 
-Arguments: `task_document_ref`, `role`, `reason` (default `delegated seat retired`; texts of the
-product also call a role agent a seat), `agent_id` and `interrupt_turn=false`.
+If `retire-record-failed` reports a confirmed host archive, the seat is already archived. Repeat
+the identical call to finish the receipt and settle and unlink its held-message store.
+
+Pass `agent_id` and the seat's `role`. The ID selects the receipt. Scope uses the caller's binding,
+the seat's recorded selection, and current task membership. The response uses the recorded role
+and task references. The optional `sprint_document_ref`, `master_document_ref` and
+`task_document_ref` describe the intended seat. Taskless seats need no reference. `reason` defaults
+to `delegated seat retired`.
 
 
 ## `role_start_set`

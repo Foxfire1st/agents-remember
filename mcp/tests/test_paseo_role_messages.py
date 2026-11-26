@@ -469,26 +469,23 @@ class RoleMessageTests(RoleToolsTestCase):
             self.assertNotIn("the list was cut", result["detail"])
 
     def test_a_leaf_seat_with_two_live_agents_refuses_by_role(self) -> None:
-        # One seat holds one agent (MIK-R100 rule 9): where two live agents hold one
-        # leaf seat, the address by role is refused with the candidates. The tool never
-        # picks one.
         to_worker = {"role": "worker", **selection_of("worker")}
-        agents: list[str] = []
-        for _execution in range(3):
+        launches = []
+        for index in range(3):
             request, agent_id = self.started(status="idle")
-            agents.append(agent_id)
+            launches.append((request, agent_id))
             self.close_execution(request, "completed")
-            # A finished turn does not free the seat (MIK-R100 rule 9): archive the
-            # holder before the next start, as the launch does for a freed seat.
-            if _execution < 2:
+            if index < 2:
                 self.runtime.agents[agent_id].update(archivedAt=ARCHIVED_AT)
+        agents = [agent_id for _, agent_id in launches]
         first, second, current = agents
-        # Two earlier executions and the current one; the launches archived the earlier agents.
-        self.assertEqual(
-            [self.runtime.agents[agent]["archivedAt"] is not None for agent in agents],
-            [True, True, False],
-        )
-        for agent_id in (first, second):
+        for request, agent_id in launches[:2]:
+            # Model historical holders from before host archival carried durable retirement.
+            path = self.receipt_path(request).parent / "history" / f"{request.request_id}.json"
+            record = json.loads(path.read_text())
+            for key in ("retiredBy", "retireReason"):
+                record.pop(key, None)
+            path.write_text(json.dumps(record))
             self.runtime.agents[agent_id].update(status="idle", archivedAt=None, received=[])
         with self.subTest("two live agents in one leaf seat are refused with both ids"):
             self.runtime.calls.clear()

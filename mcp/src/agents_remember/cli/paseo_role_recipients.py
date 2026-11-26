@@ -19,8 +19,6 @@ from agents_remember.cli.investigator_receipts import (
     investigator_has_document,
     open_investigator_receipts,
 )
-from agents_remember.cli.paseo_role_caller import _host_unreachable
-from agents_remember.cli.paseo_status import read_agent
 from agents_remember.cli.role_held_store import HeldSeatClosed, held_seat_ref
 from agents_remember.cli.role_launch_preparation import ROLE_START_TOOL
 from agents_remember.cli.role_launch_receipts import (
@@ -28,7 +26,11 @@ from agents_remember.cli.role_launch_receipts import (
     _receipt_path,
     _taskless_execution_receipts,
 )
-from agents_remember.cli.role_message_delivery import _Recipient, _Refused
+from agents_remember.cli.role_message_delivery import (
+    _live_agents,
+    _Recipient,
+    _Refused,
+)
 from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_agents import RoleMessageCall
@@ -274,33 +276,6 @@ def _recipient_by_selection(
         raise _archived(archived)
     other = " other than the calling agent" if own else ""
     raise _not_found(f"No live {selection.role} agent{other} is recorded for this selection.")
-
-
-def _live_agents(
-    config: McpRuntimeConfig, receipts: list[dict[str, Any]], *, first_only: bool
-) -> tuple[list[_Recipient], str | None]:
-    """The executions whose agent is live, and the first archived agent met on the way.
-
-    Each agent is read once from the host; the read changes nothing. ``first_only`` stops at the
-    first live agent, which for a task-bound selection is its open or most recent execution.
-    """
-
-    live: list[_Recipient] = []
-    archived: str | None = None
-    for receipt in receipts:
-        agent_id = receipt.get("agentId")
-        if not isinstance(agent_id, str) or not agent_id:
-            continue
-        reading = read_agent(config, agent_id)
-        if not reading.reachable:
-            raise _host_unreachable(str(reading.unreachable_reason))
-        if reading.found and reading.archived:
-            archived = archived or agent_id
-        elif reading.found:
-            live.append(_Recipient(agent_id, receipt))
-            if first_only:
-                break
-    return live, archived
 
 
 def _selection_receipts(config: McpRuntimeConfig, selection: RoleSelection) -> list[dict[str, Any]]:

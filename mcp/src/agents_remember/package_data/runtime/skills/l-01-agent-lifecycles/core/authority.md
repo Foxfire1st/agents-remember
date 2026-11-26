@@ -42,7 +42,7 @@ Start another role with `role_start` once, naming the role, a chosen request ide
 
 Keep the per-start override route. After a start with overrides, the starter checks and sets the seat's features. If the seat differs from the resolved choices, record a product issue rather than remove the overrides.
 
-The agent that started a seat retires the agent in it with `retire_child`; the tool refuses any other caller.
+Follow the shared `retire_child` instruction for the scope that governs retirement and replacement.
 
 ## Handle a developer-declared takeover
 

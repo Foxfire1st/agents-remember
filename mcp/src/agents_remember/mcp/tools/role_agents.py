@@ -144,8 +144,6 @@ def retire_child_payload(
     request: RetireChildRequest,
     **overrides: Any,
 ) -> dict[str, Any]:
-    # MIK-R100 rule 8: the starter retires the receipt-tracked agent in its seat. An
-    # empty id is refused by name inside the retirement.
     from agents_remember.cli.role_retire import retire_native_seat  # noqa: PLC0415
 
     payload = retire_native_seat(config, request, environment=overrides.get("environ"))
