@@ -7,7 +7,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 from unittest import mock
 
@@ -525,8 +524,9 @@ def test_r5_tsc_b_incremental_cache_catches_introduced_type_error(tmp_path: Path
     )
     assert warm.returncode == 0, warm.stdout + warm.stderr
 
-    time.sleep(0.02)
+    previous_stat = source.stat()
     source.write_text('export const value: number = "wrong";\n', encoding="utf-8")
+    os.utime(source, ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns + 2_000_000_000))
     mutated = subprocess.run(
         [str(TSC_BIN), "-b"], cwd=project, capture_output=True, text=True, check=False
     )

@@ -17,8 +17,8 @@ from unittest.mock import patch
 from agents_remember.application import tool_response as response
 from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.application.tool_response import complete_tool_response
-from agents_remember.cli import paseo_role_tools
 from agents_remember.cli import role_launch_preparation as preparation
+from agents_remember.cli import role_message_delivery
 from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.mcp.tools.role_agents import role_message_payload
 from agents_remember.models.role_agents import RoleMessageCall
@@ -401,7 +401,7 @@ class RoleMessageWarningTests(RoleToolsTestCase):
         # Lower only the tool bound to exercise overflow at any fixture path length.
         with (
             patch.dict(TOOL_ANSWER_EXCEPTIONS, {("role_message", None): (1, "test overflow")}),
-            patch.object(paseo_role_tools, "_ensure_recipient_link", return_value=link_notice),
+            patch.object(role_message_delivery, "_ensure_recipient_link", return_value=link_notice),
             patch.dict(os.environ, self.architect.environment()),
             tool_call_context("role_message", arguments, config=self.config),
         ):
