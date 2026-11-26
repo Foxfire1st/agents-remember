@@ -58,6 +58,10 @@ def start_execution(
             return prior
     route._refuse_reused_request_id(config, path, request)
     handover_args = {"step_up": request.step_up} if request.step_up is not None else {}
+    if request.role == "manager" and started_by is not None:
+        architect_id = route._architect_behind(config, started_by)
+        if architect_id is not None:
+            handover_args["owning_architect_id"] = architect_id
     role_handover = route.prepare_role_handover(
         config,
         context,

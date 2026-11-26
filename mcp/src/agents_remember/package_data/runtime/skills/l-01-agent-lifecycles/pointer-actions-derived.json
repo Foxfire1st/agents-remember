@@ -337,7 +337,7 @@
       {
         "source": "roles/manager.md",
         "fragment": "",
-        "wording": "before directing handovers, repair loops, review rounds, memory passes or relays"
+        "wording": "before directing leaf stages or relays"
       }
     ],
     "coordination-before-filling-or-reading-message-fields-26e69910c5": [
@@ -1268,7 +1268,7 @@
       {
         "source": "roles/orchestrator.md",
         "fragment": "questions-received-from-children",
-        "wording": "forward only questions requiring the developer and the permission notices described under"
+        "wording": "send developer questions and"
       }
     ],
     "orchestrator-pending-developer-questions-and-held-report-state-from-910407ef4d": [

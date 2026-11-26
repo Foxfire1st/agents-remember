@@ -139,7 +139,12 @@ coordinate, each in its own scope:
   requirement within its meaning, the checks around a landing, and the closeout and the landing
   of its tasks.
 
-A coordinating role agent sends upward only a question that needs your decision.
+A Manager sends upward only matters reserved for the Architect (such as first reports, qualifying
+skeletons, changes to what a requirement asks, rounds beyond the settings limit, step-ups with no
+configured model, a second infrastructure failure of the same kind, effects outside its worktree,
+scratch folder or task, closeout exceptions, and publication-owner actions) and questions that need
+your decision. An Orchestrator forwards those Architect matters unchanged alongside questions that
+need your decision; qualifying skeletons keep their direct route to the owning Architect.
 
 The Architect performs no step of a landing. The one exception is the closeout of a task when you
 told the Architect in its chat to coordinate the role agents itself: it then runs the closeout
@@ -266,7 +271,9 @@ A role agent sends a message to another role agent with `role_message`. It names
 `agent_id`, or by `role` together with the task documents.
 
 A role agent's own chat text reaches no other role agent. A role agent's results, and what it
-waits for, travel by `role_message`.
+waits for, travel by `role_message`, except that a Manager waiting on a working child or on an
+already-sent developer question records that wait in its end line and status file and sends no
+`role_message` for the wait; that end line declares a valid named wait.
 
 ### How a long message travels
 
@@ -343,8 +350,10 @@ reply, and it names the reply's message file in `messageFile`.
 
 ## Where a question for you arrives
 
-A role agent with a parent sends a question that needs your decision to its parent with
-`role_message` and keeps working. Each parent passes it upward: Worker, Manager, Orchestrator,
+A role agent with a parent sends a question that needs your decision to its parent—or, for a
+Manager whose Architect named an Orchestrator as its reporting recipient, to that recorded
+reporting recipient while its launch parent stays fixed—with `role_message` and keeps working.
+Each parent passes it upward: Worker, Manager, Orchestrator,
 Architect. You meet the question in the chat of the role agent at the top of that chain, which is
 the Architect unless you started another role agent from the role launcher. A role agent without
 a parent asks you in its own chat.

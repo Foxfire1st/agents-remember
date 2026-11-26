@@ -34,7 +34,7 @@ For code changes, read `system/coding-guidelines.md` under `workspace.memoryRoot
 
 For user-interface work, read `system/design-guidelines.md` under `workspace.memoryRoot`, where it exists, before the first interface edit and follow it. Write instruction texts (skills, role files, capsules or templates) according to `system/skill-writing-guidelines.md` under `workspace.memoryRoot` when present. The Worker does not edit that guideline.
 
-When the requirement's planned structure leaves types, modules or signatures open, complete the skeleton first, without bodies, and send it to your Manager before you write the bodies. Write the bodies after the Architect's answer.
+Before writing bodies, send a skeleton to your Manager when the plan leaves types, modules or signatures open or you propose a [planned shape change](manager.md#start-leaf-agents-and-preserve-their-work). Follow the requirement’s pre-edit report instructions. Write bodies after the Manager or Architect answers.
 
 ## Map and record evidence
 

@@ -63,9 +63,7 @@ When the Architect started you, message it for a developer decision about:
 - a small item that has cost about an hour, or a second repair round or freeze; include its hours and a proposal;
 - a blocker that none of your own decisions can remove.
 
-Send these with `role_message` on `agents-remember-task` to the parent agent ID in your handover. Forward only questions requiring the developer and the permission notices described under [Questions received from children](#questions-received-from-children). Send no other role messages or landing notices to the Architect. Ordinary requirement readings and operational rulings stay with you; do not ask the Architect to perform them.
-
-Send one further message with your report path when the whole assignment is finished or cannot be finished. Send no other messages to the Architect.
+Use `role_message` on `agents-remember-task` to the parent agent ID in your handover. Forward the Manager's matters for the Architect unchanged. Send developer questions and [permission notices](#questions-received-from-children) on the same route. Send your report path when the whole assignment is finished or cannot be finished. Send no status-only messages or other landing notices.
 
 When the send answers held, follow [the held-delivery rule](../core/every-role.md#parallel-work-and-waiting) for queued delivery, consumption and supersession. For a refusal other than held or full-store, write the matter and the refusal in your status file. Either way, continue the work that does not depend on the developer's decision, and do not decide the developer's question yourself.
 
@@ -88,7 +86,7 @@ A gate refusal on a master's landing means the exact candidate has unresolved kn
 
 A turn ending proves only that it ended. Verify each Manager's delivery and aggregate evidence. The Manager owns the leaf-diff, repair and evidence loop; you may inspect supplied actual diffs for acceptance without taking over that loop.
 
-The Manager sends a Worker's skeleton to the Architect at once. The Worker writes the bodies after the Architect answers.
+The Manager answers skeletons within the planned structure. It sends skeletons requiring Architect input directly to the Architect. The Worker writes bodies after the answer.
 
 Request an independent Reviewer when the brief or risk requires it; a Reviewer never adjudicates its own work. Request a Curator for affected memory and onboarding when needed. Keep reports, findings, review, curation, and Git publication separately addressed. Use the existing AR task and paired Git owners for their semantic records.
 
