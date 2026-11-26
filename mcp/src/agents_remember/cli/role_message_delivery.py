@@ -299,7 +299,7 @@ def _live_successor(config: McpRuntimeConfig, recipient: _Recipient) -> str | No
 def _archived_with_successor(config: McpRuntimeConfig, parties: _MessageParties) -> _Refused:
     """The archived refusal: the successor when one is live, else the gated one."""
     recipient = parties.recipient
-    binding = parties.binding
+    caller_role = parties.binding.role
     successor = _live_successor(config, recipient)
     if successor is not None:
         return _Refused(
@@ -310,7 +310,7 @@ def _archived_with_successor(config: McpRuntimeConfig, parties: _MessageParties)
             recipientAgentId=recipient.agent_id,
             successorAgentId=successor,
         )
-    return _archived_for(binding.role, _recipient_role(recipient), recipient.agent_id)
+    return _archived_for(caller_role, _recipient_role(recipient), recipient.agent_id)
 
 
 def _readable_receipt(path: Path) -> dict[str, Any] | None:
@@ -334,6 +334,9 @@ def _live_agents(
     for receipt in receipts:
         agent_id = receipt.get("agentId")
         if not isinstance(agent_id, str) or not agent_id:
+            continue
+        if isinstance(receipt.get("retiredBy"), dict):
+            archived = archived or agent_id
             continue
         reading = read_agent(config, agent_id)
         if not reading.reachable:

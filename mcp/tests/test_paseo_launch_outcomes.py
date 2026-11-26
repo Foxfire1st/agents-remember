@@ -5,22 +5,40 @@ from __future__ import annotations
 import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 from agents_remember.cli import (
+    role_launch_liveness,
     role_launch_receipts,
     role_launch_routes,
 )
-from agents_remember.models.role_launcher import (
-    RoleDispatchRequest,
+from agents_remember.cli.paseo_launch import StartingAgent
+from agents_remember.cli.paseo_status import AgentReading
+from agents_remember.cli.role_retire import retire_native_seat
+from agents_remember.cli.role_retirement_receipt import (
+    Retirement,
+    hold_retirement,
+    settle_retirement,
 )
+from agents_remember.controlplane.held_store_layout import HeldMessage, hold_message, store_path_for
+from agents_remember.models.role_launcher import RoleDispatchRequest
+from agents_remember.models.structural.agent import RetireChildRequest
+from agents_remember.tasks import write_task_doc
+from agents_remember.tasks.document import SubTaskRef
+from fastapi import HTTPException
+from paseo_role_tools_test_support import OTHER_MASTER
 from test_paseo_launch import (
     ANTIGRAVITY_CATALOG,
+    LEAF_REF,
+    MASTER_REF,
     NO_ANSWER_CODES,
     PaseoLaunchTestCase,
 )
+from test_paseo_role_tools import RoleToolsTestCase, binding
+from test_paseo_status import REPLIED, StatusTestCase
 
 
 class LaunchOutcomeTests(PaseoLaunchTestCase):
@@ -484,3 +502,237 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
                 kept = path if status == "starting" else history
                 self.assertEqual(json.loads(kept.read_text(encoding="utf-8")), competitor)
                 kept.unlink()
+
+
+class HostRetirementTests(StatusTestCase):
+    def test_refresh_records_discovery_of_externally_archived_and_gone_seats(self) -> None:
+        for role, state in (
+            ("manager", "archived"),
+            ("investigator", "archived"),
+            ("investigator", "gone"),
+        ):
+            with self.subTest(role=role, state=state):
+                request = self.launched(role, status="idle", lastTurn=REPLIED)
+                receipt = self.receipt(request)
+                agent_id = receipt["agentId"]
+                folder = receipt["workspace"]["path"]
+                held = hold_message(
+                    folder, agent_id, HeldMessage("Sender", "sender", "Waiting", "busy")
+                )
+                if state == "archived":
+                    self.runtime.agents[agent_id]["archivedAt"] = "2026-10-02T01:00:00Z"
+                else:
+                    del self.runtime.agents[agent_id]
+
+                discovered_after = datetime.now(UTC)
+                self.assertEqual(self.refresh(request)["status"], "stopped")
+                discovered_before = datetime.now(UTC)
+
+                after = self.receipt(request)
+                self.assertEqual(after["retiredBy"]["caller"], "host")
+                self.assertEqual(after["retiredBy"]["reason"], "host archive")
+                at = datetime.fromisoformat(after["retiredBy"]["at"])
+                self.assertLessEqual(discovered_after, at)
+                self.assertLessEqual(at, discovered_before)
+                self.assertEqual(self.commands(), ["agent-state"])
+                self.assertEqual(after["heldWaiting"], 0)
+                self.assertEqual(
+                    [line["messageId"] for line in after["heldMessageLines"]],
+                    [held["heldMessageId"]],
+                )
+                self.assertFalse(store_path_for(folder, agent_id).exists())
+                self.assertEqual(
+                    [row["id"] for row in after["heldStoreClosures"]["0"]["waitingMessages"]],
+                    [held["heldMessageId"]],
+                )
+
+    def test_refresh_defers_to_a_pending_retirement_then_preserves_its_detail(self) -> None:
+        request = self.launched("manager", status="idle", lastTurn=REPLIED)
+        path = self.receipt_path(request)
+        stale = self.receipt(request)
+        intent = Retirement("architect agent", "architect-id", "finished", "Explicit retirement.")
+        held = hold_retirement(path, stale, intent)
+        self.runtime.agents[stale["agentId"]]["archivedAt"] = "2026-10-02T01:00:00Z"
+
+        self.refresh(request)
+        self.assertEqual(self.receipt(request)["retireIntent"], held.receipt["retireIntent"])
+        self.assertNotIn("retiredBy", self.receipt(request))
+
+        self.assertEqual(settle_retirement(path, stale, intent).state, "recorded")
+        settled = self.saved(request)
+        reply = role_launch_liveness.apply_execution_reading(
+            path, stale, AgentReading(lifecycle="idle", last_turn="replied", final_text="Earlier.")
+        )
+        self.assertEqual((reply["status"], reply["detail"]), ("stopped", intent.detail))
+        self.assertEqual(self.saved(request), settled)
+        self.assertEqual(
+            self.receipt(request)["retiredBy"]["at"], held.receipt["retireIntent"]["at"]
+        )
+
+
+class ReplacementRetirementTests(RoleToolsTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        master = self.master.document.model_copy(
+            update={"subTasks": [SubTaskRef(number="01_LEAF", name="Leaf", file="01_leaf.json")]}
+        )
+        write_task_doc(self.master.path.parent, master)
+
+    def test_leaf_replacement_uses_manager_scope_instead_of_starter(self) -> None:
+        holder = self.start(binding("manager"), "worker")["agentId"]
+        self.runtime.agents[holder]["status"] = "idle"
+        request = self.request("worker")
+        path = self.receipt_path(request)
+        before = path.read_bytes()
+        calls = len(self.runtime.calls)
+        foreign = binding("manager", master_ref=OTHER_MASTER)
+        public = self.start(foreign, "worker", replaces_agent_id=holder)
+        self.refusal(public, "selection-outside-callers-scope")
+        self.assertIn(OTHER_MASTER.key, public["detail"])
+        self.assertIn(MASTER_REF.key, public["detail"])
+        self.assertEqual(self.runtime.calls[calls:], [])
+        self.assertFalse(self.runtime.agents[holder]["archivedAt"])
+        self.assertEqual(path.read_bytes(), before)
+
+        outsider = StartingAgent(str(uuid.uuid4()), "manager", "Other", master_ref=OTHER_MASTER)
+
+        with self.assertRaises(HTTPException) as refused:
+            role_launch_liveness._reconcile_prior_execution(
+                self.config,
+                path,
+                request,
+                "replacement",
+                role_launch_liveness._Replacement(outsider, replaces_agent_id=holder),
+            )
+
+        self.assertEqual(refused.exception.status_code, 409)
+        self.assertIn(OTHER_MASTER.key, str(refused.exception.detail))
+        self.assertIn(LEAF_REF.path, str(refused.exception.detail))
+        self.assertEqual(path.read_bytes(), before)
+        self.assertFalse(self.runtime.agents[holder]["archivedAt"])
+        answer = self.start(binding("manager"), "worker", replaces_agent_id=holder)
+        self.assertTrue(answer["ok"], answer)
+        self.assertTrue(self.runtime.agents[holder]["archivedAt"])
+        self.assertNotEqual(answer["agentId"], holder)
+
+    def test_replacement_retries_archive_before_retiring_the_predecessor(self) -> None:
+        previous, agent_id = self.started("manager", status="idle", lastTurn=REPLIED)
+        prior = self.receipt(previous)
+        folder = prior["workspace"]["path"]
+        held = hold_message(folder, agent_id, HeldMessage("Sender", "sender", "Waiting", "busy"))
+        successor = self.request("manager")
+        self.runtime.fail("agent-archive", "paseo_archive_refused", "Archive refused while live.")
+
+        _, failed = self.dispatch(successor)
+
+        history = self.receipt_path(previous).parent / "history" / f"{previous.request_id}.json"
+        pending = json.loads(history.read_text())
+        self.assertNotIn("retiredBy", pending)
+        self.assertEqual(pending["retireIntent"]["replacementRequestId"], str(successor.request_id))
+        self.assertIn(str(successor.request_id), pending["retireIntent"]["reason"])
+        self.assertFalse(self.runtime.agents[agent_id]["archivedAt"])
+        saved_store = json.loads(store_path_for(folder, agent_id).read_text())
+        self.assertEqual([item["id"] for item in saved_store["messages"]], [held["heldMessageId"]])
+        self.assertTrue(failed["canRetry"])
+        self.assertEqual(len(self.runtime.agents), 1)
+        self.assertEqual(self.receipt(successor)["pendingArchiveAgentId"], agent_id)
+        successor_agent = self.receipt(successor)["agentId"]
+
+        self.assertEqual(self.dispatch(successor)[0], 200)
+
+        settled = json.loads(history.read_text())
+        self.assertTrue(self.runtime.agents[agent_id]["archivedAt"])
+        self.assertEqual(self.receipt(successor)["agentId"], successor_agent)
+        self.assertNotIn("pendingArchiveAgentId", self.receipt(successor))
+        self.assertIn(str(successor.request_id), settled["retiredBy"]["reason"])
+        self.assertNotIn("retireIntent", settled)
+        self.assertEqual(
+            [line["messageId"] for line in settled["heldMessageLines"]], [held["heldMessageId"]]
+        )
+        self.assertEqual(settled["heldWaiting"], 0)
+        final_bytes = history.read_bytes()
+        self.assertEqual(self.dispatch(successor)[0], 200)
+        self.assertEqual(history.read_bytes(), final_bytes)
+
+    def test_manager_replacement_preserves_its_worker_for_the_successor(self) -> None:
+        manager = self.start(self.architect, "manager")
+        worker = self.start(binding("manager", manager["agentId"]), "worker")
+        manager_id, worker_id = manager["agentId"], worker["agentId"]
+        self.runtime.agents[manager_id].update(status="idle", lastTurn=REPLIED)
+        self.runtime.agents[worker_id]["status"] = "idle"
+        manager_request = self.request("manager")
+        prior = self.receipt(manager_request)
+        held = hold_message(
+            prior["workspace"]["path"],
+            manager_id,
+            HeldMessage("Sender", "sender", "Waiting", "busy"),
+        )
+
+        successor = self.start(self.architect, "manager")
+
+        self.assertTrue(successor["ok"], successor)
+        self.assertTrue(self.runtime.agents[manager_id]["archivedAt"])
+        self.assertFalse(self.runtime.agents[worker_id]["archivedAt"])
+        worker_receipt = self.receipt(self.request("worker"))
+        self.assertEqual(worker_receipt["parentAgentId"], manager_id)
+        history = (
+            self.receipt_path(manager_request).parent / "history" / f"{prior['requestId']}.json"
+        )
+        recorded = json.loads(history.read_text())
+        self.assertIn(successor["requestId"], recorded["retiredBy"]["reason"])
+        self.assertEqual(
+            [line["messageId"] for line in recorded["heldMessageLines"]], [held["heldMessageId"]]
+        )
+        self.assertEqual(recorded["heldWaiting"], 0)
+        result = retire_native_seat(
+            self.config,
+            RetireChildRequest(worker_id, "worker", "finished", task_document_ref=LEAF_REF),
+            environment=binding("manager", successor["agentId"]).environment(),
+        )
+        self.assertEqual(result["status"], "retired")
+
+    def test_replacing_a_closed_manager_waits_for_its_explicit_retirement(self) -> None:
+        request, agent_id = self.started("manager", status="idle", lastTurn=REPLIED)
+        self.refresh(request)
+        receipt = self.receipt(request)
+        path = self.receipt_path(request)
+        intent = Retirement("architect agent", "architect-id", "finished", "Explicit retirement.")
+        hold_retirement(path, receipt, intent)
+        saved = self.saved(request)
+
+        with self.assertRaises(HTTPException) as refused:
+            self.dispatch(self.request("manager"))
+
+        self.assertEqual(refused.exception.status_code, 409)
+        self.assertIn("unfinished retirement", str(refused.exception.detail))
+        self.assertFalse(self.runtime.agents[agent_id]["archivedAt"])
+        self.assertEqual(self.saved(request)[0], saved[0])
+
+    def test_replacement_attributes_an_archived_orchestrator(self) -> None:
+        previous, agent_id = self.started("orchestrator")
+        self.runtime.agents[agent_id]["archivedAt"] = "2026-10-02T01:00:00Z"
+        successor = self.request("orchestrator")
+
+        self.assertEqual(self.dispatch(successor)[0], 200)
+
+        history = self.receipt_path(previous).parent / "history" / f"{previous.request_id}.json"
+        retired = json.loads(history.read_text())["retiredBy"]
+        self.assertEqual(retired["caller"], "the launcher")
+        self.assertIn(str(successor.request_id), retired["reason"])
+
+    def test_replacement_preserves_a_retired_or_rejected_predecessor(self) -> None:
+        previous = self.launched("manager", status="idle", lastTurn=REPLIED)
+        receipt = self.receipt(previous)
+        self.runtime.agents[receipt["agentId"]]["archivedAt"] = "2026-10-02T01:00:00Z"
+        self.refresh(previous)
+        self.runtime.fail("agent-create", "paseo_call_failed", "refused")
+        rejected = self.request("orchestrator")
+        self.assertEqual(self.dispatch(rejected)[1]["status"], "rejected")
+
+        for prior in (previous, rejected):
+            with self.subTest(role=prior.role):
+                path = self.receipt_path(prior)
+                before = path.read_bytes()
+                self.assertEqual(self.dispatch(self.request(prior.role))[0], 200)
+                history = path.parent / "history" / f"{prior.request_id}.json"
+                self.assertEqual(history.read_bytes(), before)

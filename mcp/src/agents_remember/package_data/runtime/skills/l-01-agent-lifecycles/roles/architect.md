@@ -151,6 +151,8 @@ When the developer answers or gives a ruling, send that actual answer or ruling 
 
 When an Investigator is needed, start it with `role_start` on `agents-remember-task` without a task reference, on a sprint, a standalone master, or both. Send the scoped concern as your first `role_message` on `agents-remember-task` to the returned agent ID. A Manager or Orchestrator may also start an Investigator within its own scope.
 
+After receiving a finished Investigator's report, call `retire_child` on `agents-remember-task` with its `agent_id` and `role="investigator"`. Set `interrupt_turn=true` if the turn that delivered the report is still active.
+
 Research may go to an Investigator whose role settings suit it; weigh what each provider's usage costs. Private helpers remain available for internal work of any size; they are not restricted to short mechanical help.
 
 ### Prepare and preserve each brief

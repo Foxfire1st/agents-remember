@@ -114,6 +114,11 @@ def receipt_is_closed(receipt: Mapping[str, Any]) -> bool:
     )
 
 
+def receipt_is_explicitly_retired(receipt: Mapping[str, Any]) -> bool:
+    retired = receipt.get("retiredBy")
+    return isinstance(retired, dict) and retired.get("caller") != "host"
+
+
 def _receipt_marks_closure(receipt: Mapping[str, Any]) -> bool:
     archive = receipt.get("leafArchive")
     return (
@@ -469,12 +474,29 @@ def preserve_held_closure(
         receipt[CLOSURES] = _merge_closed_generations(closures, receipt.get(CLOSURES, {}))
         if prior_generation is None and str(generation) in closures:
             receipt["heldWaiting"] = 0
-            if current.get("status") in _RESTARTABLE_STATUSES:
+            if (
+                not _prepared_start_refused(receipt)
+                and current.get("status") in _RESTARTABLE_STATUSES
+            ):
                 receipt["status"] = current["status"]
     if prior_generation is None and isinstance(current.get("retiredBy"), dict):
-        for key in ("status", "retiredBy", "retireReason", "detail", "canRevive"):
+        keys = (
+            ("retiredBy", "retireReason", "canRevive")
+            if _prepared_start_refused(receipt)
+            else ("status", "retiredBy", "retireReason", "detail", "canRevive")
+        )
+        for key in keys:
             if key in current:
                 receipt[key] = current[key]
+
+
+def _prepared_start_refused(receipt: Mapping[str, Any]) -> bool:
+    mark = receipt.get("leafArchive")
+    return (
+        receipt.get("status") == "rejected"
+        and isinstance(mark, dict)
+        and mark.get("startRefused") is True
+    )
 
 
 def _merge_closed_generations(
@@ -509,7 +531,7 @@ def begin_held_generation(
         receipt = _current(ref)
         if (
             receipt.get("status") not in _RESTARTABLE_STATUSES
-            or isinstance(receipt.get("retiredBy"), dict)
+            or receipt_is_explicitly_retired(receipt)
             or _leaf_is_closing(receipt)
         ):
             raise HeldSeatClosed(ref.agent_id, "closed")
@@ -518,5 +540,7 @@ def begin_held_generation(
         receipt.update(receipt_updates)
         receipt[GENERATION] = ref.generation + 1
         receipt.pop("leafCreateEntered", None)
+        receipt.pop("retiredBy", None)
+        receipt.pop("retireReason", None)
         _write_receipt(ref.receipt_path, receipt, prior_generation=ref.generation)
         return held_seat_ref(ref.receipt_path, receipt)

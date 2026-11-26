@@ -14,7 +14,8 @@ from typing import Any
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
-from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND
+from agents_remember.application.seat_retirement_scope import retirement_scope_refusal
+from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, StartingAgent
 from agents_remember.cli.paseo_status import AgentReading, read_agent, status_row
 from agents_remember.cli.role_activity import resume_role_agent
 from agents_remember.cli.role_held_store import (
@@ -22,7 +23,7 @@ from agents_remember.cli.role_held_store import (
     begin_held_generation,
     held_seat_ref,
     receipt_is_closed,
-    settle_held_store,
+    receipt_is_explicitly_retired,
 )
 from agents_remember.cli.role_launch_receipts import (
     _archive_receipt,
@@ -32,12 +33,21 @@ from agents_remember.cli.role_launch_receipts import (
     _public_execution,
     _read_receipt,
     _request_digest,
+    _same_request_receipt,
     _write_receipt,
 )
+from agents_remember.cli.role_retirement_receipt import (
+    Retirement,
+    RetirementUpdate,
+    hold_retirement,
+    replacement_request_of,
+    settle_retirement,
+)
 from agents_remember.cli.role_step_up_decisions import record_step_up
+from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_identity import LEAF_ROLES
-from agents_remember.models.role_launcher import RoleDispatchRequest
+from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.serving.projections.host_activity import running_subagents
 
 _CLOSED_STATUSES = frozenset({"completed", "failed", "stopped"})
@@ -66,7 +76,7 @@ _ROW_FIELDS = ("status", "detail", "canRevive", "result", "resumeRefused")
 class _Replacement:
     """The replacement a start asks for: who asks, and which holder goes first."""
 
-    started_by: Any | None = None
+    started_by: StartingAgent | None = None
     replaces_agent_id: str | None = None
     interrupt_turn: bool = False
     request_id: str | None = None
@@ -101,20 +111,33 @@ def _reconcile_prior_execution(
         if (
             (status == "stopped" or (status == "rejected" and current.get("stepUp")))
             and isinstance(current.get("replayRequest"), dict)
-            and not isinstance(current.get("retiredBy"), dict)
+            and not receipt_is_explicitly_retired(current)
             and not _leaf_is_closing(current)
         ):
             return _restart_closed_execution(config, path, current)
         return JSONResponse(_refresh_execution(config, path, current))
+    replacement = replacement or _Replacement(request_id=str(request.request_id))
     if str(current.get("role")) in LEAF_ROLES or str(request.role) in LEAF_ROLES:
         return _reconcile_leaf_occupancy(
             config,
             path,
             current,
-            replacement or _Replacement(),
+            replacement,
         )
-    # The open-execution rule is applied to what the agent is doing now, not to the saved status.
-    status = _refresh_execution(config, path, current)
+    return _reconcile_non_leaf(config, path, current, replacement)
+
+
+def _reconcile_non_leaf(
+    config: McpRuntimeConfig, path: Path, current: dict[str, Any], replacement: _Replacement
+) -> None:
+    # A new start owns the closed predecessor's settlement. Its host read classifies
+    # closure without stamping a host archive ahead of that replacement.
+    reading = read_execution_agent(config, current)
+    status = (
+        {"status": "stopped"}
+        if reading is not None and _archived_or_gone(reading)
+        else apply_execution_reading(path, current, reading)
+    )
     if status.get("hostUnreachable") is True:
         # The agent could not be read, so nobody knows whether the execution is open: its saved
         # status may be stale, and a new launch would archive an agent that is at work.
@@ -133,8 +156,14 @@ def _reconcile_prior_execution(
                 "revive it before starting another."
             ),
         )
-    _archive_receipt(path, current)
-    return None
+    with exclusive_file_lock(path, "role execution receipt"):
+        current = _same_request_receipt(path, current)
+        if current.get("status") != "rejected" and not isinstance(current.get("retiredBy"), dict):
+            holder = str(current["agentId"])
+            caller = _replacement_caller(config, current, holder, replacement)
+            update = hold_retirement(path, current, _replacement_intent(caller, replacement))
+            current = _replacement_receipt(update)
+        _archive_receipt(path, current)
 
 
 def _restart_closed_execution(
@@ -195,13 +224,24 @@ def _reconcile_leaf_occupancy(
             f"{reading.unreachable_reason}"
         )
     host_state = _host_closure(reading)
-    if host_state is not None:
-        _archive_receipt(
-            path, current, host_state=host_state if holder == current.get("agentId") else None
-        )
-        return None
     replaces_agent_id = replacement.replaces_agent_id
-    started_by = replacement.started_by
+    if host_state is not None:
+        if replaces_agent_id == holder and not replacement.step_up:
+            _replacement_caller(config, current, holder, replacement)
+        with exclusive_file_lock(path, "role execution receipt"):
+            current = _same_request_receipt(path, current)
+            reserved = replacement_request_of(current)
+            if current.get("retireIntent") is not None and (
+                reserved is None or reserved != replacement.request_id
+            ):
+                raise _pending_retirement(current)
+            _observe_host_archive(path, current, reading)
+            _archive_receipt(
+                path,
+                _same_request_receipt(path, current),
+                host_state=host_state if holder == current.get("agentId") else None,
+            )
+        return None
     if replaces_agent_id is not None:
         if replaces_agent_id != holder:
             raise HTTPException(
@@ -212,25 +252,10 @@ def _reconcile_leaf_occupancy(
                     "with the holder's agent id, or without a replacement."
                 ),
             )
-        starter = current.get("parentAgentId")
-        if started_by is None:
-            caller = "the launcher"
-        elif getattr(started_by, "agent_id", None) == starter:
-            caller = f"agent {started_by.agent_id}"
-        else:
-            owner = f"agent {starter}" if isinstance(starter, str) and starter else "the launcher"
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Agent {getattr(started_by, 'agent_id', '?')} did not start the holder "
-                    f"(agent {holder}) and cannot replace it; only {owner} can. "
-                    "Nothing was archived."
-                ),
-            )
+        caller = _replacement_caller(config, current, holder, replacement)
         _require_step_up_idle(config, reading, holder, replacement)
         _require_holder_interruptible(config, reading, holder, replacement.interrupt_turn)
-        _record_holder_replacement(path, current, caller, replacement.request_id)
-        _archive_receipt(path, current)
+        _reserve_leaf_predecessor(path, current, caller, replacement)
         return None
     owner = current.get("parentAgentId")
     started = f"agent {owner}" if isinstance(owner, str) and owner else "the launcher"
@@ -243,6 +268,65 @@ def _reconcile_leaf_occupancy(
             "start again with replacesAgentId naming it; a start by hand from the launcher "
             "follows the same rule and offers the replacing start on this line."
         ),
+    )
+
+
+def _replacement_caller(
+    config: McpRuntimeConfig, current: dict[str, Any], holder: str, replacement: _Replacement
+) -> str:
+    started_by = replacement.started_by
+    if started_by is None:
+        return "the launcher"
+    if replacement.step_up:
+        starter = current.get("parentAgentId")
+        if started_by.agent_id != starter:
+            owner = f"agent {starter}" if starter else "the launcher"
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Agent {started_by.agent_id} did not start the holder (agent {holder}) "
+                    f"and cannot replace it; only {owner} can. Nothing was archived."
+                ),
+            )
+    else:
+        selection = RoleSelection.model_validate(current["selection"])
+        refusal = retirement_scope_refusal(config, started_by, holder, selection)
+        if refusal is not None:
+            raise HTTPException(status_code=409, detail=refusal)
+    return f"agent {started_by.agent_id}"
+
+
+def _reserve_leaf_predecessor(
+    path: Path, current: dict[str, Any], caller: str, replacement: _Replacement
+) -> None:
+    with exclusive_file_lock(path, "role execution receipt"):
+        update = hold_retirement(path, current, _replacement_intent(caller, replacement))
+        current = _replacement_receipt(update)
+        if update.state == "held" and "replaceAuthorizedAt" not in current:
+            current["replaceAuthorizedBy"] = caller
+            current["replaceAuthorizedAt"] = current["retireIntent"]["at"]
+            _write_receipt(path, current)
+        _archive_receipt(path, current)
+
+
+def _replacement_receipt(update: RetirementUpdate) -> dict[str, Any]:
+    if update.state == "pending-conflict":
+        raise _pending_retirement(update.receipt)
+    if update.state == "receipt-changed":
+        raise HTTPException(status_code=409, detail="The predecessor receipt changed. Start again.")
+    return update.receipt
+
+
+def _pending_retirement(receipt: dict[str, Any]) -> HTTPException:
+    replacing = replacement_request_of(receipt)
+    retry = (
+        f"Retry the replacing start with request id {replacing}."
+        if replacing is not None
+        else "Retry that retire_child call before replacing the seat."
+    )
+    return HTTPException(
+        status_code=409,
+        detail=f"Agent {receipt['agentId']} has an unfinished retirement. {retry}",
     )
 
 
@@ -338,39 +422,20 @@ def _require_step_up_idle(
         )
 
 
-def _record_holder_replacement(
-    path: Path,
-    current: dict[str, Any],
-    caller: str,
-    request_id: str | None,
-) -> None:
-    """Record the holder's retirement by replacement on its receipt (rules 8/9).
-
-    The archived copy then carries who replaced it and why, like a native
-    retirement: the host archival that follows needs no turn of its own.
-    """
-
+def _replacement_intent(caller: str, replacement: _Replacement) -> Retirement:
+    request_id = replacement.request_id
     reason = (
         f"replaced by a new start (request {request_id}) authorized by {caller}"
         if request_id
         else f"replaced by a new start authorized by {caller}"
     )
-    now = _now_iso()
-    updates = {
-        "status": "stopped",
-        "detail": f"Replaced by {caller}: {reason}.",
-        "retiredBy": {
-            "caller": caller,
-            "callerAgentId": None,
-            "reason": reason,
-            "at": now,
-        },
-        "retireReason": reason,
-        "updatedAt": now,
-        "replaceAuthorizedBy": caller,
-        "replaceAuthorizedAt": now,
-    }
-    settle_held_store(held_seat_ref(path, current), receipt_updates=updates)
+    return Retirement(
+        caller,
+        replacement.started_by.agent_id if replacement.started_by is not None else None,
+        reason,
+        f"Replaced by {caller}: {reason}.",
+        request_id,
+    )
 
 
 def _refresh_execution(
@@ -423,21 +488,56 @@ def _host_closure(reading: AgentReading) -> HostClosure | None:
 def _apply_reading(path: Path, receipt: dict[str, Any], reading: AgentReading) -> dict[str, Any]:
     """Write what the matching row says into the receipt and return the public execution."""
 
+    if not reading.reachable:
+        return {
+            **_public_execution(receipt),
+            "hostUnreachable": True,
+            "hostUnreachableReason": reading.unreachable_reason,
+        }
+    with exclusive_file_lock(path, "role execution receipt"):
+        current = _read_receipt(path)
+        if current is None or current.get("requestId") != receipt.get("requestId"):
+            return _public_execution(receipt)
+        receipt.clear()
+        receipt.update(current)
+        if isinstance(current.get("retiredBy"), dict):
+            return _public_execution(current)
+        if _archived_or_gone(reading):
+            return _observe_host_archive(path, receipt, reading)
+        return _apply_status_row(path, receipt, reading)
+
+
+def _archived_or_gone(reading: AgentReading) -> bool:
+    return reading.reachable and (reading.archived or not reading.found)
+
+
+def _observe_host_archive(
+    path: Path, receipt: dict[str, Any], reading: AgentReading
+) -> dict[str, Any]:
+    if receipt.get("retireIntent") is not None or _leaf_is_closing(receipt):
+        return {**_public_execution(receipt), "canRevive": False}
+    detail = "archived" if reading.found else "the host has no such agent"
+    if receipt.get("status") == "held":
+        detail = "The holder is archived or gone; the seat is free."
+    update = settle_retirement(
+        path,
+        receipt,
+        Retirement("host", None, "host archive", detail),
+        host_state=_host_closure(reading),
+    )
+    return _public_execution(update.receipt)
+
+
+def _apply_status_row(path: Path, receipt: dict[str, Any], reading: AgentReading) -> dict[str, Any]:
     if str(receipt.get("status")) == "held":
-        return _apply_held_reading(path, receipt, reading)
+        # A host idle reading does not open a held seat or replace its saved handover.
+        return _public_execution(receipt)
     refusal = receipt.get("resumeRefused")
     row = status_row(
         reading,
         str(receipt.get("status")),
         refusal.get("reason") if isinstance(refusal, dict) else None,
     )
-    if row.host_unreachable:
-        # The saved receipt stays as it is; only this answer says that it is the last known state.
-        return {
-            **_public_execution(receipt),
-            "hostUnreachable": True,
-            "hostUnreachableReason": reading.unreachable_reason,
-        }
     before = {field: receipt.get(field) for field in _ROW_FIELDS}
     if row.status is not None:
         receipt["status"] = row.status
@@ -459,50 +559,7 @@ def _apply_reading(path: Path, receipt: dict[str, Any], reading: AgentReading) -
         )
         if closed_now and receipt["status"] in _CLOSED_STATUSES:
             receipt["terminalObservedAt"] = now
-    _publish_reading(path, receipt, reading, changed=changed)
-    return _public_execution(receipt)
-
-
-def _publish_reading(
-    path: Path, receipt: dict[str, Any], reading: AgentReading, *, changed: bool
-) -> None:
-    host_state = _host_closure(reading)
-    if host_state is not None and _recorded_agent_id(receipt) == receipt.get("agentId"):
-        settle_held_store(
-            held_seat_ref(path, receipt),
-            host_state=host_state,
-            receipt_updates=receipt if changed else None,
-        )
-    elif changed:
         _write_receipt(path, receipt)
-
-
-def _apply_held_reading(
-    path: Path, receipt: dict[str, Any], reading: AgentReading
-) -> dict[str, Any]:
-    """A held seat stays held until its first message opens it (MIK-R100 rules 2/4).
-
-    The host's idle state never rewrites the product's word. Only an archived or
-    vanished holder frees the seat.
-    """
-
-    if not reading.reachable:
-        return {
-            **_public_execution(receipt),
-            "hostUnreachable": True,
-            "hostUnreachableReason": reading.unreachable_reason,
-        }
-    host_state = _host_closure(reading)
-    if host_state is not None and _recorded_agent_id(receipt) == receipt.get("agentId"):
-        now = _now_iso()
-        receipt.update(
-            status="stopped",
-            detail="The holder is archived or gone; the seat is free.",
-            updatedAt=now,
-        )
-        settle_held_store(
-            held_seat_ref(path, receipt), host_state=host_state, receipt_updates=receipt
-        )
     return _public_execution(receipt)
 
 

@@ -215,6 +215,7 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
             "task_document_ref": LEAF_REF,
         },
         "retire_child": {
+            "agent_id": "00000000-0000-4000-8000-000000000002",
             "task_document_ref": LEAF_REF,
             "role": "worker",
         },
