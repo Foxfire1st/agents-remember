@@ -74,6 +74,7 @@ Use `agents-remember-task`. Run the complete curation check set and report each 
 - `git diff --check` in the memory worktree.
 - The full `memory_quality_check` operation on `agents-remember-task`.
 
+For Manager leaf closeout, call `knowledge_read` on `agents-remember-task` with `memoryRoot` and `repositoryRoot` set to the paired leaf worktrees, `codeTreeId="working-tree"`, `view="dependent"` and `staleOnly=true`. Match the code and memory candidates before and after the read. Finish every page and confirm or correct each row. Record the exact pair, input, response `memoryTree.treeKey`, final `counts.total` and receipt in the curation report.
 A named scoped check never substitutes for the full operation. Repair every Curator-actionable finding, or escalate it as blocked with its exact returned code. Run the full operation at intake and after every repair until `curatorActionableCount=0` and the raw `qualityChecklistStatus` is `ready-for-closeout`. If coherence is then missing or stale, complete the authority gates below before closeout.
 
 ### Obtain the independent fact-check

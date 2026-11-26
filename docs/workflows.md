@@ -158,8 +158,12 @@ The closeout has two calls:
    that records the approval under which the commits are made, and answers `closed`, `blocked` or
    `closeout-gate-blocked`.
 
-Closeout and commit approval are separate from implementation approval. The agent presents a dry-run
-preview before any authorized closeout creates commits.
+Closeout and commit approval are separate from implementation approval. Under the Manager's
+standing leaf authority (covering leaves of all masters, including standalone masters, when its
+routine closeout prerequisites hold), the Manager runs `worktree_closeout_preview` itself and
+calls `worktree_closeout_apply` with that recorded standing authority as `intent_note`, without
+presenting a dry-run preview first. Where explicit approval is required, the agent presents a
+dry-run preview before an authorized closeout creates commits.
 
 ## Landing
 

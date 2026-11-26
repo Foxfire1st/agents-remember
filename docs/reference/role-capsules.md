@@ -51,7 +51,10 @@ the step of the role that it applies to. The instructions of Bootstrap hold no m
 duty and no pointer to that procedure.
 
 A role agent's chat text is not a message. A role agent sends its results, and what it waits for,
-with `role_message` to the role agent that waits. When a turn ends without a
+with `role_message` to the role agent that waits, except that a Manager waiting on a working child
+or on an already-sent developer question records that wait in its end line and status file and
+sends no `role_message` for the wait; that end line declares a valid named wait. When a turn ends
+without a
 `role_message` to the parent, the host's plug-in gives the parent one "turn ended" line. That
 line carries the last line of the role agent's text, cut at 300 characters, and nothing else of
 the chat. [Roles and role agents](../roles.md#when-a-turn-ends) describes the line and a turn
