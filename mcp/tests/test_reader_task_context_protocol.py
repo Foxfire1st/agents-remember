@@ -10,6 +10,7 @@ import unittest
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
+from unittest import mock
 
 import anyio
 
@@ -26,7 +27,6 @@ from agents_remember.mcp.server import create_server
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.services import reset_worktree_services
-from mcp.types import PaginatedRequestParams
 from test_worktree_support import open_external_contract_fixture
 
 PROTOCOL_WAIT_SECONDS = 60
@@ -291,11 +291,12 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
     def test_late_tool_list_response_times_out_and_closes_the_handler(self) -> None:
         handler_closed: list[bool] = []
 
-        async def late_tools(_ctx, _params):
+        async def late_tools() -> list[types.Tool]:
             try:
                 await anyio.sleep_forever()
             finally:
                 handler_closed.append(True)
+            return []
 
         async def exercise_late_response() -> None:
             async with Client(self.server, mode="legacy") as client:
@@ -310,14 +311,8 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
                 ):
                     await _await_protocol(list_tools, wait_seconds=3)
 
-        lowlevel = self.server._lowlevel_server
-        original = lowlevel.get_request_handler("tools/list")
-        assert original is not None
-        lowlevel.add_request_handler("tools/list", PaginatedRequestParams, late_tools)
-        try:
+        with mock.patch.object(self.server, "list_tools", late_tools):
             _run_protocol(exercise_late_response)
-        finally:
-            lowlevel.add_request_handler("tools/list", original.params_type, original.handler)
         self.assertEqual(handler_closed, [True])
         self.test_registered_readers_use_call_local_admitted_leaf_context()
 

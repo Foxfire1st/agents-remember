@@ -10,6 +10,7 @@ framing via ``Client(server, mode="legacy")``.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import sys
@@ -20,6 +21,7 @@ from typing import Any
 from unittest.mock import patch
 
 import anyio
+from mcp.server.mcpserver import MCPServer
 from mcp.shared.exceptions import MCPError
 from mcp.types import TextContent
 
@@ -30,6 +32,7 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.application.agent_binding import AgentBinding
 from agents_remember.kernel.primitives.runtime_config import (
     load_config,
 )
@@ -46,6 +49,9 @@ from agents_remember.mcp.server import AgentsRememberMCP, create_server
 from agents_remember.mcp.tool_results import compact_content_blocks
 from agents_remember.models.build_currentness import BuildCurrentnessPayload
 from agents_remember.models.skill_resources import SKILL_INDEX_URI, SKILLS_EXTENSION_ID
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.tools.role_tool_scope import ROLE_TOOL_ALLOWLISTS, tools_for_role
+from agents_remember.models.tools.tool_schema_compaction import compact_tool_schema
 from test_config import settings_payload
 
 
@@ -302,6 +308,163 @@ class CompactToolResultWireTests(unittest.TestCase):
 
         async with Client(server, mode="legacy") as client:
             return await client.call_tool("bare", {})
+
+    def test_every_roles_wire_tool_list_keeps_exact_bytes_and_unmutated_stored_tools(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / ".codex" / "mcp" / "settings.json"
+            _write_json(path, settings_payload(root))
+            config = load_config(path)
+            backup = {k: v for k, v in os.environ.items() if k.startswith("AR_")}
+            try:
+                for key in list(backup):
+                    os.environ.pop(key, None)
+                unbound_server = create_server(config)
+                unbound_wire, base_listed = anyio.run(self._wire_and_base_tools, unbound_server)
+                unbound_by_name = {tool["name"]: tool for tool in unbound_wire}
+                # Schema compaction shapes the public listing, never the stored tools.
+                self.assertTrue(
+                    any("title" in t.input_schema for t in base_listed),
+                    "base MCPServer.list_tools() should still hold uncompacted stored schemas",
+                )
+                for listed, raw_base in zip(unbound_wire, base_listed, strict=True):
+                    self.assertEqual(
+                        listed["inputSchema"], compact_tool_schema(raw_base.input_schema)
+                    )
+                # Central read-only marking replaces the whole annotation object (no extra hints).
+                self.assertEqual(
+                    unbound_by_name["server_info"]["annotations"], {"readOnlyHint": True}
+                )
+                self.assertNotIn(
+                    "refresh", unbound_by_name["read_ar_files"]["inputSchema"]["properties"]
+                )
+
+                # Every canonical role + alias keeps exact byte-for-byte tool definitions & order.
+                ref_shapes = {
+                    "architect": (False, False, False),
+                    "orchestrator": (True, False, False),
+                    "manager": (True, True, False),
+                    "worker": (True, True, True),
+                    "curator": (True, True, True),
+                    "reviewer": (True, True, True),
+                    "consolidator": (True, True, True),
+                    "investigator": (True, True, False),
+                    "bootstrap": (False, False, False),
+                }
+                for role in (*ROLE_TOOL_ALLOWLISTS, "system-specialist"):
+                    for key in list(os.environ):
+                        if key.startswith("AR_"):
+                            os.environ.pop(key, None)
+                    canonical = "investigator" if role == "system-specialist" else role
+                    has_sprint, has_master, has_task = ref_shapes[canonical]
+                    binding = AgentBinding(
+                        agent_id="3b7c1d2e-5f4a-4c6b-9d8e-0a1b2c3d4e5f",
+                        role=canonical,
+                        request_id="9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a",
+                        report_path="/tmp/seat-report.md",
+                        sprint_ref=TaskDocumentRef(repository="demo", path="t/task.json")
+                        if has_sprint
+                        else None,
+                        master_ref=TaskDocumentRef(repository="demo", path="task.json")
+                        if has_master
+                        else None,
+                        task_ref=TaskDocumentRef(repository="demo", path="t/leaf.json")
+                        if has_task
+                        else None,
+                    )
+                    for key, value in binding.environment().items():
+                        os.environ[key] = value
+                    os.environ["AR_ROLE"] = role
+                    role_wire, _ = anyio.run(self._wire_and_base_tools, create_server(config))
+                    expected_slice = [unbound_by_name[name] for name in tools_for_role(canonical)]
+                    actual_bytes = json.dumps(
+                        role_wire, separators=(",", ":"), ensure_ascii=False
+                    ).encode("utf-8")
+                    expected_bytes = json.dumps(
+                        expected_slice, separators=(",", ":"), ensure_ascii=False
+                    ).encode("utf-8")
+                    self.assertEqual(actual_bytes, expected_bytes, f"wire drift on role {role}")
+            finally:
+                for key in list(os.environ):
+                    if key.startswith("AR_"):
+                        os.environ.pop(key, None)
+                os.environ.update(backup)
+
+    @staticmethod
+    async def _wire_and_base_tools(
+        server: AgentsRememberMCP,
+    ) -> tuple[list[dict[str, Any]], list[Any]]:
+        base_listed = await MCPServer.list_tools(server)
+        async with Client(server, mode="legacy") as client:
+            listed = await client.list_tools()
+        wire = [t.model_dump(mode="json", by_alias=True, exclude_none=True) for t in listed.tools]
+        return wire, base_listed
+
+    def test_no_private_mcp_sdk_access_remains_in_repository(self) -> None:
+        repo_root = Path(__file__).resolve().parents[2]
+        hits: list[str] = []
+        for folder in ("mcp/src", "mcp/test_support", "scripts", "mcp/tests"):
+            base = repo_root / folder
+            if not base.exists():
+                continue
+            for py_file in sorted(base.rglob("*.py")):
+                rel = py_file.relative_to(repo_root).as_posix()
+                hits.extend(_private_mcp_sdk_hits(py_file, rel))
+        self.assertEqual(hits, [], f"unexpected private MCP SDK accesses: {hits}")
+
+
+_PRIVATE_MCP_ATTRS = frozenset(
+    {
+        "_tool_manager",
+        "_lowlevel_server",
+        "_mcp_server",
+        "_subscriptions",
+        "_resource_manager",
+        "_prompt_manager",
+        "fn_metadata",
+        "request_handlers",
+        "_convert_to_content",
+        "_handle_message",
+        "_handle_request",
+        "_receive_request_type",
+    }
+)
+_INTERNAL_MCP_PREFIXES = (
+    "mcp.server.fastmcp",
+    "mcp.server.mcpserver.tools",
+    "mcp.server.mcpserver.utilities",
+)
+
+
+def _is_internal_mcp_module(module: str) -> bool:
+    if module != "mcp" and not module.startswith("mcp."):
+        return False
+    return module.startswith(_INTERNAL_MCP_PREFIXES) or any(
+        part.startswith("_") for part in module.split(".")
+    )
+
+
+def _private_mcp_sdk_hits(py_file: Path, rel: str) -> list[str]:
+    hits: list[str] = []
+    tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=rel)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in _PRIVATE_MCP_ATTRS:
+            hits.append(f"{rel}:{node.lineno}: .{node.attr}")
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            and _is_internal_mcp_module(node.module)
+        ):
+            hits.append(f"{rel}:{node.lineno}: from {node.module}")
+        elif isinstance(node, ast.Import):
+            hits.extend(
+                f"{rel}:{node.lineno}: import {alias.name}"
+                for alias in node.names
+                if _is_internal_mcp_module(alias.name)
+            )
+    return hits
 
 
 if __name__ == "__main__":

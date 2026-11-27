@@ -17,9 +17,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.extension import ResourceBinding
 from mcp.server.lowlevel.helper_types import ReadResourceContents
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import MCPServer, ResourceBinding
 from mcp.server.mcpserver.resources import FunctionResource
 
 from agents_remember.application.skill_resources import (
@@ -40,6 +39,7 @@ from agents_remember.models.skill_resources import (
     SkillResourceFile,
     skill_meta,
 )
+from mcp import Client
 
 from .skills_extension import SkillsExtension
 
@@ -57,10 +57,18 @@ def build_skills_extension(catalog: SkillResourceCatalog | None = None) -> Skill
 
 
 def declared_extensions(server: MCPServer[Any]) -> dict[str, Any]:
-    """The extension declarations this server sends in its ``initialize`` result."""
+    """The extension declarations this server advertises to an MCP client."""
 
-    options = server._lowlevel_server.create_initialization_options()
-    return dict(options.capabilities.extensions or {})
+    import asyncio  # noqa: PLC0415 - one stdlib import for one synchronous bridge
+
+    async def _query() -> dict[str, Any]:
+        async with Client(server) as client:
+            capabilities = client.server_capabilities
+            if capabilities is None or not capabilities.extensions:
+                return {}
+            return dict(capabilities.extensions)
+
+    return asyncio.run(_query())
 
 
 def skill_file_resource(

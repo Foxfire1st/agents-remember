@@ -11,11 +11,11 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from functools import partial
 from importlib import import_module
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict, override
 
-from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver import Context, Icon, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
-from mcp.types import CallToolResult, InputRequiredResult
+from mcp.types import CallToolResult, InputRequiredResult, ToolAnnotations
 from mcp.types import Tool as MCPTool
 
 from agents_remember.application.agent_binding import (
@@ -56,8 +56,7 @@ from agents_remember.serving.server_bindings import (
 )
 from agents_remember.serving.server_registry import register_server
 
-from .build_staleness import is_stale_build_write, stale_build_refusal
-from .read_only import apply_read_only_marks
+from .read_only import read_only_annotations
 from .registration import TOOL_REGISTRARS
 from .registration.capsule_serving import build_skills_extension
 from .registration.explainer_surface import (
@@ -67,24 +66,22 @@ from .registration.explainer_surface import (
 )
 from .registration.skills_extension import preserve_handshake_extensions
 from .thread_workers import (
-    run_in_detached_request_thread,
     run_in_request_thread,
     track_worker_cancellation,
 )
-from .tool_results import build_call_tool_result, build_early_refusal_result
+from .tool_results import build_early_refusal_result, structured_output_spec
+from .tool_wrapper import RegisteredToolPolicy, wrap_registered_tool
 
 
 class AgentsRememberMCP(MCPServer[Any]):
     """MCPServer boundary with Agents Remember's request-scope, logging, and offload contract."""
 
-    # MIK-R108 rule 3: this server's config, carried per call to the answer
-    # boundary by call_tool. Set once by create_server; None on a bare
-    # instance (a test), where the log resolves without it.
+    # This server's config, carried per call to the answer boundary by call_tool.
+    # Set once by create_server; None on a bare instance (a test), where the log resolves without it.
     _agents_remember_config: Any | None = None
 
-    # MIK-R186 @ v2 rule 3: the seat this process was launched for, when it was launched as an
-    # explainer seat; each of the explainer's own tools is checked against it, so a forged or
-    # replaced seat answers by name. None on an ordinary server.
+    # The seat this process was launched for when bound as an explainer seat; each of the
+    # explainer's own tools is checked against it, so a forged or replaced seat answers by name.
     _explainer_binding: Any | None = None
 
     # Snapshotted once at server creation from read_agent_binding(); None when unbound or
@@ -94,26 +91,91 @@ class AgentsRememberMCP(MCPServer[Any]):
 
     _synchronous_write_lock: asyncio.Lock | None = None
 
+    def __init__(
+        self,
+        *args: Any,
+        enforce_read_only_marks: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        self._enforce_read_only_marks = enforce_read_only_marks
+        self._compact_listed_schemas = False
+        self._registered_tools: dict[str, ToolAnnotations | None] = {}
+        super().__init__(*args, **kwargs)
+
+    def registered_tool_names(self) -> tuple[str, ...]:
+        """Return currently registered tool names in registration order without triggering discovery."""
+        return tuple(self._registered_tools)
+
+    @override
+    def add_tool(
+        self,
+        fn: Callable[..., Any],
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        annotations: ToolAnnotations | None = None,
+        icons: list[Icon] | None = None,
+        meta: dict[str, Any] | None = None,
+        structured_output: bool | None = None,
+    ) -> None:
+        tool_name = name or fn.__name__
+        effective_annotations = (
+            read_only_annotations(tool_name) if self._enforce_read_only_marks else annotations
+        )
+        output_spec = structured_output_spec(fn, structured_output=structured_output)
+        wrapped = wrap_registered_tool(
+            fn,
+            RegisteredToolPolicy(
+                tool_name=tool_name,
+                annotations=effective_annotations,
+                output_spec=output_spec,
+                acquire_write_lock=self._write_lock_for_call,
+                on_write_lock_cancelled=self._log_write_lock_cancellation,
+            ),
+        )
+        super().add_tool(
+            wrapped,
+            name=name,
+            title=title,
+            description=description,
+            annotations=effective_annotations,
+            icons=icons,
+            meta=meta,
+            structured_output=structured_output,
+        )
+        self._registered_tools.setdefault(tool_name, effective_annotations)
+
+    @override
+    def remove_tool(self, name: str) -> None:
+        super().remove_tool(name)
+        self._registered_tools.pop(name, None)
+
+    def _write_lock_for_call(self, _tool_name: str, _admitted: dict[str, Any]) -> asyncio.Lock:
+        if self._synchronous_write_lock is None:
+            self._synchronous_write_lock = asyncio.Lock()
+        return self._synchronous_write_lock
+
+    def _log_write_lock_cancellation(self, tool_name: str, admitted: dict[str, Any]) -> None:
+        call = current_tool_call()
+        logged_args = dict(call.arguments) if call is not None else admitted
+        _log_cancelled_wait(tool_name, logged_args, self._agents_remember_config, "write-lock")
+
     async def list_tools(self) -> list[MCPTool]:
         answer = await super().list_tools()
-        # MIK-R204 @ v1 rule 3 as amended (80f71dff): the one post-discovery start -- the
-        # outside-scratch sweep always and dashboard supervision when autoStart is true -- is
-        # scheduled from the event loop right after this first discovery answer has been produced,
-        # so neither initialize nor the answer waits for it. The first tool call below is the
-        # fallback for a client that never lists; one latch covers both, so it happens once.
+        if self._compact_listed_schemas:
+            answer = [
+                tool.model_copy(update={"input_schema": compact_tool_schema(tool.input_schema)})
+                for tool in answer
+            ]
+        # Schedule the once-only post-discovery start (outside-scratch sweep and optional
+        # dashboard supervision) on the event loop right after producing the listing answer so
+        # neither initialize nor discovery waits for it; call_tool carries the same latch as fallback.
         loop = asyncio.get_running_loop()
         loop.call_soon(
             server_startup.start_after_discovery,
             getattr(self, "_agents_remember_config", None),
         )
         return answer
-
-    def _resolve_context(self, context: Context[Any, Any] | None) -> Context[Any, Any]:
-        return (
-            Context(mcp_server=self, subscriptions=self._subscriptions)
-            if context is None
-            else context
-        )
 
     async def call_tool(
         self,
@@ -162,12 +224,7 @@ class AgentsRememberMCP(MCPServer[Any]):
                 waiting_for = None
                 await self._maybe_suppress_provider_limits(config)
                 with tool_build_currentness(reading):
-                    stale = await self._stale_write_refusal(name, arguments, reading)
-                    if stale is not None:
-                        return stale
-                    return await self._dispatch_tool(
-                        name, arguments, self._resolve_context(context)
-                    )
+                    return await self._dispatch_tool(name, arguments, context)
             except asyncio.CancelledError:
                 _log_interrupted_dispatch(
                     name, arguments, config, waiting_for, worker_cancellation.error
@@ -182,24 +239,10 @@ class AgentsRememberMCP(MCPServer[Any]):
         if launched is None or name not in EXPLAINER_SURFACE:
             return None
         # Guard only explainer tools still registered after role narrowing.
-        if self._tool_manager.get_tool(name) is None:
+        if name not in self._registered_tools:
             return None
         not_this_seat = _launched_seat_refusal(launched)
         return build_early_refusal_result(not_this_seat) if not_this_seat is not None else None
-
-    async def _stale_write_refusal(
-        self, name: str, arguments: dict[str, Any], reading: Any | None
-    ) -> CallToolResult | None:
-        if reading is None or reading.mode != "installed" or reading.state != "stale":
-            return None
-        tool = self._tool_manager.get_tool(name)
-        if tool is None:
-            return None
-        admitted = tool.fn_metadata.arg_model.model_validate(arguments).model_dump()
-        if not is_stale_build_write(name, admitted):
-            return None
-        refused = await run_in_detached_request_thread(stale_build_refusal, name, reading)
-        return build_early_refusal_result(refused)
 
     async def _maybe_suppress_provider_limits(self, config: Any | None) -> None:
         """Suppress falsely limited windows when a bound seat proves a post-limit live turn."""
@@ -217,67 +260,16 @@ class AgentsRememberMCP(MCPServer[Any]):
         self,
         name: str,
         arguments: dict[str, Any],
-        context: Context[Any, Any],
+        context: Context[Any, Any] | None,
     ) -> CallToolResult | InputRequiredResult:
-        """Keep synchronous writes ordered while their handlers leave the event loop."""
-        tool = self._tool_manager.get_tool(name)
-        if tool is None:
-            return await super().call_tool(name, arguments, context)
+        """Dispatch through MCPServer.call_tool and preserve ToolError cause messages."""
         try:
-            raw = await self._run_tool_handler(tool, name, arguments, context)
-            return build_call_tool_result(tool, raw)
+            return await super().call_tool(name, arguments, context)
         except UnexpectedToolError as error:
             cause = error.__cause__
             if isinstance(cause, Exception):
                 raise ToolError(f"Error executing tool {name}: {cause}") from cause
             raise
-
-    async def _run_tool_handler(
-        self,
-        tool: Any,
-        name: str,
-        arguments: dict[str, Any],
-        context: Context[Any, Any],
-    ) -> Any:
-        if tool.is_async:
-            return await tool.run(arguments, context=context, convert_result=False)
-        # Per-call copy avoids mutating registration or the advertised signature.
-        threaded = tool.model_copy(update={"fn": _threaded(tool.fn), "is_async": True})
-        if _nonwriting_call(tool, arguments):
-            return await threaded.run(arguments, context=context, convert_result=False)
-        if self._synchronous_write_lock is None:
-            self._synchronous_write_lock = asyncio.Lock()
-        lock = self._synchronous_write_lock
-        try:
-            await lock.acquire()
-        except asyncio.CancelledError:
-            _log_cancelled_wait(name, arguments, self._agents_remember_config, "write-lock")
-            raise
-        try:
-            return await threaded.run(arguments, context=context, convert_result=False)
-        finally:
-            lock.release()
-
-
-def _nonwriting_call(tool: Any, arguments: dict[str, Any]) -> bool:
-    """Only advertised reads and explicitly non-writing modes bypass write ordering."""
-    if tool.annotations is not None and tool.annotations.read_only_hint is True:
-        return True
-    if tool.name == "context_packet":
-        return arguments.get("include_freshness", False) is False
-    if tool.name == "memory_quality_check":
-        request = arguments.get("request")
-        return isinstance(request, dict) and request.get("mode") in ("start", "poll")
-    if tool.name == "citation_fix":
-        return arguments.get("mode") in ("start", "poll") or arguments.get("dry_run") is True
-    return False
-
-
-def _threaded(function: Any) -> Any:
-    async def execute(**arguments: Any) -> Any:
-        return await run_in_request_thread(function, **arguments)
-
-    return execute
 
 
 type _CancelledWait = Literal["build-currentness", "write-lock", "worker-thread"]
@@ -458,22 +450,20 @@ def _bound_role_tools(explainer_present: bool) -> frozenset[str] | None:
     return frozenset(allowed)
 
 
-def _compact_server_tool_schemas(server: MCPServer[Any]) -> None:
-    """Compact every registered tool's advertised inputSchema in place before role narrowing."""
+def _compact_server_tool_schemas(server: AgentsRememberMCP) -> None:
+    """Enable lossless inputSchema compaction on the server's public ``list_tools`` output."""
 
-    tools: dict[str, Any] = server._tool_manager._tools
-    for tool in tools.values():
-        tool.parameters = compact_tool_schema(tool.parameters)
+    server._compact_listed_schemas = True
 
 
-def _scope_server_tools(server: MCPServer[Any], allowed: frozenset[str]) -> None:
+def _scope_server_tools(server: AgentsRememberMCP, allowed: frozenset[str]) -> None:
     """Remove every registered tool outside ``allowed``, keeping the survivors' order.
 
     ``remove_tool`` is MCPServer's public operation: removal is the only change, so the surviving
     tools keep their registration order, schemas and annotations.
     """
 
-    for name in tuple(server._tool_manager._tools):
+    for name in server.registered_tool_names():
         if name not in allowed:
             server.remove_tool(name)
 
@@ -501,11 +491,13 @@ def create_server(config: McpRuntimeConfig) -> AgentsRememberMCP:
         extensions=extensions,
         middleware=[preserve_handshake_extensions(extensions)],
         subscriptions=False,
+        enforce_read_only_marks=True,
     )
     # Carry server config per call to the answer boundary.
     server._agents_remember_config = config
     server._bound_agent_id = _snapshot_bound_agent_id()
     # Register AR tool families plus the explainer surface when bound as an explainer seat.
+    # Central read-only annotations are validated and attached at registration time.
     explainer = read_explainer_binding(config)
     for register_tools in TOOL_REGISTRARS:
         register_tools(server, config)
@@ -513,8 +505,7 @@ def create_server(config: McpRuntimeConfig) -> AgentsRememberMCP:
         # Verify explainer tool calls against the launched seat.
         server._explainer_binding = explainer
         register_explainer_surface(server, config, explainer)
-    # Mark read-only annotations and compact schemas before role narrowing.
-    apply_read_only_marks(server)
+    # Compact advertised schemas in list_tools and narrow by role binding.
     _compact_server_tool_schemas(server)
     allowed = _bound_role_tools(explainer_present=explainer is not None)
     if allowed is not None:

@@ -31,8 +31,6 @@ from agents_remember.models.tools.tool_response import finalize_tool_response
 from pydantic import ValidationError
 from tool_entry_point_world import EntryPointWorld, _ToolCallTimeout, classify, refusal_marks
 
-from mcp import types
-
 
 class EntryPointCoverageTests(unittest.TestCase):
     """The swept population is derived, so a new tool cannot arrive unswept."""
@@ -68,28 +66,20 @@ class ChokePointControlTests(unittest.TestCase):
     def test_a_tool_that_never_answers_fails_by_name_and_closes_its_handler(self) -> None:
         handler_closed: list[bool] = []
 
-        async def no_response(_ctx, _params):
+        async def no_response(_name: str, _arguments: dict[str, Any], _context: Any = None) -> Any:
             try:
                 await anyio.sleep_forever()
             finally:
                 handler_closed.append(True)
 
-        lowlevel = self.world.server._lowlevel_server
-        original_entry = lowlevel.get_request_handler("tools/call")
-        assert original_entry is not None
-        lowlevel.add_request_handler("tools/call", types.CallToolRequestParams, no_response)
-        try:
-            with (
-                mock.patch("tool_entry_point_world.TOOL_RESPONSE_WAIT_SECONDS", 3),
-                self.assertRaisesRegex(
-                    _ToolCallTimeout, "'server_info' tool response did not finish within 3 seconds"
-                ),
-            ):
-                self.world.call("server_info", {})
-        finally:
-            lowlevel.add_request_handler(
-                "tools/call", original_entry.params_type, original_entry.handler
-            )
+        with (
+            mock.patch.object(self.world.server, "call_tool", no_response),
+            mock.patch("tool_entry_point_world.TOOL_RESPONSE_WAIT_SECONDS", 3),
+            self.assertRaisesRegex(
+                _ToolCallTimeout, "'server_info' tool response did not finish within 3 seconds"
+            ),
+        ):
+            self.world.call("server_info", {})
         self.assertEqual(handler_closed, [True])
         self.assertEqual("payload", classify("server_info", self.world.call("server_info", {}))[0])
 

@@ -46,9 +46,10 @@ order (an unbound server serves the full public roster; a valid role+explainer l
 explainer tools). When a role binding is malformed or unreadable, the server fails closed: it emits
 no launched-server instructions and serves only `server_info` (pruning all other tools including
 explainer tools), and `server_info` reports the binding error. Before role narrowing, the server
-losslessly compacts every registered tool's JSON Schema (stripping schema-level `title`, redundant
-`default: null`, and top-level `$defs` model descriptions while preserving runtime validation) and
-keeps every tool's short description within 500 characters.
+enables listing-time schema compaction so `list_tools` returns losslessly compacted copies of every
+advertised tool's JSON Schema (stripping schema-level `title`, redundant `default: null`, and
+top-level `$defs` model descriptions while preserving runtime validation without mutating stored
+tools) and keeps every tool's short description within 500 characters.
 
 The tool server owns the deterministic work:
 
