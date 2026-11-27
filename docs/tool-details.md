@@ -62,7 +62,10 @@ call with `dry_run=true` are answered.
 
 Refusals: none in the ordinary path — the call cannot fail on arguments
 (it takes none). A tool server that cannot read its own configuration refuses at
-startup, before any tool is served.
+startup, before any tool is served. When a launched server receives a malformed or
+unreadable agent binding, it fails closed by emitting no launched-server instructions
+and advertising only `server_info` (pruning all other tools, including explainer tools);
+calling `server_info` then raises an error naming what is wrong with the binding.
 
 ## `runtime_install`
 
@@ -304,6 +307,9 @@ the next unchanged quality check. Records without `measuredReportSha256` or
 `measuredAttestationSha256` are readable, and their stored generations are checked for
 integrity. The shared validator used by `memory_quality_check`, `status`, `validate` and
 closeout reports `curator-coherence-stale` with next action `publish` for such a live record.
+When the shared knowledge-gate check refuses with `curator-coherence-knowledge-gate-refused`,
+the refusal detail appends
+`See skill://agents-remember/skills/l-01-agent-lifecycles/reference/coordination/shared/closeout-recovery.md#recover-an-unfinished-closeout.`.
 
 After the closeout of a task, `status` and `validate` answer the state `closed-out` with the
 closeout's code commit and memory commit and the digest of the coherence record. They compare
@@ -376,7 +382,11 @@ unchanged pair keeps the published coherence record current, including when publ
 assessments to the checklist's `knowledgeReview` section. The measured result outside that section
 stays bound, as do the other inputs of the record: a changed measured finding, count, status or
 other bound input makes it stale and requires a new publication. The complete checklist and
-attestation keep their separate integrity checks. The final commit stamps of the cards stay
+attestation keep their separate integrity checks. On worklist or knowledge-gate failures
+(`action-required`, `not-ready`, `curator-coherence-knowledge-gate-refused`, an incomplete
+worklist, or a refused knowledge gate), `guidance` appends
+`See skill://agents-remember/skills/l-01-agent-lifecycles/reference/curator/worklist.md#answer-rows-and-repair-the-list.`.
+The final commit stamps of the cards stay
 the closeout's work. The request has exactly one `mode`:
 `sync` and `start` carry the repository and optional fields for the scope, the checks and the
 detail, while `poll` carries the repository, the run id and, for a run on a task, the same
@@ -424,7 +434,10 @@ Retire a role agent by agent ID. The Architect can retire any other agent, the M
 seats on its master and its leaves, and the Orchestrator can retire seats on its sprint and its
 masters and leaves. A scope refusal names the caller's scope and the seat's selection. Unknown and
 ambiguous IDs are refused by name. An open-child refusal names each open child. For these
-pre-archive refusals, nothing is archived.
+pre-archive refusals, nothing is archived; `outside-scope`, `agent-in-turn`, and
+`open-children` refusals append
+`See skill://agents-remember/skills/l-01-agent-lifecycles/reference/coordination/shared/seat-recovery.md#retire-child-scope-and-active-turns.`
+to `detail`.
 
 Successful retirement archives the agent without a turn, records the caller, reason and time,
 settles waiting held messages as undelivered in `heldStoreClosures` and `heldMessageLines`, and
@@ -458,7 +471,11 @@ The Worker opens at once. The Reviewer and the Curator are held: each exists on
 the host, is reached by its role and the task's document reference, and has taken no
 turn, with its handover written when the role agent is prepared. reviewer_message is
 the Reviewer's first work: carried, the Reviewer opens at once with its handover
-and that message. `replaces` names, for each role, the role agent that holds that role on
+and that message. When an opening message (or a held seat's opening batch) exceeds
+`orchestration.roleMessageLimit` (default 1,000 characters), the full text is written
+once beside the launch report as `<stem>.opening-message.md` (or `<stem>.held-batch-<sha256>.md`)
+and the opening turn carries a truncated preview with an `Opening message file:` (or
+`Held opening messages file:`) pointer line. `replaces` names, for each role, the role agent that holds that role on
 the task, its holder; the start retires the holder first and then starts the successor, as
 [One role agent for each role of a task](reference/mcp-tools.md#one-role-agent-for-each-role-of-a-task)
 describes for `role_start`. `replaces_interrupt_turn` is the word, for the whole set, that a

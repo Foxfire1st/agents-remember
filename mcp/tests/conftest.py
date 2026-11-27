@@ -242,9 +242,14 @@ def pytest_collection_finish(session: pytest.Session) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _user_settings_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Each test has its own user settings; no process-wide settings leak between cases."""
+def _user_settings_home(
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each test has its own user settings and data home; neither leaks between cases."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "user-config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path_factory.mktemp("user-data")))
 
 
 @pytest.fixture(autouse=True)
