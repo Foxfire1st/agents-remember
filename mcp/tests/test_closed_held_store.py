@@ -229,6 +229,10 @@ class ClosedHeldStoreTests(RoleToolsTestCase):
         first = start_set()
         assert first["status"] == "held", first
         reviewer = first["agentId"]
+        opened = self.message(manager, agent_id=reviewer, text="open initial generation")
+        assert (opened["status"], opened["recipientAgentId"]) == ("accepted", reviewer), opened
+        assert opened["openedHeldSeat"] is True
+        self.runtime.agents[reviewer]["status"] = "idle"
         request = self.request("reviewer", uuid.UUID(first["requestId"]))
         path = self.receipt_path(request)
         receipt = self.receipt(request)
@@ -266,7 +270,9 @@ class ClosedHeldStoreTests(RoleToolsTestCase):
         prompts = [
             payload["prompt"]
             for command, payload in self.runtime.calls
-            if command == "agent-create" and payload.get("agentId") == reviewer
+            if command == "agent-create"
+            and payload.get("agentId") == reviewer
+            and isinstance(payload.get("prompt"), str)
         ]
         assert len(prompts) == 1 and prompts[0].count("the fresh send") == 1
 

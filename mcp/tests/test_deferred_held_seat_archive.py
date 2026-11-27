@@ -123,6 +123,9 @@ class DeferredHeldSeatArchiveTests(LeafAgentArchiveTests):
             )
             self.assertFalse(applied["ok"], applied)
             self.assertIn(agent_id, {row.get("agent") for row in applied.get("blockers", [])})
-            self.assertEqual([call.args[1] for call in host.call_args_list], ["agent-archive"])
+            self.assertEqual(
+                [call.args[1] for call in host.call_args_list],
+                ["agent-archive", "agent-state", "agent-archive"],
+            )
             saved = json.loads(receipt_path.read_text(encoding="utf-8"))
             self.assertEqual(saved["leafArchive"]["outcomes"][agent_id]["state"], "owed")

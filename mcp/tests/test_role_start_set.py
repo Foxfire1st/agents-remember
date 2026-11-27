@@ -276,7 +276,11 @@ class SetStartTests(RoleToolsTestCase):
         self.assertEqual(
             (reviewer["status"], reviewer["opened"], reviewer["held"]), ("held", False, True)
         )
-        self.assertEqual(len(self.runtime.agents), 2)
+        self.assertEqual(set(self.runtime.agents), {consolidator["agentId"]})
+        reviewer_receipt = self.receipt_for("reviewer")
+        self.assertIs(reviewer_receipt["hostAgentExists"], False)
+        self.assertEqual(reviewer_receipt["execution"], {})
+        self.assertNotIn(reviewer["agentId"], self.runtime.agents)
         self.assertEqual(self.received(reviewer["agentId"]), [])
 
         seat = binding("consolidator", agent_id=consolidator["agentId"])
@@ -284,7 +288,10 @@ class SetStartTests(RoleToolsTestCase):
 
         self.assertEqual((opened["ok"], opened["status"]), (True, "accepted"))
         self.assertTrue(opened["openedHeldSeat"])
-        self.assertNotEqual(self.receipt_for("reviewer")["status"], "held")
+        self.assertEqual(set(self.runtime.agents), {consolidator["agentId"], reviewer["agentId"]})
+        opened_receipt = self.receipt_for("reviewer")
+        self.assertNotEqual(opened_receipt["status"], "held")
+        self.assertIs(opened_receipt["hostAgentExists"], True)
 
     def test_a_set_that_names_a_seat_outside_the_leafs_set_is_refused_with_no_effects(
         self,

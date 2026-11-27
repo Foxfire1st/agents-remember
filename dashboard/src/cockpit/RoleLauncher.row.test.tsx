@@ -173,6 +173,7 @@ describe('the row holds controls only', () => {
         false,
       ),
     );
+    await view.findByLabelText('Speed override');
     const launcher = view.getByTestId('role-launcher');
     expect(view.queryByTestId('role-default-sources')).toBeNull();
     for (const sentence of [
@@ -378,7 +379,7 @@ describe('where a default comes from is hover text', () => {
         false,
       ),
     );
-    fireEvent.change(view.getByLabelText('Speed override'), { target: { value: 'priority' } });
+    fireEvent.change(await view.findByLabelText('Speed override'), { target: { value: 'priority' } });
     expect((view.getByLabelText('Speed override') as HTMLElement).getAttribute('title')).toContain(
       'Fast',
     );
@@ -419,7 +420,7 @@ describe('every selector is the same selector', () => {
     const view = renderArchitectRow();
     await waitFor(() => expect(view.getByText('Default Permissions')).toBeTruthy());
     const agent = view.getByLabelText('Role agent override') as HTMLSelectElement;
-    const speed = view.getByLabelText('Speed override') as HTMLSelectElement;
+    const speed = (await view.findByLabelText('Speed override')) as HTMLSelectElement;
     expect(speed.className).toBe(agent.className);
     expect(speed.options[0]?.textContent).toBe('Speed · default');
     expect(view.queryByLabelText('Plan mode override')).toBeNull();
