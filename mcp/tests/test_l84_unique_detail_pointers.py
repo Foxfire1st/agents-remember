@@ -359,7 +359,7 @@ ROLE_INDEX_POINTERS: dict[str, list[tuple[str, str, str, str]]] = {
         (
             "reference/knowledge/commands.md",
             "Master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child",
-            "cmds",
+            "`knowledge_read`",
             "",
         ),
         (

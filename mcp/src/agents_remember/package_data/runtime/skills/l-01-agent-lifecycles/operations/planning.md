@@ -15,7 +15,7 @@ Before releasing a new/revised packet into a master with open leaves (not retire
 
 ## Establish ownership and prepared context
 
-Follow [owner](coordination.md#choose-the-coordination-owner), keep 1 owner/task and real IDs, and populate Prepared context (records, files/lines/unattributed callers, traps) before starting seats.
+Follow [owner](coordination.md#choose-the-coordination-owner), keep 1 owner/task and real IDs, and populate Prepared context (records via `knowledge_read` `impact`/`search`, files/lines/unattributed callers, traps) before starting seats.
 
 <!-- ar:roles architect -->
 ## Prepare knowledge effects and intent review

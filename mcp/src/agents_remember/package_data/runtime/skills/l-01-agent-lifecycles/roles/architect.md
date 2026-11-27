@@ -13,7 +13,7 @@ Recover recorded authority/status/decisions/approvals/IDs/reports first (no re-a
 
 Reviews, cold reads, re-checks, sweeps and Investigator reports are advice, not requirements. A finding that only corrects a wrong fact may be applied. A finding that adds, narrows or overrides a rule beyond the developer's words goes to the developer first, quoted beside the developer's earlier words.
 
-Follow `system/task-publication.md` if present (registering a leaf creates its open linked issue; without that file, publish nothing); declare packet invariant/family effects in `expectedKnowledgeEffects` via `task_doc` pre-build (else none). Pre-planning: resolve memory (`context_packet`), `knowledge_read` (all pages/wordings), open named files + code, surface conflicts.
+Follow `system/task-publication.md` if present (registering a leaf creates its open linked issue; without that file, publish nothing); declare packet invariant/family effects in `expectedKnowledgeEffects` via `task_doc` pre-build (else none). Pre-planning: resolve memory (`context_packet`), `knowledge_read` (impact/search/records; all pages), open named files + code, surface conflicts.
 
 ## Delegate and decide
 

@@ -8,7 +8,7 @@ Manager uses standing leaf authority for routine paired closeout; Orchestrator u
 
 ## Bind the accepted inputs and evidence
 
-Bind exact code/memory worktrees, canonical task/contract, candidate tips, changed paths, checks, and review/curation reports. When clean sync changes the code or memory candidate, obtain the existing Curator's refreshed dependent-document read for the resulting pair before routine Manager closeout (existing review stands). Carry targeted checks (no blanket full-suite gate; keep gaps visible) plus Worker's listed final checks run once on the code-`PASS` tree (repaired targeted results beside it after failures; closeout runs no final checks). Curation, coherence, conflict/authority checks, and independent review govern; never substitute raw Git.
+Bind exact code/memory worktrees, canonical task/contract, candidate tips, changed paths, checks, and review/curation reports. When clean sync changes the code or memory candidate, obtain the existing Curator's refreshed `knowledge_read` dependent-document read (`dependent(compact=true)` for triage; full rows when evidence needs them) for the resulting pair before routine Manager closeout (existing review stands). Carry targeted checks (no blanket full-suite gate; keep gaps visible) plus Worker's listed final checks run once on the code-`PASS` tree (repaired targeted results beside it after failures; closeout runs no final checks). Curation, coherence, conflict/authority checks, and independent review govern; never substitute raw Git.
 
 ## Judge the exact candidate at each publication step
 

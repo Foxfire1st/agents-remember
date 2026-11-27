@@ -200,7 +200,7 @@ carryover.
 
 | Tool | Purpose | Main arguments |
 | --- | --- | --- |
-| `knowledge_read` | Name one view of a memory snapshot (`source_context`, `invariant`, `family`, `record`, `weakness`, `dependent`, `writers`, `consolidation_proposal`). Paged record rows hold the text ID, kind, state and memory-checkout location. Open the named files for record text. The short answer of `read_ar_files` carries a source file's rules. The `writers` view returns bounded aggregates by role, harness and model, with revision counts and the path to the complete report. | `memoryRoot`, `view`, `limit=32`, `continuation`, the seed of the view (`sourcePath`, `invariantRevisionId`, `familyRevisionId`, `recordId`, `masterId`), filters `weaknessKind`, `includeClosed`, `staleOnly`, `standsOn` |
+| `knowledge_read` | Read one of 11 views of a converted memory snapshot (`source_context`, `invariant`, `family`, `record`, `records`, `impact`, `search`, `weakness`, `dependent`, `writers`, `consolidation_proposal`). `records` returns verbatim full record text (up to 25 `recordIds`, up to 20 per page inside the answer bound); `impact` (`files`/`folder`) and `search` (`query`/`kinds`) return text-bearing rows; `dependent` supports `compact=true` for closeout triage alongside full moved-link rows; `writers` returns bounded aggregates by role, harness and model with revision counts and the path to the complete report; `consolidation_proposal` proposes families and attached unaffiliated rules; `source_context`, `invariant`, `family`, `record` and `weakness` return structured metadata, locations and relationships. Auto-pairs the code tree from `repo_id`, `contractPath`, or `memoryRoot` (`repositoryRoot`/`codeTreeId` override). The short answer of `read_ar_files` carries a source file's rules. | `memoryRoot`, `view`, `limit=32`, `continuation`, pairing overrides (`repo_id`, `contractPath`, `repositoryRoot`, `codeTreeId`), view selectors (`sourcePath`, `files`, `folder`, `query`, `kinds`, `invariantRevisionId`, `familyRevisionId`, `recordId`, `recordIds`, `masterId`), flags and filters (`compact`, `weaknessKind`, `includeClosed`, `staleOnly`, `standsOn`) |
 | `knowledge_write` | Plan or write the [hand-off list](../concepts.md#hand-off-list) that a Curator gives it, through the one writer of knowledge files, which `agents-remember knowledge-ingest` and `agents-remember knowledge-bootstrap` also use. Without `commit` it plans and validates; with it, writes knowledge files and makes no Git commit. The answer names the whole report and all refusals, and its `notes` say what the write took but the caller should know, for example a revised invariant that has no title. When `state` is `refused`, `notes` also carries a `See skill://.../reference/curator/publication-report.md#read-the-ingest-report-before-claiming-publication.` pointer; an `invalid-input` refusal appends `See skill://.../reference/refused-write.md.` to `refusalDetail`. | `contractPath`, `handoff` + `handoffName` or `handoffPath`, `authorizationRef`, `commit=false`; for a [foundation wave](../concepts.md#knowledge-foundation), a write that belongs to no task, `repoId` + `wave`; for a crossing, a master's crossing sync or structural merge that parked before its merge commit and opened a history file, the master's `contractPath` + `crossing` |
 | `knowledge_diff` | Name the changed records of two memory trees beside a caller-readable report holding the whole comparison: the two trees, counts by kind, changed records, report location. | `memoryRoot`, `beforeRevision="HEAD"`, `afterRevision`, `recordId`, `path` |
 | `knowledge_integrity_check` | Validate a memory tree: `validation.ok`, refusal/report counts, rule counts and bounded violations. With `contractPath`, use the task's code and memory worktrees and return its latest persisted worklist; no semantic judgment is inferred. | `memoryRoot`, `codeRoot`, `baseCommits`, or a task's `contractPath` |
@@ -214,8 +214,36 @@ threshold. The answer then carries a `continuation`. A call that passes the `con
 resumes the same selection at the same memory tree, until every row has been returned once.
 
 The views `invariant` and `family` accept the text ID of a record in `recordId`, beside the
-revision IDs. The view `record` answers one record of any kind: its state, its links with the
+revision IDs. `recordId` and `recordIds` accept text IDs (`INV-…`, `FAM-…`, `WKN-…`, `DPD-…`).
+The view `record` answers one record of any kind: its state, its links with the
 state of each target, the records that link to it and its [judgment rows](../concepts.md#judgment-row).
+
+`knowledge_read` automatically pairs the code checkout from `contractPath` (leaf enclosure),
+`repo_id`, or `memoryRoot`, and observes the working tree when uncommitted edits exist; pass
+`repositoryRoot` and/or `codeTreeId` (`"working-tree"` or a tree/commit hash) to override.
+
+The view `records` batch-reads verbatim full text for up to 25 requested `recordIds`, paginated at
+up to 20 records per page inside the answer bound without trimming statements. Each record returns
+its statement, conditions, exclusions, standing, realizations, proofs and families, naming stale
+anchor paths inline whenever `stale > 0`.
+
+The view `impact` accepts `files` (list of repo-relative paths) and/or `folder`, deduplicates live
+invariants across the scope, groups them by live family with family guarantees and out-of-scope
+`familySiblings`, includes open weaknesses and standing dependent documents, and trims statements
+past 80 words with a pointer to `records`. Pass `compact=true` for one-line-per-rule output.
+
+The view `search` runs deterministic SQLite FTS5 keyword search over live records using `query`
+(defaulting to `kinds=["invariant", "family", "weakness"]`, expandable across live non-history
+kinds, with optional `files`/`folder` scope and `compact=true`).
+
+The view `dependent` lists standing dependent documents (filterable by `sourcePath`, `staleOnly`,
+and `standsOn`). Passing `compact=true` returns compact rows (id, document, state, deferral
+conditions, confirmation summary and moved-link count) for bounded closeout triage; omit `compact`
+when an evidence receipt requires full moved-link rows.
+
+Retrieved claims guide inspection and never substitute for reading source code or running tests;
+reserve native file opens for source code, tests, briefs, cards and any record detail not carried
+by `records` or `impact`.
 
 The view `writers` answers one table of how each writer did, counted from the selected memory
 tree. A row names a writer by the role, harness and model of its

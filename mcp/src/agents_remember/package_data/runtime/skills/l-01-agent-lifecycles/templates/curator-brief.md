@@ -72,6 +72,15 @@ Before checking the supplied producer lists, read [the Curator handoff-list cont
 - Reviewer verdict: `<path or review evidence under developer-chosen direct coordination | none when not requested>`.
 - Verification evidence: `<commands/artifacts>`.
 
+## Knowledge reads
+
+Before authoring, use `knowledge_read` on `agents-remember-task` against `<memory-worktree-path>` with `contractPath: "<enclosure-contract-path>"`:
+
+- `view="impact"` (`files`/`folder`): inspect touched invariants, families, siblings, and standing dependents.
+- `view="search"` (`query`, optional `kinds`): check existing records and prior wording before drafting.
+- `view="records"` (`recordIds`, up to 25): read verbatim record statements, conditions, exclusions, and proofs.
+- `view="dependent"` (`staleOnly=true, compact=true`): triage stale standing documents; use full `dependent(staleOnly=true)` when the closeout evidence receipt requires moved-link rows.
+
 ## Routing and handoff
 
 Before routing each change-set or task-notes item, read [change routing](../reference/curator/change-routing.md) for changed-file and notes-item routing to records, cards and indexes.

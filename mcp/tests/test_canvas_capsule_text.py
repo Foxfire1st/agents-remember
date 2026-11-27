@@ -80,7 +80,7 @@ def test_the_capability_text_is_read_from_the_package_data_copy(tmp_path: Path) 
     # selection, self-contained explanations, full-reading essay, figure design before page build,
     # driven central-mechanism visuals, kit highlighting, inline evidence marks, automatic kit
     # carrying, and the planned variant.
-    assert loaded.words == 1446
+    assert loaded.words == 1469
     assert loaded.words <= loaded.word_budget == 1500
     assert len(loaded.digest) == 64 and loaded.revision == f"sha256:{loaded.digest}"
     for clause in REQUIRED_WORDING:
