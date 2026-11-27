@@ -32,6 +32,7 @@ from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.primitives.gate_policy import DEFAULT_GATE_POLICY
 from agents_remember.kernel.primitives.gate_vocab import STORED_GATE_WAY_OUT, GateKind
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
+from agents_remember.models.role_capsules.refusal_references import with_refusal_reference
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.worktrees import direct_landing
 from agents_remember.worktrees.activation.atomic_series_activation import (
@@ -299,8 +300,11 @@ def test_a_closeout_refused_on_the_early_read_reads_as_before_plus_the_way_out(
     tmp_path: Path,
 ) -> None:
     assert _closeout_early_read(tmp_path) == {
-        "text": "closeout blocked by gate enforcement: closeout-approval gate 01H is open. "
-        f"{STORED_GATE_WAY_OUT}"
+        "text": with_refusal_reference(
+            "closeout blocked by gate enforcement: closeout-approval gate 01H is open. "
+            f"{STORED_GATE_WAY_OUT}",
+            "closeout-gate-blocked",
+        )
     }
 
 
@@ -319,9 +323,10 @@ def test_a_gate_an_earlier_closeout_spent_refuses_with_the_way_out(tmp_path: Pat
     with pytest.raises(RuntimeError) as refused:
         closeout._refuse_unsatisfied_closeout_gate(_contract(tmp_path), _closeout_args())
 
-    assert str(refused.value) == (
+    assert str(refused.value) == with_refusal_reference(
         "closeout blocked by gate enforcement: closeout-approval gate 01H was already applied. "
-        f"{STORED_GATE_WAY_OUT}"
+        f"{STORED_GATE_WAY_OUT}",
+        "closeout-gate-blocked",
     )
 
 
@@ -340,9 +345,10 @@ def test_a_direct_landing_refused_by_a_stored_gate_keeps_its_status(tmp_path: Pa
 def test_a_closeout_refused_by_a_stored_gate_keeps_its_reason(tmp_path: Path, claim: bool) -> None:
     fields = _closeout_gate_refusal(tmp_path, claim=claim)
 
-    assert fields["text"] == (
+    assert fields["text"] == with_refusal_reference(
         "closeout blocked by gate enforcement: closeout-approval gate 01H is open. "
-        f"{STORED_GATE_WAY_OUT}"
+        f"{STORED_GATE_WAY_OUT}",
+        "closeout-gate-blocked",
     )
 
 

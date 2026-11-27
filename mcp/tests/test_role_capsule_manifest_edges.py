@@ -656,7 +656,7 @@ def test_structured_shared_digest_is_delivered_once_and_seals_each_role() -> Non
     )
     task_code_rule = (
         "Architect, Orchestrator, Manager, Worker, Bootstrap: "
-        "Change code only under an approved task (`task_doc`), never from chat."
+        "Edit code under approved `task_doc` only, never chat."
     )
     for role, entry in _shipped_parsed().roles.items():
         for operation in entry.operations:
@@ -774,7 +774,7 @@ def test_git_root_scope_has_one_complete_source_and_digest_home() -> None:
         "and only when that root is a Git repository. "
         "Never run Git against the coordination root as a whole."
     )
-    expected_digest = "Run Git only in code/memory Git roots, never coordination root."
+    expected_digest = "Git only in code/memory roots, never coordination root."
     source = (LIFECYCLE_ROOT / rule["file"]).read_text().splitlines()
     start, end = rule["lines"]
     assert "\n".join(source[start - 1 : end]) == expected, (
@@ -825,7 +825,7 @@ def _assert_foundation_detail_at_its_action(
 
 def test_reviewer_complete_diff_rule_stays_inline_once() -> None:
     """The complete-diff rule's one home is the Reviewer role file."""
-    inline = "inspect every changed/unattributed file"
+    inline = "inspect all changed/unattributed files"
     assert (LIFECYCLE_ROOT / "roles/reviewer.md").read_text().count(inline) == 1
     assert inline not in (LIFECYCLE_ROOT / "reference/knowledge/use.md").read_text()
 

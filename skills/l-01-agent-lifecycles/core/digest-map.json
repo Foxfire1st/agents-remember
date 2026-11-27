@@ -2584,24 +2584,8 @@
     {
       "id": "IN1.2",
       "file": "core/invariants.md",
-      "disposition": "reference",
-      "audience": [
-        "architect",
-        "bootstrap",
-        "curator",
-        "investigator",
-        "manager",
-        "orchestrator",
-        "reviewer",
-        "worker"
-      ],
-      "reason": "Canonical home remains core/invariants.md (Tier 2 reference)",
-      "evidence": [
-        {
-          "path": "skills/l-01-agent-lifecycles/core/invariants.md",
-          "symbol": "## Keep continuity in durable state"
-        }
-      ]
+      "disposition": "digest",
+      "digestPlace": "place-32"
     },
     {
       "id": "IN1.3",
@@ -4922,14 +4906,16 @@
         "units": [
           "AC0.1",
           "AC0.5",
-          "AC1.9"
+          "AC1.9",
+          "IN1.2"
         ],
         "clauses": [
           {
             "units": [
               "AC0.1",
               "AC0.5",
-              "AC1.9"
+              "AC1.9",
+              "IN1.2"
             ]
           }
         ]
@@ -5511,7 +5497,17 @@
           9,
           11
         ],
-        "sha256": "fd06329bf41ebf8abe12f91a47580acd01396d3a605a662d7235718e8c04b7d7"
+        "sha256": "fd06329bf41ebf8abe12f91a47580acd01396d3a605a662d7235718e8c04b7d7",
+        "audience": [
+          "architect",
+          "bootstrap",
+          "curator",
+          "investigator",
+          "manager",
+          "orchestrator",
+          "reviewer",
+          "worker"
+        ]
       },
       "IN1.3": {
         "lines": [

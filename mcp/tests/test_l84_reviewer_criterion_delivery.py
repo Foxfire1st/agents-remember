@@ -135,40 +135,40 @@ class ReviewerCriterionDeliveryTests(FirstMessageMatrixBase):
             {binding.agent_id, *(s["agentId"] for s in started["seats"].values())},
         )
         opening = reviewer["heldOpeningPrompt"]
-        self.assertIn("Confirm the assignment before inspection", opening)
         self.assertIn(
-            "If the opening names no review mode, ask your starter for its first "
-            "`role_message` on `agents-remember-task` and wait. A Reviewer started from the "
-            "dashboard has no starter and asks the developer in its own chat instead. "
-            "Inspect nothing and infer no mode before the answer arrives.",
+            "Require before inspecting: mode (`baseline`/`fix-verification`; no whole-review in "
+            "`fix-verification`), seam, req IDs/versions/packets/approval, exact candidate "
+            '(no branch/"latest") + clean-copy checks (withhold PASS until passing), '
+            "Worker attempts, `system/tools.md` + `system/design-guidelines.md` + guidelines.",
             opening,
         )
         self.assertIn(
-            "Once intake arrives, require every applicable input below; refuse and report "
-            "omissions rather than guessing.",
+            "If mode is absent, ask starter via `role_message` (developer if parentless) and wait.",
             opening,
         )
-        intake = re.search(
-            r"Before inspecting the assigned packet or candidate, follow "
-            r"\[the review intake procedure\]\(([^)]+)\) for the mode, handover scope "
-            r"and chat boundary\.",
+        baseline = re.search(r"\[baseline\]\(([^)]+)\)", opening)
+        self.assertIsNotNone(baseline, "baseline review detail must be linked in opening")
+        assert baseline is not None
+        self.assertEqual(baseline[1], "detail/reference/review-baseline.md")
+        link_roots = re.search(
+            r'^Link roots: skill=("(?:[^"\\]|\\.)+"), detail=("(?:[^"\\]|\\.)+")$',
             opening,
+            re.M,
         )
-        self.assertIsNotNone(intake, "intake home must be named before inspection")
-        assert intake is not None
-        target, fragment = intake[1].rsplit("#", 1)
-        self.assertEqual(fragment, "receive-the-intake-and-hand-over-the-leaf-verdict")
-        self.assertEqual(target, "skill/operations/review.md")
-        link_roots = re.search(r'^Link roots: skill=("(?:[^"\\]|\\.)+")', opening, re.M)
-        self.assertIsNotNone(link_roots, "opening must declare skill link root")
+        self.assertIsNotNone(link_roots, "opening must declare skill and detail link roots")
         assert link_roots is not None
         skill_root = Path(json.loads(link_roots[1]))
+        detail_root = Path(json.loads(link_roots[2]))
+        self.assertTrue((detail_root / "reference/review-baseline.md").is_file())
         with shipped_composition_corpus() as (corpus, _):
             self.assertEqual(
-                (skill_root / target.removeprefix("skill/")).resolve(),
+                (skill_root / "operations/review.md").resolve(),
                 (corpus / "operations/review.md").resolve(),
             )
-        self.assertIn("Require these inputs before candidate inspection:", opening)
+            self.assertEqual(
+                (skill_root / "criteria/code-seam.md").resolve(),
+                (corpus / "criteria/code-seam.md").resolve(),
+            )
         self.assertFalse(
             any(
                 command == "agent-create"

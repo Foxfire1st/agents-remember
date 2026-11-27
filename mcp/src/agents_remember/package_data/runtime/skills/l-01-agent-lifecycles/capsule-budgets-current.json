@@ -6206,9 +6206,9 @@
         "worker/orientation": 527,
         "worker/implementation": 257,
         "worker/recovery": 280,
-        "curator/orientation": 650,
-        "curator/curation": 406,
-        "curator/recovery": 375,
+        "curator/orientation": 645,
+        "curator/curation": 412,
+        "curator/recovery": 370,
         "reviewer/orientation": 640,
         "reviewer/review": 506,
         "reviewer/recovery": 393,
@@ -6354,8 +6354,8 @@
         "sha256": "22fe207bffb1bc3392cbf264c8efbe6f9d5bffd99a651d7bbfcb3f431d7665bf"
       },
       "skills/l-01-agent-lifecycles/core/digest-map.json": {
-        "size_words": 16843,
-        "sha256": "2b18276ae5cba78fcc1683e41082d992fd7cadb6eec3bdcb8b787aabe38b4f60"
+        "size_words": 16825,
+        "sha256": "a006d3a10a5667a9577d86921d394ec9802031af53b742ffd1e2dc7d3f66dad5"
       },
       "skills/l-01-agent-lifecycles/core/every-role.md": {
         "size_words": 342,
@@ -6410,8 +6410,8 @@
         "sha256": "420aa8aaf6bf16abf298a95bd011b4a3d69d5bff818865168531798e53c5c968"
       },
       "skills/l-01-agent-lifecycles/operations/curation.md": {
-        "size_words": 242,
-        "sha256": "59b69c1389f51f2bb6f1bad1f8c70f029752b2002c181a2ebd066772da4cb4f4"
+        "size_words": 253,
+        "sha256": "641e5977b0280c2791ad6da096495f6028c2e10a1f2932c1e88a02cb666afd21"
       },
       "skills/l-01-agent-lifecycles/operations/implementation.md": {
         "size_words": 127,
@@ -6630,8 +6630,8 @@
         "sha256": "292b937834bdb9186cc4f70c74a2530c61145ba90ec03909a86395ca3c3a762c"
       },
       "skills/l-01-agent-lifecycles/roles/curator.md": {
-        "size_words": 270,
-        "sha256": "a87590170e4a5857f4411ae66534cf53435a1e9037a6eac345a9faa4666b38b8"
+        "size_words": 265,
+        "sha256": "356bdb331c6971b987292bd9921439b4f16293decc360194fb89a3006e74fe1f"
       },
       "skills/l-01-agent-lifecycles/roles/investigator.md": {
         "size_words": 227,
@@ -6735,7 +6735,7 @@
       "operations/bootstrap.md": "sha256:981b8f9bd61063fc2297c7f9d736b156a088487f808417f3cebc212ce4ade333",
       "operations/closeout.md": "sha256:6d8f09d9e611039b575a6d6ffceca76febf365f213ae7a67d9481f017adbf397",
       "operations/coordination.md": "sha256:420aa8aaf6bf16abf298a95bd011b4a3d69d5bff818865168531798e53c5c968",
-      "operations/curation.md": "sha256:59b69c1389f51f2bb6f1bad1f8c70f029752b2002c181a2ebd066772da4cb4f4",
+      "operations/curation.md": "sha256:641e5977b0280c2791ad6da096495f6028c2e10a1f2932c1e88a02cb666afd21",
       "operations/implementation.md": "sha256:e7bb29395b15f82a02ba00329159ac22b85193c5ccd8127ac8475a6b02eb8d52",
       "operations/orientation.md": "sha256:cec64492c4ea9fbcdf71060c6c08adf8313981c36bd575abb9e6b3254789dcb5",
       "operations/planning.md": "sha256:0f96d0137ba2f62568e07acce9750ed6f8dcb654b723c10567e19af0f5b767eb",
@@ -6786,7 +6786,7 @@
       "reference/writing/visual-explainers.md": "sha256:c11ed6c846183bd54433dd007c53467810982712f021400a7cbb3794b0f79ad3",
       "roles/architect.md": "sha256:d3bfe1b26da3064cbb8de7ff8fb99bc0ed5048e3409f3c2b2154032fcdb173f5",
       "roles/bootstrap.md": "sha256:292b937834bdb9186cc4f70c74a2530c61145ba90ec03909a86395ca3c3a762c",
-      "roles/curator.md": "sha256:a87590170e4a5857f4411ae66534cf53435a1e9037a6eac345a9faa4666b38b8",
+      "roles/curator.md": "sha256:356bdb331c6971b987292bd9921439b4f16293decc360194fb89a3006e74fe1f",
       "roles/investigator.md": "sha256:1f992757e0d459bd02e64fea8039662c7bd5c020fb31fb63dc4de67bc294dd7c",
       "roles/manager.md": "sha256:e2cd502a21767b2c74ec009218f811a8b8c13ab3e25691f2b702f82deeadbc81",
       "roles/orchestrator.md": "sha256:867bc51d025a287c4667ffa9dc647579929fd8e466e6551f5d4b120a0b864add",

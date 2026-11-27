@@ -199,6 +199,12 @@ PROCESS_MUTABLE_STATES = (
         _clear_cache,
     ),
     _row(
+        "application.role_capsules.wire_budget",
+        "_wire_encoding",
+        "Forget the cached vendored tiktoken encoding between test modules.",
+        _clear_cache,
+    ),
+    _row(
         "application.task_projection.statuses",
         "UNREACHABLE_STATUSES",
         "The empty status vocabulary is written only at import and tests only read it.",
