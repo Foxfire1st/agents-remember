@@ -6254,7 +6254,7 @@
         "reference/curator/repository-foundation.md": 388,
         "reference/curator/worklist.md": 541,
         "reference/instruction-shortfall-review.md": 514,
-        "reference/knowledge/commands.md": 2425,
+        "reference/knowledge/commands.md": 2647,
         "reference/knowledge/serving-build.md": 272,
         "reference/knowledge/use.md": 762,
         "reference/message-handover.md": 314,
@@ -6571,8 +6571,8 @@
         "sha256": "445d398f29d81662c2c82584b04d96cdf7ff23a3b758880f092a9cf0e286a703"
       },
       "skills/l-01-agent-lifecycles/reference/knowledge/commands.md": {
-        "size_words": 2425,
-        "sha256": "830b1780a4002ae74ba09a8b27f0b4ebf6581c1ec239b995e1e4235b2b30d4a6"
+        "size_words": 2647,
+        "sha256": "69ce828f5e3d69d89ba9995f7485739d8a357a2a28cf1c777929e429f2620f8d"
       },
       "skills/l-01-agent-lifecycles/reference/knowledge/serving-build.md": {
         "size_words": 272,
@@ -6789,7 +6789,7 @@
       "reference/curator/repository-foundation.md": "sha256:cedcdbd5cf960e1ec08e535abc2e8d739e43963cb736ad9bbcb1faed388ca748",
       "reference/curator/worklist.md": "sha256:a372e2808481c24c969cee74daa1c77dcea30984aca15a985af471d810932b13",
       "reference/instruction-shortfall-review.md": "sha256:445d398f29d81662c2c82584b04d96cdf7ff23a3b758880f092a9cf0e286a703",
-      "reference/knowledge/commands.md": "sha256:830b1780a4002ae74ba09a8b27f0b4ebf6581c1ec239b995e1e4235b2b30d4a6",
+      "reference/knowledge/commands.md": "sha256:69ce828f5e3d69d89ba9995f7485739d8a357a2a28cf1c777929e429f2620f8d",
       "reference/knowledge/serving-build.md": "sha256:51389e0ea154c66cd67bfc9fe836f05d427d91cf6acfa1c1d0ad55a53fdd7517",
       "reference/knowledge/use.md": "sha256:80443255a6b55e12dd7aaf9689e3888a0bac8684118efc30123f17289e846de0",
       "reference/message-handover.md": "sha256:12f9b61c2bf425072d2de5cae97279cefbf5b8d10a12751964c00489d51d22dc",

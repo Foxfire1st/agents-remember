@@ -81,6 +81,11 @@ from agents_remember.application.knowledge_paging.tree_read import (
     read_tree_page,
 )
 from agents_remember.application.knowledge_proofs import tree_view_proofs
+from agents_remember.application.knowledge_queries import (
+    QUERY_VIEWS,
+    QueryViewContext,
+    run_query_view,
+)
 from agents_remember.application.knowledge_read import open_read_context
 from agents_remember.application.knowledge_reader.marks import (
     compact_dependent_rows,
@@ -154,7 +159,6 @@ from agents_remember.models.tools.tool_answer import (
 )
 
 from .base import _tool_payload
-from .knowledge_queries import QUERY_VIEWS, QueryViewContext, run_query_view
 from .knowledge_views.read_request import ReadToolRequest
 from .knowledge_views.record_views import _proposal_view, _writers_view
 

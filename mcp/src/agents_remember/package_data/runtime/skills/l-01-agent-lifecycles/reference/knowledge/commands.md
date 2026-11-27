@@ -19,7 +19,7 @@ An `agents-remember` command found through `PATH` can select an older build. Whe
 ## Choose a public command-line subcommand
 
 The public command registry is `mcp/src/agents_remember/cli/__main__.py::build_parser` and its registrars.
-`paseo` and `knowledge-census` require subcommands.
+`paseo`, `knowledge-census` and `provider-limits` require subcommands.
 
 ### Knowledge and memory
 
@@ -33,6 +33,7 @@ The public command registry is `mcp/src/agents_remember/cli/__main__.py::build_p
 | `knowledge-index` | Builds/reuses a derived SQLite index; text stays authoritative. Working capture uses disposable objects, not repository objects. Cache writes occur; duplicate IDs yield partial state. | Reader/maintainer inspecting retrieval; ordinary reads index on demand. | `agents-remember knowledge-index --memory-root /work/memory --cache-dir /work/cache/knowledge-index` |
 | `knowledge-worklist` | Computes work from a contract or the base/candidate code trees (`B`/`C`) and their paired memory trees (`K_B`/`K_C`). May write captured objects/cache; `--output` writes a report, not judgments. | Curator starting/rechecking curation; maintainer reproducing the comparison. | `agents-remember knowledge-worklist --contract /work/series-contract.md --output /work/report/worklist.json` |
 | `knowledge-routes` | Reports family routes, route state and mechanical suggestions, without choosing a route or changing records. Select families with repeated `--family`; `--code-commit` selects committed source instead of the working tree. | Curator inspecting routing evidence; Investigator or Reviewer checking a family manifestation. | `agents-remember knowledge-routes /work/memory --code /work/code --json` |
+| `memory-briefs` | Refreshes Git-ignored `briefs/` in a converted memory checkout for `--repo` (with optional `--config`) or explicit `--memory-root --code-root --coordination-root` (optional `--code-commit`, `--json`). Refuses unconverted legacy memory without writing; creates no Git commit. | Any operator or agent refreshing derived briefs manually (for example after pulling memory or on a landing `briefsProblem` advisory). | `agents-remember memory-briefs --repo app --config /work/settings.json` |
 | `memory-citations` | Reports references; `--fix` repairs regenerable sidecars, `--dry-run` previews. `--document` bounds repairs; `--census` writes/names full evidence. Only explicit pre-baseline admission exempts the contract. | Curator repairing moved anchors; census owner preparing evidence. | `agents-remember memory-citations --repo app --contract /work/series-contract.md --fix --document src/widget.py.md --dry-run` |
 
 Ingest/bootstrap planning checks writer admission and validation and may cache the base. A planning result grants no write authority; the existing admission requirements still apply.
@@ -46,6 +47,10 @@ Ingest/bootstrap planning checks writer admission and validation and may cache t
 | `paseo provision` | Installs the pinned runtime/plugin and daemon configuration and starts the host. Changed start settings can restart it, ending open turns and permission prompts. | Authorized runtime operator provisioning the configured host. | `agents-remember paseo provision --config /work/settings.json` |
 | `paseo status` | Reports whether the configured host daemon is running and its identity. | Runtime operator diagnosing the configured host. | `agents-remember paseo status --config /work/settings.json` |
 | `paseo stop` | Stops the configured host; open turns and permission prompts end, while sessions remain resumable. | Authorized runtime operator intentionally stopping that host. | `agents-remember paseo stop --config /work/settings.json` |
+| `provider-limits` | Selects `status`, `suppress` or `unsuppress`; requires `--config` naming the active settings file and prints JSON. | Runtime operator inspecting or managing active provider-limit holds. | `agents-remember provider-limits status --config /work/settings.json` |
+| `provider-limits status` | Lists every live provider-limit report (recorded timestamp, windows, mapped seats) and active suppression as JSON. | Runtime operator diagnosing recorded provider usage limits or active suppressions. | `agents-remember provider-limits status --config /work/settings.json` |
+| `provider-limits suppress` | Suppresses live exhausted provider-limit windows until their reset time by `--report` (with optional `--window`, required when a report has multiple live windows) or `--agent`, printing JSON. | Authorized runtime operator overriding a recorded provider-limit hold. | `agents-remember provider-limits suppress --config /work/settings.json --report REPORT_ID --window WINDOW_ID` |
+| `provider-limits unsuppress` | Removes an active provider-limit window suppression by `--report` (with optional `--window`) or `--agent`, printing JSON. | Authorized runtime operator restoring an overridden provider-limit hold. | `agents-remember provider-limits unsuppress --config /work/settings.json --agent AGENT_ID` |
 | `tool-log-stats` | Reads tool-call logs and prints per-tool answer sizes; optional date limits and JSON output. | Investigator or maintainer measuring captured calls. | `agents-remember tool-log-stats /work/coordination/logs/mcp --json` |
 
 `start-leaf-enclosure` is an internal dispatcher branch, deliberately absent from the public
@@ -129,7 +134,7 @@ Before interpreting final writer checks, read [publication reports](../curator/p
 
 ## Find the owning source
 
-CLI sources are in `mcp/src/agents_remember/cli/`; each command module owns its arguments and effects. `knowledge_census.py::add_arguments` and `paseo_runtime.py::_COMMANDS` own nested names. `leaf_enclosure_start.py::COMMAND` owns internal dispatch.
+CLI sources are in `mcp/src/agents_remember/cli/`; each command module owns its arguments and effects. `knowledge_census.py::add_arguments`, `paseo_runtime.py::_COMMANDS` and `provider_limit_hold.py::add_arguments` own nested names. `leaf_enclosure_start.py::COMMAND` owns internal dispatch.
 
 The MCP registrations named above own tool signatures. Request shapes belong to `mcp/src/agents_remember/models/memory.py` and `mcp/src/agents_remember/models/lifecycles/curator_coherence.py`.
 
