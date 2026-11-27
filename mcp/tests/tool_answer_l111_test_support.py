@@ -684,6 +684,17 @@ _L111_LARGEST_CODE: dict[str, str] = {
     "worktree_enclosure_adopt": "enclosure-adoption-approval-required",
 }
 
+RECORD_LANDING_REFUSAL_CODES: frozenset[str] = frozenset(
+    {
+        "commit-missing",
+        "landing-target-missing",
+        "commit-not-on-landing-target",
+        "legacy-format",
+        "knowledge-gate-refused",
+        "contract-abandoned",
+    }
+)
+
 _L111_LARGEST_NEXT: dict[str, str] = {
     "worktree_start": "worktree_status",
     "worktree_attach": "worktree_status",

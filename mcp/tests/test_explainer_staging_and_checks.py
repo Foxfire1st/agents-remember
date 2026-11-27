@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import shutil
 import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import pytest
 from agents_remember.application.review_frame_store import (
-    begin_draft,
     frame_scope,
     reopen_frame,
 )
@@ -38,7 +39,9 @@ from agents_remember.canvas.kit import KIT_ROOT
 from agents_remember.canvas.paths import PathRefused
 from agents_remember.canvas.prospective import BrowserProspectiveLoad, ProspectiveResult
 from agents_remember.canvas.readiness import check_page
+from agents_remember.kernel.file_lock import try_file_lease
 from agents_remember.models.knowledge.review_frame import FrameAuthoring, FrameDraft
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from canvas_browser_test_support import configure_browser_env
 from canvas_host_test_support import LEAF
 from canvas_host_test_support import packet as host_packet
@@ -196,6 +199,31 @@ def _patch_if_present(
         monkeypatch.setattr(target, attr, value)
 
 
+def _observe_contending_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    is_contender: Callable[[], bool],
+) -> tuple[threading.Event, list[bool]]:
+    """Wrap ``explainer_staging.exclusive_file_lock`` to prove a contending thread is excluded."""
+
+    real_lock = explainer_staging.exclusive_file_lock
+    attempted = threading.Event()
+    excluded: list[bool] = []
+
+    @contextmanager
+    def _observe(path: Path, resource: str) -> Iterator[None]:
+        if is_contender() and not attempted.is_set():
+            lease = try_file_lease(path, resource)
+            excluded.append(lease is None)
+            if lease is not None:
+                lease.close()
+            attempted.set()
+        with real_lock(path, resource):
+            yield
+
+    monkeypatch.setattr(explainer_staging, "exclusive_file_lock", _observe)
+    return attempted, excluded
+
+
 def _assert_prune_does_not_delete_in_flight_staging(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -205,44 +233,56 @@ def _assert_prune_does_not_delete_in_flight_staging(
 
     real_working = explainer_staging.publish_working_directory
     real_active = explainer_staging.active_staging_dirs
+    real_stage_and_begin = explainer_staging.stage_and_begin_draft
     staging_created = threading.Event()
     prune_read_active = threading.Event()
-    draft_began = threading.Event()
     prune_done = threading.Event()
+    pruner_tid_box: list[int] = []
+    prune_attempted_lock, prune_excluded = _observe_contending_lock(
+        monkeypatch,
+        lambda: bool(pruner_tid_box) and threading.get_ident() == pruner_tid_box[0],
+    )
 
     def _hook_working(*args: Any, **kwargs: Any) -> tuple[Path, bool]:
         result = real_working(*args, **kwargs)
         staging_created.set()
-        prune_read_active.wait(timeout=0.35)
+        assert prune_attempted_lock.wait(timeout=HANG_GUARD_SECONDS), (
+            "pruner did not contend for the task lock before begin_draft"
+        )
+        assert not prune_read_active.is_set(), (
+            "pruner inspected active staging while stage_and_begin_draft held the task lock"
+        )
         return result
 
     def _hook_active(active_scope: Any) -> set[Path]:
         active = real_active(active_scope)
-        prune_read_active.set()
-        draft_began.wait(timeout=0.35)
+        if pruner_tid_box and threading.get_ident() == pruner_tid_box[0]:
+            prune_read_active.set()
         return active
 
-    def _hook_begin(*args: Any, **kwargs: Any) -> FrameDraft:
-        draft = begin_draft(*args, **kwargs)
-        draft_began.set()
-        if prune_read_active.is_set():
-            prune_done.wait(timeout=0.8)
+    def _hook_stage_and_begin(*args: Any, **kwargs: Any) -> FrameDraft:
+        draft = real_stage_and_begin(*args, **kwargs)
+        assert prune_done.wait(timeout=HANG_GUARD_SECONDS), (
+            "pruner did not finish after stage_and_begin_draft released the task lock"
+        )
         return draft
 
+    monkeypatch.setattr(explainer_staging, "active_staging_dirs", _hook_active)
     for module in (explainer_staging, explainer_server):
         _patch_if_present(monkeypatch, module, "publish_working_directory", _hook_working)
-        _patch_if_present(monkeypatch, module, "begin_draft", _hook_begin)
-    monkeypatch.setattr(explainer_staging, "active_staging_dirs", _hook_active)
+        _patch_if_present(monkeypatch, module, "stage_and_begin_draft", _hook_stage_and_begin)
 
     prune_errors: list[BaseException] = []
 
     def _run_prune() -> None:
+        pruner_tid_box.append(threading.get_ident())
         try:
-            assert staging_created.wait(timeout=3.0)
+            assert staging_created.wait(timeout=HANG_GUARD_SECONDS)
             prune_finished_staging(world.workspace, scope)
         except BaseException as exc:  # pragma: no cover - surfaced by assertion below
             prune_errors.append(exc)
         finally:
+            prune_attempted_lock.set()
             prune_done.set()
 
     pruner = threading.Thread(target=_run_prune, daemon=True)
@@ -250,9 +290,11 @@ def _assert_prune_does_not_delete_in_flight_staging(
     render_result = explainer_server.render_and_publish(
         world.workspace, task_root=world.task_root, seat="seat-1"
     )
-    pruner.join(timeout=5.0)
+    pruner.join(timeout=HANG_GUARD_SECONDS)
     assert not pruner.is_alive(), "prune thread deadlocked"
     assert not prune_errors, prune_errors
+    assert prune_excluded == [True]
+    assert prune_read_active.is_set()
     assert render_result["publication"]["state"] == "published", render_result
     assert reopen_frame(scope).revision == 1
 
@@ -271,26 +313,26 @@ def _assert_render_blocks_at_prune_barrier_without_deadlock(
     real_active = explainer_staging.active_staging_dirs
     pruner_tid = threading.get_ident()
     prune_entered_gap = threading.Event()
-    gap_barrier = threading.Barrier(2, timeout=0.35)
-    state = {"timed_out": False, "entered_during_gap": False}
+    render_entered_working = threading.Event()
+    render_attempted_lock, render_excluded = _observe_contending_lock(
+        monkeypatch,
+        lambda: threading.get_ident() != pruner_tid,
+    )
 
     def _barrier_active(active_scope: Any) -> set[Path]:
         active = real_active(active_scope)
         if threading.get_ident() == pruner_tid:
             prune_entered_gap.set()
-            try:
-                gap_barrier.wait()
-            except threading.BrokenBarrierError:
-                state["timed_out"] = True
+            assert render_attempted_lock.wait(timeout=HANG_GUARD_SECONDS), (
+                "render thread did not contend for the task lock during prune"
+            )
+            assert not render_entered_working.is_set(), (
+                "render entered publish_working_directory while prune held the task lock"
+            )
         return active
 
     def _probe_working(*args: Any, **kwargs: Any) -> tuple[Path, bool]:
-        if not gap_barrier.broken:
-            try:
-                gap_barrier.wait()
-                state["entered_during_gap"] = True
-            except threading.BrokenBarrierError:
-                pass
+        render_entered_working.set()
         return real_working(*args, **kwargs)
 
     monkeypatch.setattr(explainer_staging, "active_staging_dirs", _barrier_active)
@@ -302,7 +344,7 @@ def _assert_render_blocks_at_prune_barrier_without_deadlock(
 
     def _run_render() -> None:
         try:
-            assert prune_entered_gap.wait(timeout=3.0)
+            assert prune_entered_gap.wait(timeout=HANG_GUARD_SECONDS)
             render_box.append(
                 explainer_server.render_and_publish(
                     world.workspace, task_root=world.task_root, seat="seat-2"
@@ -310,14 +352,17 @@ def _assert_render_blocks_at_prune_barrier_without_deadlock(
             )
         except BaseException as exc:  # pragma: no cover - surfaced by assertion below
             render_errors.append(exc)
+        finally:
+            render_attempted_lock.set()
 
     renderer = threading.Thread(target=_run_render, daemon=True)
     renderer.start()
     prune_finished_staging(world.workspace, scope)
-    renderer.join(timeout=5.0)
+    renderer.join(timeout=HANG_GUARD_SECONDS)
     assert not renderer.is_alive(), "render thread deadlocked"
     assert not render_errors, render_errors
-    assert state["timed_out"] and not state["entered_during_gap"]
+    assert render_excluded == [True]
+    assert render_entered_working.is_set()
     assert not stale.exists()
     assert render_box and render_box[0]["publication"]["state"] == "published", render_box
     assert reopen_frame(scope).revision == 1
@@ -326,7 +371,7 @@ def _assert_render_blocks_at_prune_barrier_without_deadlock(
 def _assert_identical_concurrent_renders_serialize(tmp_path: Path) -> None:
     world = _world(tmp_path / "race-identical-renders")
     _write_kit_draft(world, "Identical")
-    start_both = threading.Barrier(2, timeout=3.0)
+    start_both = threading.Barrier(2, timeout=HANG_GUARD_SECONDS)
     outcomes: list[dict[str, Any]] = []
     outcome_errors: list[BaseException] = []
 
@@ -348,7 +393,7 @@ def _assert_identical_concurrent_renders_serialize(tmp_path: Path) -> None:
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join(timeout=5.0)
+        thread.join(timeout=HANG_GUARD_SECONDS)
         assert not thread.is_alive()
     assert not outcome_errors, outcome_errors
     assert sorted(item["publication"]["state"] for item in outcomes) == ["published", "unchanged"]

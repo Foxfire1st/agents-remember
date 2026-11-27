@@ -25,7 +25,7 @@ from agents_remember.application.knowledge_writer.code_anchors import (
     CodeSnapshot,
 )
 from agents_remember.application.knowledge_writer.deferrals import apply_record_row_deferrals
-from agents_remember.application.knowledge_writer.family_effect import family_effect_refusal
+from agents_remember.application.knowledge_writer.family_rows import build_family_row
 from agents_remember.application.knowledge_writer.handoff import (
     HANDLE_PREFIX,
     CoverRequest,
@@ -85,6 +85,7 @@ from agents_remember.worktrees.modules.onboarding_trace import (
 
 if TYPE_CHECKING:
     from agents_remember.application.knowledge_writer.authoring import DecisionResolver
+    from agents_remember.application.knowledge_writer.family_rows import ReachedFamilyFacts
 
 ABSENT: Final = "absent"
 
@@ -155,6 +156,8 @@ class HistoryRowAuthoring:
         """The persisted worklist's onboarding items' covered sources by subject (MIK-R53)."""
         onboarding_counted: Mapping[str, bool]
         """The persisted worklist's onboarding items' counted change by subject (MIK-R53)."""
+        reached_family_members: Mapping[str, ReachedFamilyFacts]
+        """The persisted worklist's reached_family member facts by family ID."""
         coordination_root: Path | None
         memory_base: str | None
         """The leaf's recorded memory base commit for card comparison."""
@@ -1057,31 +1060,15 @@ class HistoryRowAuthoring:
     def _family_row(
         self, request: RowRequest, row: dict[str, Any], record: Mapping[str, Any], where: str
     ) -> dict[str, Any] | None:
-        refusal = family_effect_refusal(request, row["subject"])
-        if refusal is not None:
-            self.problem(f"{where}.effect", refusal)
+        built = build_family_row(self, request, row, record, where)
+        if built is None:
             return None
-        if not request.examined:
-            self.problem(where, "a family row names every member the curator examined")
-            return None
-        examined = []
-        for one in request.examined:
-            member = self.resolve_id(one, where)
-            found = None if member is None else self.state.record(member)
-            if member is None or found is None or found[1] != "invariant":
-                self.problem(where, f"examined member {one!r} is not a stored invariant")
-                continue
-            examined.append({"id": member, "revision": found[2].get("revision")})
-        row["examined"] = examined
-        row["revision"] = record.get("revision")
-        if request.effect is not None:
-            row["effect"] = request.effect
         try:
-            FamilyRow.model_validate(row)
+            FamilyRow.model_validate(built)
         except ValidationError as error:
-            self.problem(where, f"family {row['subject']}: {_first_error(error)}")
+            self.problem(where, f"family {built['subject']}: {_first_error(error)}")
             return None
-        return row
+        return built
 
     def _covers(
         self, request: CoverRequest, subject: str, where: str, *, allow_path: bool = False

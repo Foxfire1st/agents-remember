@@ -23,6 +23,7 @@ from agents_remember.canvas.kit import kit_assets
 from agents_remember.canvas.prospective import BrowserProspectiveLoad, ProspectiveResult
 from agents_remember.canvas.readiness import check_page
 from agents_remember.canvas.sessions import CanvasSession
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from canvas_browser_test_support import configure_browser_env
 from canvas_host_test_support import packet, record
 from explainer_server_test_support import _call, _server, _world
@@ -374,12 +375,13 @@ def test_no_false_failure_paused_video_with_poster(browser_load) -> None:
 def test_interactive_sweep_deadline_keeps_unvisited_out_of_errors(
     browser_load, tmp_path: Path
 ) -> None:
-    buttons = "".join(f'<button type="button">Btn {i}</button>' for i in range(25))
-    # RESERVE_MS is 18.5s, so a 19s limit gives a ~0.5s interactive sweep budget before stopping.
+    # Each control waits 100ms across 4 passes, so 40 buttons require at least 16s of sweep time,
+    # guaranteeing the 11.5s budget (HANG_GUARD_SECONDS 30s minus RESERVE_MS 18.5s) stops early.
+    buttons = "".join(f'<button type="button">Btn {i}</button>' for i in range(40))
     result = browser_load(
         _html(f"<main><h1>Many Controls</h1>{buttons}</main>"),
         interactive_directory=tmp_path / "interactions",
-        timeout_seconds=19.0,
+        timeout_seconds=HANG_GUARD_SECONDS,
     )
     assert result.state == "loaded", result.diagnostics()
     interactive = result.interactive
