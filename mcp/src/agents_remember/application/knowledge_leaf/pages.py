@@ -59,6 +59,7 @@ from agents_remember.application.knowledge_paging.pager import (
     PageRow,
     page_block,
 )
+from agents_remember.application.worktree_code_state import CodeState
 from agents_remember.memory.knowledge.read_refusals import (
     registration_absent_refusal,
     selector_absent_refusal,
@@ -94,6 +95,7 @@ class LeafRequest:
     index_state: str
     path: str | None = None
     code_tree: CodeTree | None = None
+    code_state: CodeState | None = None
     resume: KnowledgeContinuation | None = None
     family: str | None = None
 
@@ -189,6 +191,7 @@ def prepare_leaf(request: LeafRequest) -> PreparedLeaf | KnowledgeRefusal | Pagi
         policy_version=LEAF_POLICY_VERSION,
         manifest_digest=structure.manifest_digest,
         code_tree_id=None if request.code_tree is None else request.code_tree.tree,
+        code_state=request.code_state,
         index_state=request.index_state,
     )
     position = 0

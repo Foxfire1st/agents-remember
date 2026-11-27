@@ -45,6 +45,7 @@ import apsw
 from agents_remember.memory.knowledge.connection import create_or_validate_schema
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge_index import projection
+from agents_remember.memory.knowledge_index.fts import populate_fts
 from agents_remember.memory.knowledge_index.record_standing import RecordStanding, StandingDeriver
 from agents_remember.memory.knowledge_index.schema import INDEX_DDL, INDEX_FORMAT
 from agents_remember.memory.knowledge_index.tree import MemoryTreeSnapshot
@@ -226,6 +227,7 @@ def build_index(snapshot: MemoryTreeSnapshot, destination: Path) -> BuildReport:
             connection.execute(statement)
         _write_rows(connection, parsed, standings)
         _write_revisions(connection, parsed, states)
+        populate_fts(connection, parsed)
         projection.project(connection, parsed, standings)
         _write_meta(connection, snapshot, parsed)
         connection.execute("COMMIT")

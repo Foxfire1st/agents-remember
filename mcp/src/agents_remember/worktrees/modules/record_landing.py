@@ -58,6 +58,7 @@ from agents_remember.worktrees.knowledge_gate import (
     leaf_cutover_refusal,
     master_document_base,
 )
+from agents_remember.worktrees.landing_briefs import refresh_recorded_landing_memory_briefs
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.closeout_external import leaf_pair_refusal
 from agents_remember.worktrees.modules.git import (
@@ -699,4 +700,11 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
     )
     if documents is not None:
         recorded_payload["staleDocuments"] = documents
+    briefs_problem = refresh_recorded_landing_memory_briefs(
+        updated,
+        code_commit=commit,
+        memory_commit=args.landed_memory_content_commit.strip(),
+    )
+    if briefs_problem is not None:
+        recorded_payload["briefsProblem"] = briefs_problem
     return WorktreeCommandResult(0, recorded_payload)

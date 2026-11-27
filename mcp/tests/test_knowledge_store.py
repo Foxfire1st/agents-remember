@@ -234,6 +234,12 @@ def test_the_created_file_carries_the_one_declared_schema(tmp_path: Path) -> Non
             "ix_history_row",
             "ix_revision",
             "ix_uuid",
+            "ix_fts",
+            "ix_fts_config",
+            "ix_fts_content",
+            "ix_fts_data",
+            "ix_fts_docsize",
+            "ix_fts_idx",
         }
         == tables
     )

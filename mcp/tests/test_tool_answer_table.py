@@ -37,6 +37,7 @@ from agents_remember.models.tools.tool_answer import (
     TOOL_ANSWER_EXCEPTIONS,
     TOOL_ANSWER_LIST_MAX,
     bound_for,
+    exception_ceiling_for,
     fields_outside_row,
 )
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
@@ -92,9 +93,8 @@ class ToolAnswerTableTests(unittest.TestCase):
 
     def test_no_bound_above_the_exception_max(self) -> None:
         for key, row in TOOL_ANSWER_TABLE.items():
-            self.assertLessEqual(
-                row.bound, TOOL_ANSWER_EXCEPTION_MAX_TOKENS, f"row {key} over 4,000"
-            )
+            ceiling = exception_ceiling_for(key)
+            self.assertLessEqual(row.bound, ceiling, f"row {key} over {ceiling:,}")
 
     def test_exception_table_first_rows(self) -> None:
         self.assertIn(("role_message", None), TOOL_ANSWER_EXCEPTIONS)
@@ -102,7 +102,7 @@ class ToolAnswerTableTests(unittest.TestCase):
         self.assertEqual(bound_for("role_message"), TOOL_ANSWER_EXCEPTION_MAX_TOKENS)
         self.assertEqual(bound_for("server_info"), TOOL_ANSWER_EXCEPTION_MAX_TOKENS)
         for key, (bound, _reason) in TOOL_ANSWER_EXCEPTIONS.items():
-            self.assertLessEqual(bound, TOOL_ANSWER_EXCEPTION_MAX_TOKENS, f"{key}")
+            self.assertLessEqual(bound, exception_ceiling_for(key), f"{key}")
 
     def test_interim_rows_hold_the_bound_and_name_a_leaf(self) -> None:
         for key, row in TOOL_ANSWER_TABLE.items():

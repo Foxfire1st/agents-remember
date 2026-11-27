@@ -205,7 +205,7 @@ TreeExtras = Callable[[ReadSubject, CodeTree | None, list[Any]], PageExtras]
 
 @dataclass(frozen=True)
 class TreeReadScope:
-    """Where one tree read locates: the caller workspace and the selection epoch.
+    """Where one tree read locates: the caller workspace, paired code root, and selection epoch.
 
     The epoch carries the locating it was selected for (relative files for a
     worktree caller, absolute with the commit beside the answer otherwise).
@@ -213,6 +213,8 @@ class TreeReadScope:
 
     workspace_root: str | None = None
     provenance: SelectionProvenance | None = None
+    object_directory: Path | None = None
+    paired_code_root: str | None = None
 
 
 @dataclass(frozen=True)
@@ -226,6 +228,8 @@ class _TreeRead:
     code_tree: CodeTree | None = None
     relative_locations: bool = False
     resolver: NameResolver | None = None
+    object_directory: Path | None = None
+    paired_code_root: str | None = None
 
     @property
     def index_complete(self) -> bool:
@@ -274,6 +278,8 @@ def read_tree_page(
         extras,
         located.workspace_root,
         relative_locations=relative_locations,
+        object_directory=located.object_directory,
+        paired_code_root=located.paired_code_root,
     )
     resume = None
     capture: WorktreeCapture | None = None
@@ -288,6 +294,7 @@ def read_tree_page(
             read,
             resume.code_tree_id,
             None if capture is None else capture.object_directory,
+            code_state=resume.code_state,
         )
     # One shared naming resolver per answer, opened with the selection's
     # epoch: sizing (the admission measure) and projection (the answer)
@@ -318,8 +325,8 @@ def _fresh_read(read: _TreeRead) -> dict[str, Any]:
     absent = _fresh_seed_absent(read)
     if absent is not None:  # never answered as an empty, complete view (L37, P2 task 4)
         return _refused(read, "selector_absent", absent)
-    # A fresh view walk is bound to the code tree the caller named, and only that one.
-    return _fresh_response(_at_code_tree(read, read.request.code_tree_id))
+    # Forward the resolved code tree and any working-tree object_directory observed for this read.
+    return _fresh_response(_at_code_tree(read, read.context.code_tree_id, read.object_directory))
 
 
 def _fresh_seed_absent(read: _TreeRead) -> str | None:
@@ -386,7 +393,12 @@ def _resumed_working_tree(
     the stale anchor set is served.
     """
 
-    root = read.request.repository_root or read.workspace_root
+    root = (
+        read.request.repository_root
+        or read.paired_code_root
+        or read.context.repository_root
+        or read.workspace_root
+    )
     if root is None:
         return (
             PagingRefusal(
@@ -461,6 +473,8 @@ def _at_code_tree(
     read: _TreeRead,
     code_tree_id: str | None,
     object_directory: Path | None = None,
+    *,
+    code_state: str | None = None,
 ) -> _TreeRead:
     """The read at the walk's code tree: its objects read from the caller's root or the workspace.
 
@@ -468,14 +482,26 @@ def _at_code_tree(
     """
 
     request = read.request
-    root = request.repository_root or read.workspace_root
+    root = (
+        request.repository_root
+        or read.paired_code_root
+        or read.context.repository_root
+        or read.workspace_root
+    )
     if code_tree_id is None or root is None:
         tree, root = None, None
     else:
         tree = code_tree_id
-    context = KnowledgeReadContext.model_validate(
-        {**read.context.model_dump(), "code_tree_id": tree, "repository_root": root}
-    )
+    context_fields: dict[str, Any] = {
+        **read.context.model_dump(),
+        "code_tree_id": tree,
+        "repository_root": root,
+    }
+    if tree is None:
+        context_fields["code_state"] = None
+    elif code_state is not None:
+        context_fields["code_state"] = code_state
+    context = KnowledgeReadContext.model_validate(context_fields)
     code = None if tree is None or root is None else CodeTree(Path(root), tree, object_directory)
     return replace(read, context=context, code_tree=code)
 
@@ -485,7 +511,12 @@ def _missing_code_tree(read: _TreeRead, code_tree_id: str | None) -> PagingRefus
 
     if code_tree_id is None:
         return None
-    root = read.context.repository_root
+    root = (
+        read.request.repository_root
+        or read.paired_code_root
+        or read.context.repository_root
+        or read.workspace_root
+    )
     if root is not None and _holds_tree(Path(root), code_tree_id):
         return None
     where = (
@@ -849,6 +880,7 @@ def _leaf_response(
             index_state=read.tree.index_state,
             path=seed.get("path"),
             code_tree=read.code_tree,
+            code_state=read.context.code_state,
             resume=resume,
             family=seed.get("id") if seed.get("kind") == "family" else None,
         )
