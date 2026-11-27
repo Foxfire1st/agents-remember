@@ -19,6 +19,9 @@ from agents_remember.application.knowledge_gate.predicates import (
 )
 from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
 from agents_remember.application.knowledge_worklist.touched_records import touched_record_items
+from agents_remember.application.knowledge_writer import Owner, WriteReport, WriteRequest
+from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
+from agents_remember.application.knowledge_writer.writer import write_knowledge
 from agents_remember.memory.knowledge_index import directory_snapshot, git_tree_snapshot
 from agents_remember.memory_quality.knowledge_validator import CodePathSet, validate_tree
 from agents_remember.memory_quality.knowledge_validator.trees import (
@@ -685,3 +688,191 @@ def test_new_dependent_with_confirmation_and_deferral_without_edit_is_refused(
         if json.loads(path.read_text(encoding="utf-8"))["document"] == s.SETTINGS_DOC
     )
     assert len(stored["deferrals"]) == 1 and stored["deferrals"][0]["passage"] == "Install table"
+
+
+def _write_crossing(
+    world: Any,
+    records: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+    *,
+    code_commit: str,
+    commit: bool = True,
+) -> WriteReport:
+    crossing_id = "261112-BUG-crossing-7"
+    return write_knowledge(
+        WriteRequest(
+            memory_root=world.memory,
+            code_root=world.code,
+            owner=Owner(task=s.TASK_BUG, kind="crossing", id=crossing_id),
+            handoff_path="crossing-handoff.json",
+            document={"records": records, "history": rows},
+            commit=commit,
+            authorization="test-crossing",
+            coordination_root=world.root,
+            repo_name=s.REPO_NAME,
+            code_base=code_commit,
+        ),
+        code=CodeSnapshot.at_commit(world.code, code_commit),
+    )
+
+
+def test_crossing_write_resolves_deferred_dependent_preserving_before_deferrals(
+    tmp_path: Path,
+) -> None:
+    """Crossing write at code_base == snapshot.commit resolves conflicted dependent and preserves deferrals."""
+
+    d1 = s.deferral_entry("DFR-NDPEXV", {"task": s.LEAF_60}, passage="Auth defaults")
+    world, _, _, blob1 = s.seed_deferred_world(tmp_path, "DPD-23C91T", [d1])
+    (world.code / CODE_FILE).write_text(
+        (world.code / CODE_FILE).read_text(encoding="utf-8") + "\n# settled\n", encoding="utf-8"
+    )
+    settled_commit = commit_all(world.code, "settled crossing merge")
+    settled_blob = git(world.code, "hash-object", CODE_FILE)
+    assert settled_blob != blob1
+
+    dep_path = s.stored_dependent_path(world.memory)
+    conflicted = json.loads(dep_path.read_text(encoding="utf-8"))
+    for field_name in ("revision", "confirmed", "stands_on"):
+        conflicted[field_name] = {
+            "crossing-conflict": {"item": field_name, "reason": "both changed"}
+        }
+    dep_path.write_text(canonical_text(conflicted), encoding="utf-8")
+
+    crossing = "261112-BUG-crossing-7"
+    report = _write_crossing(
+        world,
+        [s.confirm_op("DPD-23C91T", crossing, statement="Resolved crossing conflict.")],
+        [s.row_op("DPD-23C91T", "changed", "Resolved crossing conflict.", effect="clarify")],
+        code_commit=settled_commit,
+    )
+    assert report.state == "written", report.problems
+    stored = s.stored_dependent(world.memory)
+    assert (
+        stored["revision"] == 2
+        and stored["confirmed"]["task"] == crossing
+        and stored["confirmed"]["commit"] == settled_commit
+        and stored["stands_on"][0]["blob"] == settled_blob
+        and stored["deferrals"] == [d1]
+    )
+
+
+def test_crossing_write_adopts_validated_explicit_deferrals_and_clears_on_empty(
+    tmp_path: Path,
+) -> None:
+    """Crossing write validates explicit merged deferrals (earlier or settled fileBlob), supports ops, and clears on []/None."""
+
+    d_old = s.deferral_entry("DFR-CAA340", {"file": CODE_FILE}, passage="Old watch")
+    d_keep = s.deferral_entry(
+        "DFR-XP94XS", {"task": s.LEAF_60}, passage="Task watch", owner=s.TASK_CAP
+    )
+    world, _, _, blob1 = s.seed_deferred_world(tmp_path, "DPD-X6G7K3", [d_old])
+    (world.code / CODE_FILE).write_text(
+        (world.code / CODE_FILE).read_text(encoding="utf-8") + "\n# merged\n", encoding="utf-8"
+    )
+    settled_commit = commit_all(world.code, "settled code")
+    blob2 = git(world.code, "hash-object", CODE_FILE)
+    assert blob2 != blob1
+
+    d_preserved = {**d_old, "fileBlob": blob1}
+    d_updated = s.deferral_entry(
+        "DFR-VPD222", {"file": CODE_FILE}, passage="Settled watch", file_blob=blob2
+    )
+    merged = [d_preserved, d_updated, d_keep]
+    crossing = "261112-BUG-crossing-7"
+    r1 = _write_crossing(
+        world,
+        [s.confirm_op("DPD-X6G7K3", crossing, extra_fields={"deferrals": merged})],
+        [s.row_op("DPD-X6G7K3", "changed", "Merged deferrals.", effect="clarify")],
+        code_commit=settled_commit,
+    )
+    assert r1.state == "written", r1.problems
+    stored = s.stored_dependent(world.memory)
+    assert [one["id"] for one in stored["deferrals"]] == ["DFR-CAA340", "DFR-VPD222", "DFR-XP94XS"]
+    assert (
+        stored["deferrals"][0]["fileBlob"] == blob1 and stored["deferrals"][1]["fileBlob"] == blob2
+    )
+
+    r_res = _write_crossing(
+        world,
+        [
+            s.confirm_op(
+                "DPD-X6G7K3",
+                crossing,
+                extra_fields={"deferrals": merged, "resolveDeferrals": ["DFR-XP94XS"]},
+            )
+        ],
+        [s.row_op("DPD-X6G7K3", "changed", "Resolved one deferral.", effect="clarify")],
+        code_commit=settled_commit,
+    )
+    assert r_res.state == "written", r_res.problems
+    assert [one["id"] for one in s.stored_dependent(world.memory)["deferrals"]] == [
+        "DFR-CAA340",
+        "DFR-VPD222",
+    ]
+
+    for empty_value in ([], None):
+        r_clear = _write_crossing(
+            world,
+            [s.confirm_op("DPD-X6G7K3", crossing, extra_fields={"deferrals": empty_value})],
+            [s.row_op("DPD-X6G7K3", "changed", "Cleared deferrals.", effect="clarify")],
+            code_commit=settled_commit,
+        )
+        assert r_clear.state == "written", r_clear.problems
+        assert "deferrals" not in s.stored_dependent(world.memory)
+
+
+def test_crossing_write_refuses_invalid_deferrals_and_preserves_leaf_refusals(
+    tmp_path: Path,
+) -> None:
+    """Invalid crossing deferrals refuse cleanly; leaf direct-deferrals and unedited confirmations stay refused."""
+
+    d1 = s.deferral_entry("DFR-VAK001", {"task": s.LEAF_60}, passage="Tracked passage")
+    world, code_base, _, blob1 = s.seed_deferred_world(tmp_path, "DPD-VAK001", [d1])
+    crossing = "261112-BUG-crossing-7"
+    bad_cases: list[tuple[str, Any, str]] = [
+        ("non-list", "not-a-list", "must be a list"),
+        ("dict-not-list", d1, "must be a list"),
+        ("non-object-item", ["bad"], "JSON object"),
+        ("bad-schema-id", [{**d1, "id": "BAD-ID"}], "id"),
+        ("file-without-blob", [s.deferral_entry("DFR-VAK002", {"file": CODE_FILE})], "fileBlob"),
+        ("duplicate-id", [d1, {**d1, "passage": "Dup"}], "duplicate deferral id"),
+        (
+            "missing-file",
+            [s.deferral_entry("DFR-VAK003", {"file": "missing/file.py"}, file_blob=blob1)],
+            "not a tracked file",
+        ),
+    ]
+    for label, bad_deferrals, expected in bad_cases:
+        refused = _write_crossing(
+            world,
+            [s.confirm_op("DPD-VAK001", crossing, extra_fields={"deferrals": bad_deferrals})],
+            [s.row_op("DPD-VAK001", "changed", "Invalid.", effect="clarify")],
+            code_commit=code_base,
+            commit=False,
+        )
+        assert refused.state == "refused", f"{label} should be refused"
+        assert expected in " ".join(p.render() for p in refused.problems)
+
+    leaf_direct = s.write_dep(
+        world,
+        [s.confirm_op("DPD-VAK001", s.LEAF_51, extra_fields={"deferrals": [d1]})],
+        rows=[s.row_op("DPD-VAK001", "changed", effect="clarify")],
+        leaf=s.LEAF_51,
+        code_base=code_base,
+        commit=False,
+    )
+    assert leaf_direct.state == "refused"
+    assert "instead of setting 'deferrals' directly" in " ".join(
+        p.message for p in leaf_direct.problems
+    )
+
+    leaf_unedited = s.write_dep(
+        world,
+        [s.confirm_op("DPD-VAK001", s.LEAF_51, statement="Unedited leaf confirm.")],
+        rows=[s.row_op("DPD-VAK001", "changed", effect="clarify")],
+        leaf=s.LEAF_51,
+        code_base=code_base,
+        commit=False,
+    )
+    assert leaf_unedited.state == "refused"
+    assert "DFR-VAK001" in " ".join(p.message for p in leaf_unedited.problems)
