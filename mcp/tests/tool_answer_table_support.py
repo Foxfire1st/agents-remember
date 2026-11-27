@@ -26,9 +26,9 @@ from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import (
     INTERIM_LEAVES,
     L111_SHAPED_TOOLS,
-    TOOL_ANSWER_EXCEPTION_MAX_TOKENS,
     TOOL_ANSWER_EXCEPTIONS,
     bound_for,
+    exception_ceiling_for,
     is_valid_tool_code,
 )
 from tool_answer_l110_rows import L110_ROW_DATA
@@ -400,7 +400,7 @@ L109_SHAPED_ROWS: dict[tuple[str, str | None], ToolAnswerRow] = {
             "refusalCode": "the refusal identity the caller branches on",
             "refusalDetail": "what the caller can do instead of this call",
         },
-        bound=4000,
+        bound=5000,
         interim_leaf=None,
         ordinary_case=_l109_case("knowledge_read_ordinary"),
         largest_case=_l109_case("knowledge_read_largest"),
@@ -600,8 +600,9 @@ def validate_tool_answer_row(key: tuple[str, str | None], row: ToolAnswerRow) ->
 def _validate_row_identity(key: tuple[str, str | None], row: ToolAnswerRow) -> list[str]:
     """Check one row's bound."""
     failures: list[str] = []
-    if row.bound > TOOL_ANSWER_EXCEPTION_MAX_TOKENS:
-        failures.append(f"row {key}: bound over 4,000")
+    ceiling = exception_ceiling_for(key)
+    if row.bound > ceiling:
+        failures.append(f"row {key}: bound over {ceiling:,}")
     return failures
 
 

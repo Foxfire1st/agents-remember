@@ -31,8 +31,19 @@ from agents_remember.models.tools.tool_answer_short_fields import (
 # Rule 4: one constant bounds every answer, counted with the product's counter
 # (``models/tokens.py``).
 TOOL_ANSWER_MAX_TOKENS = 1500
-# Rule 4: no bound in the exception table is above this.
+# Rule 4: no bound in the exception table is above this, except the developer-approved
+# knowledge_read batch-records bound (5,000 tokens for 20 verbatim records/page).
 TOOL_ANSWER_EXCEPTION_MAX_TOKENS = 4000
+TOOL_ANSWER_KNOWLEDGE_READ_MAX_TOKENS = 5000
+
+
+def exception_ceiling_for(key: tuple[str, str | None]) -> int:
+    """Upper bound allowed for an exception-table row."""
+    if key == ("knowledge_read", None):
+        return TOOL_ANSWER_KNOWLEDGE_READ_MAX_TOKENS
+    return TOOL_ANSWER_EXCEPTION_MAX_TOKENS
+
+
 # Status-answer ruling: a status answer keeps the default bound of 1,500.
 # The five landed status answers whose full entry lists exceed it carry at
 # most this many entries per list instead -- smaller entries first, then
@@ -118,8 +129,8 @@ TOOL_ANSWER_EXCEPTIONS: dict[tuple[str, str | None], tuple[int, str]] = {
         "twenty named paths with their cards, counts and overviews",
     ),
     ("knowledge_read", None): (
-        4000,
-        "the largest family-complete page in named rows with short currentness",
+        5000,
+        "batch full-text records up to 20 records per page and family-complete pages with short currentness",
     ),
     ("knowledge_diff", None): (
         1500,

@@ -46,6 +46,14 @@ from agents_remember.application.knowledge_bootstrap_admission import (
     BootstrapRefusal,
     admit_bootstrap_context,
 )
+from agents_remember.application.knowledge_code_pairing import (
+    NoCodeTreeError,
+    ObservedCodeSource,
+    PairingContext,
+    code_tree_of,
+    observe_code_source,
+    resolve_paired_code_root,
+)
 from agents_remember.application.knowledge_currentness import CodeTree
 from agents_remember.application.knowledge_diff_decisions import change_counts, decision_records
 from agents_remember.application.knowledge_file_diff import (
@@ -72,6 +80,7 @@ from agents_remember.application.knowledge_paging.tree_read import (
 from agents_remember.application.knowledge_proofs import tree_view_proofs
 from agents_remember.application.knowledge_read import open_read_context
 from agents_remember.application.knowledge_reader.marks import (
+    compact_dependent_rows,
     dependent_list,
     weakness_list,
 )
@@ -115,22 +124,12 @@ from agents_remember.application.published_intent import (
 )
 from agents_remember.application.record_standing_answers import record_answer_standing
 from agents_remember.application.role_capsules.refusal_references import with_refusal_reference
-from agents_remember.application.worktree_code_state import (
-    CODE_STATE_COMMIT,
-    CODE_STATE_WORKING_TREE,
-    WORKING_TREE_SELECTOR,
-    CodeState,
-    WorktreeCapture,
-    capture_worktree,
-    hold_observed_code_tree,
-)
 from agents_remember.kernel.git_command import (
     GitRunnerOptions,
-    git_environment,
     run_git,
 )
 from agents_remember.kernel.git_preparation import GitPreparationError
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge_index import (
     INDEX_REPOSITORY_ID,
@@ -158,6 +157,7 @@ from agents_remember.models.tools.tool_answer import (
 )
 
 from .base import _tool_payload
+from .knowledge_queries import QUERY_VIEWS, QueryViewContext, run_query_view
 
 __all__ = [
     "DiffToolRequest",
@@ -225,6 +225,14 @@ class ReadToolRequest:
     include_closed: bool = False
     stale_only: bool = False
     stands_on: str | None = None
+    repo_id: str | None = None
+    contract_path: str | None = None
+    files: tuple[str, ...] | None = None
+    folder: str | None = None
+    query: str | None = None
+    kinds: tuple[str, ...] | None = None
+    record_ids: tuple[str, ...] | None = None
+    compact: bool = False
 
 
 @dataclass(frozen=True)
@@ -249,8 +257,7 @@ def _record_view(
     selected: SelectedKnowledgeDataset,
     repository_id: str,
     *,
-    workspace_root: str | None = None,
-    coordination_root: str | None = None,
+    view_context: QueryViewContext | None = None,
 ) -> dict[str, Any]:
     """One record's truth view: its fields, its links with their states, and its history rows.
 
@@ -261,6 +268,7 @@ def _record_view(
     location rather than carried (MIK-R109 rule 2).
     """
 
+    ctx = view_context if view_context is not None else QueryViewContext()
     if not request.record_id:
         return _refused_read(
             "record",
@@ -277,7 +285,11 @@ def _record_view(
             "the selection names no converted memory tree, so no record can be read",
         )
     memory_root = Path(request.memory_root)
-    source = _observed_source_or_none(request, workspace_root)
+    source = (
+        _observed_source_or_none(request, ctx.workspace_root)
+        if ctx.repositories is None
+        else _observed_source_or_none(request, ctx.workspace_root, repositories=ctx.repositories)
+    )
     code_tree = _code_tree_of(source)
     try:
         selection = selection_for_dataset(
@@ -286,9 +298,13 @@ def _record_view(
             database_path=selected.database_path,
             tree_key=tree.tree_key,
             code_tree=code_tree,
-            coordination_root=None if coordination_root is None else Path(coordination_root),
+            coordination_root=(
+                None if ctx.coordination_root is None else Path(ctx.coordination_root)
+            ),
         )
     except READ_FAILURES as error:
+        if source is not None:
+            source.close()
         return _refused_read(
             "record",
             repository_id,
@@ -341,29 +357,18 @@ def _one_view(
     selected: SelectedKnowledgeDataset,
     repository_id: str,
     *,
-    workspace_root: str | None = None,
-    coordination_root: str | None = None,
+    view_context: QueryViewContext | None = None,
 ) -> dict[str, Any]:
-    """The answer one single-record view holds: a record's truth view, the marks' listing, or the
-    writers' table."""
+    """The answer one single-record, marks, writers, or drafting query view holds."""
 
+    ctx = view_context if view_context is not None else QueryViewContext()
+    if request.view in QUERY_VIEWS:
+        return run_query_view(request, selected, repository_id, context=ctx)
     if request.view == "writers":
-        return _writers_view(request, selected, coordination_root)
+        return _writers_view(request, selected, ctx.coordination_root)
     if request.view == "record":
-        return _record_view(
-            request,
-            selected,
-            repository_id,
-            workspace_root=workspace_root,
-            coordination_root=coordination_root,
-        )
-    return _marks_view(
-        request,
-        selected,
-        repository_id,
-        workspace_root=workspace_root,
-        coordination_root=coordination_root,
-    )
+        return _record_view(request, selected, repository_id, view_context=ctx)
+    return _marks_view(request, selected, repository_id, view_context=ctx)
 
 
 def _marks_view(
@@ -371,8 +376,7 @@ def _marks_view(
     selected: SelectedKnowledgeDataset,
     repository_id: str,
     *,
-    workspace_root: str | None = None,
-    coordination_root: str | None = None,
+    view_context: QueryViewContext | None = None,
 ) -> dict[str, Any]:
     """The weaknesses or the dependents of one memory tree, bounded and naming how to read on.
 
@@ -387,6 +391,7 @@ def _marks_view(
     the only continuation accepted; a token this view cannot read refuses, never restarts the walk.
     """
 
+    ctx = view_context if view_context is not None else QueryViewContext()
     tree = selected.memory_tree
     if tree is None:
         return _refused_read(
@@ -399,7 +404,11 @@ def _marks_view(
     if isinstance(start, str):
         return _refused_read(request.view, repository_id, "bad_continuation", start)
     memory_root = Path(request.memory_root)
-    source = _observed_source_or_none(request, workspace_root)
+    source = (
+        _observed_source_or_none(request, ctx.workspace_root)
+        if ctx.repositories is None
+        else _observed_source_or_none(request, ctx.workspace_root, repositories=ctx.repositories)
+    )
     code_tree = _code_tree_of(source)
     try:
         selection = selection_for_dataset(
@@ -408,9 +417,13 @@ def _marks_view(
             database_path=selected.database_path,
             tree_key=tree.tree_key,
             code_tree=code_tree,
-            coordination_root=None if coordination_root is None else Path(coordination_root),
+            coordination_root=(
+                None if ctx.coordination_root is None else Path(ctx.coordination_root)
+            ),
         )
     except READ_FAILURES as error:
+        if source is not None:
+            source.close()
         return _refused_read(
             request.view,
             repository_id,
@@ -485,23 +498,28 @@ def _marks_offset(request: ReadToolRequest) -> int | str:
 def _marks_rows(request: ReadToolRequest, selection: Any) -> list[dict[str, Any]]:
     """The rows one marks view holds, before the answer's bound is applied."""
 
+    folder = request.folder or request.source_path
     if request.view == "weakness":
         return weakness_list(
             selection,
-            folder=request.source_path,
+            folder=folder,
             kind=request.weakness_kind,
             include_closed=request.include_closed,
         )
-    return dependent_list(
+    rows = dependent_list(
         selection,
-        folder=request.source_path,
+        folder=folder,
         stale_only=request.stale_only,
         stands_on=request.stands_on,
     )
+    return compact_dependent_rows(rows) if request.compact else rows
 
 
 def _observed_source_or_none(
-    request: ReadToolRequest, workspace_root: str | None
+    request: ReadToolRequest,
+    workspace_root: str | None,
+    *,
+    repositories: Mapping[str, RepositoryScope] | None = None,
 ) -> _ObservedSource | None:
     """The code source a record read assesses its links at, when one resolves.
 
@@ -510,7 +528,7 @@ def _observed_source_or_none(
     """
 
     try:
-        return _observe_source(request, workspace_root)
+        return _observe_source(request, workspace_root, repositories=repositories)
     except _NoCodeTreeError:
         return None
 
@@ -518,13 +536,7 @@ def _observed_source_or_none(
 def _code_tree_of(source: _ObservedSource | None) -> CodeTree | None:
     """The `CodeTree` a record read assesses links at, or ``None`` when nothing resolved."""
 
-    if source is None or source.repository_root is None or source.code_tree_id is None:
-        return None
-    return CodeTree(
-        Path(source.repository_root),
-        source.code_tree_id,
-        None if source.capture is None else source.capture.object_directory,
-    )
+    return code_tree_of(source)
 
 
 def _bound_record_lists(answer: dict[str, Any]) -> None:
@@ -565,6 +577,9 @@ _ADMITTED_VIEWS: Final = (
     "invariant",
     "family",
     "record",
+    "records",
+    "impact",
+    "search",
     "weakness",
     "dependent",
     "writers",
@@ -705,19 +720,8 @@ def _select(path: str, coordination_root: str | None) -> SelectedKnowledgeDatase
     )
 
 
-class _NoCodeTreeError(ValueError):
-    """A named ``repositoryRoot`` resolves no tree: it has no commit, or it is not a repository.
-
-    The read context refuses a root without a tree, so this was a raw ``ValidationError`` out of the
-    tool (carried to L01 from L02); it is now the named refusal below.
-    """
-
-    def __init__(self, repository_root: str) -> None:
-        super().__init__(
-            f"repositoryRoot {repository_root} resolves no code tree to read anchors at (it has no "
-            "commit, or it is not a Git repository); name a repository with a commit, add "
-            "codeTreeId, or omit repositoryRoot"
-        )
+_NoCodeTreeError = NoCodeTreeError
+_ObservedSource = ObservedCodeSource
 
 
 # Every way resolving and opening a selected memory tree can fail, so each handler refuses the same
@@ -742,124 +746,19 @@ def _selection_refusal(path: str, error: BaseException) -> tuple[str, str]:
     )
 
 
-@dataclass
-class _ObservedSource:
-    """The code source one read observes, and any working-tree capture it must hold until it answers.
+def _observe_source(
+    request: ReadToolRequest,
+    workspace_root: str | None,
+    *,
+    repositories: Mapping[str, RepositoryScope] | None = None,
+) -> _ObservedSource:
+    """Resolve and observe the code source one read observes."""
 
-    A capture is a scratch store holding the working tree's blobs: it has to outlive the whole read
-    (the page's anchors and currentness are observed while the answer is built) and be removed
-    afterwards, so the object that observed it owns its removal.
-    """
-
-    repository_root: str | None
-    code_tree_id: str | None
-    code_state: CodeState | None
-    capture: WorktreeCapture | None = None
-
-    def close(self) -> None:
-        if self.capture is not None:
-            self.capture.close()
-            self.capture = None
-
-
-def _observe_source(request: ReadToolRequest, workspace_root: str | None) -> _ObservedSource:
-    """Resolve the code source one read observes, capturing its working tree when it differs.
-
-    Three shapes, one rule -- the read answers at the bytes the caller sees (MIK-R73 rule 7):
-
-    * ``codeTreeId: "working-tree"`` with ``repositoryRoot``: capture that checkout and read it;
-    * a named tree and root: read exactly that tree, as before;
-    * a root alone (or the mount's workspace default): the commit when the checkout is clean, else
-      its captured working tree.
-
-    The capture is returned, not closed: the read that asked for it holds it while it observes.
-    """
-
-    named_tree = request.code_tree_id
-    root = request.repository_root
-    if named_tree == WORKING_TREE_SELECTOR:
-        target = root if root is not None else workspace_root
-        if target is None:
-            raise _NoCodeTreeError("the working-tree selector with no repository root")
-        capture = capture_worktree(Path(target))
-        return _ObservedSource(target, capture.tree_id, CODE_STATE_WORKING_TREE, capture)
-    if named_tree is not None and root is not None:
-        return _ObservedSource(root, named_tree, CODE_STATE_COMMIT)
-    if root is None:
-        if named_tree is not None or workspace_root is None:
-            return _ObservedSource(None, None, None)
-        # The mount's own default: it supplies a repository when it has one, and resolves nothing
-        # when it has none -- a workspace that is not a checkout is not a caller's mistake.
-        observed, capture = hold_observed_code_tree(Path(workspace_root))
-        if observed is None:
-            return _ObservedSource(None, None, None)
-        return _ObservedSource(workspace_root, observed.tree_id, observed.code_state, capture)
-    observed, capture = hold_observed_code_tree(Path(root))
-    if observed is None:
-        raise _NoCodeTreeError(root)
-    return _ObservedSource(root, observed.tree_id, observed.code_state, capture)
-
-
-def _source_resolution(
-    request: ReadToolRequest, workspace_root: str | None
-) -> tuple[str | None, str | None]:
-    """The source-resolution pair one read context may carry, completed rather than half-supplied.
-
-    A read resolves recorded anchors against a tree, and the shipped context model refuses a pair
-    that names only one of the two: ``repository_root`` without ``code_tree_id`` is an incomplete
-    request, not a narrower one. An ordinary caller supplies neither and still needs an answer, and
-    the mount's own default supplied the root alone -- so a schema-conformant call raised a raw
-    ``ValidationError`` out of the context constructor instead of returning a view or a typed
-    refusal.
-
-    The pair is completed here for the same reason the context refuses it: if a tree is to be named,
-    both halves of it are named. The workspace default is used only when the caller names no
-    repository at all, which is the behaviour the mount already documented; a caller that names a
-    root without a tree gets that root's own current tree, resolved from it, and a root that has none
-    is refused by name (:class:`_NoCodeTreeError`).
-    """
-
-    if request.code_tree_id is not None and request.repository_root is not None:
-        return request.repository_root, request.code_tree_id
-    root = request.repository_root
-    if root is None:
-        if request.code_tree_id is not None or workspace_root is None:
-            return None, None
-        # The mount's own default supplies a *repository*, never half a resolution request: a
-        # workspace that is not the repository a tree could be read from is not named at all,
-        # because the context model refuses a root without a tree and answering with one would
-        # replace a caller's minimal read with a refusal about the mount's configuration.
-        tree_id = _current_code_tree(workspace_root)
-        return (workspace_root, tree_id) if tree_id is not None else (None, None)
-    tree_id = _current_code_tree(root)
-    if tree_id is None:
-        raise _NoCodeTreeError(root)
-    return root, tree_id
-
-
-def _current_code_tree(repository_root: str) -> str | None:
-    """The tree id of one repository root's current commit, or ``None`` when it has no tree.
-
-    Nothing is invented when the root is not a repository, Git is absent or Git does not answer in
-    time: the context is then built with neither half, which the shipped resolver reports as "no
-    source resolution was requested" rather than as a resolution that silently failed.
-    """
-
-    try:
-        completed = subprocess.run(
-            ["git", "-C", repository_root, "rev-parse", "HEAD^{tree}"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=_GIT_TIMEOUT_SECONDS,
-            env=git_environment(),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if completed.returncode != 0:
-        return None
-    tree_id = completed.stdout.strip()
-    return tree_id if _TREE_ID_PATTERN.match(tree_id) else None
+    return observe_code_source(
+        request,
+        repositories=repositories,
+        workspace_root=workspace_root,
+    )
 
 
 def knowledge_read_payload(
@@ -868,6 +767,7 @@ def knowledge_read_payload(
     workspace_root: str | None = None,
     coordination_root: str | None = None,
     relative_locations: bool = False,
+    repositories: Mapping[str, RepositoryScope] | None = None,
 ) -> dict[str, Any]:
     """Retrieve one named view of a memory tree, through the response-model choke point.
 
@@ -885,6 +785,7 @@ def knowledge_read_payload(
         workspace_root=workspace_root,
         coordination_root=coordination_root,
         relative_locations=relative_locations,
+        repositories=repositories,
     )
     if body["state"] == "refused":
         # MIK-R02 rule 1: a refusal states the threshold too (a page states it in page).
@@ -975,6 +876,7 @@ def _read_result(
     workspace_root: str | None = None,
     coordination_root: str | None = None,
     relative_locations: bool = False,
+    repositories: Mapping[str, RepositoryScope] | None = None,
 ) -> tuple[dict[str, Any], SelectedKnowledgeDataset | None, NameResolver | None]:
     """The one ``knowledge_read`` body with the selection that read it.
 
@@ -1012,17 +914,14 @@ def _read_result(
             # same moved-selection refusal as the projection seam: no
             # mixed epoch is ever bound to rows.
             raise SelectionMovedError(before_commit, provenance.commit)
-        if view in ("record", "weakness", "dependent", "writers"):
-            # One record with its links, their states and its history; the listings of the two
-            # record kinds; and the table of how each writer did.
+        if view in ("record", "weakness", "dependent", "writers", *QUERY_VIEWS):
+            view_context = QueryViewContext(
+                repositories=repositories,
+                workspace_root=workspace_root,
+                coordination_root=coordination_root,
+            )
             return (
-                _one_view(
-                    request,
-                    selected,
-                    repository_id,
-                    workspace_root=workspace_root,
-                    coordination_root=coordination_root,
-                ),
+                _one_view(request, selected, repository_id, view_context=view_context),
                 selected,
                 None,
             )
@@ -1030,13 +929,21 @@ def _read_result(
         if seed_refusal is not None:
             return (_refused_read(view, repository_id, *seed_refusal), None, None)
         request = seeded
-        source = _observe_source(request, workspace_root)
+        paired_code_root = resolve_paired_code_root(
+            request,
+            context=PairingContext(repositories=repositories, workspace_root=workspace_root),
+        )
+        source = (
+            _ObservedSource(paired_code_root, None, None)
+            if request.continuation is not None
+            else _observe_source(request, workspace_root, repositories=repositories)
+        )
         try:
             context = open_read_context(
                 selected.database_path,
                 repository_id,
                 repository_root=None
-                if source.repository_root is None
+                if source.code_tree_id is None or source.repository_root is None
                 else Path(source.repository_root),
                 code_tree_id=source.code_tree_id,
                 code_state=source.code_state,
@@ -1047,7 +954,14 @@ def _read_result(
                 selected,
                 context,
                 extras=_tree_extras(selected),
-                scope=TreeReadScope(workspace_root=workspace_root, provenance=provenance),
+                scope=TreeReadScope(
+                    workspace_root=workspace_root,
+                    provenance=provenance,
+                    object_directory=(
+                        None if source.capture is None else source.capture.object_directory
+                    ),
+                    paired_code_root=paired_code_root,
+                ),
             )
         finally:
             # The captured blobs are readable through the whole read and removed with it.

@@ -378,7 +378,10 @@ def _block_policy(seeds: Sequence[object]) -> str:
 
 def _code_tree(selection: PublishedIntentSelection) -> CodeTree | None:
     pair = selection.source_pair
-    return None if pair is None else CodeTree(pair.repository_root, pair.code_tree_id)
+    if pair is None:
+        return None
+    object_directory = None if pair.capture is None else pair.capture.object_directory
+    return CodeTree(pair.repository_root, pair.code_tree_id, object_directory)
 
 
 def _candidates(blocks: list[dict[str, Any] | PreparedScope | PreparedLeaf]) -> list[Any]:
@@ -456,11 +459,17 @@ def _open_context(
 ) -> KnowledgeReadContext | PublishedIntentUnavailable:
     pair = selection.source_pair
     try:
+        code_state = (
+            None
+            if pair is None
+            else ("working-tree" if pair.code_state == "working-tree" else "commit")
+        )
         return open_read_context(
             selection.database_path,
             selection.repository_id,
             repository_root=None if pair is None else pair.repository_root,
             code_tree_id=None if pair is None else pair.code_tree_id,
+            code_state=code_state,
         )
     except _PUBLICATION_FAILURES as error:
         return _unusable(

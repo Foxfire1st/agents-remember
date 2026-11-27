@@ -196,6 +196,7 @@ def prepare_scope(
         policy_version=SCOPE_POLICY_VERSION,
         manifest_digest=selected.manifest_digest,
         code_tree_id=request.context.code_tree_id,
+        code_state=request.context.code_state,
         index_state=request.tree.index_state,
     )
     resume = request.resume

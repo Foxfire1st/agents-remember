@@ -89,6 +89,7 @@ def _dataset(path: Path) -> bytes:
             "ix_history_row",
             "ix_revision",
             "ix_uuid",
+            "ix_fts",
         ):
             connection.execute(f"DROP TABLE {table}")
     finally:

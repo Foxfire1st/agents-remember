@@ -26,7 +26,9 @@ from typing import Final
 # v3 (MIK-R74): history rows are keyed by (path, id), so two files may hold one row ID.
 # v2 (MIK-R25): projected revision rows carry the store's own payload seal, so an index built by v1
 # (whose seals the store's revision readers refuse) is rebuilt rather than reused.
-INDEX_FORMAT: Final = "ar-knowledge-index/v7"
+# v8: ``ix_fts`` virtual table (FTS5, porter unicode61) indexes live records' title, statement,
+# conditions and applicability deterministically for keyword search.
+INDEX_FORMAT: Final = "ar-knowledge-index/v8"
 
 INDEX_DDL: Final[tuple[str, ...]] = (
     """
@@ -123,4 +125,15 @@ CREATE TABLE ix_revision (
     "CREATE INDEX ix_link_source ON ix_link (source)",
     "CREATE INDEX ix_history_subject ON ix_history_row (subject)",
     "CREATE INDEX ix_history_owner ON ix_history_row (owner)",
+    """
+CREATE VIRTUAL TABLE ix_fts USING fts5(
+  record_id UNINDEXED,
+  kind UNINDEXED,
+  title,
+  statement,
+  conditions,
+  applicability,
+  tokenize='porter unicode61'
+)
+""",
 )

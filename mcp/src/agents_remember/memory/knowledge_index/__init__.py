@@ -27,6 +27,11 @@ from agents_remember.memory.knowledge_index.cache import (
     default_cache_directory,
     open_cached_index,
 )
+from agents_remember.memory.knowledge_index.fts import (
+    ALLOWED_SEARCH_KINDS,
+    DEFAULT_SEARCH_KINDS,
+    FtsHit,
+)
 from agents_remember.memory.knowledge_index.projection import (
     INDEX_AUTHORITY_HOME,
     INDEX_REPOSITORY_ID,
@@ -58,6 +63,8 @@ from agents_remember.memory.knowledge_index.tree import (
 )
 
 __all__ = [
+    "ALLOWED_SEARCH_KINDS",
+    "DEFAULT_SEARCH_KINDS",
     "INDEX_AUTHORITY_HOME",
     "INDEX_FORMAT",
     "INDEX_REPOSITORY_ID",
@@ -67,6 +74,7 @@ __all__ = [
     "EntriesAtPath",
     "Entry",
     "FamilyKnowledge",
+    "FtsHit",
     "HistoryRow",
     "IndexMismatchError",
     "IndexState",
