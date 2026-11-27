@@ -200,7 +200,7 @@ carryover.
 
 | Tool | Purpose | Main arguments |
 | --- | --- | --- |
-| `knowledge_read` | Name one view of a memory snapshot (`source_context`, `invariant`, `family`, `record`, `weakness`, `dependent`, `writers`). Paged record rows hold the text ID, kind, state and memory-checkout location. Open the named files for record text. The short answer of `read_ar_files` carries a source file's rules. The `writers` view returns bounded aggregates by role, harness and model, with revision counts and the path to the complete report. | `memoryRoot`, `view`, `limit=32`, `continuation`, the seed of the view (`sourcePath`, `invariantRevisionId`, `familyRevisionId`, `recordId`), filters `weaknessKind`, `includeClosed`, `staleOnly`, `standsOn` |
+| `knowledge_read` | Name one view of a memory snapshot (`source_context`, `invariant`, `family`, `record`, `weakness`, `dependent`, `writers`, `consolidation_proposal`). Paged record rows hold the text ID, kind, state and memory-checkout location. Open the named files for record text. The short answer of `read_ar_files` carries a source file's rules. The `writers` view returns bounded aggregates by role, harness and model, with revision counts and the path to the complete report. | `memoryRoot`, `view`, `limit=32`, `continuation`, the seed of the view (`sourcePath`, `invariantRevisionId`, `familyRevisionId`, `recordId`, `masterId`), filters `weaknessKind`, `includeClosed`, `staleOnly`, `standsOn` |
 | `knowledge_write` | Plan or write the [hand-off list](../concepts.md#hand-off-list) that a Curator gives it, through the one writer of knowledge files, which `agents-remember knowledge-ingest` and `agents-remember knowledge-bootstrap` also use. Without `commit` it plans and validates; with it, writes knowledge files and makes no Git commit. The answer names the whole report and all refusals, and its `notes` say what the write took but the caller should know, for example a revised invariant that has no title. When `state` is `refused`, `notes` also carries a `See skill://.../reference/curator/publication-report.md#read-the-ingest-report-before-claiming-publication.` pointer; an `invalid-input` refusal appends `See skill://.../reference/refused-write.md.` to `refusalDetail`. | `contractPath`, `handoff` + `handoffName` or `handoffPath`, `authorizationRef`, `commit=false`; for a [foundation wave](../concepts.md#knowledge-foundation), a write that belongs to no task, `repoId` + `wave`; for a crossing, a master's crossing sync or structural merge that parked before its merge commit and opened a history file, the master's `contractPath` + `crossing` |
 | `knowledge_diff` | Name the changed records of two memory trees beside a caller-readable report holding the whole comparison: the two trees, counts by kind, changed records, report location. | `memoryRoot`, `beforeRevision="HEAD"`, `afterRevision`, `recordId`, `path` |
 | `knowledge_integrity_check` | Validate a memory tree: `validation.ok`, refusal/report counts, rule counts and bounded violations. With `contractPath`, use the task's code and memory worktrees and return its latest persisted worklist; no semantic judgment is inferred. | `memoryRoot`, `codeRoot`, `baseCommits`, or a task's `contractPath` |
@@ -228,7 +228,30 @@ such as an earlier revision of a record written before stamps existed, counts un
 `unknown`. The answer holds at most 20 rows, most revisions written first, with the totals of
 writers, revisions and records. Its `report` names a file that holds every row and, for each
 number, the revisions behind it as `<record>@<revision>` (`<record>@<first>..<last>` for a run of
-revisions that no file names). The columns of a Consolidator come with that role.
+revisions that no file names). Five more columns count a Consolidator's work, per writer of the
+revision that a [consolidation task](../roles.md#a-consolidation-task) read:
+`consolidationKept`, where that revision reads consolidated without a new one, also where only its
+card entries changed; `consolidationCorrected`, where the Consolidator wrote a successor;
+`consolidationMerged`, where the record was retired and a successor names it, which a split is
+too; `consolidationRetired`, where it was retired without a successor; and
+`consolidationUnresolved`.
+
+The view `consolidation_proposal` proposes the list of a consolidation pass, in one of three ways:
+
+- `masterId` names a finished master by the id its tasks share. The
+  answer holds the families with a rule of which that master's tasks wrote a revision or changed
+  the realization or the proof, and the rules in no family of which they did so. A rule that a task
+  only read is not counted.
+- `recordId` names a family, or `sourcePath` a folder: that family, or the families with a member
+  realized under that folder.
+- With nothing named, the families in the order of their last consolidation, oldest first.
+  Families never consolidated come first, in the order in which their records were first
+  committed.
+
+Each proposed family comes with the rules in no family that are realized in the files where its
+members are realized. Naming more than one of the three is refused. The answer holds the ids and
+counts of the first families; its `report` names a file with every proposed family and its rules.
+Whoever creates the task writes the chosen list into the task document's `consolidationList`.
 
 `knowledge_write` takes `status` only as `retired`, to retire a record, and as a decision's own
 status words. It refuses an entry, or the fields of a record, whose `status` is `proposed`,
@@ -496,7 +519,10 @@ refused `review-budget-exhausted`; a further round then needs, in the review obj
 An approval before the bound is refused `review-admission-invalid`. `reviewKind: "memory"`
 selects the separate sequence of memory reviews; the default is `code`.
 `record_review` takes `{verdict, findings:[{findingId, description}]}` first,
-then `remainingFindingIds:[...]`; successors only shrink the sealed set. A finding that a
+then `remainingFindingIds:[...]`; successors only shrink the sealed set. For
+`reviewKind: "memory"`, pass `candidateTree` (the 40-character hex Git tree of the
+checked memory candidate) and `verdictRef` (task-relative verdict path) so closeout
+can match the memory tree and record the review fact in `knowledge/history/`. A finding that a
 sanctioned route adds after sealing is recorded instead as
 `{verdict:"block", addedFindings:[{findingId, description, route}]}`, `route` being one of
 `curator`, `advisory` and `final-check`: that round adds the finding to the sealed list and
@@ -588,7 +614,7 @@ section describes the tools.
 | Tool | Purpose | Main arguments |
 | --- | --- | --- |
 | `role_start` | Start one role agent for one selection of task documents. A role agent that calls it becomes the parent of the role agent it starts. Repeating `request_id` reconciles the same role agent and never starts a second. | `role`, `request_id`, the document references that the role requires (`sprint_document_ref`, `master_document_ref`, `task_document_ref`), optional `agent`, `model`, `effort`, `feature_values`, `step_up`, `replaces_agent_id`, `replaces_interrupt_turn=false` |
-| `role_start_set` | Start the Worker, the Reviewer and the Curator of one task in one call. Only the Manager of the task's master can call it. The Worker opens; the Reviewer and the Curator are held, unless `reviewer_message` opens the Reviewer. Repeating `request_id` reconciles the same three role agents and opens no held role agent. The tool does not prescribe the order in which the instructions of the roles start the stages. | `request_id`, the three document references, optional `reviewer_message`, the choices for each role in `worker` / `reviewer` / `curator`, `replaces`, `replaces_interrupt_turn=false` |
+| `role_start_set` | Start the role agents of one task in one call: the Worker, the Reviewer and the Curator, or, for a [consolidation task](../roles.md#a-consolidation-task), the Consolidator and the Reviewer (no Worker and no Curator; the task document's `consolidationList` decides). Only the Manager of the task's master can call it. The Worker or the Consolidator opens; the Reviewer (and, on an ordinary task, the Curator) is held, unless `reviewer_message` opens the Reviewer. Repeating `request_id` reconciles the same role agents and opens no held role agent. The tool does not prescribe the order in which the instructions of the roles start the stages. | `request_id`, the three document references, optional `reviewer_message`, the choices for each role in `worker` / `consolidator` / `reviewer` / `curator`, `replaces`, `replaces_interrupt_turn=false` |
 | `user_settings_init` | Preview or create the user settings file with one harness for all roles or a harness for each named role. An existing file is read and never overwritten. The target `host-authority` is refused, because the preparation of the host writes the `paseoRuntime` block. | `target` (required; use `"role-settings"`), optional `harness` or `roles`, `dry_run=false` |
 | `role_message` | Send one text message to one role agent; with `wait`, return its reply. | `text`, `agent_id` or `role` with the document references, optional `body`, `attach`, `wait=false`, `timeout_seconds=300`, `withdraw_held_message_id` |
 | `retire_child` | Archive a role agent by ID within the caller's scope and record the retirement. | `agent_id`, `role`, optional `sprint_document_ref`, `master_document_ref`, `task_document_ref`, `reason`, `interrupt_turn=false` |
@@ -603,11 +629,12 @@ that `user_settings_init` creates.
 
 A role agent starts only the roles that its own role allows:
 
-- An Architect starts an Investigator, an Orchestrator, a Manager, a Worker, a Reviewer or a
-  Curator.
-- An Orchestrator starts a Manager, a Worker, a Reviewer, a Curator or an Investigator, each
-  under its own sprint.
-- A Manager starts a Worker, a Reviewer, a Curator or an Investigator, each under its own master.
+- An Architect starts an Investigator, an Orchestrator, a Manager, a Worker, a Consolidator, a
+  Reviewer or a Curator.
+- An Orchestrator starts a Manager, a Worker, a Consolidator, a Reviewer, a Curator or an
+  Investigator, each under its own sprint.
+- A Manager starts a Worker, a Consolidator, a Reviewer, a Curator or an Investigator, each under its
+  own master.
 
 A start of another role is refused `role-may-not-start-role`. A selection outside the caller's
 own sprint or master is refused `selection-outside-callers-scope`.
@@ -618,8 +645,8 @@ it starts has no parent, and such a call cannot replace a role agent.
 
 Each role takes one selection of task documents. An Architect and a Bootstrap name no document.
 An Orchestrator names a sprint. A Manager names a master, and its sprint when a sprint commands
-that master. A Worker, a Reviewer and a Curator name a master and a task, and the master's sprint
-when a sprint commands it. An Investigator names no document, a sprint, a master, or a sprint and a
+that master. A Worker, a Consolidator, a Reviewer and a Curator name a master and a task, and the
+master's sprint when a sprint commands it. An Investigator names no document, a sprint, a master, or a sprint and a
 master, and never a task. A master that no sprint commands is named alone; a sprint named for such
 a master is refused, and the refusal says that the master stands on its own. One selection carries
 at most eight Investigators that are not closed; a further start is refused
@@ -640,7 +667,7 @@ retired nor closing can restart on a repeat of its `request_id`.
 
 ### What a start on a task prepares
 
-A start of a Worker, a Reviewer or a Curator prepares the task's enclosure itself: the code
+A start of a Worker, a Consolidator, a Reviewer or a Curator prepares the task's enclosure itself: the code
 worktree, the memory worktree and the task's workspace in the host. No other call has to come
 first. The whole result says in `preparation` whether the enclosure and the workspace were
 created or found. When the start cannot prepare them, it is refused with the reason and the next

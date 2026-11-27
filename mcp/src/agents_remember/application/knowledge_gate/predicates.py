@@ -30,6 +30,9 @@ satisfied. An item whose kind has no predicate is open: nothing that cannot be d
 * ``touched_record`` -- :func:`record_row_open`: the leaf's ``record`` row at the candidate
   revision with the disposition the change takes (MIK-R53 rule 8).
 * ``planned_untouched`` -- :func:`planned_item_open`.
+* ``consolidation_target`` -- :func:`.consolidation.consolidation_target_open`: the subject's row at
+  its current revision. A ``stands`` or ``unresolved`` row answers today's invariant and family
+  items only where :func:`.consolidation.new_disposition_reason` admits it.
 * ``reconsideration_candidate`` -- :func:`reconsideration_item_open`: an unanswered candidate
   blocks closeout (D29).
 
@@ -53,6 +56,11 @@ from agents_remember.application.knowledge_currentness.observe import (
 )
 from agents_remember.application.knowledge_worklist.classify import COVERING_CLASSES
 from agents_remember.application.knowledge_worklist.code import CodeReadError
+from agents_remember.application.knowledge_worklist.consolidation import (
+    CONSOLIDATION_KIND,
+    consolidation_target_open,
+    new_disposition_reason,
+)
 from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
 from agents_remember.application.knowledge_worklist.link_targets import holds_target
 from agents_remember.application.knowledge_worklist.reconsideration_gate import (
@@ -68,12 +76,16 @@ from agents_remember.models.knowledge_files.history import (
     DEFERRAL_RECORD_DISPOSITIONS,
     FamilyRow,
     HistoryFile,
+    HistoryRow,
     InvariantRow,
     MembershipRow,
     OnboardingTraceRow,
     RecordRow,
     membership_invariant,
     winning_row_closed,
+)
+from agents_remember.models.knowledge_files.history_consolidation import (
+    CONSOLIDATION_DISPOSITIONS,
 )
 from agents_remember.models.knowledge_files.history_governing_rows import (
     changed_family_row_violation,
@@ -260,13 +272,23 @@ def _not_current(row: InvariantRow, context: GateContext) -> list[str]:
     return reasons
 
 
+def _absent_or_new_disposition(
+    item: Mapping[str, Any], row: HistoryRow | None, kind: str
+) -> str | None:
+    """No row of ``kind`` about the subject, or a ``stands``/``unresolved`` row: what it answers."""
+
+    if row is None or row.row_kind != kind:
+        return f"the leaf's history file holds no {kind} row about {item.get('subject')}"
+    return new_disposition_reason(item, row)
+
+
 def invariant_row_open(item: Mapping[str, Any], context: GateContext) -> str | None:
     """Rule 2's invariant-row currentness for a ``touched_invariant`` or ``stale_invariant``."""
 
     subject = str(item.get("subject"))
     row = None if context.history is None else context.history.row_about(subject)
-    if not isinstance(row, InvariantRow):
-        return f"the leaf's history file holds no invariant row about {subject}"
+    if not isinstance(row, InvariantRow) or row.disposition in CONSOLIDATION_DISPOSITIONS:
+        return _absent_or_new_disposition(item, row, "invariant")
     missing = sorted(required_covers(item) - {cover.id for cover in row.covers})
     revision = context.candidate.revision(subject)
     record = (item.get("facts") or {}).get("record") or {}
@@ -307,8 +329,8 @@ def family_row_open(item: Mapping[str, Any], context: GateContext) -> str | None
 
     subject = str(item.get("subject"))
     row = None if context.history is None else context.history.row_about(subject)
-    if not isinstance(row, FamilyRow):
-        return f"the leaf's history file holds no family row about {subject}"
+    if not isinstance(row, FamilyRow) or row.disposition in CONSOLIDATION_DISPOSITIONS:
+        return _absent_or_new_disposition(item, row, "family")
     revision = context.candidate.revision(subject)
     if row.revision is not None and row.revision != revision:
         return (
@@ -589,6 +611,7 @@ register_gate_predicate("onboarding_trace", onboarding_row_open)
 register_gate_predicate("unexplained_hunk", unexplained_row_open)
 register_gate_predicate("unexplained_file", unexplained_row_open)
 register_gate_predicate("planned_untouched", _by_rows(planned_item_open))
+register_gate_predicate(CONSOLIDATION_KIND, consolidation_target_open)
 
 
 def reconsideration_row_open(item: Mapping[str, Any], context: GateContext) -> str | None:

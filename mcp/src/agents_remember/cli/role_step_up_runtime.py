@@ -26,6 +26,7 @@ from agents_remember.cli.role_instructions import launch_choice_metadata
 from agents_remember.cli.role_launch_receipts import _read_receipt, _receipt_path
 from agents_remember.cli.role_step_up import LAUNCH_FIELDS, select_step_up
 from agents_remember.cli.role_step_up_decisions import recorded_step_up
+from agents_remember.kernel._agentic_settings_core import STEP_UP_COUNTED_ROLES
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_identity import TASKLESS_ROLES
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
@@ -57,7 +58,7 @@ def selected_defaults(
     unreadable = (
         document.review_read_error
         or review_count_unavailable(role_review_state(document, context.role))
-        if document is not None and context.role in {"worker", "curator"} and defaults.get("stepUp")
+        if document is not None and context.role in STEP_UP_COUNTED_ROLES and defaults.get("stepUp")
         else None
     )
     selected = select_step_up(

@@ -6,6 +6,9 @@ It reads the leaf's latest history file in that commit instead: a closed file wi
 fact means no passed memory review was recorded when the leaf landed, so the revisions it wrote
 stay proposed. A commit without the owner's history file, or one whose file is
 open or unreadable, is no claim either way and gives no sentence.
+
+A consolidation task's history file names the records its pass's list reached
+(``consolidationSubjects``); without a pass the sentence adds that nothing was consolidated.
 """
 
 from __future__ import annotations
@@ -21,7 +24,10 @@ from agents_remember.kernel.git_command import (
 )
 from agents_remember.models.knowledge_files.documents import KNOWLEDGE_ROOT, owner_history_attempt
 from agents_remember.worktrees.memory_verdict_ref import unmapped_verdict_ref_note
-from agents_remember.worktrees.review_fact_source import NO_PASS_SENTENCE
+from agents_remember.worktrees.review_fact_source import (
+    NO_PASS_SENTENCE,
+    NOTHING_CONSOLIDATED_SENTENCE,
+)
 from agents_remember.worktrees.role_reports import is_collected_report_ref
 
 _HISTORY_DIRECTORY = f"{KNOWLEDGE_ROOT}/history"
@@ -42,9 +48,15 @@ def committed_review_note(repository: Path, commit: str, owner: str) -> str:
     if not attempts:
         return ""
     text = _git(repository, ["show", f"{commit}:{_HISTORY_DIRECTORY}/{attempts[max(attempts)]}"])
+    return closed_history_review_note(text)
+
+
+def closed_history_review_note(text: str | bytes | None) -> str:
+    """The sentence for one history file's text: none unless it is closed without a review fact."""
+
     try:
         document = json.loads(text) if text is not None else None
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return ""
     if not isinstance(document, dict) or document.get("closed") is not True:
         return ""
@@ -53,6 +65,8 @@ def committed_review_note(repository: Path, commit: str, owner: str) -> str:
 
 def _history_review_note(document: dict[str, object]) -> str:
     if "review" not in document:
+        if document.get("consolidationSubjects"):
+            return f"{NO_PASS_SENTENCE} {NOTHING_CONSOLIDATED_SENTENCE}"
         return NO_PASS_SENTENCE
     review = document["review"]
     verdict_ref = review.get("verdictRef") if isinstance(review, dict) else None

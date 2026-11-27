@@ -44,6 +44,7 @@ from agents_remember.models.knowledge_files.history_product import record_conten
 from agents_remember.models.knowledge_files.record_state import UNRESOLVED, RevisionStates
 from agents_remember.models.knowledge_files.writer_stamp import WriterStamp
 from knowledge_review_fact_test_support import (
+    consolidating,
     history_document,
     review_fact,
     stamp,
@@ -302,10 +303,13 @@ def _both_views(root: Path, files: dict[str, dict[str, Any]]) -> tuple[str | Non
 
 
 _EARLY, _LATE = "261112-FIX-L0", "261112-FIX-L9"
-_KEEP = history_document(
-    "261112-FIX-L5",
-    rows=(_no_impact_row(RULE, 2),),
-    review=review_fact("261112-FIX-L5", handed_over_by="consolidator"),
+_KEEP = consolidating(
+    history_document(
+        "261112-FIX-L5",
+        rows=(_no_impact_row(RULE, 2),),
+        review=review_fact("261112-FIX-L5", handed_over_by="consolidator"),
+    ),
+    RULE,
 )
 
 
@@ -549,10 +553,13 @@ def test_a_revision_a_consolidator_wrote_reads_consolidated(tmp_path: Path) -> N
 
 def test_a_revision_a_consolidator_read_and_kept_reads_consolidated(tmp_path: Path) -> None:
     wrote = history_document(LEAF, written_rows=(written(RULE, 1, LEAF),), review=review_fact(LEAF))
-    kept = history_document(
-        CONSOLIDATING_LEAF,
-        rows=(_no_impact_row(RULE, 1),),
-        review=review_fact(CONSOLIDATING_LEAF, handed_over_by="consolidator"),
+    kept = consolidating(
+        history_document(
+            CONSOLIDATING_LEAF,
+            rows=(_no_impact_row(RULE, 1),),
+            review=review_fact(CONSOLIDATING_LEAF, handed_over_by="consolidator"),
+        ),
+        RULE,
     )
     record = _invariant(RULE, 1, writer=stamp(LEAF))
 
@@ -579,10 +586,13 @@ def test_two_writers_of_identical_content_do_not_make_a_keep_ambiguous(tmp_path:
 def test_a_consolidator_row_about_an_older_revision_keeps_no_newer_one(tmp_path: Path) -> None:
     """A row names the revision it read; the record's newer revision is not consolidated by it."""
 
-    kept = history_document(
-        CONSOLIDATING_LEAF,
-        rows=(_no_impact_row(RULE, 1),),
-        review=review_fact(CONSOLIDATING_LEAF, handed_over_by="consolidator"),
+    kept = consolidating(
+        history_document(
+            CONSOLIDATING_LEAF,
+            rows=(_no_impact_row(RULE, 1),),
+            review=review_fact(CONSOLIDATING_LEAF, handed_over_by="consolidator"),
+        ),
+        RULE,
     )
     later = history_document(LATER_LEAF, written_rows=(written(RULE, 2, LATER_LEAF),))
     files = _files(_invariant(RULE, 2, writer=stamp(LATER_LEAF)), kept, later)
@@ -675,17 +685,19 @@ def test_an_unconverted_and_a_converted_record_are_read_side_by_side(tmp_path: P
 def test_an_unresolved_consolidator_row_keeps_no_revision() -> None:
     """A row a consolidator could not judge consolidates nothing; the revision keeps its state.
 
-    No row kind admits the ``unresolved`` disposition until the consolidator role brings it, so
-    the row is placed on a parsed file by copy and read through the model the index uses.
+    The row is placed on a parsed file by copy and read through the model the index uses.
     """
 
     _path, wrote = history_document(
         LEAF, written_rows=(written(RULE, 1, LEAF),), review=review_fact(LEAF)
     )
-    _path, kept = history_document(
-        CONSOLIDATING_LEAF,
-        rows=(_no_impact_row(RULE, 1),),
-        review=review_fact(CONSOLIDATING_LEAF, handed_over_by="consolidator"),
+    _path, kept = consolidating(
+        history_document(
+            CONSOLIDATING_LEAF,
+            rows=(_no_impact_row(RULE, 1),),
+            review=review_fact(CONSOLIDATING_LEAF, handed_over_by="consolidator"),
+        ),
+        RULE,
     )
     keeping = HistoryFile.model_validate(kept)
     unresolved = keeping.model_copy(
@@ -736,8 +748,11 @@ def test_a_fact_on_an_open_history_makes_nothing_reviewed_or_consolidated(tmp_pa
     assert _state(tmp_path / "wrote-open", _files(rewritten, _opened(wrote_it))) == "proposed"
     assert _state(tmp_path / "wrote-closed", _files(rewritten, wrote_it)) == "consolidated"
 
-    kept = history_document(
-        CONSOLIDATING_LEAF, rows=(_no_impact_row(RULE, 1),), review=consolidator_fact
+    kept = consolidating(
+        history_document(
+            CONSOLIDATING_LEAF, rows=(_no_impact_row(RULE, 1),), review=consolidator_fact
+        ),
+        RULE,
     )
     assert _state(tmp_path / "kept-open", _files(record, reviewed, _opened(kept))) == "reviewed"
     assert _state(tmp_path / "kept-closed", _files(record, reviewed, kept)) == "consolidated"
@@ -772,14 +787,20 @@ def _judgment(subject: str, disposition: str, **fields: Any) -> dict[str, Any]:
 
 
 _KEEPING_ROWS = {
+    "rule stands": _judgment(
+        RULE, "stands", covers=[], testsRun=[{"test": "t.py::a", "result": "passed"}]
+    ),
     "rule no_impact": _judgment(RULE, "no_impact", covers=[]),
     "rule moved": _judgment(RULE, "moved", covers=[_covered("RLZ-0QYX992Q")]),
     "rule extended": _judgment(RULE, "extended", covers=[_covered("RLZ-0QYX992Q", added=True)]),
     "family no_impact": _judgment(FAMILY, "no_impact", examined=[]),
     "family rerouted": _judgment(FAMILY, "rerouted", examined=[]),
     "family assigned": _judgment(FAMILY, "assigned", examined=[]),
+    "family stands": _judgment(FAMILY, "stands", examined=[]),
 }
 _NON_KEEPING_ROWS = {
+    "rule unresolved": _judgment(RULE, "unresolved", covers=[], noProofRecorded=True),
+    "family unresolved": _judgment(FAMILY, "unresolved", examined=[]),
     "rule changed": _judgment(RULE, "changed", covers=[], effect="strengthen"),
     "rule deleted": _judgment(RULE, "deleted", covers=[], effect="retire"),
     "family changed": _judgment(FAMILY, "changed", examined=[], effect="strengthen"),
@@ -795,12 +816,15 @@ def _state_beside_a_consolidator_row(row: dict[str, Any]) -> str | None:
     _path, wrote = history_document(
         LEAF, written_rows=(written(record, 1, LEAF),), review=review_fact(LEAF)
     )
-    _path, consolidating = history_document(
-        CONSOLIDATING_LEAF,
-        rows=(row,),
-        review=review_fact(CONSOLIDATING_LEAF, handed_over_by="consolidator"),
+    _path, pass_file = consolidating(
+        history_document(
+            CONSOLIDATING_LEAF,
+            rows=(row,),
+            review=review_fact(CONSOLIDATING_LEAF, handed_over_by="consolidator"),
+        ),
+        record,
     )
-    histories = (HistoryFile.model_validate(wrote), HistoryFile.model_validate(consolidating))
+    histories = (HistoryFile.model_validate(wrote), HistoryFile.model_validate(pass_file))
     writer = WriterStamp.model_validate(stamp(LEAF))
     return RevisionStates.of(histories).state_of(record, 1, retired=False, writer=writer)
 

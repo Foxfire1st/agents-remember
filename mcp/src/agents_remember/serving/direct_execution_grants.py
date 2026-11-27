@@ -49,9 +49,6 @@ from agents_remember.worktrees.integration.lifecycle.observation.projection impo
 )
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
-#: The seat roles whose presence proves a leaf started (same set as the census).
-_LEAF_SEAT_ROLES = frozenset({"worker", "reviewer", "curator"})
-
 #: What remains possible after a started-leaf refusal (same as the architect route).
 _STARTED_REMAINDER = "Finish the leaf as it is, or abandon it and plan a new one"
 

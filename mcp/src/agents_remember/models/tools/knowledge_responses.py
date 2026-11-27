@@ -143,6 +143,9 @@ class KnowledgeReadResponse(ToolResponse):
     rows: list[dict[str, Any]] | None = None
     counts: dict[str, Any] | None = None
     readOn: dict[str, Any] | None = None
+    # The `consolidation_proposal` view: the way the read chose, the subject it named, and the
+    # rules in no family that way proposes beside its family rows.
+    proposal: dict[str, Any] | None = None
 
 
 class KnowledgeDiffResponse(ToolResponse):

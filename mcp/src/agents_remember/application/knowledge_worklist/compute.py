@@ -26,7 +26,9 @@ landed inventory owner measures it (:func:`git_rename_inference`, ICR-R08), then
    (:mod:`.unexplained`), with its path's coverage. Its items join step 5's sort; the planning marks
    do not apply to them.
 8. evaluates every K_B decision's ``reconsider_on`` links (MIK-R14, :mod:`.reconsideration`) and
-   raises a ``reconsideration_candidate`` for each alternative whose linked target changed.
+   raises a ``reconsideration_candidate`` for each alternative whose linked target changed;
+9. raises a consolidation task's list items and marks today's items of listed subjects
+   (:mod:`.consolidation`).
 
 An input that cannot be read makes the run ``incomplete`` naming it, with no items (rule 4);
 nothing is a verdict (Exclusions).
@@ -54,6 +56,10 @@ from agents_remember.application.knowledge_worklist.classify import (
 from agents_remember.application.knowledge_worklist.code import (
     CodeReadError,
     CodeTrees,
+)
+from agents_remember.application.knowledge_worklist.consolidation import (
+    Listing,
+    consolidation_pass,
 )
 from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
 from agents_remember.application.knowledge_worklist.link_targets import link_target_items
@@ -170,6 +176,8 @@ class WorklistInputs:
     """K_B's onboarding routes and census statuses (MIK-R10 coverage); ``None``: every route pending."""
     coordination_root: Path | None = None
     """Where requirement endpoints' owning tasks live (MIK-R14); ``None`` resolves none."""
+    consolidation: Listing | None = None
+    """A consolidation task's list of its pass; ``None`` for every other task."""
 
 
 def worklist_digest(state: str, items: Iterable[Mapping[str, Any]], missing: Any) -> str:
@@ -302,6 +310,11 @@ class _Run:
                     )
                 ),
             ],
+            key=lambda item: (item["kind"], item["subject"]),
+        )
+        listed = consolidation_pass(inputs.consolidation, inputs.base, inputs.candidate)
+        rendered = sorted(
+            [*(listed.mark(item) for item in rendered), *listed.items],
             key=lambda item: (item["kind"], item["subject"]),
         )
         rendered = [

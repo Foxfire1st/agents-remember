@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from agents_remember.models.knowledge_files.canonical import canonical_text
+from agents_remember.models.knowledge_files.documents import history_path, record_path
 from agents_remember.serving.projections.snapshots_impl._task_documents import (
     _SUMMARY_HEADER_NOTES,
     _SUMMARY_REVIEW_FINDINGS,
@@ -18,6 +20,7 @@ from agents_remember.serving.projections.snapshots_impl._task_documents import (
 )
 from agents_remember.tasks import write_task_doc
 from agents_remember.tasks.document import TaskDocument
+from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 
 REPO = "repo-a"
 NOW = datetime(2026, 10, 11, tzinfo=UTC)
@@ -177,6 +180,7 @@ class TaskPageSkeletonProjectionTests(unittest.TestCase):
 
     def test_documents_without_review_state_project_none(self) -> None:
         self.assertIsNone(self.nodes["SPRINT"].reviewState)
+        self.assertIsNone(self.nodes["TASK-L1"].consolidation)
         self.assertIsNone(self.nodes["MASTER-A"].reviewState)
 
     def test_body_revision_changes_with_each_displayed_field(self) -> None:
@@ -358,6 +362,173 @@ class TaskPageSkeletonProjectionTests(unittest.TestCase):
                 self.assertEqual(summary.completedAt, expected)
                 self.assertEqual(body.completedAt, expected)
                 self.assertEqual((root / "task.json").read_bytes(), before)
+
+
+CONSOLIDATION_LEAF = "261126-SIM-L1"
+FAMILY = "FAM-2M8HXR"
+FAMILY_MEMBERS = ["INV-7K3F9Q", "INV-ZZZZZZ", "INV-0QYX99"]
+
+
+def _cover() -> dict[str, Any]:
+    def anchor(content: str, blob: str) -> dict[str, Any]:
+        return {
+            "path": "mcp/src/module.py",
+            "locator": {"kind": "symbol", "name": "rule"},
+            "blob": blob * 40,
+            "content": "sha256:" + content * 64,
+        }
+
+    return {"id": "RLZ-0QYX992Q", "before": anchor("a", "0"), "after": anchor("b", "1")}
+
+
+def _rule_row(row_id: str, subject: str, disposition: str, reason: str) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "id": row_id,
+        "subject": subject,
+        "disposition": disposition,
+        "reason": reason,
+        "items": [],
+        "covers": [_cover()],
+        "revision": 2,
+    }
+    if disposition == "extended":
+        row["covers"] = [{**_cover(), "before": "absent"}]
+    return row
+
+
+class ConsolidationProjectionTests(unittest.TestCase):
+    """The list of a consolidation pass on its task page, counted from the task's history."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.coord = Path(self._dir.name)
+        self.memory = self.coord / "memory-worktree"
+        self.task_root = self.coord / "tasks" / REPO / "master"
+        self.contract = self.task_root / "enclosures" / "sim-l1" / "series-contract.md"
+        self.contract.parent.mkdir(parents=True)
+        write_contract(
+            self.contract,
+            WorktreeContract(
+                task_id="master",
+                task_name="master",
+                repo_name=REPO,
+                workflow_kind="light-task",
+                memory_mode="external",
+                coordination_root=self.coord,
+                task_root=self.task_root,
+                contract_path=self.contract,
+                task_artifact=self.task_root / "task.md",
+                worktree_group=self.coord,
+                code_repo_path=self.coord / "code",
+                code_source_branch="master",
+                code_work_branch="work",
+                code_base_commit="0" * 40,
+                code_worktree=self.coord / "code-worktree",
+                memory_repo_path=self.coord / "memory",
+                memory_source_branch="master",
+                memory_work_branch="work",
+                memory_base_commit="1" * 40,
+                memory_worktree=self.memory,
+                ledger_path=self.memory / "memory.md",
+                leaf_id=CONSOLIDATION_LEAF,
+            ),
+        )
+        self.doc_path, _ = write_task_doc(
+            self.task_root,
+            TaskDocument.model_validate(
+                _base(
+                    CONSOLIDATION_LEAF,
+                    "subTask",
+                    slug="01_pass",
+                    seriesContractPath=str(self.contract),
+                    consolidationList={
+                        "families": [FAMILY],
+                        "rules": ["INV-1A2B3C", "INV-7K3F9Q"],
+                    },
+                )
+            ),
+        )
+
+    def _write(self, path: str, document: dict[str, Any]) -> None:
+        target = self.memory / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(canonical_text(document), encoding="utf-8")
+
+    def _write_memory(self) -> None:
+        self._write(
+            record_path("family", FAMILY, "pass-family"),
+            {
+                "schema": "ar-family/v1",
+                "id": FAMILY,
+                "origin": {"task": "261126-SIM", "leaf": "261126-SIM-L0"},
+                "revision": 1,
+                "status": "accepted",
+                "title": "A family the pass reads",
+                "guarantee": "Its members hold together.",
+                "members": FAMILY_MEMBERS,
+                "routes": ["mcp/src"],
+                "admission": "legacy-unassessed",
+            },
+        )
+        rows = [
+            {
+                "id": "ROW-9Q7K3F",
+                "subject": FAMILY,
+                "disposition": "stands",
+                "reason": "its members still give the guarantee",
+                "items": [],
+                "examined": [{"id": member, "revision": 2} for member in FAMILY_MEMBERS],
+                "revision": 1,
+            },
+            _rule_row("ROW-3F9Q7K", "INV-1A2B3C", "no_impact", "read; the text holds"),
+            _rule_row("ROW-7K3F9Q", "INV-7K3F9Q", "extended", "linked its realization"),
+            _rule_row("ROW-ZZZZZZ", "INV-ZZZZZZ", "unresolved", "the named proof fails"),
+        ]
+        self._write(
+            history_path(CONSOLIDATION_LEAF),
+            {"schema": "ar-history/v1", "leaf": CONSOLIDATION_LEAF, "closed": False, "rows": rows},
+        )
+
+    def _summary(self) -> Any:
+        return next(
+            node
+            for node in read_task_documents(self.coord, now=NOW)
+            if node.id == CONSOLIDATION_LEAF
+        )
+
+    def test_counts_each_outcome_of_the_expanded_list_and_serves_rows_in_the_body(self) -> None:
+        self._write_memory()
+        summary = self._summary().consolidation
+        body = read_task_document_body(self.coord, doc_path=str(self.doc_path), now=NOW)
+        assert summary is not None and body is not None and body.consolidation is not None
+        counts = (summary.total, summary.stands, summary.corrected, summary.unresolved)
+        self.assertEqual(counts, (5, 2, 1, 1))
+        self.assertEqual(summary.open, 1)
+        self.assertTrue(summary.memoryRead)
+        self.assertIsNone(summary.rows)
+        rows = [(row.subject, row.outcome, row.family) for row in body.consolidation.rows or []]
+        self.assertEqual(
+            rows,
+            [
+                (FAMILY, "stands", None),
+                ("INV-1A2B3C", "stands", None),
+                ("INV-7K3F9Q", "corrected", None),
+                ("INV-ZZZZZZ", "unresolved", FAMILY),
+                ("INV-0QYX99", "open", FAMILY),
+            ],
+        )
+        self.assertEqual((body.consolidation.rows or [])[3].reason, "the named proof fails")
+        self.assertEqual(self._summary().bodyRevision, body.bodyRevision)
+
+    def test_without_the_memory_the_ids_stand_as_listed_and_no_outcome_is_read(self) -> None:
+        summary = self._summary().consolidation
+        assert summary is not None
+        self.assertFalse(summary.memoryRead)
+        self.assertEqual((summary.total, summary.open), (3, 3))
+        self.assertEqual(
+            [summary.families, summary.rules], [[FAMILY], ["INV-1A2B3C", "INV-7K3F9Q"]]
+        )
 
 
 if __name__ == "__main__":

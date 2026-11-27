@@ -54,6 +54,9 @@ from agents_remember.application.knowledge_code_pairing import (
     observe_code_source,
     resolve_paired_code_root,
 )
+from agents_remember.application.knowledge_consolidation_proposal import (
+    PROPOSAL_VIEW,
+)
 from agents_remember.application.knowledge_currentness import CodeTree
 from agents_remember.application.knowledge_diff_decisions import change_counts, decision_records
 from agents_remember.application.knowledge_file_diff import (
@@ -109,11 +112,6 @@ from agents_remember.application.knowledge_write_route import (
     wave_write_report,
 )
 from agents_remember.application.knowledge_writer import WriteReport
-from agents_remember.application.knowledge_writers_view import (
-    WritersRequest,
-    WriterTableRefusal,
-    writers_view,
-)
 from agents_remember.application.memory_checkout_state import (
     memory_checkout_commit,
     memory_checkout_dirty,
@@ -132,7 +130,6 @@ from agents_remember.kernel.git_preparation import GitPreparationError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge_index import (
-    INDEX_REPOSITORY_ID,
     IndexMismatchError,
     KnowledgeIndex,
     MemoryTreeError,
@@ -158,6 +155,8 @@ from agents_remember.models.tools.tool_answer import (
 
 from .base import _tool_payload
 from .knowledge_queries import QUERY_VIEWS, QueryViewContext, run_query_view
+from .knowledge_views.read_request import ReadToolRequest
+from .knowledge_views.record_views import _proposal_view, _writers_view
 
 __all__ = [
     "DiffToolRequest",
@@ -189,50 +188,6 @@ class ProjectionNaming:
     relative_locations: bool = False
     provenance: SelectionProvenance | None = None
     resolver: NameResolver | None = None
-
-
-@dataclass(frozen=True)
-class ReadToolRequest:
-    """One ``knowledge_read`` call's arguments as one value.
-
-    The tool signature stays flat because FastMCP derives the published input schema from it; this
-    value is what the builder consumes.
-
-    ``memory_root`` is the *selection*, and the caller owns it: the root directory of a converted
-    memory tree (``memoryTree.memoryRoot`` of a published-intent block, a leaf's memory worktree, or
-    the repository's memory root). ``repository_id`` is not a wire argument: a memory tree's index
-    has one constant namespace (:data:`INDEX_REPOSITORY_ID`), which the server supplies and every
-    response states.
-
-    ``record_id`` is a record's text ID (``INV-…``, ``FAM-…``), accepted by the ``invariant`` and
-    ``family`` views beside the revision UUIDs (MIK-R73 rule 3): the UUIDs are derived from the
-    text IDs and are stored nowhere, so a caller may name either.
-    """
-
-    memory_root: str
-    view: str
-    ordering_input: str | None = None
-    limit: int = 32
-    continuation: str | None = None
-    invariant_revision_id: str | None = None
-    family_revision_id: str | None = None
-    record_id: str | None = None
-    source_path: str | None = None
-    repository_root: str | None = None
-    code_tree_id: str | None = None
-    repository_id: str = INDEX_REPOSITORY_ID
-    weakness_kind: str | None = None
-    include_closed: bool = False
-    stale_only: bool = False
-    stands_on: str | None = None
-    repo_id: str | None = None
-    contract_path: str | None = None
-    files: tuple[str, ...] | None = None
-    folder: str | None = None
-    query: str | None = None
-    kinds: tuple[str, ...] | None = None
-    record_ids: tuple[str, ...] | None = None
-    compact: bool = False
 
 
 @dataclass(frozen=True)
@@ -366,6 +321,8 @@ def _one_view(
         return run_query_view(request, selected, repository_id, context=ctx)
     if request.view == "writers":
         return _writers_view(request, selected, ctx.coordination_root)
+    if request.view == PROPOSAL_VIEW:
+        return _proposal_view(request, selected, ctx.coordination_root)
     if request.view == "record":
         return _record_view(request, selected, repository_id, view_context=ctx)
     return _marks_view(request, selected, repository_id, view_context=ctx)
@@ -571,7 +528,8 @@ def _refused_read(view: str, repository_id: str, code: str, detail: str) -> dict
 
 
 # The tree views; `record`, the truth view of one record; the two record kinds' listings; and
-# `writers`, the table of how each writer did. All are views of this one tool: no tool is added.
+# `writers`, the table of how each writer did; and `consolidation_proposal`, the families a
+# consolidation pass could take. All are views of this one tool: no tool is added.
 _ADMITTED_VIEWS: Final = (
     "source_context",
     "invariant",
@@ -583,6 +541,7 @@ _ADMITTED_VIEWS: Final = (
     "weakness",
     "dependent",
     "writers",
+    PROPOSAL_VIEW,
 )
 
 
@@ -914,7 +873,7 @@ def _read_result(
             # same moved-selection refusal as the projection seam: no
             # mixed epoch is ever bound to rows.
             raise SelectionMovedError(before_commit, provenance.commit)
-        if view in ("record", "weakness", "dependent", "writers", *QUERY_VIEWS):
+        if view in ("record", "weakness", "dependent", "writers", PROPOSAL_VIEW, *QUERY_VIEWS):
             view_context = QueryViewContext(
                 repositories=repositories,
                 workspace_root=workspace_root,
@@ -975,25 +934,6 @@ def _read_result(
             None,
             None,
         )
-
-
-def _writers_view(
-    request: ReadToolRequest, selected: SelectedKnowledgeDataset, coordination_root: str | None
-) -> dict[str, Any]:
-    """The table of how each writer did, or its refusal (the application owns the table)."""
-
-    try:
-        return writers_view(
-            selected,
-            WritersRequest(
-                memory_root=request.memory_root,
-                repository_id=request.repository_id,
-                limit=request.limit,
-                coordination_root=coordination_root,
-            ),
-        )
-    except WriterTableRefusal as refusal:
-        return _refused_read(request.view, request.repository_id, refusal.code, refusal.detail)
 
 
 def _ordering(request: ReadToolRequest) -> str:

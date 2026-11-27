@@ -28,6 +28,7 @@ from agents_remember.errors import AuthorityError
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.sidecar_pairing import confine_rel
+from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.models.role_launcher import RoleResultRequest
 from agents_remember.serving.notes import _MAX_FILE_BYTES
 from agents_remember.serving.response_contract import SCOPED_READ_RESPONSES, TaskReports
@@ -64,7 +65,7 @@ def _complete_task_selection(
     # completed. A request naming a partial chain (sprint without master or vice versa)
     # stays malformed and keeps the existing invalid-selection refusal.
     if (
-        request.role in {"worker", "reviewer", "curator"}
+        request.role in LEAF_ROLES
         and request.sprint_document_ref is None
         and request.master_document_ref is None
     ):

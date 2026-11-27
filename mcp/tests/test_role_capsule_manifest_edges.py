@@ -852,6 +852,10 @@ KNOWLEDGE_USE_CONSUMERS = {
         "curation",
         (("| Knowledge/CLI |", "[use]"),),
     ),
+    "consolidator": (
+        "consolidation",
+        (("| Knowledge/CLI |", "[use]"),),
+    ),
 }
 
 
@@ -866,6 +870,7 @@ def test_inherited_step_details_reach_only_the_seats_that_use_them(tmp_path: Pat
     assert set(declaration["roles"]) == {
         "architect",
         "worker",
+        "consolidator",
         "curator",
         "reviewer",
         "investigator",

@@ -16,7 +16,9 @@ writer's row with its whole labels and, for every number, the revisions behind i
 reclaimed with the tool log folder it lies in. A report that cannot be written refuses the read
 with the reason; nothing partial is left.
 
-A Consolidator's columns are not part of the table yet: they come with that role.
+Beside each writer's written, reviewed, changed and retired counts, the row carries the
+Consolidator's columns: of that writer's revisions a consolidation pass read, how many it kept,
+corrected, merged, retired or left unresolved.
 """
 
 from __future__ import annotations

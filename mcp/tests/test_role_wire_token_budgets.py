@@ -235,7 +235,7 @@ def test_filter_shared_block_32_admitted_pairs_and_digest_map() -> None:
     raw_lines = raw.splitlines()
     digest_map = load_digest_map(adm.LIFECYCLE_ROOT / "core/digest-map.json")
     pairs = [(r, op) for r, e in parsed.roles.items() for op in e.operations]
-    assert len(pairs) == 32
+    assert len(pairs) == 35
     restricted_checked = False
     for role, op in pairs:
         out = compile_admitted_capsule(
@@ -382,7 +382,7 @@ def test_compiled_capsule_token_ceilings_all_34_matrix_keys() -> None:
         )
         for key, result in _compile_all_34_matrix_capsules().items()
     }
-    assert len(measurements) == 34
+    assert len(measurements) == 37
     assert set(measurements) == set(COMPILED_CAPSULE_TOKEN_CEILINGS)
     assert evaluate_wire_token_ceilings(measurements, COMPILED_CAPSULE_TOKEN_CEILINGS) == []
 

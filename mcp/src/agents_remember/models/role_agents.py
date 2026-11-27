@@ -59,13 +59,14 @@ class SeatLaunchOverride:
 class RoleStartSetCall:
     """The inputs of one set start: the leaf, the set request id, and per-seat choices.
 
-    The Manager names a leaf and the product starts its Worker, Reviewer and Curator
-    in this one call (MIK-R100 rule 1). Per-seat request ids derive deterministically
-    from ``request_id``, so a repeat with the same set id reconciles the same three
-    agents and creates no fourth. ``reviewer_message`` is the Reviewer's first work
-    (rule 3): carried, the Reviewer opens at once; absent, Reviewer and Curator are
-    held (rule 2). ``replaces`` names, per seat role, the holder a replacing start
-    retires first (rule 9).
+    The Manager names a leaf and the product starts its seats in this one call (MIK-R100
+    rule 1): an ordinary leaf's Worker, Reviewer and Curator, or a consolidation task's
+    Consolidator and Reviewer, as the leaf's task document says. Per-seat request ids derive
+    deterministically from ``request_id``, so a repeat with the same set id reconciles the
+    same agents and creates no extra one. ``reviewer_message`` is the Reviewer's first work
+    (rule 3): carried, the Reviewer opens at once; absent, the Reviewer and a Curator are
+    held (rule 2). ``replaces`` names, per seat role, the holder a replacing start retires
+    first (rule 9). A seat's choices apply only to a seat of the leaf's set.
     """
 
     request_id: uuid.UUID
@@ -76,6 +77,7 @@ class RoleStartSetCall:
     worker: SeatLaunchOverride = field(default_factory=SeatLaunchOverride)
     reviewer: SeatLaunchOverride = field(default_factory=SeatLaunchOverride)
     curator: SeatLaunchOverride = field(default_factory=SeatLaunchOverride)
+    consolidator: SeatLaunchOverride = field(default_factory=SeatLaunchOverride)
     replaces: dict[str, str] = field(default_factory=dict)
     # The word, for the whole set, that a replaced holder's turn may be
     # interrupted (rule 8). Without it a running holder is refused, as in retirement.
@@ -281,15 +283,15 @@ class RoleMessageResponse(ToolResponse):
 
 
 class RoleStartSetResponse(ToolResponse):
-    """Three seats of a leaf from one call (MIK-R100 rule 1), or why the set is partial.
+    """A leaf's seats from one call (MIK-R100 rule 1), or why the set is partial.
 
-    ``seats`` carries worker, reviewer and curator in that order: each names its agent,
-    its seat request id, whether the seat is held (no turn yet) or opened at once, and
-    whether the host records a turn for it. A seat that has an agent also says whether the
-    agent carries the product's other server (``secondCopyLoaded``, as ``RoleStartResponse``
-    says it of a single start). ``ok`` is true only when all three seats
-    have an agent; a partial set names the failed seat, leaves the others as they are,
-    and a repeat with the same set request id completes it.
+    ``seats`` carries worker, reviewer and curator in that order, or consolidator and
+    reviewer for a consolidation task: each names its agent, its seat request id, whether
+    the seat is held (no turn yet) or opened at once, and whether the host records a turn
+    for it. A seat that has an agent also says whether the agent carries the product's other
+    server (``secondCopyLoaded``, as ``RoleStartResponse`` says it of a single start). ``ok``
+    is true only when every seat has an agent; a partial set names the failed seat, leaves
+    the others as they are, and a repeat with the same set request id completes it.
     """
 
     operation: Literal["role_start_set"] = "role_start_set"

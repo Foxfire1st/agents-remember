@@ -36,6 +36,7 @@ from agents_remember.application.knowledge_worklist.compute import (
     git_failure,
     incomplete_worklist,
 )
+from agents_remember.application.knowledge_worklist.consolidation import listing_from
 from agents_remember.application.knowledge_worklist.leaf import ExplicitSides, worklist_over
 from agents_remember.application.knowledge_worklist.planned_effects import declarations_from
 from agents_remember.kernel.git_command import (
@@ -366,6 +367,7 @@ def _worklist(contract: WorktreeContract, direct: _DirectSides) -> dict[str, Any
             if found is None
             else declarations_from(found[1].expectedKnowledgeEffects),
             coordination_root=contract.coordination_root,
+            consolidation=None if found is None else listing_from(found[1].consolidationList),
         )
         document = worklist_over(contract, sides)
     except LeafDocumentUnresolved as error:

@@ -33,11 +33,15 @@ The registered row kinds include MIK-R30 ``onboarding:…``, MIK-R11 ``planned:�
 ``hunk:…``/``file:…``, MIK-R14 ``reconsider:…``, and MIK-R53 membership and record rows.
 A row whose subject no registered kind claims is refused.
 
-**Checks that need the trees.** The models check shape. The writer support below checks a row
-against K_B/K_C facts the caller reads: :func:`reanchor_mismatches` (rule 4: each ``after`` equals
-the entry's anchor in K_C), :func:`unknown_subjects`, :func:`invariant_revision_violation` and
-:func:`stale_examined_members` (the revision binding of rules 2 and 5). Whether a row is *current*
-for an item is the gate's rule (MIK-R09 rule 2), not this module's.
+**A consolidation pass.** Invariant and family rows also take ``stands`` (read in full at the
+row's ``revision``; it stands, and ``reason`` says why) and ``unresolved`` (``reason`` says what
+contradicts what), and may name the tests the reader ran or could not run, or that no proof is
+recorded (:mod:`.history_consolidation`). A consolidation task's file names the records its list
+reached in ``consolidationSubjects``.
+
+**Checks that need the trees.** The models check shape. The writer support in
+:mod:`.history_writer_checks` checks a row against K_B/K_C facts the caller reads. Whether a row is
+*current* for an item is the gate's rule (MIK-R09 rule 2), not this module's.
 
 **Freezing (rule 7).** Rows are edited freely until closeout. The closeout route sets
 ``closed: true`` (:meth:`HistoryFile.closed_copy`, or :func:`empty_history` when the leaf has no
@@ -58,7 +62,7 @@ closeout goes to: the latest attempt while it is open, else the next one.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Collection, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Annotated, Any, ClassVar, Final, Literal
@@ -67,6 +71,11 @@ from pydantic import Field, SerializeAsAny, StrictBool, StrictInt, field_validat
 
 from agents_remember.models.knowledge.effect import EffectLabel
 from agents_remember.models.knowledge_files.canonical import CanonicalFormatError, parse_json
+from agents_remember.models.knowledge_files.history_consolidation import (
+    CONSOLIDATION_DISPOSITIONS,
+    STANDS,
+    ConsolidationEvidence,
+)
 from agents_remember.models.knowledge_files.history_product import (
     CrossingSelection,
     ReviewFact,
@@ -98,19 +107,33 @@ from agents_remember.models.knowledge_files.shapes import (
     FileModel,
     InvariantId,
     Label,
+    RecordId,
     RepositoryPath,
     RequirementReference,
     Text,
     require_unique,
 )
-from agents_remember.models.knowledge_files.sidecars import ProofEntry, RealizationEntry
 from agents_remember.models.knowledge_files.unexplained import NO_INVARIANT, ROW_SUBJECT_PATTERN
 
 HISTORY_SCHEMA: Final = "ar-history/v1"
 ABSENT: Final = "absent"
 
-INVARIANT_DISPOSITIONS: Final = ("changed", "moved", "deleted", "extended", "no_impact")
-FAMILY_DISPOSITIONS: Final = ("changed", "rerouted", "assigned", "retired", "no_impact")
+INVARIANT_DISPOSITIONS: Final = (
+    "changed",
+    "moved",
+    "deleted",
+    "extended",
+    "no_impact",
+    *CONSOLIDATION_DISPOSITIONS,
+)
+FAMILY_DISPOSITIONS: Final = (
+    "changed",
+    "rerouted",
+    "assigned",
+    "retired",
+    "no_impact",
+    *CONSOLIDATION_DISPOSITIONS,
+)
 ONBOARDING_DISPOSITIONS: Final = ("updated", "no_impact")
 MEMBERSHIP_DISPOSITIONS: Final = ("no_family",)
 DEFERRAL_RECORD_DISPOSITIONS: Final = ("deferred", "re_deferred", "deferral_lifted")
@@ -120,8 +143,12 @@ RECORD_DISPOSITIONS: Final = (
     "no_impact",
     *DEFERRAL_RECORD_DISPOSITIONS,
 )
-InvariantDisposition = Literal["changed", "moved", "deleted", "extended", "no_impact"]
-FamilyDisposition = Literal["changed", "rerouted", "assigned", "retired", "no_impact"]
+InvariantDisposition = Literal[
+    "changed", "moved", "deleted", "extended", "no_impact", "stands", "unresolved"
+]
+FamilyDisposition = Literal[
+    "changed", "rerouted", "assigned", "retired", "no_impact", "stands", "unresolved"
+]
 OnboardingDisposition = Literal["updated", "no_impact"]
 MembershipDisposition = Literal["no_family"]
 RecordDisposition = Literal[
@@ -217,6 +244,7 @@ def _entry_set_changed(covers: tuple[CoveredEntry, ...]) -> bool:
 
 # What each disposition's own covers must show (rule 3). ``moved`` and ``no_impact`` keep the set of
 # entries: an added or removed entry needs the stronger ``extended``, ``deleted`` or ``changed``.
+# ``stands`` and ``unresolved`` change nothing of the record, so they keep the set too.
 _COVER_REQUIREMENTS: Final[
     Mapping[str, tuple[tuple[str, Callable[[tuple[CoveredEntry, ...]], bool]], ...]]
 ] = {
@@ -233,12 +261,15 @@ _COVER_REQUIREMENTS: Final[
     "extended": (
         ("an extended invariant row covers an added entry", lambda c: any(e.added for e in c)),
     ),
-    "no_impact": (
-        (
-            "a no_impact invariant row keeps the set of entries: none added or removed",
-            lambda c: not _entry_set_changed(c),
-        ),
-    ),
+    **{
+        disposition: (
+            (
+                f"a {disposition} invariant row keeps the set of entries: none added or removed",
+                lambda c: not _entry_set_changed(c),
+            ),
+        )
+        for disposition in ("no_impact", *CONSOLIDATION_DISPOSITIONS)
+    },
 }
 
 
@@ -261,7 +292,7 @@ def _require_disposition_evidence(row: InvariantRow) -> None:
             raise ValueError(message)
 
 
-class InvariantRow(HistoryRow):
+class InvariantRow(HistoryRow, ConsolidationEvidence):
     """A judgment about one invariant that existed in K_B."""
 
     row_kind: ClassVar[str] = "invariant"
@@ -287,7 +318,7 @@ class ExaminedMember(FileModel):
     revision: Revision
 
 
-class FamilyRow(HistoryRow):
+class FamilyRow(HistoryRow, ConsolidationEvidence):
     """A judgment about one family that existed in K_B, bound to every member revision examined."""
 
     row_kind: ClassVar[str] = "family"
@@ -311,6 +342,11 @@ class FamilyRow(HistoryRow):
             raise ValueError(
                 f"family {self.subject}: its {self.disposition} row {self.id} carries an effect, "
                 "which only a changed row has; remove 'effect' from the row"
+            )
+        if self.disposition == STANDS and self.revision is None:
+            raise ValueError(
+                f"family {self.subject}: its stands row {self.id} names the revision it read; "
+                "the writer records it"
             )
         return self
 
@@ -641,6 +677,10 @@ class HistoryFile(FileModel):
     """Selected-side evidence for records whose standing could otherwise change in the merge."""
     review: ReviewFact | None = None
     """The fact of the memory review that passed this owner's change, written at its closeout."""
+    consolidation_subjects: tuple[RecordId, ...] | None = Field(
+        default=None, alias="consolidationSubjects", min_length=1
+    )
+    """A consolidation task's file: the families and rules its pass's list reached, sorted."""
 
     @field_validator("rows", mode="before")
     @classmethod
@@ -662,6 +702,10 @@ class HistoryFile(FileModel):
             tuple((one.record, one.revision) for one in self.written or ()),
             what="written revisions",
         )
+        subjects = self.consolidation_subjects or ()
+        require_unique(subjects, what="consolidation subjects")
+        if list(subjects) != sorted(subjects):
+            raise ValueError("consolidationSubjects lists its record ids sorted")
         return self
 
     def written_revision(self, record: str, revision: int) -> WrittenRevision | None:
@@ -800,101 +844,3 @@ def frozen_history_violation(bases: Iterable[bytes | None], candidate: bytes | N
     """
 
     return any(is_closed_history(base) and base != candidate for base in bases)
-
-
-# --------------------------------------------------------------------------------------------------
-# Writer support: checks against K_B / K_C facts the caller supplies (rules 2, 4 and 5)
-# --------------------------------------------------------------------------------------------------
-
-
-def reanchor_mismatches(row: InvariantRow, candidate_anchors: Mapping[str, Anchor]) -> list[str]:
-    """Return the covered entry IDs whose ``after`` differs from the entry's anchor in K_C.
-
-    ``candidate_anchors`` maps each entry ID present in K_C to its anchor with ``path`` filled in
-    (:func:`sidecar_entry_anchors`). An ``after`` of ``"absent"`` requires the entry to be absent.
-    """
-
-    mismatches = []
-    for entry in row.covers:
-        expected: Anchor | str = candidate_anchors.get(entry.id, ABSENT)
-        if entry.after != expected:
-            mismatches.append(entry.id)
-    return mismatches
-
-
-def sidecar_entry_anchors(
-    sidecar_path: str, entries: Iterable[RealizationEntry | ProofEntry]
-) -> dict[str, Anchor]:
-    """Map each realization or proof entry of one file sidecar to its anchor, path filled in."""
-
-    return {entry.id: entry.anchor.model_copy(update={"path": sidecar_path}) for entry in entries}
-
-
-def unknown_subjects(history: HistoryFile, known_record_ids: Collection[str]) -> list[str]:
-    """Return the row subjects that name no known record.
-
-    Invariant, family and ``record`` rows name their record; a ``membership`` row names its
-    invariant after the ``membership:`` prefix. Every other kind answers worklist items, not
-    records, and is not checked here.
-    """
-
-    unknown = []
-    for row in history.rows:
-        if isinstance(row, InvariantRow | FamilyRow | RecordRow):
-            if row.subject not in known_record_ids:
-                unknown.append(row.subject)
-        elif isinstance(row, MembershipRow):
-            invariant = membership_invariant(row.subject)
-            if invariant is None or invariant not in known_record_ids:
-                unknown.append(row.subject)
-    return unknown
-
-
-def invariant_revision_violation(
-    row: InvariantRow,
-    *,
-    base_revision: int | None,
-    candidate_revision: int,
-    restated_revision: int | None = None,
-) -> str | None:
-    """Return why ``row.revision`` does not bind the invariant's revisions, or ``None``.
-
-    The row's revision is the invariant's revision in K_C. A ``changed`` row's revision is the
-    K_B revision plus one: a leaf changes an invariant's meaning once, so its revision increments
-    exactly once (MIK-R21 rule 4). ``moved``, ``extended`` and ``no_impact`` leave meaning, and so the
-    revision, unchanged. ``deleted`` is not constrained beyond K_C. ``base_revision`` is ``None``
-    for an invariant absent from K_B, which needs no row (rule 6).
-
-    ``restated_revision`` is the revision of the owner's governing ``changed`` row in an earlier,
-    frozen attempt of the same leaf (``None`` when it has none). A ``changed`` row at an unchanged
-    revision is accepted only as a restatement of that revision step: the record has not changed
-    since that row (K_C's revision is K_B's) and both rows are at that revision. It corrects the
-    step's effect, because and reason; it is no second change (L37 ruling of 2026-10-01T22:49:36,
-    Q2 a).
-    """
-
-    if row.revision != candidate_revision:
-        return f"row revision {row.revision} is not the K_C revision {candidate_revision}"
-    if base_revision is None or row.disposition == "deleted":
-        return None
-    if row.disposition == "changed" and candidate_revision != base_revision + 1:
-        if candidate_revision == base_revision == restated_revision:
-            return None
-        return f"a changed row's revision is the K_B revision {base_revision} plus one"
-    if row.disposition != "changed" and candidate_revision != base_revision:
-        return f"a {row.disposition} row keeps the K_B revision {base_revision}"
-    return None
-
-
-def stale_examined_members(row: FamilyRow, candidate_revisions: Mapping[str, int]) -> list[str]:
-    """Return the examined members whose K_C revision differs from the one the row examined.
-
-    A member absent from K_C (``candidate_revisions`` has no entry) is not stale. A non-empty
-    result means the family must be examined again (rule 5).
-    """
-
-    return [
-        member.id
-        for member in row.examined
-        if member.id in candidate_revisions and candidate_revisions[member.id] != member.revision
-    ]

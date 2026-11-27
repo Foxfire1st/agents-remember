@@ -9,7 +9,7 @@ Start/message Agents Remember (AR) roles via `role_start`/`role_message` with ca
 
 ## Start one canonical role assignment
 
-Call `role_start` with role, refs, and request ID (Architect: all 6; Orchestrator: all except Orchestrator, sprint; Manager: Worker/Reviewer/Curator/Investigator, master). Keep AR-paired enclosure (no Paseo worktree/global memory); save IDs/paths; reconcile uncertain starts via same request ID.
+Call `role_start` with role, refs, and request ID (Architect: all 7; Orchestrator: all except Orchestrator, sprint; Manager: Worker/Reviewer/Curator/Consolidator/Investigator, master). Keep AR-paired enclosure (no Paseo worktree/global memory); save IDs/paths; reconcile uncertain starts via same request ID.
 
 <!-- ar:roles architect,orchestrator,manager -->
 ## Start leaf stages and deliver the first intake

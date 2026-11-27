@@ -15,11 +15,16 @@ task documents, the steps a task passes, and the tools and settings behind each 
    tasks of each master. Every code change runs under a task document.
 4. **Intent review.** For each task the Architect asks you "go, or review first?" and records
    your answer.
-5. **Start.** The Manager of the task's master starts the task's Worker, with `role_start` or,
-   together with the Reviewer and the Curator, with `role_start_set`. An Orchestrator or an
-   Architect can start a Worker too. The start creates the task's enclosure.
-6. **Build, review and memory update.** The Worker builds, the Reviewer reviews, and the Curator
-   updates the memory.
+5. **Start.** The Manager of the task's master starts the task's Worker with `role_start` or,
+   together with the Reviewer and the Curator, with `role_start_set`; for a
+   [consolidation task](roles.md#a-consolidation-task), the Consolidator takes the Worker's place
+   and `role_start_set` starts the Consolidator and the Reviewer, with no Worker and no Curator.
+   An Orchestrator or an Architect can start a Worker or a Consolidator too. The start creates the
+   task's enclosure.
+6. **Build, review and memory update.** On an ordinary task, the Worker builds, the Reviewer
+   reviews, and the Curator updates the memory. On a consolidation task, the Consolidator reads the
+   listed families and rules again against the code and updates the memory, and the Reviewer
+   reviews that pass (with no Curator).
 7. **Closeout.** The closeout commits the task's code and memory.
 8. **Landing.** The landing brings the commits onto the master's branch.
 9. **Finalizing.** Finalizing completes the task in its documents and removes its worktrees.
@@ -108,7 +113,7 @@ master has no intent review.
 
 ## The enclosure a start creates
 
-The first start of a Worker, a Reviewer or a Curator on a task creates the task's enclosure. The
+The first start of a Worker, a Consolidator, a Reviewer or a Curator on a task creates the task's enclosure. The
 enclosure holds a code worktree and a memory worktree, each on its own work branch, and the
 folders for scratch files, reports and copies of the task's documents.
 [Roles and role agents](roles.md#where-a-role-agents-files-lie) shows the layout. The tool
@@ -144,7 +149,7 @@ settles a matter that an earlier ruling of the same kind covers by that ruling.
 ## Closeout
 
 The closeout commits the code and the memory of a task. The instructions of the roles give it to a
-Manager or an Orchestrator; a Worker, a Reviewer or a Curator never runs it. Where neither a
+Manager or an Orchestrator; a Worker, a Consolidator, a Reviewer or a Curator never runs it. Where neither a
 Manager nor an Orchestrator coordinates, the Architect runs it. It does so only with your approval
 of that commit, or with an authority that you delegated for the whole master and that the task
 document records.
@@ -235,7 +240,7 @@ such a task. The role agent works in the code worktree and the memory worktree o
 checkouts of the master's branch that the master's worktree contract names. One task with a grant
 is in work at a time in a master; a start for a second one is refused. Giving and revoking a grant
 is refused once the task has started: once its status is no longer `planning`, a Worker, a
-Reviewer or a Curator is registered on it, a code review is recorded on it, or one of its steps is
+Consolidator, a Reviewer or a Curator is registered on it, a code review is recorded on it, or one of its steps is
 no longer `pending`.
 
 `direct_landing` lands the work of such a task. It answers `landed`, `would-land` or `refused`.

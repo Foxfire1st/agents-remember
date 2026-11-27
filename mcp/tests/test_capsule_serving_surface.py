@@ -550,7 +550,7 @@ def test_altitude_admission_admits_every_role_the_document_can_carry_and_refuses
             refused.append(role)
             continue
         admitted.append(role)
-    assert admitted == ["worker", "curator", "reviewer"]
+    assert admitted == ["worker", "curator", "reviewer", "consolidator"]
     # The rest are refused: three need a sprint, one needs a master, and ``bootstrap``
     # carries no structural task altitude at all -- it is the seat a workspace reaches
     # before a task document exists.

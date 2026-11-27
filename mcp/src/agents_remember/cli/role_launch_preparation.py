@@ -32,6 +32,7 @@ from agents_remember.application.task_scoped_mcp import (
     task_scoped_mcp_config_for_reader,
 )
 from agents_remember.cli import role_launch_enclosure
+from agents_remember.cli.leaf_seat_handover import leaf_seats
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import (
     launcher_options,
@@ -98,6 +99,7 @@ ROLE_START_OPERATIONS: dict[LauncherRole, CapsuleOperation] = {
     "worker": "implementation",
     "reviewer": "review",
     "curator": "curation",
+    "consolidator": "consolidation",
     "bootstrap": "bootstrap",  # MIK-R196 rule 4: the same capsule, now reachable from a launch
 }
 
@@ -814,26 +816,7 @@ def _compile_handover(request: RoleHandoverRequest) -> dict[str, Any]:
         ),
     }
     if context.role in LEAF_ROLES and context.task is not None:
-        seat_selection = ar_binding["selection"]
-        handover["leafSeats"] = {
-            "roles": ["worker", "reviewer", "curator"],
-            "roleMessageArguments": {
-                role: {
-                    "role": role,
-                    # A leaf of a standalone master has no sprint to name; the master and
-                    # the leaf are the whole selection then.
-                    **(
-                        {"sprint_document_ref": seat_selection["sprintDocumentRef"]}
-                        if seat_selection.get("sprintDocumentRef") is not None
-                        else {}
-                    ),
-                    "master_document_ref": seat_selection["masterDocumentRef"],
-                    "task_document_ref": context.task.ref.model_dump(mode="json"),
-                }
-                for role in ("worker", "reviewer", "curator")
-                if role != context.role
-            },
-        }
+        handover["leafSeats"] = leaf_seats(context.role, context.task, ar_binding["selection"])
     prompt, projection, handover_file, handover_file_content = _assembled_brief(
         request,
         handover,

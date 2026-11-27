@@ -1,6 +1,6 @@
 # Read the ingest report before claiming publication
 
-Curators read this topic before interpreting an authored-knowledge ingest result or claiming publication. It explains planned, written and refused results, file-writing authority and report evidence.
+Curators and Consolidators read this topic before interpreting an authored-knowledge ingest result or claiming publication. It explains planned, written and refused results, file-writing authority and report evidence.
 
 Without `--commit`, ingest plans and validates without writing files. `--commit` authorizes file writes, never a Git commit or acceptance.
 

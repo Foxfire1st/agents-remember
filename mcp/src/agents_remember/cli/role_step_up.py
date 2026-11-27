@@ -7,6 +7,7 @@ from typing import Any
 
 from agents_remember.cli.role_instructions import launch_choice_metadata
 from agents_remember.errors import AgentsRememberError
+from agents_remember.kernel._agentic_settings_core import STEP_UP_COUNTED_ROLES
 from agents_remember.tasks import TaskDocument
 from agents_remember.worktrees.review_history import failed_role_tries
 
@@ -57,7 +58,7 @@ def select_step_up(
             ),
         }
     tries = failed_role_tries(document, role) if document is not None else 0
-    threshold = row.get("afterTries", 3 if role in {"worker", "curator"} else None)
+    threshold = row.get("afterTries", 3 if role in STEP_UP_COUNTED_ROLES else None)
     if reason is None and not prior and (threshold is None or tries is None or tries < threshold):
         return defaults
     source = (

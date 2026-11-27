@@ -9,9 +9,9 @@ Restore role, task, agent IDs, request ID, recipient, candidate refs, and report
 
 <!-- ar:roles architect,orchestrator,manager -->
 Reconcile uncertain `role_start` with the same request ID ([start role](coordination.md#start-one-canonical-role-assignment)); query unknown message delivery with a new `role_message` to the same agent (preserve unknown outcomes with IDs).
-<!-- ar:roles worker,curator,investigator,reviewer -->
+<!-- ar:roles worker,curator,consolidator,investigator,reviewer -->
 You start no role; query the same agent or starter on uncertain starts/messages without creating a new owner (preserve unknown outcomes with IDs).
-<!-- ar:roles architect,orchestrator,manager,worker,curator,investigator,reviewer -->
+<!-- ar:roles architect,orchestrator,manager,worker,curator,consolidator,investigator,reviewer -->
 Preserve the leaf's admitted code/memory/contract pair ([start role](coordination.md#start-one-canonical-role-assignment)).
 <!-- ar:roles all -->
 
@@ -23,6 +23,6 @@ After clean sync, the reviewed result stands; follow [Synchronize the leaf](../r
 
 <!-- ar:roles curator -->
 Follow [serving-build binding](orientation.md#bind-curation-to-the-serving-build) before resuming memory writes.
-<!-- ar:roles architect,orchestrator,manager,worker,curator,investigator,reviewer -->
+<!-- ar:roles architect,orchestrator,manager,worker,curator,consolidator,investigator,reviewer -->
 On full-store refusal: [full-store](../reference/message-handover.md#handle-a-full-store-refusal).
 <!-- ar:roles all -->

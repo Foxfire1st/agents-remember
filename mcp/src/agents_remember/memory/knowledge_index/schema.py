@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Final
 
+# v8: an ``ix_revision`` row carries what a consolidation pass did with the revision it read.
 # v5: ``ix_revision`` holds every revision a file of the tree names, with its writer and whether it
 # is reviewed, so the writer table is read without the history files that name earlier revisions.
 # v4: a record row carries its derived ``state`` (proposed, reviewed, consolidated; NULL when
@@ -114,6 +115,7 @@ CREATE TABLE ix_revision (
   writer_model TEXT,
   seat TEXT,
   reviewed INTEGER NOT NULL,
+  consolidation TEXT,
   PRIMARY KEY (record, revision)
 ) STRICT
 """,

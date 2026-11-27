@@ -198,12 +198,12 @@ class HandoverTextWordingTests(unittest.TestCase):
                 "repository": "repo",
                 "path": "sprint/task.json",
             }
-        if role in {"manager", "worker", "reviewer", "curator"}:
+        if role in {"manager", "worker", "reviewer", "curator", "consolidator"}:
             refs["masterDocumentRef"] = {
                 "repository": "repo",
                 "path": "master/task.json",
             }
-        if role in {"worker", "reviewer", "curator"}:
+        if role in {"worker", "reviewer", "curator", "consolidator"}:
             refs["taskDocumentRef"] = {
                 "repository": "repo",
                 "path": "master/01_leaf.json",
@@ -412,7 +412,7 @@ class HandoverTextWordingTests(unittest.TestCase):
                         self.assertNotIn("questions about the assignment and your result", relation)
                         self.assertNotIn("Send that agent only what needs", relation)
                         self.assertNotIn("questions about the assignment and your result", prompt)
-                    elif role in {"worker", "reviewer", "curator"}:
+                    elif role in {"worker", "reviewer", "curator", "consolidator"}:
                         self.assertIn("Send no routine result to the parent.", relation)
                         self.assertIn("leafSeats.roleMessageArguments", relation)
                         self.assertIn("the current Manager of this master", relation)
@@ -760,12 +760,14 @@ class RoleToolDescriptionWordingTests(unittest.TestCase):
             ),
             (
                 "role_start_set",
-                "Start a leaf's Worker, Reviewer and Curator in one call (MIK-R100 rule 1).",
+                "Start a leaf's seats in one call (MIK-R100 rule 1): Worker, Reviewer and "
+                "Curator, or Consolidator and Reviewer when the task document names a "
+                "consolidationList.",
             ),
             (
                 "role_start_set",
-                "A repeat with the same request id reconciles the same three agents: it "
-                "creates no fourth and opens no held seat.",
+                "A repeat with the same request id reconciles the same agents: it creates no "
+                "new one and opens no held seat.",
             ),
             ("role_message", "an address by role never means the caller itself."),
             ("role_start", "rejected (the launch is closed; no usable agent exists)"),

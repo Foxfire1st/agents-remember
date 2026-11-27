@@ -19,7 +19,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -57,6 +56,7 @@ from agents_remember.models.task_intent import (
 )
 from agents_remember.models.task_retirement import MasterRetirementProof
 
+from .consolidation_list import ConsolidationList, check_consolidation_list
 from .execution_graph_validation import (
     ExecutionGraphAnalysis,
     ExecutionGraphValidationError,
@@ -65,6 +65,7 @@ from .execution_graph_validation import (
     find_execution_graph_cycle,
     validate_execution_graph,
 )
+from .expected_effects_check import check_expected_knowledge_effects
 from .launch_review_read import launch_review_fallback, preserve_unreadable_review
 from .progress import current_step, step_done, step_total  # noqa: F401  # preserve public exports
 from .route_review import (  # noqa: F401  # preserve existing task-document model exports
@@ -90,7 +91,7 @@ DocKind = Literal["light", "subTask", "master"]
 # re-exports these constants for its altitude checks, so their canonical home is here.
 SPRINT_ROLES = frozenset({"architect", "orchestrator", "investigator"})
 MASTER_ROLES = frozenset({"manager"})
-LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
+LEAF_ROLES = frozenset({"worker", "reviewer", "curator", "consolidator"})
 REVIEWER_ALTITUDES = frozenset({"sprint", "master", "leaf"})
 
 
@@ -202,7 +203,7 @@ class TaskExecutionRegistration(_Doc):
     """Bounded monotonic proof that one leaf acquired typed execution authority."""
 
     sourceKind: Literal["terminal-catalog-seat", "operator-inbox-turn-report"]
-    role: Literal["worker", "reviewer", "curator"]
+    role: Literal["worker", "reviewer", "curator", "consolidator"]
     sourceId: str
     observedAt: str
 
@@ -1007,39 +1008,6 @@ def _manifest_carries_digest(manifest_bytes: bytes, sha256: str) -> bool:
     }
 
 
-def _check_expected_knowledge_effects(
-    kind: DocKind,
-    effects: list[ExpectedKnowledgeEffect] | None,
-    requirements: list[str | ApprovedRequirementPacketRef],
-) -> None:
-    if effects is None:
-        return
-    if kind == "master":
-        raise ValueError("expectedKnowledgeEffects belongs to a leaf document, not a master")
-    if not effects:
-        raise ValueError(
-            "expectedKnowledgeEffects declares at least one effect; clear it with null instead"
-        )
-    packets = {
-        f"{packet.stableId}@{packet.version}"
-        for packet in requirements
-        if isinstance(packet, ApprovedRequirementPacketRef)
-    }
-    unknown = sorted({effect.requirementRef for effect in effects} - packets)
-    if packets and unknown:
-        raise ValueError(
-            "expectedKnowledgeEffects requirementRef names no packet in requirements: "
-            + ", ".join(unknown)
-        )
-    counts = Counter(f"{effect.subject}#{effect.effect}" for effect in effects)
-    repeated = sorted(key for key, count in counts.items() if count > 1)
-    if repeated:
-        raise ValueError(
-            "expectedKnowledgeEffects repeats a declaration (the same subject and effect): "
-            + ", ".join(repeated)
-        )
-
-
 class TaskDocument(_Doc):
     schema_: Literal["ar-task-document/v1"] = Field(default=TASK_DOCUMENT_SCHEMA, alias="schema")
     id: str
@@ -1079,6 +1047,9 @@ class TaskDocument(_Doc):
     # MIK-R11: the invariant and family effects the leaf expects, declared before implementation.
     # Absent means no declaration: every worklist item is ``unplanned``.
     expectedKnowledgeEffects: list[ExpectedKnowledgeEffect] | None = None
+    # The families and rules a consolidation pass reads again; a non-empty list makes the document
+    # a consolidation task (:mod:`.consolidation_list`). Absent: an ordinary task.
+    consolidationList: ConsolidationList | None = None
     # MIK-R189 rule 8: the architect's record of the developer's answer before a start. Absent is
     # an older leaf, which is admitted; ``pending`` and ``review-first`` refuse every start of the
     # leaf with ``intent-review-open``. ``go``, with the agreed revision, admits it.
@@ -1156,9 +1127,12 @@ class TaskDocument(_Doc):
         self._check_sprint_rows_and_seats()
         self._check_discarded_subtasks()
         self._normalize_integration_branch()
-        _check_expected_knowledge_effects(
-            self.kind, self.expectedKnowledgeEffects, self.requirements
+        check_expected_knowledge_effects(
+            self.kind,
+            self.expectedKnowledgeEffects,
+            [one for one in self.requirements if isinstance(one, ApprovedRequirementPacketRef)],
         )
+        check_consolidation_list(self.kind, self.consolidationList)
         return self
 
     def _check_master_fields(self) -> None:

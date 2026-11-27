@@ -263,7 +263,7 @@ COORDINATION_ACTION_STEPS = (
         (
             "Delegate 1 master to 1 Manager; 2+ concurrent masters to 1 sprint Orchestrator "
             "(1 Manager/master).",
-            "Start all 6 roles via `role_start` with exact refs/request ID; keep returned "
+            "Start all 7 roles via `role_start` with exact refs/request ID; keep returned "
             "IDs/paths.",
         ),
     ),

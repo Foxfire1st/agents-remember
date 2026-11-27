@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import Literal, get_args
 
-#: The eight lifecycle roles each have a canonical ``roles/<role>.md`` source.
+#: The nine lifecycle roles each have a canonical ``roles/<role>.md`` source.
 #: ``bootstrap`` is the free agent the module docstring describes.
 type CapsuleRole = Literal[
     "architect",
@@ -35,11 +35,12 @@ type CapsuleRole = Literal[
     "worker",
     "curator",
     "reviewer",
+    "consolidator",
     "investigator",
     "bootstrap",
 ]
 
-#: The nine operations, matching the canonical ``operations/<name>.md`` blocks.
+#: The ten operations, matching the canonical ``operations/<name>.md`` blocks.
 type CapsuleOperation = Literal[
     "orientation",
     "planning",
@@ -50,6 +51,7 @@ type CapsuleOperation = Literal[
     "authorized-closeout",
     "recovery",
     "bootstrap",
+    "consolidation",
 ]
 
 #: ``role`` is a dispatched role seat; ``launcher`` is the ambient no-role routing
@@ -68,7 +70,7 @@ CAPSULE_ROLE_MODE: CapsuleSeatKind = "role"
 
 CAPSULE_SEAT_KINDS: tuple[CapsuleSeatKind, ...] = get_args(CapsuleSeatKind)
 
-#: The eight roles, in the registry's canonical order. This tuple and the
+#: The nine roles, in the registry's canonical order. This tuple and the
 #: :data:`CapsuleRole` literal above are one registry with two readers — the type
 #: checker reads the literal, runtime selection reads the tuple — so a test holds the
 #: literal's own arguments to this exact tuple and the pair cannot drift apart.
@@ -79,13 +81,15 @@ CAPSULE_ROLES: tuple[CapsuleRole, ...] = (
     "worker",
     "curator",
     "reviewer",
+    "consolidator",
     "investigator",
     "bootstrap",
 )
 
-#: The nine operations, in the order the architecture names them, with the one
-#: deliberate extension appended rather than inserted: ``bootstrap``, the first-hour
-#: operation the ``bootstrap`` role carries.
+#: The ten operations, in the order the architecture names them, with the two
+#: extensions appended rather than inserted: ``bootstrap``, the first-hour operation the
+#: ``bootstrap`` role carries, and ``consolidation``, the operation of the ``consolidator``
+#: role that reads listed knowledge records again against the code.
 CAPSULE_OPERATIONS: tuple[CapsuleOperation, ...] = (
     "orientation",
     "planning",
@@ -96,6 +100,7 @@ CAPSULE_OPERATIONS: tuple[CapsuleOperation, ...] = (
     "authorized-closeout",
     "recovery",
     "bootstrap",
+    "consolidation",
 )
 
 #: The composition order: shared core first, then the seat's own block, then the
@@ -134,7 +139,7 @@ CAPSULE_LAUNCHER_COMPOSITION_ORDER: tuple[CapsuleCompositionRoot, ...] = ("core"
 
 
 def is_capsule_role(value: str) -> bool:
-    """Whether ``value`` is one of the eight frozen roles (exact, not normalized)."""
+    """Whether ``value`` is one of the nine frozen roles (exact, not normalized)."""
 
     return value in CAPSULE_ROLES
 
@@ -154,7 +159,7 @@ def role_composition_order(seat_kind: CapsuleSeatKind) -> tuple[CapsuleCompositi
 
 
 def is_capsule_operation(value: str) -> bool:
-    """Whether ``value`` is one of the nine frozen operations (exact, not normalized)."""
+    """Whether ``value`` is one of the ten frozen operations (exact, not normalized)."""
 
     return value in CAPSULE_OPERATIONS
 

@@ -110,6 +110,7 @@ def test_shipped_contracts_have_one_matching_sender_and_receiver() -> None:
         "worker": "implementation",
         "reviewer": "review",
         "curator": "curation",
+        "consolidator": "consolidation",
         "investigator": "orientation",
         "bootstrap": "bootstrap",
     }

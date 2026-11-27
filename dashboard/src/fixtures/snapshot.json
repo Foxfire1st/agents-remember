@@ -1980,6 +1980,50 @@
           "openFindings": 1,
           "developerApproval": "replay approved by the developer"
         },
+        "consolidation": {
+          "families": [
+            "FAM-5M0001"
+          ],
+          "rules": [
+            "INV-5M0001"
+          ],
+          "memoryRead": true,
+          "total": 4,
+          "stands": 1,
+          "corrected": 1,
+          "unresolved": 1,
+          "open": 1,
+          "rows": [
+            {
+              "subject": "FAM-5M0001",
+              "kind": "family",
+              "outcome": "stands",
+              "disposition": "stands",
+              "reason": "its members still give the guarantee"
+            },
+            {
+              "subject": "INV-5M0001",
+              "kind": "rule",
+              "outcome": "corrected",
+              "disposition": "changed",
+              "reason": "the condition named a retired route"
+            },
+            {
+              "subject": "INV-5M0002",
+              "kind": "rule",
+              "outcome": "unresolved",
+              "family": "FAM-5M0001",
+              "disposition": "unresolved",
+              "reason": "the named proof fails"
+            },
+            {
+              "subject": "INV-5M0003",
+              "kind": "rule",
+              "outcome": "open",
+              "family": "FAM-5M0001"
+            }
+          ]
+        },
         "currentStep": "step-2",
         "bodyRevision": "rev-3",
         "createdAt": "2026-06-14T08:50:00+00:00",

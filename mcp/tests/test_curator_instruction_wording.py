@@ -188,11 +188,11 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                 (
                     (
                         "roles/architect.md",
-                        "Start all 6 roles via `role_start` with exact refs/request ID; keep returned IDs/paths.",
+                        "Start all 7 roles via `role_start` with exact refs/request ID; keep returned IDs/paths.",
                     ),
                     (
                         "operations/coordination.md",
-                        "Call `role_start` with role, refs, and request ID (Architect: all 6; Orchestrator: all except Orchestrator, sprint; Manager: Worker/Reviewer/Curator/Investigator, master). Keep AR-paired enclosure (no Paseo worktree/global memory); save IDs/paths; reconcile uncertain starts via same request ID.",
+                        "Call `role_start` with role, refs, and request ID (Architect: all 7; Orchestrator: all except Orchestrator, sprint; Manager: Worker/Reviewer/Curator/Consolidator/Investigator, master). Keep AR-paired enclosure (no Paseo worktree/global memory); save IDs/paths; reconcile uncertain starts via same request ID.",
                     ),
                     (
                         "core/authority.md",
@@ -327,7 +327,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                 (
                     (
                         "roles/orchestrator.md",
-                        "Reuse every existing Manager named in Architect's handover and start 1 Manager per other master via `role_start` under sprint (permitted: Manager, Worker, Reviewer, Curator, Investigator). Keep returned IDs, address explicitly, never proxy invisibly.",
+                        "Reuse every existing Manager named in Architect's handover and start 1 Manager per other master via `role_start` under sprint (permitted: Manager, Worker, Reviewer, Curator, Consolidator, Investigator).",
                     ),
                 ),
             ),

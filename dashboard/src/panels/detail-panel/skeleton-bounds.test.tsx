@@ -457,3 +457,116 @@ describe('the way back by the Escape key', () => {
     expect(keydowns(added)).toBe(addedBefore + 2);
   });
 });
+
+describe('consolidation list', () => {
+  const rows = Array.from({ length: 10 }, (_, index) => ({
+    subject: `INV-5M00${String(index).padStart(2, '0')}`,
+    kind: 'rule' as const,
+    outcome: (['stands', 'corrected', 'unresolved', 'open'] as const)[index % 4],
+    family: 'FAM-5M0001',
+  }));
+
+  it('counts each outcome over the whole list, bounds the rows and opens the whole list', () => {
+    seedLeaf({
+      consolidation: {
+        families: ['FAM-5M0001'],
+        rules: [],
+        memoryRead: true,
+        total: 11,
+        stands: 3,
+        corrected: 3,
+        unresolved: 2,
+        open: 3,
+        rows: [
+          {
+            subject: 'FAM-5M0001',
+            kind: 'family',
+            outcome: 'stands',
+            disposition: 'stands',
+            reason: 'Its members still give the guarantee.',
+          },
+          ...rows,
+        ],
+      },
+    });
+    const { container, getByTestId, queryByTestId } = renderLeaf();
+
+    expect(getByTestId('consolidation-count').textContent).toBe('11 subjects');
+    expect(getByTestId('consolidation-count-stands').textContent).toBe('3 stand');
+    expect(getByTestId('consolidation-count-corrected').textContent).toBe('3 corrected');
+    expect(getByTestId('consolidation-count-unresolved').textContent).toBe('2 unresolved');
+    expect(getByTestId('consolidation-count-open').textContent).toBe('3 open');
+    expect(getByTestId('consolidation-listed').textContent).toBe('listed: 1 family');
+    const block = container.querySelector('[data-block="consolidation"]') as HTMLElement;
+    expect(block.querySelectorAll('[data-testid^="consolidation-row-"]')).toHaveLength(8);
+    expect(getByTestId('consolidation-row-FAM-5M0001').textContent).toContain(
+      'Its members still give the guarantee.',
+    );
+
+    fireEvent.click(getByTestId('consolidation-all-link'));
+    expect(getByTestId('doc-view-title').textContent).toBe('Consolidation');
+    const view = getByTestId('consolidation-all-rows');
+    expect(view.querySelectorAll('[data-testid^="consolidation-row-"]')).toHaveLength(11);
+    expect(getByTestId('consolidation-row-INV-5M0009').textContent).toContain(
+      'member of FAM-5M0001',
+    );
+
+    fireEvent.click(getByTestId('doc-view-back'));
+    expect(queryByTestId('doc-view')).toBeNull();
+  });
+
+  it('shows listed counts and listed badges where the memory was not read, and no block without a list', () => {
+    seedLeaf({
+      consolidation: {
+        families: [],
+        rules: ['INV-5M0001', 'INV-5M0002'],
+        memoryRead: false,
+        total: 2,
+        stands: 0,
+        corrected: 0,
+        unresolved: 0,
+        open: 2,
+      },
+    });
+    const first = renderLeaf();
+    expect(first.getByTestId('consolidation-count-listed').textContent).toBe(
+      '2 listed · outcomes not known yet',
+    );
+    expect(first.queryByTestId('consolidation-count-open')).toBeNull();
+    expect(first.getByTestId('consolidation-memory-unread')).toBeTruthy();
+    expect(first.queryByTestId('consolidation-all-link')).toBeNull();
+    first.unmount();
+
+    seedLeaf({
+      consolidation: {
+        families: [],
+        rules: ['INV-5M0001', 'INV-5M0002'],
+        memoryRead: false,
+        total: 2,
+        stands: 0,
+        corrected: 0,
+        unresolved: 0,
+        open: 2,
+        rows: [
+          { subject: 'INV-5M0001', kind: 'rule', outcome: 'open' },
+          { subject: 'INV-5M0002', kind: 'rule', outcome: 'open' },
+        ],
+      },
+    });
+    const unreadRows = renderLeaf();
+    expect(unreadRows.getByTestId('consolidation-row-INV-5M0001').textContent).toContain('listed');
+    expect(unreadRows.getByTestId('consolidation-row-INV-5M0001').textContent).not.toContain(
+      'open',
+    );
+    fireEvent.click(unreadRows.getByTestId('consolidation-all-link'));
+    expect(unreadRows.getByTestId('doc-view').textContent).toContain(
+      '2 listed · outcomes not known yet',
+    );
+    expect(unreadRows.getByTestId('consolidation-row-INV-5M0002').textContent).toContain('listed');
+    unreadRows.unmount();
+
+    seedLeaf({});
+    const second = renderLeaf();
+    expect(second.container.querySelector('[data-block="consolidation"]')).toBeNull();
+  });
+});

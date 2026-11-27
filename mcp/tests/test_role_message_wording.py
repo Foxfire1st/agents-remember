@@ -123,6 +123,7 @@ COMPILED_ROLES = (
     "worker",
     "reviewer",
     "curator",
+    "consolidator",
     "investigator",
 )
 
@@ -176,6 +177,7 @@ MESSAGE_HANDOVER_TABLE_ACTIONS = {
     "worker": "[msg](",
     "reviewer": "[msg](",
     "curator": "[msg](",
+    "consolidator": "[msg](",
     "investigator": "[msgs](",
 }
 

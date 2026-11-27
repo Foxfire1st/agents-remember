@@ -218,6 +218,7 @@ def _assert_digest_audiences(document: dict, text: str) -> None:
         "orchestrator",
         "manager",
         "worker",
+        "consolidator",
         "curator",
         "reviewer",
         "investigator",

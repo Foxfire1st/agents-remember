@@ -1,6 +1,6 @@
 # Curator worklist rules
 
-Curators use this file before answering the persisted leaf worklist. It links the writer's row and evidence procedures and explains the returned worklist and gate fields.
+Curators and Consolidators use this file before answering the persisted leaf worklist. It links the writer's row and evidence procedures and explains the returned worklist and gate fields.
 
 ## Answer rows and repair the list
 

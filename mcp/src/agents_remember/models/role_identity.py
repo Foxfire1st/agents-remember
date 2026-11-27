@@ -25,6 +25,7 @@ ROLE_LEVELS = {
     "worker": "leaf",
     "reviewer": "leaf",
     "curator": "leaf",
+    "consolidator": "leaf",
     # The free agent a new user reaches through the one start call (MIK-R196): it holds no
     # task altitude, so no per-level override applies to it and its role row is the whole
     # of its launch choices.
@@ -34,4 +35,4 @@ ROLE_LEVELS = {
 # selection with no document at all. ``bootstrap`` joins them as the identity-free first
 # seat (MIK-R196 rule 1), not as a second identity of any other role.
 TASKLESS_ROLES = frozenset({"architect", "investigator", "bootstrap"})
-LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
+LEAF_ROLES = frozenset({"worker", "reviewer", "curator", "consolidator"})

@@ -1,6 +1,6 @@
 # Prepare an authored knowledge ingest
 
-Curators read this topic before preparing or ingesting authored knowledge. It describes target explanations, the plan-to-write sequence and the semantic scope the Curator supplies.
+Curators and Consolidators read this topic before preparing or ingesting authored knowledge. It describes target explanations, the plan-to-write sequence and the semantic scope supplied to the writer.
 
 The reconciliation's requirement-shaped items are authored knowledge, not onboarding prose. Before preparing the producer list for ingest, read [the producer entry contract](../../templates/curator-handoff-list.md#the-entry) for producer ownership and target rationale.
 

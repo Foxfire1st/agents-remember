@@ -792,8 +792,10 @@ class TestPublisherCallerAddress:
     refused with the shape **and** this contract's exact expected value.
     """
 
+    # The Consolidator publishes its own consolidation task's record by the leaf, as a Curator does.
+    @pytest.mark.parametrize("role", ["curator", "consolidator"])
     def test_a_bare_leaf_document_name_is_resolved_against_the_contract(
-        self, enclosure: tuple[WorktreeContract, TaskDocumentRef]
+        self, enclosure: tuple[WorktreeContract, TaskDocumentRef], role: str
     ) -> None:
         contract, _sprint = enclosure
         # The task directory's own name, which is what a canonical ref path is relative to.
@@ -821,7 +823,7 @@ class TestPublisherCallerAddress:
                 judgments=judgments,
                 **prepared_publish_inputs(prepared),
                 caller=DeclaredCaller(
-                    role="curator",
+                    role=role,
                     task_document_ref=TaskDocumentRef(
                         repository=REPO, path=f"{contract.leaf_id}.json"
                     ),
@@ -834,7 +836,7 @@ class TestPublisherCallerAddress:
         assert record.taskDocumentRef.path == canonical
         # The resolved ref is what the record (and any assessment's author identity) carries, not
         # the bare spelling the caller supplied.
-        assert record.publishedBy == f"curator@{REPO}/{canonical}"
+        assert record.publishedBy == f"{role}@{REPO}/{canonical}"
 
     def test_a_bare_name_for_another_leaf_is_refused_with_the_canonical_path(
         self, enclosure: tuple[WorktreeContract, TaskDocumentRef]

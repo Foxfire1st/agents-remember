@@ -139,7 +139,10 @@ def _primary_roles(selection: RoleSelection) -> tuple[str, ...]:
     """
 
     if selection.task_document_ref:
-        return ("worker", "reviewer", "curator")
+        # Every seat a leaf can hold: an ordinary leaf's Worker, Reviewer and Curator, and a
+        # consolidation task's Consolidator and Reviewer. A seat the leaf never had has no
+        # receipt and answers nothing, so no task document is read to choose among them.
+        return ("worker", "consolidator", "reviewer", "curator")
     if selection.master_document_ref:
         return ("manager",)
     if selection.sprint_document_ref:

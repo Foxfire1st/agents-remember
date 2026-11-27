@@ -624,6 +624,12 @@ was the trial and error the schema exists to prevent. It is an instructions-do-n
 """
 
 
+# The leaf seats that publish their own task's coherence record, naming the leaf itself: the
+# Curator of an ordinary leaf and the Consolidator of a consolidation task. Any other caller
+# names the owning sprint (or the standalone master).
+_LEAF_PUBLISHER_ROLES = frozenset({"curator", "consolidator"})
+
+
 def _authorized_publisher(
     contract: WorktreeContract,
     observation: CuratorCoherenceObservation,
@@ -647,7 +653,7 @@ def _authorized_publisher(
         raise CuratorCoherenceError(exc.status, str(exc), next_action="task_doc") from exc
     expected = (
         observation.candidate.ref
-        if caller.role == "curator"
+        if caller.role in _LEAF_PUBLISHER_ROLES
         else (sprint_ref if sprint_ref is not None else master_ref)
     )
     resolved = _resolve_caller_ref(caller.task_document_ref, expected)
@@ -691,12 +697,12 @@ def _caller_refusal_detail(caller: DeclaredCaller, expected: TaskDocumentRef | N
     supplied = f"{caller.task_document_ref.repository}:{caller.task_document_ref.path}"
     if expected is None:
         return (
-            "publish requires the exact leaf curator or owning sprint architect; "
+            "publish requires the exact leaf curator or consolidator, or the owning sprint architect; "
             f"caller.task_document_ref.path must be the {_CALLER_PATH_SHAPE}, and this contract "
             f"has no owning sprint document to resolve one from; received {supplied!r}"
         )
     return (
-        "publish requires the exact leaf curator or owning sprint architect; "
+        "publish requires the exact leaf curator or consolidator, or the owning sprint architect; "
         f"caller.task_document_ref.path must be the {_CALLER_PATH_SHAPE} -- for this contract "
         f"that is {expected.path!r} in repository {expected.repository!r}, or the bare file name "
         f"{expected.path.rsplit('/', 1)[-1]!r}; received {supplied!r}"

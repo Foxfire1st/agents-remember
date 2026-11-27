@@ -225,7 +225,7 @@ def test_current_measurements_retire_word_ceilings_while_keeping_freshness() -> 
 
 def test_compiled_capsule_token_ceilings_enforce_all_matrix_keys() -> None:
     assert set(COMPILED_CAPSULE_TOKEN_CEILINGS) == set(matrix_keys())
-    assert len(COMPILED_CAPSULE_TOKEN_CEILINGS) == 34
+    assert len(COMPILED_CAPSULE_TOKEN_CEILINGS) == 37
     at_limit = dict(COMPILED_CAPSULE_TOKEN_CEILINGS)
     assert evaluate_wire_token_ceilings(at_limit, COMPILED_CAPSULE_TOKEN_CEILINGS) == []
     budgets_mod = renewal_module("budgets")

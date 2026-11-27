@@ -22,6 +22,7 @@ _RECOGNIZED_ROLE_LABELS: Final[frozenset[str]] = frozenset(
         "worker",
         "reviewer",
         "curator",
+        "consolidator",
         "investigator",
         "bootstrap",
         "system-specialist",
