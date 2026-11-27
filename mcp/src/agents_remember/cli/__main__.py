@@ -35,6 +35,7 @@ from agents_remember.cli import (
     knowledge_worklist,
     leaf_enclosure_start,
     memory_backfill,
+    memory_briefs,
     memory_citations,
     paseo_runtime,
     removed_stores,
@@ -73,6 +74,12 @@ def _register_memory_commands(sub: argparse._SubParsersAction) -> None:
     )
     memory_backfill.add_arguments(backfill)
     backfill.set_defaults(func=memory_backfill.run)
+    briefs = sub.add_parser(
+        "memory-briefs",
+        help="Refresh derived briefs/ in a converted external memory checkout.",
+    )
+    memory_briefs.add_arguments(briefs)
+    briefs.set_defaults(func=memory_briefs.run)
 
 
 def _register_knowledge_commands(sub: argparse._SubParsersAction) -> None:

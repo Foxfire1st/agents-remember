@@ -26,8 +26,17 @@ IN_THE_FILE: Final = (
     "where else it is realized, the tests that prove it, the decisions that formed it, each "
     "family's guarantee and its other rules with their text."
 )
+IN_THE_FILE_NOT_CURRENT: Final = (
+    "The brief on disk is missing or older than this tree, so do not rely on opening it directly; "
+    "use knowledge_read for full conditions, exclusions, proofs, and family context."
+)
 LEFT_OUT: Final = "Read the current brief with your own file tool for the rule texts that did not fit this answer."
+LEFT_OUT_NOT_CURRENT: Final = (
+    "Some rule texts did not fit this answer, and the brief on disk is missing or older than this "
+    "tree; use knowledge_read for the remaining rules."
+)
 RULE_LEFT_OUT: Final = "text in the brief"
+RULE_LEFT_OUT_NOT_CURRENT: Final = "text omitted; brief on disk is not current"
 NOTHING_RECORDED: Final = (
     "No rule, weakness, decision or standing document is recorded at this file, so it has no brief."
 )
@@ -62,7 +71,7 @@ def whole(brief: FileBrief, location: BriefLocation) -> dict[str, Any]:
         for one in brief.families[:LIST_CAP]
     ]
     answer["retiredLeftOut"] = brief.retired_left_out
-    answer["inTheFile"] = IN_THE_FILE
+    answer["inTheFile"] = IN_THE_FILE if location.current else IN_THE_FILE_NOT_CURRENT
     return answer
 
 
@@ -82,14 +91,15 @@ def counts_only(brief: FileBrief, location: BriefLocation) -> dict[str, Any]:
 def without_rule_texts(answer: Mapping[str, Any], keep: int) -> dict[str, Any]:
     """``answer`` with the first ``keep`` rules' texts and the rest by ID and title only."""
 
+    is_current = bool(answer.get("current"))
     trimmed = dict(answer)
     trimmed["rules"] = [
-        dict(one) if position < keep else _named_only(one)
+        dict(one) if position < keep else _named_only(one, current=is_current)
         for position, one in enumerate(answer.get("rules") or ())
     ]
     trimmed["weaknesses"] = [] if keep == 0 else answer.get("weaknesses", [])
     if keep < len(answer.get("rules") or ()):
-        trimmed["leftOut"] = LEFT_OUT
+        trimmed["leftOut"] = LEFT_OUT if is_current else LEFT_OUT_NOT_CURRENT
     return trimmed
 
 
@@ -102,11 +112,17 @@ class Candidate:
     counts: dict[str, Any]
 
 
-def counts_notice(count: int) -> str:
+def counts_notice(count: int, *, all_current: bool = True) -> str:
     paths = "1 path" if count == 1 else f"{count} paths"
+    if all_current:
+        return (
+            f"The briefs of {paths} did not fit this answer whole, so their rows carry "
+            "the counts and the brief's path. Read each current brief with your own file tool."
+        )
     return (
         f"The briefs of {paths} did not fit this answer whole, so their rows carry "
-        "the counts and the brief's path. Read each current brief with your own file tool."
+        "the counts and the brief's path. Open only briefs marked current; missing or older "
+        "briefs are not current on disk."
     )
 
 
@@ -196,9 +212,9 @@ def _rule(rule: RuleBlock) -> dict[str, Any]:
     return row
 
 
-def _named_only(rule: Mapping[str, Any]) -> dict[str, Any]:
+def _named_only(rule: Mapping[str, Any], *, current: bool = True) -> dict[str, Any]:
     named = {key: rule[key] for key in ("id", "title", "moved") if key in rule}
-    named["rule"] = RULE_LEFT_OUT
+    named["rule"] = RULE_LEFT_OUT if current else RULE_LEFT_OUT_NOT_CURRENT
     return named
 
 
@@ -214,9 +230,13 @@ def _weaknesses(brief: FileBrief) -> list[Any]:
 
 __all__ = [
     "IN_THE_FILE",
+    "IN_THE_FILE_NOT_CURRENT",
     "LEFT_OUT",
+    "LEFT_OUT_NOT_CURRENT",
     "LIST_CAP",
     "NOTHING_RECORDED",
+    "RULE_LEFT_OUT",
+    "RULE_LEFT_OUT_NOT_CURRENT",
     "BriefLocation",
     "Candidate",
     "counts_notice",

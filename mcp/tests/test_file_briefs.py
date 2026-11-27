@@ -288,9 +288,31 @@ def test_which_files_get_a_brief(memory: Path, tmp_path: Path) -> None:
     assert source.assemble("README.md") is None
 
 
-def test_an_untitled_rule_is_named_by_its_first_six_words(memory: Path, tmp_path: Path) -> None:
-    named = rule_title({"statement": "One two three four five six seven eight."})
-    assert named == RuleTitle("One two three four five six …", given=False)
+def test_an_untitled_rule_is_named_by_its_first_clause(memory: Path, tmp_path: Path) -> None:
+    short = rule_title({"statement": "One two three four five six seven eight."})
+    assert short == RuleTitle("One two three four five six seven eight.", given=False)
+    long_sentence = rule_title(
+        {
+            "statement": (
+                "Derived briefs refresh after every landing route. "
+                "Secondary clauses explain advisory failure handling when a checkout is unpulled."
+            )
+        }
+    )
+    assert long_sentence == RuleTitle(
+        "Derived briefs refresh after every landing route", given=False
+    )
+    long_clause = rule_title(
+        {
+            "statement": (
+                "Derived briefs stay Git-ignored on every external memory branch, "
+                "and any refresh failure is reported as advisory briefsProblem without rolling back."
+            )
+        }
+    )
+    assert long_clause == RuleTitle(
+        "Derived briefs stay Git-ignored on every external memory branch …", given=False
+    )
     assert rule_title({"title": "Briefs lie beside cards", "statement": "x"}).given
     # The heading of an untitled rule is those words alone; the short answer says it is untitled.
     brief = _source(memory, tmp_path / "cache").assemble(REVIEW_PATH)

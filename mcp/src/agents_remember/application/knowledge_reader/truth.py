@@ -54,6 +54,7 @@ from agents_remember.application.knowledge_reader.records import (
     records_linking,
     summary_of,
 )
+from agents_remember.application.knowledge_reader.records_batch import records_view
 from agents_remember.application.knowledge_reader.selection import READ_FAILURES, ReaderSelection
 from agents_remember.application.knowledge_reader.timeline import record_timeline
 from agents_remember.application.knowledge_reader.weakness_closure import closure_document
@@ -72,7 +73,7 @@ from agents_remember.models.knowledge_files.records import (
 from agents_remember.serving.media import media_type_for
 from agents_remember.serving.scope import language_for
 
-__all__ = ["census_view", "code_view", "record_list", "record_view"]
+__all__ = ["census_view", "code_view", "record_list", "record_view", "records_view"]
 
 _FACET_FRAME: Final = frozenset({"schema", "id", "links"})
 

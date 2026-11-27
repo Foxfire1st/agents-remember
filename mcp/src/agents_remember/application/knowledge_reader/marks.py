@@ -46,6 +46,9 @@ from agents_remember.application.knowledge_reader.deferrals import (
     infer_reading_leaf,
     opened_code_files,
 )
+from agents_remember.application.knowledge_reader.marks_compact import (
+    compact_dependent_rows,
+)
 from agents_remember.application.knowledge_reader.selection import READ_FAILURES, ReaderSelection
 from agents_remember.application.knowledge_reader.weakness_closure import closure_document
 from agents_remember.kernel.git_command import (
@@ -66,6 +69,7 @@ PRODUCT_VERSION_FILE = "mcp/pyproject.toml"
 __all__ = [
     "DEPENDENT_VIEW",
     "WEAKNESS_VIEW",
+    "compact_dependent_rows",
     "dependent_counts",
     "dependent_detail",
     "dependent_list",

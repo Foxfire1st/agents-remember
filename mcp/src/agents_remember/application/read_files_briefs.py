@@ -156,16 +156,32 @@ class BatchBriefs:
         self._fit(payload, self.candidates, bound=bound_for("read_ar_files") - FINISHING_ROOM)
 
     def _fit(self, payload: dict[str, Any], candidates: list[Candidate], *, bound: int) -> None:
+        def _counts_rows() -> list[dict[str, Any]]:
+            return [
+                candidate.row[BRIEF_FIELD]
+                for candidate in candidates
+                if "counts" in candidate.row[BRIEF_FIELD]
+            ]
+
         def fits() -> bool:
-            counts = sum("counts" in candidate.row[BRIEF_FIELD] for candidate in candidates)
-            answer = {**payload, "briefsLeftOut": counts_notice(counts)} if counts else payload
+            rows = _counts_rows()
+            if rows:
+                notice = counts_notice(
+                    len(rows), all_current=all(bool(r.get("current")) for r in rows)
+                )
+                answer = {**payload, "briefsLeftOut": notice}
+            else:
+                answer = payload
             return _answer_tokens(answer) <= bound
 
         count_only = fit(candidates, fits=fits, field=BRIEF_FIELD)
         if count_only is None:
             self._compact(payload)
         elif count_only > 0:
-            payload["briefsLeftOut"] = counts_notice(count_only)
+            rows = _counts_rows()
+            payload["briefsLeftOut"] = counts_notice(
+                count_only, all_current=all(bool(r.get("current")) for r in rows)
+            )
 
     def _compact(self, payload: dict[str, Any]) -> None:
         """Keep every path addressable when the legacy rows with brief counts cannot fit."""

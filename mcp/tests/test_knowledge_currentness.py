@@ -659,10 +659,11 @@ def test_knowledge_read_flags_a_stale_invariant_and_keeps_it_visible(
     assert "INV-AAAAAA holds." not in json.dumps(invariant), invariant
 
 
-def test_knowledge_read_without_a_named_tree_is_unverifiable_and_never_reads_head(
+def test_knowledge_read_without_a_named_tree_pairs_resolved_code_and_stays_unverifiable_without_root(
     world: World,
 ) -> None:
     world.change({REVIEW: _body_edit()})  # HEAD now holds the edit
+    head_tree = git(world.code, "rev-parse", "HEAD^{tree}")
     for fields in ({}, {"repository_root": str(world.code)}):
         response = _read(
             world,
@@ -671,24 +672,43 @@ def test_knowledge_read_without_a_named_tree_is_unverifiable_and_never_reads_hea
             **fields,
         )
         block = response["currentness"]
-        assert block["codeTree"] is None
-        assert block["unverifiableReason"] == "no code tree was requested"
-        assert [one["state"] for one in block["invariants"]] == ["unverifiable"]
-        # One read-wide reason explains every entry, so each is named compactly (review N4).
-        assert block["invariants"][0]["entries"] == [
-            {
-                "id": "RLZ-A00001",
-                "kind": "realization",
-                "path": REVIEW,
-                "state": "unverifiable",
-            },
-            {
-                "id": "PRF-P00001",
-                "kind": "proof",
-                "path": TESTS,
-                "state": "unverifiable",
-            },
-        ]
+        assert block["codeTree"] == {
+            "repositoryRoot": str(world.code),
+            "treeId": head_tree,
+        }
+        assert [one["state"] for one in block["invariants"]] == ["stale"]
+
+    # When no code repository root is resolvable at all (unconfigured memory + non-Git workspace),
+    # anchors stay cleanly unverifiable with the read-wide reason.
+    non_git = world.root / "projects-workspace"
+    non_git.mkdir(exist_ok=True)
+    unpaired = knowledge_read_payload(
+        ReadToolRequest(
+            memory_root=str(world.memory),
+            view="invariant",
+            invariant_revision_id=text_uuid("revision", "INV-AAAAAA@1"),
+        ),
+        workspace_root=str(non_git),
+        coordination_root=str(world.root / "coordination"),
+    )
+    block = unpaired["currentness"]
+    assert block["codeTree"] is None
+    assert block["unverifiableReason"] == "no code tree was requested"
+    assert [one["state"] for one in block["invariants"]] == ["unverifiable"]
+    assert block["invariants"][0]["entries"] == [
+        {
+            "id": "RLZ-A00001",
+            "kind": "realization",
+            "path": REVIEW,
+            "state": "unverifiable",
+        },
+        {
+            "id": "PRF-P00001",
+            "kind": "proof",
+            "path": TESTS,
+            "state": "unverifiable",
+        },
+    ]
 
 
 def test_the_published_intent_block_flags_returned_invariants_at_its_resolved_tree(

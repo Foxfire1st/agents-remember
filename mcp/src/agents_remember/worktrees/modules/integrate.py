@@ -44,6 +44,7 @@ from agents_remember.worktrees.integration.master_review_gate import (
     blocked_integration_payload,
 )
 from agents_remember.worktrees.knowledge_gate import landing_document_answer
+from agents_remember.worktrees.landing_briefs import refresh_integrated_memory_briefs
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.git import (
     branch_commit,
@@ -1002,13 +1003,27 @@ def _publish_integration_edge(
         current_command="finalize integration contract edge",
     )
     if checkpoint is not None:
-        return _checkpoint_result(current, publication.locked_args, publication.commits)
-    return _integrated_result(
+        result = _checkpoint_result(current, publication.locked_args, publication.commits)
+    else:
+        result = _integrated_result(
+            current,
+            publication.locked_args,
+            publication.commits,
+            handover_warning=publication.handover_warning,
+        )
+    briefs_problem = refresh_integrated_memory_briefs(
         current,
-        publication.locked_args,
-        publication.commits,
-        handover_warning=publication.handover_warning,
+        code_commit=publication.commits.code,
+        memory_commit=publication.commits.memory_content,
+        memory_branch=snapshot.memory_branch,
+        previous_memory_commit=snapshot.memory_before or None,
     )
+    if briefs_problem is not None:
+        return WorktreeCommandResult(
+            result.returncode,
+            {**result.payload, "briefsProblem": briefs_problem},
+        )
+    return result
 
 
 def _checkpoint_result(

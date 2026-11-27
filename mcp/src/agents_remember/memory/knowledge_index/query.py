@@ -41,6 +41,7 @@ from typing import Any, Literal
 import apsw
 
 from agents_remember.memory.knowledge.connection import open_read_only_database
+from agents_remember.memory.knowledge_index.fts import search_fts
 from agents_remember.memory.knowledge_index.projection import INDEX_REPOSITORY_ID, RETIRED_STATUS
 from agents_remember.memory.knowledge_index.record_standing import (
     UNKNOWN_WRITER,
@@ -576,6 +577,17 @@ class KnowledgeIndex:
             )
             for row in rows
         )
+
+    def search_fts(
+        self,
+        query_text: str,
+        *,
+        kinds: Sequence[str] | None = None,
+        limit: int | None = None,
+    ) -> Answer[tuple[Any, ...]]:
+        """Deterministic FTS5 keyword search over live records."""
+
+        return self._answer(search_fts(self._connection, query_text, kinds=kinds, limit=limit))
 
     def _record(self, record_id: str) -> Record | None:
         row = next(
