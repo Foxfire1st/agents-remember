@@ -125,10 +125,14 @@ NAMED_EXCEPTIONS = {
         "3. the cleanup survey's read-only content probe (MIK-R26 rule 6)"
     ),
 }
-# Not a knowledge database: the citation source index of the memory-quality checks.
-OTHER_DATABASES: set[str] = set()
+# These opens belong to the durable provider reset schedule.
+OTHER_DATABASES = {
+    "controlplane/held_reset_index.py::_writer",
+    "controlplane/held_reset_index.py::_reader",
+}
 # The exceptions that open a file which already exists; each must open it read-only.
 READ_ONLY_EXCEPTIONS = {
+    "controlplane/held_reset_index.py::_reader",
     "memory/knowledge/connection.py::open_read_only_database",
     "memory/conversion/legacy_db.py::export_database",
     "application/dataset_copy_survey.py::sqlite_table_names",
@@ -136,6 +140,7 @@ READ_ONLY_EXCEPTIONS = {
 # What else of a SQLite module production names outside a type annotation. None of these opens.
 OTHER_ATTRIBUTES_ALLOWED = {
     "apsw.Error": "the error class of every apsw failure",
+    "sqlite3.Error": "the error class for an interrupted reset-index write",
     "apsw.SQLITE_OPEN_READONLY": "the flag of a read-only open",
     "apsw.SQLITE_OPEN_URI": "lets the read-only content probe name its file as a URI",
 }
@@ -152,6 +157,7 @@ COMPUTED_IMPORTS_ALLOWED = {
 }
 # A production module may name a database file only here; a copy of a dataset needs such a name.
 SQLITE_FILE_NAMES_ALLOWED = {
+    "controlplane/held_reset_index.py": "the held-message reset schedule's filename",
     "application/knowledge_proofs.py": "the scratch derived index of a tree read without a cache",
     "memory/carryover.py": "scratch derived indexes of the source and target trees of a carry-over plan",
     "kernel/memory_init.py": "tests whether a root holds legacy memory",
@@ -163,8 +169,9 @@ NAMES_ALLOWED = {
     "kernel/memory_init.py": "tests whether a root holds legacy memory, so it never marks it converted",
     "memory/conversion/inputs.py": "the legacy reader's input: the file of an unconverted tree",
 }
-# The one package whose database is not a knowledge database: the citation source index.
-_OTHER_STORES = ("memory_quality/style/citations/",)
+# The stores whose database is not a knowledge database: the citation source index and the
+# durable provider reset schedule.
+_OTHER_STORES = ("memory_quality/style/citations/", "controlplane/held_reset_index.py")
 _ROW_WRITERS = {
     "memory/knowledge_index/build.py",
     "memory/knowledge_index/fts.py",

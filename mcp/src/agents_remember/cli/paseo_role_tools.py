@@ -46,6 +46,7 @@ from agents_remember.application.role_capsules.refusal_references import (
 from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
 )
+from agents_remember.cli.held_reset_delivery import hold_at_receipt
 from agents_remember.cli.investigator_receipts import (
     investigator_message_capacity,
 )
@@ -96,8 +97,6 @@ from agents_remember.cli.role_held_messages import (
     _read_store_counts,
     apply_drain_to_receipt,
     drain_held,
-    hold_message,
-    note_held_receipt,
     sender_terminal_lines,
     waiting_total,
     withdraw_message,
@@ -535,7 +534,9 @@ def _hold_for_seat(  # noqa: PLR0913 -- each fact of the wait rides the take, pe
     ref = held_seat_ref(path, _receipt)
     try:
         with open_held_store(ref):
-            taken = hold_message(
+            taken = hold_at_receipt(
+                send.config,
+                path,
                 folder,
                 send.recipient.agent_id,
                 HeldMessage(
@@ -563,7 +564,6 @@ def _hold_for_seat(  # noqa: PLR0913 -- each fact of the wait rides the take, pe
         ) from full
     except ValueError as error:
         raise _not_found(str(error), recipientAgentId=send.recipient.agent_id) from error
-    note_held_receipt(send.config, path)
     _note_waiting(ref, taken["waitingTotal"])
     try:
         drain = drain_held(send.config, path, _receipt)

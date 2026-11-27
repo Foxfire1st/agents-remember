@@ -67,6 +67,7 @@ class CatalogPreparationLifetimeTests(unittest.IsolatedAsyncioTestCase):
                 background_ledger=None,
                 review_trees_shutdown=None,
                 master_preparation=None,
+                held_reset_delivery=None,
                 explainer_application=None,
                 launcher_catalog_prepare=prepare or self._catalog,
                 stream_shutdown=StreamShutdown(),

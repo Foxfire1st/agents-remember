@@ -77,6 +77,10 @@ LINK: Final = "link"
 # why. A module is named, never a path: the index cache and the scratch copies lie wherever the
 # caller's coordination root puts them. ``CONNECT`` includes a read-only connection.
 ALLOWED_MODULES: Final[dict[str, tuple[str, str]]] = {
+    "controlplane/held_reset_index.py": (
+        CONNECT,
+        "the durable provider reset schedule for native held messages",
+    ),
     "memory/knowledge_index/build.py": (
         CONNECT,
         "the derived index: its builder writes a new index file",
