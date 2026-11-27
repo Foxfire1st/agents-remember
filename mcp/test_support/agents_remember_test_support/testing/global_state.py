@@ -235,6 +235,12 @@ PROCESS_MUTABLE_STATES = (
         _reset_build_watchdog,
     ),
     _row(
+        "canvas.kit_references",
+        "_js_language",
+        "Forget loaded JavaScript grammar memoization between test modules.",
+        _clear_cache,
+    ),
+    _row(
         "cli.role_held_messages",
         "_sweep_walks",
         "Close suspended sweep walks before forgetting them between test modules.",
