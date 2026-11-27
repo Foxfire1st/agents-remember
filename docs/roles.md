@@ -15,7 +15,7 @@ Related pages:
 
 ## The roles
 
-The product has eight roles. A role agent holds exactly one of them.
+The product has nine roles. A role agent holds exactly one of them.
 
 | Role | What it does | Works on |
 | --- | --- | --- |
@@ -23,15 +23,19 @@ The product has eight roles. A role agent holds exactly one of them.
 | Orchestrator | Coordinates one sprint when two or more of its masters are worked on at the same time, or when you ask for one. It starts one Manager for each master. | one sprint |
 | Manager | Coordinates one master: it starts the role agents of each task, decides the order of the tasks, and closes out and lands them. | one master |
 | Worker | Builds one task in the task's code worktree and writes one report. | one task |
+| Consolidator | Reads the rules and families that a [consolidation task](#a-consolidation-task) lists again against the code, runs the tests they name as proof, and leaves each standing, corrected or unresolved. It changes no code. | one task |
 | Reviewer | Reviews one task against its requirement and records a verdict with its findings. It reviews the code change and the memory change. | one task |
 | Curator | Brings the memory of the code repository in line with the reviewed code change of one task. | one task |
 | Investigator | Looks into one question that belongs to no task and writes one report. It changes no code, no memory and no task document. | no task document, one sprint, one standalone master, or one sprint and one of its masters |
 | Bootstrap | Sets up one code repository for a new user. It is the role of the first run. | no task document |
 
-Two names stand beside the roles:
+Three names stand beside the roles:
 
 - The role settings accept a row `review-presenter` for the explainer of the review page. It is
   not a role, and no start accepts it.
+- The role settings accept a row `consolidation-reviewer` for the Reviewer of a consolidation
+  task. It is not a role, and no start accepts it; see
+  [A consolidation task](#a-consolidation-task).
 - The explainer is not a role agent. [The review page and its explainer](guides/review-page-and-explainer.md)
   describes it.
 
@@ -74,8 +78,9 @@ approval.
 
 ### The role launcher of the dashboard
 
-The role launcher of the dashboard starts a role agent in one of seven roles: Architect,
-Investigator, Orchestrator, Manager, Worker, Reviewer or Curator. It does not start Bootstrap.
+The role launcher of the dashboard starts a role agent in one of eight roles: Architect,
+Investigator, Orchestrator, Manager, Worker, Consolidator, Reviewer or Curator. It does not start
+Bootstrap.
 [Dashboard](dashboard.md) describes its controls.
 
 A role agent that the launcher or a chat without a role started has no parent, that is, no role
@@ -92,13 +97,13 @@ Every start names a role. The role decides which task documents the start select
 | Investigator | optional | optional, alone or with its sprint | never |
 | Orchestrator | yes | no | no |
 | Manager | when it commands the master | yes | no |
-| Worker, Reviewer, Curator | when it commands the master | yes | yes |
+| Worker, Consolidator, Reviewer, Curator | when it commands the master | yes | yes |
 
 A master that no sprint commands is a master in its own right: its start names the master and no
 sprint. When a sprint commands the selected master, the start names that sprint, and no other. A
 sprint named for a master that no sprint commands is refused, and the refusal says that the master
 stands on its own. The selected task must be a task of the selected master. A start of a Worker, a
-Reviewer or a Curator is refused with `intent-review-open` until the task's intent review is `go`;
+Consolidator, a Reviewer or a Curator is refused with `intent-review-open` until the task's intent review is `go`;
 see [Workflows](workflows.md#the-intent-review-before-a-task-starts).
 
 A start may name the harness (argument `agent`), the model, the effort and feature values for this
@@ -113,11 +118,12 @@ effort; see [Harnesses](reference/harnesses.md).
 
 A role agent starts another role agent with `role_start` and becomes its parent:
 
-- An Architect starts an Investigator, an Orchestrator, a Manager, a Worker, a Reviewer or a
-  Curator.
-- An Orchestrator starts a Manager, a Worker, a Reviewer, a Curator or an Investigator under its
-  own sprint.
-- A Manager starts a Worker, a Reviewer, a Curator or an Investigator under its own master.
+- An Architect starts an Investigator, an Orchestrator, a Manager, a Worker, a Consolidator, a
+  Reviewer or a Curator.
+- An Orchestrator starts a Manager, a Worker, a Consolidator, a Reviewer, a Curator or an
+  Investigator under its own sprint.
+- A Manager starts a Worker, a Consolidator, a Reviewer, a Curator or an Investigator under its
+  own master.
 
 The product runs one start at a time. A second call waits up to 60 seconds for the first start to
 end; after that it is refused, and its answer says to call again with the same arguments.
@@ -189,6 +195,34 @@ for you, a limit, a disagreement, or readiness for closeout.
 Each of the three marks its own step of the task document `done`, with a one-line note, when its
 part is finished.
 
+### A consolidation task
+
+A consolidation task reads the memory again against the code. It is a task like any other, with a
+code worktree, a memory worktree and a scratch folder, in a master of its own that is made off
+`main` on your request; nothing starts one on its own. Its task document names the list of the
+pass in `consolidationList`: families and rules by their ids. The list is written before any role
+agent starts, and the `knowledge_read` view `consolidation_proposal` proposes lists, for a
+finished master, for a family or a folder, or, with nothing named, the families longest without a
+consolidation.
+
+Its role agents are a Consolidator and a Reviewer. It has no Worker and no Curator. With
+`role_start_set` the Manager names a `consolidator` seat in place of the `worker` seat: the
+Consolidator opens, and the Reviewer is held until the Consolidator's hand-over reaches it. The
+Reviewer of a consolidation task takes the settings row `consolidation-reviewer`; a field that row
+leaves empty comes from the Reviewer's row, and a model that the start names wins over both.
+
+For each listed rule, and each rule of a listed family, the Consolidator reads the rule, its
+family's guarantee, its decisions and the code and tests its card entries name. It runs the tests
+the rule names as proof, and no others, and leaves the code worktree as it was. Each listed record
+then gets one row in the task's history file: `stands` with its reason and the tests that ran,
+a correction with the rows that change asks for, or `unresolved` when rule and code contradict
+each other and the Consolidator cannot tell which is wrong. The knowledge gate holds the closeout
+until every listed record has its row. The Reviewer reviews the memory change and each `stands`
+row against its reason; the Consolidator publishes the coherence record of its task. After a
+closeout with a passed memory review, the revisions the pass wrote, or read and left as they were,
+read **consolidated**; a rule with an `unresolved` row keeps its state. A pass that changes no
+record lands its history file alone.
+
 A review takes a limited number of rounds. A round is one review of a candidate, of the code or of
 the memory, that the task document records. The limit is five, unless
 `orchestration.loops.defaults.maxRounds` in the user settings file names another number. A round
@@ -249,8 +283,8 @@ and the whole result in `log` also names `reportPath`.
 
 ## Where a role agent's files lie
 
-A Worker, a Reviewer and a Curator work in the enclosure of their task. The first start of one of
-them on a task creates the enclosure. Its folder is
+A Worker, a Consolidator, a Reviewer and a Curator work in the enclosure of their task. The first
+start of one of them on a task creates the enclosure. Its folder is
 `<coordination-root>/worktrees/<repository>/<worktree-name>-ar/` and holds:
 
 | Entry | Content |
@@ -401,14 +435,14 @@ turn ended: <role> <agent id> · <task>; last line: <text>; newest report: <path
 The parent receives no line when the turn delivered a `role_message` to the parent, and none
 while the role agent waits at a permission prompt. A role agent that has one of its own role
 agents in a turn gives its line when that turn has ended. A parent that is in a turn receives the
-line when it is free. When the parent of a Worker, a Reviewer or a Curator is archived, the line
-goes to the current Manager of the task's master.
+line when it is free. When the parent of a Worker, a Consolidator, a Reviewer or a Curator is
+archived, the line goes to the current Manager of the task's master.
 
 ### A turn that ends without a hand-off
 
 A [hand-off](concepts.md#hand-off) is a delivered `role_message` or a write to a task document.
-When a Worker, a Reviewer or a Curator completes a turn without a hand-off, the parent hears
-nothing at first:
+When a Worker, a Consolidator, a Reviewer or a Curator completes a turn without a hand-off, the
+parent hears nothing at first:
 
 1. The plug-in waits 60 seconds. A new turn of the role agent inside that time cancels the wait.
 2. The plug-in sends the role agent a message that begins

@@ -289,6 +289,7 @@ class RoleExecutionResultTests(unittest.TestCase):
                 "worker",
                 "reviewer",
                 "curator",
+                "consolidator",
                 # The free agent this leaf admits to native launch (MIK-R196 rule 1).
                 "bootstrap",
             },
@@ -301,6 +302,7 @@ class RoleExecutionResultTests(unittest.TestCase):
             "worker": "leaf",
             "reviewer": "leaf",
             "curator": "leaf",
+            "consolidator": "leaf",
             "bootstrap": "free-agent",
         }
         self.assertEqual(
@@ -700,7 +702,7 @@ class StandaloneMasterSelectionTests(unittest.TestCase):
         self.assert_effective(context, self.lonely)
 
     def test_the_leaf_roles_resolve_a_leaf_of_a_standalone_master(self) -> None:
-        roles: tuple[LauncherRole, ...] = ("worker", "reviewer", "curator")
+        roles: tuple[LauncherRole, ...] = ("worker", "reviewer", "curator", "consolidator")
         for role in roles:
             with self.subTest(role=role):
                 context = self.resolve(
@@ -717,7 +719,7 @@ class StandaloneMasterSelectionTests(unittest.TestCase):
             master_document_ref=self.lonely,
             task_document_ref=self.lonely_leaf,
         )
-        selections = _set_selections(call)
+        selections = _set_selections(self.config, call)
         self.assertEqual(
             [selection.role for selection in selections], ["worker", "reviewer", "curator"]
         )

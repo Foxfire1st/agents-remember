@@ -433,6 +433,27 @@ export interface TaskCodeExampleNode {
   why: string;
 }
 
+export interface TaskConsolidationNode {
+  corrected: number;
+  families: string[];
+  memoryRead: boolean;
+  open: number;
+  rows?: TaskConsolidationRowNode[];
+  rules: string[];
+  stands: number;
+  total: number;
+  unresolved: number;
+}
+
+export interface TaskConsolidationRowNode {
+  disposition?: string;
+  family?: string;
+  kind: "family" | "rule";
+  outcome: "stands" | "corrected" | "unresolved" | "open";
+  reason?: string;
+  subject: string;
+}
+
 export interface TaskCounts {
   aborted: number;
   completed: number;
@@ -631,6 +652,7 @@ export interface TaskSummary {
   bodyRevision: string;
   codeExamples: TaskCodeExampleNode[];
   completedAt?: string;
+  consolidation?: TaskConsolidationNode;
   createdAt: string;
   currentStep?: string;
   decisions: TaskDecisionNode[];

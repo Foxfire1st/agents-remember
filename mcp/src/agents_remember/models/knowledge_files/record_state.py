@@ -8,9 +8,12 @@ The state is never stored in a record; it is read from the history files of the 
   write, so a fact on an open file is no closeout and counts for nothing;
 * **consolidated** -- a closed file whose review fact names a consolidator as the agent that handed
   the change over either wrote the revision, or holds a rule or family row that names this revision
-  as the one it read and kept (:data:`KEPT_DISPOSITIONS`), without writing a newer revision of it.
-  A row about a record of another kind, or one that changed, deleted or retired its subject, keeps
-  nothing;
+  as the one it read and kept (:data:`KEPT_DISPOSITIONS`, or a card-entry-only ``deleted`` rule row
+  without ``effect == "retire"``), without writing a newer revision of it.
+  A kept row counts only for a record the pass's list reached, which the file names in
+  ``consolidationSubjects``: a family the list did not name, reached only because a member
+  changed, is not consolidated by its row. A row about a record of another kind, one that changed
+  or retired its subject, or an ``unresolved`` row, keeps nothing;
 * **proposed** -- otherwise, also for a revision written outside any owner.
 
 A retired record shows no state. Each attempt of a reopened leaf speaks for the revisions it wrote:
@@ -71,12 +74,23 @@ CONSOLIDATOR_ROLE: Final = "consolidator"
 # The disposition a consolidator gives a record it could not judge; such a row keeps no revision.
 UNRESOLVED: Final = "unresolved"
 # The row kinds and dispositions that read a rule or family at the row's revision and left its text
-# as it was: ``moved`` and ``extended`` change card entries only, ``rerouted`` and ``assigned`` keep
-# the family's revision unless the owner also wrote a newer one, which the reader checks.
+# as it was: ``stands`` read it in full, ``moved``, ``extended`` and card-entry-only ``deleted``
+# (``effect != "retire"``) change card entries only, ``rerouted`` and ``assigned`` keep the
+# family's revision unless the owner also wrote a newer one, which the reader checks.
 KEPT_DISPOSITIONS: Final[dict[type[HistoryRow], frozenset[str]]] = {
-    InvariantRow: frozenset({"no_impact", "moved", "extended"}),
-    FamilyRow: frozenset({"no_impact", "rerouted", "assigned"}),
+    InvariantRow: frozenset({"stands", "no_impact", "moved", "extended"}),
+    FamilyRow: frozenset({"stands", "no_impact", "rerouted", "assigned"}),
 }
+
+
+def _keeps_revision(row: HistoryRow) -> bool:
+    """Whether ``row`` kept its subject's revision (including card-entry-only deletes)."""
+
+    if row.disposition in KEPT_DISPOSITIONS.get(type(row), ()):
+        return True
+    return isinstance(row, InvariantRow) and row.disposition == "deleted" and row.effect != "retire"
+
+
 # The disposition of a row that wrote the revision it names.
 WRITING_DISPOSITION: Final = "changed"
 
@@ -167,11 +181,12 @@ class RevisionStates:
                 states.written_by.setdefault(named, []).append((key, written))
                 newest = states.newest_written.get((key, written.record), 0)
                 states.newest_written[(key, written.record)] = max(newest, written.revision)
+            listed = frozenset(history.consolidation_subjects or ())
             for row in history.rows:
-                states._index_row(key, row)
+                states._index_row(key, row, listed)
         return states
 
-    def _index_row(self, key: _FileKey, row: HistoryRow) -> None:
+    def _index_row(self, key: _FileKey, row: HistoryRow, listed: frozenset[str]) -> None:
         revision = getattr(row, "revision", None)
         if not isinstance(revision, int) or row.disposition == UNRESOLVED:
             return
@@ -179,7 +194,7 @@ class RevisionStates:
         self.row_files.setdefault(named, []).append(key)
         if row.disposition == WRITING_DISPOSITION:
             self.writing_rows.setdefault(named, []).append(key)
-        if row.disposition in KEPT_DISPOSITIONS.get(type(row), ()):
+        if row.subject in listed and _keeps_revision(row):
             self.kept_rows.setdefault(named, []).append(key)
 
     def state_of(

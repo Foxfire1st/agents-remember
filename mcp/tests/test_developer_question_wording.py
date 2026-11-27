@@ -52,6 +52,7 @@ MESSAGE_HANDOVER_TABLE_ACTIONS = {
     "worker": "[msg](",
     "reviewer": "[msg](",
     "curator": "[msg](",
+    "consolidator": "[msg](",
     "investigator": "[msgs](",
 }
 CHILD_QUESTION_SOURCE = "reference/coordination/shared/child-questions.md"

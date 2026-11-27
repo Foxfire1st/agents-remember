@@ -50,6 +50,7 @@ ROLES = (
     "worker",
     "reviewer",
     "curator",
+    "consolidator",
 )
 OTHER_SPRINT = TaskDocumentRef(repository="agents-remember", path="other-sprint/task.json")
 OTHER_MASTER = TaskDocumentRef(repository="agents-remember", path="other-master/task.json")

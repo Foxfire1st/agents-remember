@@ -86,7 +86,7 @@ from task_reopen_test_support import (
 LEAF = "260698-L1"
 # The leaf seats as the launcher names them; kept beside ``LEAF_ROLES`` so the loop below hands
 # the resolver a launcher role and not a bare string, and the product's own set stays authoritative.
-LEAF_SEATS: tuple[LauncherRole, ...] = ("worker", "reviewer", "curator")
+LEAF_SEATS: tuple[LauncherRole, ...] = ("worker", "consolidator", "reviewer", "curator")
 MASTER_SERIES = "260698_demo-series"
 
 

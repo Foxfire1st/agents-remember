@@ -132,6 +132,49 @@ class TaskReviewStateNode(BaseModel):
     developerApproval: str | None = None
 
 
+ConsolidationOutcome = Literal["stands", "corrected", "unresolved", "open"]
+
+
+class TaskConsolidationRowNode(BaseModel):
+    """One subject of a consolidation pass's list with the outcome its history row gives it.
+
+    ``family`` names the listed family that reached a rule the list does not name itself.
+    ``disposition`` and ``reason`` are the row's own; both are absent while the subject is open.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    subject: str
+    kind: Literal["family", "rule"]
+    outcome: ConsolidationOutcome
+    family: str | None = None
+    disposition: str | None = None
+    reason: str | None = None
+
+
+class TaskConsolidationNode(BaseModel):
+    """The list of a consolidation pass and the outcome of each subject it reaches.
+
+    The counts always cover every subject: the listed families, and the listed rules with the
+    members of the listed families, each once. ``memoryRead`` is false when the task's memory
+    worktree could not be read; the subjects are then the listed ids as listed, and every one
+    counts as open because no history row was read. The always-on summary carries the counts
+    only, with no ``rows``; the on-demand body carries every row.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    families: list[str] = Field(default_factory=list)
+    rules: list[str] = Field(default_factory=list)
+    memoryRead: bool = False
+    total: int = 0
+    stands: int = 0
+    corrected: int = 0
+    unresolved: int = 0
+    open: int = 0
+    rows: list[TaskConsolidationRowNode] | None = None
+
+
 class TaskCodeExampleNode(BaseModel):
     """One proposed-code-example block of a task document (the plan's distinct change shapes)."""
 
@@ -334,6 +377,9 @@ class TaskSummary(BaseModel):
     # The recorded review round (MIK-R127 rule 9): the Review block and the master
     # Now block read it from the always-on summary, never from a body fetch.
     reviewState: TaskReviewStateNode | None = None
+    # The list of a consolidation pass with its outcome counts; None on any task whose document
+    # names no such list. The counts ride the always-on summary, the rows only the body.
+    consolidation: TaskConsolidationNode | None = None
     currentStep: str | None = None
     # Hash of the reader body fields omitted from the always-on summary. Dashboard readers use it
     # to refetch an already-open task document only when the on-demand body changed.

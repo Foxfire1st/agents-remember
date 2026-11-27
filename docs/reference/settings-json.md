@@ -543,8 +543,8 @@ your host offers:
 
 **Levels.** `orchestration.rolesPerLevel.<level>.<role>` holds the same keys for one role at one
 level. The levels are `leaf`, `master` and `portfolio`. The level `leaf` is the level of a task;
-tools call a task a `leaf`. Each role has one level: `leaf` for `worker`, `reviewer` and
-`curator`, `master` for `manager`, and `portfolio` for `architect`, `investigator` and
+tools call a task a `leaf`. Each role has one level: `leaf` for `worker`, `consolidator`,
+`reviewer` and `curator`, `master` for `manager`, and `portfolio` for `architect`, `investigator` and
 `orchestrator`. A start reads the row at the level of its role and lays it
 over the row under `orchestration.roles`, key by key. A row for a role under another level is
 accepted and read by nothing. `bootstrap` has no level, so no per-level row applies to it.
@@ -588,13 +588,13 @@ text after it refuses the start with `empty_instruction_overwrite`. The text is 
 product loads no file and no link from it.
 
 **Step-up.** `orchestration.roles.<role>.stepUp` names one alternative `harness`, `model`,
-`effort`, `serviceTier`, `mode`, `featureValues` and `notes`. For `worker` and `curator` the key
-`afterTries` (a positive whole number, default 3) sets after how many failed review rounds the
-alternative is offered. For the Worker a try is a recorded code review round that ends with
-findings remaining; for the Curator it is a recorded memory review round. A check that only
-records the same candidate again is no further try. Another role accepts a `stepUp` row and
-refuses `afterTries`. An unknown key, a `stepUp` inside a `stepUp`, `extraArgs`, and choices
-equal to the role's own refuse the load with the file and the key.
+`effort`, `serviceTier`, `mode`, `featureValues` and `notes`. For `worker`, `curator` and
+`consolidator` the key `afterTries` (a positive whole number, default 3) sets after how many failed
+review rounds the alternative is offered. For the Worker a try is a recorded code review round that
+ends with findings remaining; for the Curator or the Consolidator it is a recorded memory review
+round. A check that only records the same candidate again is no further try. Another role accepts a
+`stepUp` row and refuses `afterTries`. An unknown key, a `stepUp` inside a `stepUp`, `extraArgs`,
+and choices equal to the role's own refuse the load with the file and the key.
 
 When the tries reach `afterTries`, the answer of the recorded review names the step-up as the
 next action. The next start validates the alternative against the host's catalog and replaces an
@@ -608,6 +608,15 @@ row changes no running agent; the next start uses the role's own row.
 the launch choices of the explainer on the review page. Its row obeys every rule above. A start
 applies its `harness`, `model`, `effort`, `mode`, `serviceTier`, `featureValues` and `notes`. The
 start of the explainer does not read `stepUp`, and `extraArgs` in the row refuses the load.
+
+**The Reviewer of a consolidation task.** The family also accepts the name
+`consolidation-reviewer`, which is no role: the launch choices of the Reviewer of a consolidation
+task, a task whose document names a `consolidationList`. Its row obeys every rule above, and so does
+the same name under `orchestration.rolesPerLevel.leaf`. A Reviewer started on such a task lays this
+row over the `reviewer` row, key by key: a key the row leaves out comes from the `reviewer` row,
+so with no `consolidation-reviewer` row the Reviewer takes the Reviewer's row. A start that names
+its own harness, model or effort still wins. The product does not compare this row with the
+`consolidator` row.
 
 **Host profiles.** The host keeps agent profiles of its own. Each first start reads them from the
 running host, and the read changes nothing. A profile whose `name` equals the role id exactly is

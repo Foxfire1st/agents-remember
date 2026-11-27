@@ -6185,33 +6185,36 @@
   "derived": {
     "current_measurements": {
       "capsules": {
-        "architect/orientation": 994,
-        "architect/planning": 910,
-        "architect/review": 709,
-        "architect/coordination": 952,
-        "architect/authorized-closeout": 864,
-        "architect/recovery": 729,
-        "orchestrator/orientation": 916,
-        "orchestrator/planning": 646,
-        "orchestrator/review": 642,
-        "orchestrator/coordination": 896,
-        "orchestrator/authorized-closeout": 808,
-        "orchestrator/recovery": 673,
-        "manager/orientation": 1007,
-        "manager/review": 733,
-        "manager/curation": 727,
-        "manager/coordination": 1030,
-        "manager/authorized-closeout": 899,
-        "manager/recovery": 764,
+        "architect/orientation": 1011,
+        "architect/planning": 927,
+        "architect/review": 713,
+        "architect/coordination": 969,
+        "architect/authorized-closeout": 881,
+        "architect/recovery": 746,
+        "orchestrator/orientation": 934,
+        "orchestrator/planning": 664,
+        "orchestrator/review": 647,
+        "orchestrator/coordination": 914,
+        "orchestrator/authorized-closeout": 826,
+        "orchestrator/recovery": 691,
+        "manager/orientation": 1004,
+        "manager/review": 717,
+        "manager/curation": 724,
+        "manager/coordination": 1027,
+        "manager/authorized-closeout": 896,
+        "manager/recovery": 761,
         "worker/orientation": 527,
         "worker/implementation": 257,
         "worker/recovery": 280,
         "curator/orientation": 645,
         "curator/curation": 412,
         "curator/recovery": 370,
-        "reviewer/orientation": 640,
-        "reviewer/review": 506,
-        "reviewer/recovery": 393,
+        "reviewer/orientation": 627,
+        "reviewer/review": 471,
+        "reviewer/recovery": 380,
+        "consolidator/orientation": 689,
+        "consolidator/recovery": 442,
+        "consolidator/consolidation": 466,
         "investigator/orientation": 585,
         "investigator/recovery": 351,
         "bootstrap/orientation": 352,
@@ -6223,6 +6226,7 @@
       "step_details": {
         "reference/bootstrap/failure-states.md": 605,
         "reference/bootstrap/foundation-state.md": 186,
+        "reference/consolidation-pass.md": 740,
         "reference/coordination/architect/claim-verification.md": 173,
         "reference/coordination/architect/curator-measurement.md": 424,
         "reference/coordination/architect/developer-decisions.md": 223,
@@ -6237,20 +6241,20 @@
         "reference/curator/card-formats-and-citations.md": 1934,
         "reference/curator/card-sentence-decisions.md": 344,
         "reference/curator/change-routing.md": 193,
-        "reference/curator/coherence-judgments.md": 353,
+        "reference/curator/coherence-judgments.md": 355,
         "reference/curator/current-prose-and-history.md": 228,
         "reference/curator/encountered-records.md": 244,
         "reference/curator/exceptions-and-recovery.md": 746,
-        "reference/curator/family-obligations.md": 223,
-        "reference/curator/governing-sources.md": 177,
+        "reference/curator/family-obligations.md": 225,
+        "reference/curator/governing-sources.md": 179,
         "reference/curator/intent-reconciliation.md": 176,
-        "reference/curator/knowledge-ingest.md": 237,
+        "reference/curator/knowledge-ingest.md": 240,
         "reference/curator/memory-handover.md": 142,
-        "reference/curator/publication-report.md": 145,
+        "reference/curator/publication-report.md": 147,
         "reference/curator/repository-foundation.md": 388,
-        "reference/curator/worklist.md": 539,
+        "reference/curator/worklist.md": 541,
         "reference/instruction-shortfall-review.md": 514,
-        "reference/knowledge/commands.md": 2411,
+        "reference/knowledge/commands.md": 2425,
         "reference/knowledge/serving-build.md": 272,
         "reference/knowledge/use.md": 762,
         "reference/message-handover.md": 314,
@@ -6258,11 +6262,11 @@
         "reference/review-baseline.md": 276,
         "reference/review/advisory-reviews.md": 468,
         "reference/review/non-leaf-seams-and-catalogs.md": 693,
-        "reference/review/rounds-and-late-findings.md": 961,
+        "reference/review/rounds-and-late-findings.md": 1005,
         "reference/sandbox-actors.md": 355,
         "reference/tasks/document-authoring.md": 591,
         "reference/worker/sync-and-repairs.md": 1074,
-        "reference/writing/technical-english-profile.md": 1217,
+        "reference/writing/technical-english-profile.md": 1218,
         "reference/writing/visual-explainers.md": 278,
         "templates/turn-report.md": 1735
       },
@@ -6283,6 +6287,7 @@
     "current_detail_population": [
       "reference/bootstrap/failure-states.md",
       "reference/bootstrap/foundation-state.md",
+      "reference/consolidation-pass.md",
       "reference/coordination/architect/claim-verification.md",
       "reference/coordination/architect/curator-measurement.md",
       "reference/coordination/architect/developer-decisions.md",
@@ -6338,12 +6343,12 @@
     ],
     "approved_source_sizes": {
       "skills/l-01-agent-lifecycles/SKILL.md": {
-        "size_words": 1041,
-        "sha256": "702b67efa7c5f61f541dc44373b76a74b320d1ffb4a8b251354bb58625a494eb"
+        "size_words": 1042,
+        "sha256": "e7cb60f1a0cde0715476847a15043a78a2bd3f05458dfa9d40a6cb80bdc8fa87"
       },
       "skills/l-01-agent-lifecycles/composition-manifest.json": {
-        "size_words": 3616,
-        "sha256": "ffb5af2c1ab51e9b69f51f81ef36e27e2bea1bdacc49c3e0db23b30975ca78e0"
+        "size_words": 3791,
+        "sha256": "c6942970364040dcedba7f6b46d6d0ad69244cf2c17826cabddc39c2d745456a"
       },
       "skills/l-01-agent-lifecycles/core/acceptance.md": {
         "size_words": 1647,
@@ -6354,8 +6359,8 @@
         "sha256": "22fe207bffb1bc3392cbf264c8efbe6f9d5bffd99a651d7bbfcb3f431d7665bf"
       },
       "skills/l-01-agent-lifecycles/core/digest-map.json": {
-        "size_words": 16825,
-        "sha256": "a006d3a10a5667a9577d86921d394ec9802031af53b742ffd1e2dc7d3f66dad5"
+        "size_words": 16855,
+        "sha256": "091cf0d309781e4a0254e9b575ce127c32047867ab4e7ebee1b904c553bea7a7"
       },
       "skills/l-01-agent-lifecycles/core/every-role.md": {
         "size_words": 342,
@@ -6405,9 +6410,13 @@
         "size_words": 285,
         "sha256": "6d8f09d9e611039b575a6d6ffceca76febf365f213ae7a67d9481f017adbf397"
       },
+      "skills/l-01-agent-lifecycles/operations/consolidation.md": {
+        "size_words": 174,
+        "sha256": "36d2755cd5bb91508757b461e22a83e8b16915cb021d48167f4e7a59146a07ae"
+      },
       "skills/l-01-agent-lifecycles/operations/coordination.md": {
         "size_words": 479,
-        "sha256": "420aa8aaf6bf16abf298a95bd011b4a3d69d5bff818865168531798e53c5c968"
+        "sha256": "f5ed794eb187e6e70dcf3823c12fcc41108c76df57b41a1bf2ad7103e27b8429"
       },
       "skills/l-01-agent-lifecycles/operations/curation.md": {
         "size_words": 253,
@@ -6419,7 +6428,7 @@
       },
       "skills/l-01-agent-lifecycles/operations/orientation.md": {
         "size_words": 490,
-        "sha256": "cec64492c4ea9fbcdf71060c6c08adf8313981c36bd575abb9e6b3254789dcb5"
+        "sha256": "8db591e5b0556d517f97c7afcb38e2c41fffe77fa6eac78cacbbcf8a596eb2e5"
       },
       "skills/l-01-agent-lifecycles/operations/planning.md": {
         "size_words": 362,
@@ -6427,19 +6436,19 @@
       },
       "skills/l-01-agent-lifecycles/operations/recovery.md": {
         "size_words": 212,
-        "sha256": "d38ab00698c857681b3f1cf9e96160841a8dc63fc35f076c7d1c70a9fd98f176"
+        "sha256": "fece846df49e0dce8225ee1a65b71b20abf0689bad75558882217a09b0fc146d"
       },
       "skills/l-01-agent-lifecycles/operations/review.md": {
-        "size_words": 307,
-        "sha256": "5c770126e2c131e76f7ccfe647270630b891bc55adda0d719bcad60ccafd9858"
+        "size_words": 285,
+        "sha256": "ba4a13841a23d297cc8d32f1ca51ce110f724b7dcdd866e5b53da78eacb0508f"
       },
       "skills/l-01-agent-lifecycles/pointer-actions-derived.json": {
-        "size_words": 603,
-        "sha256": "1216d0076225f96482af1a313258097ee808cb1f28931cc54a03874e3ca7d330"
+        "size_words": 621,
+        "sha256": "f1ee29f93d8d8a4bc01c11073c5212d03014408cc39ab16bd940bf386afb2bb1"
       },
       "skills/l-01-agent-lifecycles/pointer-actions.json": {
-        "size_words": 370,
-        "sha256": "6419e5c19ad52330cda9f2b1689bed50529c936d54ef7649b8311b7c2939d87c"
+        "size_words": 372,
+        "sha256": "28fc6c80dcd6bb0f05f1b8efa7f879a2a886783a22389e5214c15d5ab8364b2d"
       },
       "skills/l-01-agent-lifecycles/reference/bootstrap/failure-states.md": {
         "size_words": 605,
@@ -6448,6 +6457,10 @@
       "skills/l-01-agent-lifecycles/reference/bootstrap/foundation-state.md": {
         "size_words": 186,
         "sha256": "e8273f95fb816c142bfa5711a9887fe639fc0e5fa4f7eb4da685f1a645e5b3d6"
+      },
+      "skills/l-01-agent-lifecycles/reference/consolidation-pass.md": {
+        "size_words": 740,
+        "sha256": "ef40509fa29d94ce0e997b0b5b337e8fc281523b6234d4dd8787606029e6856b"
       },
       "skills/l-01-agent-lifecycles/reference/coordination/architect/claim-verification.md": {
         "size_words": 173,
@@ -6506,8 +6519,8 @@
         "sha256": "a17858f4a703d3287bab8e9f93bb1e1583eb59ce74cc9ff64aa1657b89cbfd49"
       },
       "skills/l-01-agent-lifecycles/reference/curator/coherence-judgments.md": {
-        "size_words": 353,
-        "sha256": "d9d4353f91c95f9d5e27aec506303c86d39c852e8f8c518ebc8974e9037ea1f0"
+        "size_words": 355,
+        "sha256": "52de0011c0e9dbe4746734695b91aa0a74b2038c3c7fcdc588af6fd68029f7dd"
       },
       "skills/l-01-agent-lifecycles/reference/curator/current-prose-and-history.md": {
         "size_words": 228,
@@ -6522,44 +6535,44 @@
         "sha256": "10508631e9146f9e4fd1ff2bbd4e6ca4ddf11008e919422cfbbf6a29fcc39bf6"
       },
       "skills/l-01-agent-lifecycles/reference/curator/family-obligations.md": {
-        "size_words": 223,
-        "sha256": "c0c559f82a60f18bec5323046940341169b94ae22612ae40fcdca1ec326a302d"
+        "size_words": 225,
+        "sha256": "92c4216cccd224572f6c815905aa70c8dd927bb2fde7ad7a8e9609f39a7597e5"
       },
       "skills/l-01-agent-lifecycles/reference/curator/governing-sources.md": {
-        "size_words": 177,
-        "sha256": "d14844fb396358b801c68a39daf47a4fdbac82ba5365ff4bf916f9ec58a6beb2"
+        "size_words": 179,
+        "sha256": "dd856826b34097fa392eb6c76bca8ce77c16a8ef471d318e1b1d40823eddfcf2"
       },
       "skills/l-01-agent-lifecycles/reference/curator/intent-reconciliation.md": {
         "size_words": 176,
         "sha256": "e6736202e3464d93063d7147f61dfa8672b68d41ab5a6f0c3c6b1c437f4a8a8f"
       },
       "skills/l-01-agent-lifecycles/reference/curator/knowledge-ingest.md": {
-        "size_words": 237,
-        "sha256": "09928082408e1dcbdaa76eb78005b23be83916adb00f8c56f76d0a95f044c51d"
+        "size_words": 240,
+        "sha256": "7a003cddf72b61df35d7784fca423fcf50ffab8da7930b4cf85dd213aa89abda"
       },
       "skills/l-01-agent-lifecycles/reference/curator/memory-handover.md": {
         "size_words": 142,
         "sha256": "db2fe20bf0c1c3b836ab3462f53ce62102271f2eb419d0e72cf3c1993869a8ce"
       },
       "skills/l-01-agent-lifecycles/reference/curator/publication-report.md": {
-        "size_words": 145,
-        "sha256": "1683eeed1462fa78e3b6896fe55b9dbbce1eae623449af67785837dddd83fbfc"
+        "size_words": 147,
+        "sha256": "a30cd0f7d0f634eb1f592735fbba3d0fcce8e4d9c876e7032977b33e2a1ccc90"
       },
       "skills/l-01-agent-lifecycles/reference/curator/repository-foundation.md": {
         "size_words": 388,
         "sha256": "cedcdbd5cf960e1ec08e535abc2e8d739e43963cb736ad9bbcb1faed388ca748"
       },
       "skills/l-01-agent-lifecycles/reference/curator/worklist.md": {
-        "size_words": 539,
-        "sha256": "87ff6b06a9658a1970c33565317c9bb81a3adef800aaebbc6da6551c681155c8"
+        "size_words": 541,
+        "sha256": "a372e2808481c24c969cee74daa1c77dcea30984aca15a985af471d810932b13"
       },
       "skills/l-01-agent-lifecycles/reference/instruction-shortfall-review.md": {
         "size_words": 514,
         "sha256": "445d398f29d81662c2c82584b04d96cdf7ff23a3b758880f092a9cf0e286a703"
       },
       "skills/l-01-agent-lifecycles/reference/knowledge/commands.md": {
-        "size_words": 2411,
-        "sha256": "c1554009e9049dab70761917e1ebbfacd85da42415e8692b64f90823a98e5cd4"
+        "size_words": 2425,
+        "sha256": "830b1780a4002ae74ba09a8b27f0b4ebf6581c1ec239b995e1e4235b2b30d4a6"
       },
       "skills/l-01-agent-lifecycles/reference/knowledge/serving-build.md": {
         "size_words": 272,
@@ -6567,7 +6580,7 @@
       },
       "skills/l-01-agent-lifecycles/reference/knowledge/use.md": {
         "size_words": 762,
-        "sha256": "53ce159cb0b4c625668f87265af834465d9016c86247b87618f7ac7beffba3dc"
+        "sha256": "80443255a6b55e12dd7aaf9689e3888a0bac8684118efc30123f17289e846de0"
       },
       "skills/l-01-agent-lifecycles/reference/message-handover.md": {
         "size_words": 314,
@@ -6594,8 +6607,8 @@
         "sha256": "19a7b66410885c7c0950fe93e3a21de762484be35c5cc85f7075ddf02df5bb98"
       },
       "skills/l-01-agent-lifecycles/reference/review/rounds-and-late-findings.md": {
-        "size_words": 961,
-        "sha256": "032084df484c6d9784240497f0c903f6b24953347a1eeabdd99d7de1e831862c"
+        "size_words": 1005,
+        "sha256": "0e8f110659e7c79f656f0efc4dc2df26b49dc311ce17ee40f6a003bcc46a8c6e"
       },
       "skills/l-01-agent-lifecycles/reference/sandbox-actors.md": {
         "size_words": 355,
@@ -6614,20 +6627,24 @@
         "sha256": "f6ac9f8d6053ab04cc838b6f3c4074d41151db9fb2c0788791dc91b5c8cd62bb"
       },
       "skills/l-01-agent-lifecycles/reference/writing/technical-english-profile.md": {
-        "size_words": 1217,
-        "sha256": "e381e9b560fa509b0cfb55565e80991a857a68ec657ee42e22fe3f56df5fe788"
+        "size_words": 1218,
+        "sha256": "108f0d12d4d641990b37dc821f03f3e32839ef6ea924d1ce242be5580a68801a"
       },
       "skills/l-01-agent-lifecycles/reference/writing/visual-explainers.md": {
         "size_words": 278,
         "sha256": "c11ed6c846183bd54433dd007c53467810982712f021400a7cbb3794b0f79ad3"
       },
       "skills/l-01-agent-lifecycles/roles/architect.md": {
-        "size_words": 597,
-        "sha256": "d3bfe1b26da3064cbb8de7ff8fb99bc0ed5048e3409f3c2b2154032fcdb173f5"
+        "size_words": 614,
+        "sha256": "ced09cc8efcc9ee2a5f27c9c905f3b1d7c79d31c0a004becd350ad3d403849cc"
       },
       "skills/l-01-agent-lifecycles/roles/bootstrap.md": {
         "size_words": 265,
         "sha256": "292b937834bdb9186cc4f70c74a2530c61145ba90ec03909a86395ca3c3a762c"
+      },
+      "skills/l-01-agent-lifecycles/roles/consolidator.md": {
+        "size_words": 326,
+        "sha256": "32fd44e071b8344472166000afb61e83601b4e70059a0b12b10cdc9b0aa159d8"
       },
       "skills/l-01-agent-lifecycles/roles/curator.md": {
         "size_words": 265,
@@ -6638,16 +6655,16 @@
         "sha256": "1f992757e0d459bd02e64fea8039662c7bd5c020fb31fb63dc4de67bc294dd7c"
       },
       "skills/l-01-agent-lifecycles/roles/manager.md": {
-        "size_words": 633,
-        "sha256": "e2cd502a21767b2c74ec009218f811a8b8c13ab3e25691f2b702f82deeadbc81"
+        "size_words": 630,
+        "sha256": "4906637dc8b8d711150c022c222cabc97776fe4f200b2081225b680b5269e87e"
       },
       "skills/l-01-agent-lifecycles/roles/orchestrator.md": {
-        "size_words": 541,
-        "sha256": "867bc51d025a287c4667ffa9dc647579929fd8e466e6551f5d4b120a0b864add"
+        "size_words": 559,
+        "sha256": "029daa3fe482995e53143dab52252d33e33ca1212f7d2fb2255b49ffcdc57472"
       },
       "skills/l-01-agent-lifecycles/roles/reviewer.md": {
-        "size_words": 315,
-        "sha256": "a9597d18cffbc9d1613cce89f32a88b69813b4c12e99c7f8e0ba92d68473ad0c"
+        "size_words": 302,
+        "sha256": "5c1c4fe02e88a332a58dd03af15b7ac52e1623d2d640a0a363097325d0f7644f"
       },
       "skills/l-01-agent-lifecycles/roles/worker.md": {
         "size_words": 172,
@@ -6662,8 +6679,8 @@
         "sha256": "3f84aa93c057abbe89f078143a4e254082e85ff31d3af04260ff3784861cbf26"
       },
       "skills/l-01-agent-lifecycles/templates/curator-handoff-ingestion.md": {
-        "size_words": 6625,
-        "sha256": "b926c968e21daa324dbe834a6df86ad3f347c62337ff91299992215ff7bef34f"
+        "size_words": 6889,
+        "sha256": "2b5403ef4ae4b18921f526b71fdeff98370b51c18afdb339da0294c2b7c38526"
       },
       "skills/l-01-agent-lifecycles/templates/curator-handoff-list.md": {
         "size_words": 3078,
@@ -6723,8 +6740,8 @@
       }
     },
     "compiler_input_revisions": {
-      "SKILL.md": "sha256:702b67efa7c5f61f541dc44373b76a74b320d1ffb4a8b251354bb58625a494eb",
-      "composition-manifest.json": "sha256:ffb5af2c1ab51e9b69f51f81ef36e27e2bea1bdacc49c3e0db23b30975ca78e0",
+      "SKILL.md": "sha256:e7cb60f1a0cde0715476847a15043a78a2bd3f05458dfa9d40a6cb80bdc8fa87",
+      "composition-manifest.json": "sha256:c6942970364040dcedba7f6b46d6d0ad69244cf2c17826cabddc39c2d745456a",
       "core/acceptance.md": "sha256:579904c9e64af0329dc249bcd3d95cf7af4e306321f1ffce0dca1a3f89dd41af",
       "core/authority.md": "sha256:22fe207bffb1bc3392cbf264c8efbe6f9d5bffd99a651d7bbfcb3f431d7665bf",
       "core/every-role.md": "sha256:fda58cd22dac9080d0ff8dcb93b49a20985c84c54c780be64d5a1045790dfabd",
@@ -6734,15 +6751,17 @@
       "core/loop.md": "sha256:389672f3e7b64339d0ecc3f1c0cff0d79d3c8173a769cf9e4fa5434cd9bd0e26",
       "operations/bootstrap.md": "sha256:981b8f9bd61063fc2297c7f9d736b156a088487f808417f3cebc212ce4ade333",
       "operations/closeout.md": "sha256:6d8f09d9e611039b575a6d6ffceca76febf365f213ae7a67d9481f017adbf397",
-      "operations/coordination.md": "sha256:420aa8aaf6bf16abf298a95bd011b4a3d69d5bff818865168531798e53c5c968",
+      "operations/consolidation.md": "sha256:36d2755cd5bb91508757b461e22a83e8b16915cb021d48167f4e7a59146a07ae",
+      "operations/coordination.md": "sha256:f5ed794eb187e6e70dcf3823c12fcc41108c76df57b41a1bf2ad7103e27b8429",
       "operations/curation.md": "sha256:641e5977b0280c2791ad6da096495f6028c2e10a1f2932c1e88a02cb666afd21",
       "operations/implementation.md": "sha256:e7bb29395b15f82a02ba00329159ac22b85193c5ccd8127ac8475a6b02eb8d52",
-      "operations/orientation.md": "sha256:cec64492c4ea9fbcdf71060c6c08adf8313981c36bd575abb9e6b3254789dcb5",
+      "operations/orientation.md": "sha256:8db591e5b0556d517f97c7afcb38e2c41fffe77fa6eac78cacbbcf8a596eb2e5",
       "operations/planning.md": "sha256:0f96d0137ba2f62568e07acce9750ed6f8dcb654b723c10567e19af0f5b767eb",
-      "operations/recovery.md": "sha256:d38ab00698c857681b3f1cf9e96160841a8dc63fc35f076c7d1c70a9fd98f176",
-      "operations/review.md": "sha256:5c770126e2c131e76f7ccfe647270630b891bc55adda0d719bcad60ccafd9858",
+      "operations/recovery.md": "sha256:fece846df49e0dce8225ee1a65b71b20abf0689bad75558882217a09b0fc146d",
+      "operations/review.md": "sha256:ba4a13841a23d297cc8d32f1ca51ce110f724b7dcdd866e5b53da78eacb0508f",
       "reference/bootstrap/failure-states.md": "sha256:6e78e0368bea8f3894fc4be894fda8ae9fb5e94955e967dac963f1c0b5ee89f4",
       "reference/bootstrap/foundation-state.md": "sha256:e8273f95fb816c142bfa5711a9887fe639fc0e5fa4f7eb4da685f1a645e5b3d6",
+      "reference/consolidation-pass.md": "sha256:ef40509fa29d94ce0e997b0b5b337e8fc281523b6234d4dd8787606029e6856b",
       "reference/coordination/architect/claim-verification.md": "sha256:9979acc5bbee3aa8aa748115b3f66a23901dfca0f34be5b07f882ad9c584e07b",
       "reference/coordination/architect/curator-measurement.md": "sha256:58d437bb5ac15967b69c1a8dcd3a60d0cb7a9f9317b44502001ba0db29b60982",
       "reference/coordination/architect/developer-decisions.md": "sha256:54dee98818180a23cca8647f9aa1084e12fe0b396ae10c84ef6d67da573c49d4",
@@ -6757,40 +6776,41 @@
       "reference/curator/card-formats-and-citations.md": "sha256:42989e84a4f00a01b50c77e2c22b03a07315de3561eb230e72f893b3c1f0afb3",
       "reference/curator/card-sentence-decisions.md": "sha256:863cb4688aa375d1303459951d9ddb9d69ec9833d42d62238aa18dc9d776263c",
       "reference/curator/change-routing.md": "sha256:a17858f4a703d3287bab8e9f93bb1e1583eb59ce74cc9ff64aa1657b89cbfd49",
-      "reference/curator/coherence-judgments.md": "sha256:d9d4353f91c95f9d5e27aec506303c86d39c852e8f8c518ebc8974e9037ea1f0",
+      "reference/curator/coherence-judgments.md": "sha256:52de0011c0e9dbe4746734695b91aa0a74b2038c3c7fcdc588af6fd68029f7dd",
       "reference/curator/current-prose-and-history.md": "sha256:5715af2f9084a039826ea608fad21e54829e261e28be27a993aa6c6b10902211",
       "reference/curator/encountered-records.md": "sha256:3fefd82dfb08692310928635d6b0d4981314c1783fb264e053a229ea87d854a6",
       "reference/curator/exceptions-and-recovery.md": "sha256:10508631e9146f9e4fd1ff2bbd4e6ca4ddf11008e919422cfbbf6a29fcc39bf6",
-      "reference/curator/family-obligations.md": "sha256:c0c559f82a60f18bec5323046940341169b94ae22612ae40fcdca1ec326a302d",
-      "reference/curator/governing-sources.md": "sha256:d14844fb396358b801c68a39daf47a4fdbac82ba5365ff4bf916f9ec58a6beb2",
+      "reference/curator/family-obligations.md": "sha256:92c4216cccd224572f6c815905aa70c8dd927bb2fde7ad7a8e9609f39a7597e5",
+      "reference/curator/governing-sources.md": "sha256:dd856826b34097fa392eb6c76bca8ce77c16a8ef471d318e1b1d40823eddfcf2",
       "reference/curator/intent-reconciliation.md": "sha256:e6736202e3464d93063d7147f61dfa8672b68d41ab5a6f0c3c6b1c437f4a8a8f",
-      "reference/curator/knowledge-ingest.md": "sha256:09928082408e1dcbdaa76eb78005b23be83916adb00f8c56f76d0a95f044c51d",
+      "reference/curator/knowledge-ingest.md": "sha256:7a003cddf72b61df35d7784fca423fcf50ffab8da7930b4cf85dd213aa89abda",
       "reference/curator/memory-handover.md": "sha256:db2fe20bf0c1c3b836ab3462f53ce62102271f2eb419d0e72cf3c1993869a8ce",
-      "reference/curator/publication-report.md": "sha256:1683eeed1462fa78e3b6896fe55b9dbbce1eae623449af67785837dddd83fbfc",
+      "reference/curator/publication-report.md": "sha256:a30cd0f7d0f634eb1f592735fbba3d0fcce8e4d9c876e7032977b33e2a1ccc90",
       "reference/curator/repository-foundation.md": "sha256:cedcdbd5cf960e1ec08e535abc2e8d739e43963cb736ad9bbcb1faed388ca748",
-      "reference/curator/worklist.md": "sha256:87ff6b06a9658a1970c33565317c9bb81a3adef800aaebbc6da6551c681155c8",
+      "reference/curator/worklist.md": "sha256:a372e2808481c24c969cee74daa1c77dcea30984aca15a985af471d810932b13",
       "reference/instruction-shortfall-review.md": "sha256:445d398f29d81662c2c82584b04d96cdf7ff23a3b758880f092a9cf0e286a703",
-      "reference/knowledge/commands.md": "sha256:c1554009e9049dab70761917e1ebbfacd85da42415e8692b64f90823a98e5cd4",
+      "reference/knowledge/commands.md": "sha256:830b1780a4002ae74ba09a8b27f0b4ebf6581c1ec239b995e1e4235b2b30d4a6",
       "reference/knowledge/serving-build.md": "sha256:51389e0ea154c66cd67bfc9fe836f05d427d91cf6acfa1c1d0ad55a53fdd7517",
-      "reference/knowledge/use.md": "sha256:53ce159cb0b4c625668f87265af834465d9016c86247b87618f7ac7beffba3dc",
+      "reference/knowledge/use.md": "sha256:80443255a6b55e12dd7aaf9689e3888a0bac8684118efc30123f17289e846de0",
       "reference/message-handover.md": "sha256:12f9b61c2bf425072d2de5cae97279cefbf5b8d10a12751964c00489d51d22dc",
       "reference/refused-write.md": "sha256:83d69507881a091ffbaaa473a3deb5e9b87c86593df19ce16067dbd0bc9e7fb0",
       "reference/review-baseline.md": "sha256:871634134f16b312ed314a8acfeccecfb424e2bb10a856a1e66ebbf5c16acbb6",
       "reference/review/advisory-reviews.md": "sha256:173da043202dbeae83fda281018a0df002c826c1adfd2fea9399052e3f57427a",
       "reference/review/non-leaf-seams-and-catalogs.md": "sha256:19a7b66410885c7c0950fe93e3a21de762484be35c5cc85f7075ddf02df5bb98",
-      "reference/review/rounds-and-late-findings.md": "sha256:032084df484c6d9784240497f0c903f6b24953347a1eeabdd99d7de1e831862c",
+      "reference/review/rounds-and-late-findings.md": "sha256:0e8f110659e7c79f656f0efc4dc2df26b49dc311ce17ee40f6a003bcc46a8c6e",
       "reference/sandbox-actors.md": "sha256:d8282cbeee83cad0289aed7d405f371ac567328f973f6d3ce703a1e1e11b7277",
       "reference/tasks/document-authoring.md": "sha256:5c66644a20d1b02c9303f60b6c152374e26e3cbbe5bc1333f8694bfdc6eec54f",
       "reference/worker/sync-and-repairs.md": "sha256:f6ac9f8d6053ab04cc838b6f3c4074d41151db9fb2c0788791dc91b5c8cd62bb",
-      "reference/writing/technical-english-profile.md": "sha256:e381e9b560fa509b0cfb55565e80991a857a68ec657ee42e22fe3f56df5fe788",
+      "reference/writing/technical-english-profile.md": "sha256:108f0d12d4d641990b37dc821f03f3e32839ef6ea924d1ce242be5580a68801a",
       "reference/writing/visual-explainers.md": "sha256:c11ed6c846183bd54433dd007c53467810982712f021400a7cbb3794b0f79ad3",
-      "roles/architect.md": "sha256:d3bfe1b26da3064cbb8de7ff8fb99bc0ed5048e3409f3c2b2154032fcdb173f5",
+      "roles/architect.md": "sha256:ced09cc8efcc9ee2a5f27c9c905f3b1d7c79d31c0a004becd350ad3d403849cc",
       "roles/bootstrap.md": "sha256:292b937834bdb9186cc4f70c74a2530c61145ba90ec03909a86395ca3c3a762c",
+      "roles/consolidator.md": "sha256:32fd44e071b8344472166000afb61e83601b4e70059a0b12b10cdc9b0aa159d8",
       "roles/curator.md": "sha256:356bdb331c6971b987292bd9921439b4f16293decc360194fb89a3006e74fe1f",
       "roles/investigator.md": "sha256:1f992757e0d459bd02e64fea8039662c7bd5c020fb31fb63dc4de67bc294dd7c",
-      "roles/manager.md": "sha256:e2cd502a21767b2c74ec009218f811a8b8c13ab3e25691f2b702f82deeadbc81",
-      "roles/orchestrator.md": "sha256:867bc51d025a287c4667ffa9dc647579929fd8e466e6551f5d4b120a0b864add",
-      "roles/reviewer.md": "sha256:a9597d18cffbc9d1613cce89f32a88b69813b4c12e99c7f8e0ba92d68473ad0c",
+      "roles/manager.md": "sha256:4906637dc8b8d711150c022c222cabc97776fe4f200b2081225b680b5269e87e",
+      "roles/orchestrator.md": "sha256:029daa3fe482995e53143dab52252d33e33ca1212f7d2fb2255b49ffcdc57472",
+      "roles/reviewer.md": "sha256:5c1c4fe02e88a332a58dd03af15b7ac52e1623d2d640a0a363097325d0f7644f",
       "roles/worker.md": "sha256:c9c4f01e52cac7cb674750b8a37019a8d8a0cf39df493f05fba2af9f8896d2c0",
       "templates/turn-report.md": "sha256:d410272dce68cea910aa06ac9c9f6788f8dc4c63231306ee1c4211ef68a40b86"
     }

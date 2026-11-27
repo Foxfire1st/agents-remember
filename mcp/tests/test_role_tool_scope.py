@@ -57,6 +57,7 @@ ROLES = (
     "worker",
     "curator",
     "reviewer",
+    "consolidator",
     "investigator",
     "bootstrap",
 )
@@ -70,6 +71,7 @@ REFERENCE_SHAPES = {
     "worker": (True, True, True),
     "curator": (True, True, True),
     "reviewer": (True, True, True),
+    "consolidator": (True, True, True),
     "investigator": (True, True, False),
     "bootstrap": (False, False, False),
 }

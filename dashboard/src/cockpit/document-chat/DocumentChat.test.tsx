@@ -23,6 +23,24 @@ const architect: DocumentAgent = {
   createdAt: '2026-01-01',
   labels: { 'ar.role': 'architect' },
 };
+// A task whose document names the list of a consolidation pass: the server serves the list's
+// counts on its summary, and the task's seats are a Consolidator and a Reviewer.
+const consolidationLeaf = {
+  ...leaf,
+  summary: {
+    ...leaf.summary!,
+    consolidation: {
+      families: ['FAM-5M0001'],
+      rules: [],
+      memoryRead: true,
+      total: 1,
+      stands: 0,
+      corrected: 0,
+      unresolved: 0,
+      open: 1,
+    },
+  },
+};
 const worker: DocumentAgent = {
   agentId: 'worker',
   workspaceId: 'leaf-workspace',
@@ -587,6 +605,47 @@ describe("the document's native chat and the shared bound launcher", () => {
         taskDocumentRef: soloLeaf.reference,
       }),
     );
+  });
+
+  it('offers a consolidation task its Consolidator and Reviewer and starts the Consolidator', async () => {
+    const requests: object[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/options')) requests.push(JSON.parse(String(init?.body)));
+        const value = url.endsWith('/frame')
+          ? {
+              available: true,
+              frameBaseUrl: 'https://host.example',
+              serverId: 'server',
+              projectsWorkspaceId: 'projects',
+            }
+          : url.endsWith('/document-chats')
+            ? { agents: [] }
+            : { roleDefaults: {}, agents: [] };
+        return new Response(JSON.stringify(value));
+      }),
+    );
+    const tasks = [sprint, master, consolidationLeaf];
+    const { container, findByTestId } = render(
+      <DocumentChat active taskDocumentRef={ref('master/leaf.json')} tasks={tasks} />,
+    );
+    await findByTestId('role-launcher');
+    expect(
+      [...container.querySelectorAll('#launcher-role option')].map((item) => item.textContent),
+    ).toEqual(['Consolidator', 'Reviewer']);
+    await waitFor(() =>
+      expect(requests).toContainEqual({
+        role: 'consolidator',
+        sprintDocumentRef: ref('sprint/task.json'),
+        masterDocumentRef: ref('master/task.json'),
+        taskDocumentRef: ref('master/leaf.json'),
+      }),
+    );
+    expect(documentChatBinding(ref('master/leaf.json'), tasks).roles).toEqual([
+      'consolidator',
+      'reviewer',
+    ]);
   });
 
   it('admits exactly the roles for Projects, sprint, commanded master and leaf', () => {

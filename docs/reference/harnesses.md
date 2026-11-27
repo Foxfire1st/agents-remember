@@ -89,7 +89,7 @@ command that opens it again for an edit.
 ### The keys of a role row
 
 A role row stands under `orchestration.roles.<role>`. The role is `architect`, `investigator`,
-`orchestrator`, `manager`, `worker`, `reviewer`, `curator` or `bootstrap`. A row accepts these
+`orchestrator`, `manager`, `worker`, `consolidator`, `reviewer`, `curator` or `bootstrap`. A row accepts these
 keys. It also accepts `launchArgs`, `promptKeywords` and `sessionCommands`, and reads none of
 them. A key that the loader does not know is refused, and the refusal names the file and the key.
 
@@ -111,8 +111,12 @@ load. The refusal names the file and the key.
 The loader checks that `harness`, `model` and `effort` are non-empty texts. A start checks them
 against the host's catalog and matches a name to the host's id or label without regard to case.
 
-Besides the eight roles, the family accepts the row name `review-presenter`. That row sets the
-launch of the explainer of the review page. It is not a role.
+Besides the nine roles, the family accepts two row names that are no role. The row
+`review-presenter` sets the launch of the explainer of the review page. The row
+`consolidation-reviewer` sets the launch of the Reviewer of a consolidation task, a task whose
+document names a `consolidationList`: each key that row leaves out comes from the `reviewer` row,
+so an absent row gives the Reviewer's row. A start that names its own harness, model or effort
+still wins. No start accepts either name as a role.
 
 ### A row for one level
 
@@ -121,7 +125,7 @@ level follows the role:
 
 | Level | Roles |
 | --- | --- |
-| `leaf` | `worker`, `reviewer`, `curator` |
+| `leaf` | `worker`, `consolidator`, `reviewer`, `curator` (and the row `consolidation-reviewer`) |
 | `master` | `manager` |
 | `portfolio` | `architect`, `investigator`, `orchestrator` |
 
@@ -189,11 +193,11 @@ row that the step-up does not name.
 
 A step-up is taken in two ways:
 
-- **By count.** For `worker` and `curator`, the key `afterTries` names a number of tries; it is 3
-  when the row does not name it. A try of a Worker is a recorded round of code review that leaves
-  findings; a try of a Curator is such a round of memory review. When the count is reached, the
-  answer of the review record says that the role steps up, and the next start of that role on
-  the task takes the step-up. Another role refuses `afterTries`.
+- **By count.** For `worker`, `curator` and `consolidator`, the key `afterTries` names a number of
+  tries; it is 3 when the row does not name it. A try of a Worker is a recorded round of code review
+  that leaves findings; a try of a Curator or a Consolidator is such a round of memory review. When
+  the count is reached, the answer of the review record says that the role steps up, and the next
+  start of that role on the task takes the step-up. Another role refuses `afterTries`.
 - **On request.** `role_start` with `step_up` set to one sentence that gives the reason starts
   the role with its step-up. The button "Step up" of the role launcher does the same and asks for
   the sentence. Without a step-up in the settings the call is refused.

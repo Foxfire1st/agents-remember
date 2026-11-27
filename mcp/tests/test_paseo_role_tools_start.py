@@ -83,6 +83,7 @@ class ParentlessChatStartTests(RoleToolsTestCase):
                 "orchestrator",
                 "manager",
                 "worker",
+                "consolidator",
                 "reviewer",
                 "curator",
                 # The free agent the one call starts (MIK-R196 rule 1): no document at all.

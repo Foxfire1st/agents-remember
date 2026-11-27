@@ -35,6 +35,7 @@ import {
   type DocView,
   useDocView,
 } from './skeletons';
+import { ConsolidationBlock } from './consolidationBlock';
 import { DocContentView } from './docViews';
 import { TaskBodyNotice } from './readerTop';
 import { OrderBlock, OrderGraphViewBody } from './orderGraph';
@@ -190,6 +191,7 @@ function LeafBody(props: ReaderProps & { openView: (view: DocView) => void }) {
     <>
       <StepsBlock steps={doc.steps} done={entry.stepsDone} total={entry.stepsTotal} />
       <ReviewBlock review={doc.reviewState} openView={openView} />
+      <ConsolidationBlock consolidation={doc.consolidation} openView={openView} />
       <RequirementsBlock requirements={doc.requirements} openView={openView} />
       <LongTextBlock
         title="Design"

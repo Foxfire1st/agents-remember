@@ -609,6 +609,7 @@ class InstructionFileWordingTests(unittest.TestCase):
                     # MIK-R196: the free agent's operation is reachable from a launch now.
                     "bootstrap",
                     "closeout",
+                    "consolidation",
                     "coordination",
                     "curation",
                     "implementation",
@@ -758,7 +759,7 @@ class InstructionFileWordingTests(unittest.TestCase):
         )
         coordination = " ".join(read(LIFECYCLE / "operations" / "coordination.md").split())
         for sentence in (
-            "Architect: all 6; Orchestrator: all except Orchestrator, sprint; Manager: Worker/Reviewer/Curator/Investigator, master",
+            "Architect: all 7; Orchestrator: all except Orchestrator, sprint; Manager: Worker/Reviewer/Curator/Consolidator/Investigator, master",
             "reconcile uncertain starts via same request ID.",
             "role != self; invent no IDs",
             "active turns may `held` or cancel (never into permission prompts);",

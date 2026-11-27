@@ -583,13 +583,15 @@ for example the value `developer` that records who gave an approval, and the fol
 
 ### Role
 
-A role is one of the eight roles Architect, Investigator, Orchestrator, Manager, Worker, Reviewer,
-Curator and Bootstrap. A role fixes what an agent does and what it may write:
+A role is one of the nine roles Architect, Investigator, Orchestrator, Manager, Worker,
+Consolidator, Reviewer, Curator and Bootstrap. A role fixes what an agent does and what it may write:
 
 - The **Architect** talks with the user, writes requirements and plans, and delegates.
 - The **Orchestrator** coordinates one sprint.
 - The Manager coordinates one master and its tasks, and performs closeout and landing.
 - The Worker builds one task in its enclosure.
+- The Consolidator reads the rules and families that a consolidation task lists again against the
+  code and leaves each standing, corrected or unresolved.
 - The Reviewer reviews one task independently and gives a verdict.
 - The Curator writes the memory that the change of one task needs.
 - The Investigator looks into one scoped concern and writes one report.
@@ -616,7 +618,7 @@ a code repository.
 ### Role launcher
 
 The role launcher is the row of the dashboard's tab "Chats" from which the user starts a role
-agent in one of seven roles; it offers no Bootstrap. The user chooses the role and the task there,
+agent in one of eight roles; it offers no Bootstrap. The user chooses the role and the task there,
 and may choose another harness, model or effort than the role settings name.
 
 ### Role capsule
@@ -641,9 +643,9 @@ with a trailing `AR handover artifacts:` locator line naming `.handover.txt` and
 ### Hand-off
 
 A hand-off is what a role agent delivers before it ends a turn: a delivered `role_message` or a
-write to a task document. When a Worker, a Reviewer or a Curator ends a turn without one, the
-plug-in sends it a message that begins `[ar-plugin] turn ended with no hand-off:` — except when
-the turn's last line starts `IDENTITY MISMATCH:`, which skips the 60-second wait and wake
+write to a task document. When a Worker, a Consolidator, a Reviewer or a Curator ends a turn without
+one, the plug-in sends it a message that begins `[ar-plugin] turn ended with no hand-off:` — except
+when the turn's last line starts `IDENTITY MISMATCH:`, which skips the 60-second wait and wake
 messages and goes immediately to the parent unmarked.
 
 ### Message file
@@ -679,8 +681,8 @@ none. The dashboard and the plug-in say "subagents" for helpers, in the state
 ### Step-up
 
 A step-up is a second set of role settings for one role, for work that the first set did not
-finish. A Worker or a Curator takes it after a set number of review rounds that left findings,
-and any role takes it when its start asks for it.
+finish. A Worker, a Curator or a Consolidator takes it after a set number of review rounds that left
+findings, and any role takes it when its start asks for it.
 [Harnesses and role settings](reference/harnesses.md#step-up) describes it.
 
 ### Host profile
@@ -749,6 +751,15 @@ and so do some texts of the dashboard, for example "No leaf tasks" in the role l
 a task from the
 [leaf-task](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/templates/leaf-task.md)
 template.
+
+### Consolidation task
+
+A consolidation task is a task whose task document names the list of a pass in
+`consolidationList`: families and rules by their ids. Its role agents are a Consolidator and a
+Reviewer; it has no Worker and no Curator, and it changes no code. For each listed record the
+worklist holds one item, which the record's row in the task's history file closes: `stands`, a
+correction, or `unresolved`. It runs in a master of its own, made off `main` on the user's request.
+[Roles and role agents](roles.md#a-consolidation-task) describes how one is started.
 
 ### Attempt
 

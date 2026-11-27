@@ -14,6 +14,7 @@ from typing import Any
 from agents_remember.models.knowledge_files.documents import history_path
 
 __all__ = [
+    "consolidating",
     "history_document",
     "review_fact",
     "stamp",
@@ -82,3 +83,12 @@ def history_document(
     if review is not None:
         document["review"] = review
     return history_path(leaf, attempt), document
+
+
+def consolidating(
+    history: tuple[str, dict[str, Any]], *subjects: str
+) -> tuple[str, dict[str, Any]]:
+    """A consolidation task's history file: it names the records its pass's list reached."""
+
+    path, document = history
+    return path, {**document, "consolidationSubjects": sorted(subjects)}

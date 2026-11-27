@@ -9,6 +9,7 @@ import { TaskNotesReferencesSection, useTaskNotesData } from '../TaskNotes';
 import type { TaskArtifactReaderTarget as NotesReaderTarget } from '../../data/taskArtifacts';
 import type { TaskSummary } from '../../types/projection';
 import type { DocumentTaskEntry } from '../../data/taskReference';
+import { ConsolidationViewBody, outcomeCountsText } from './consolidationBlock';
 import { dirName } from './model';
 import {
   DocViewShell,
@@ -138,6 +139,14 @@ function RecordViews({
       </DocViewShell>
     );
   }
+  if (view.kind === 'consolidation' && doc.consolidation) {
+    const { consolidation } = doc;
+    return (
+      <DocViewShell title="Consolidation" count={outcomeCountsText(consolidation)} onBack={onBack}>
+        <ConsolidationViewBody consolidation={consolidation} />
+      </DocViewShell>
+    );
+  }
   return null;
 }
 
@@ -154,7 +163,12 @@ export function DocContentView({
   handlers: DocContentHandlers;
   scope: 'sprint' | 'master' | 'task';
 }) {
-  if (view.kind === 'register' || view.kind === 'section' || view.kind === 'findings') {
+  if (
+    view.kind === 'register' ||
+    view.kind === 'section' ||
+    view.kind === 'findings' ||
+    view.kind === 'consolidation'
+  ) {
     return <RecordViews view={view} doc={doc} onBack={handlers.onBack} />;
   }
   if (

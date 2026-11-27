@@ -71,6 +71,7 @@ FIXTURE_ROLES = (
     "worker",
     "curator",
     "reviewer",
+    "consolidator",
     "investigator",
     "bootstrap",
 )
@@ -85,6 +86,7 @@ FIXTURE_OPERATIONS = (
     "authorized-closeout",
     "recovery",
     "bootstrap",
+    "consolidation",
 )
 
 FIXTURE_CORE = ("authority", "invariants", "lifecycle-frame", "loop", "acceptance", "launcher")
@@ -103,9 +105,11 @@ FIXTURE_APPLICABILITY = {
         "manager",
         "worker",
         "curator",
+        "consolidator",
         "investigator",
     ),
     "bootstrap": ("bootstrap",),
+    "consolidation": ("consolidator",),
 }
 
 FIXTURE_ROLE_CORE = {
@@ -115,6 +119,7 @@ FIXTURE_ROLE_CORE = {
     "worker": ("authority", "invariants", "lifecycle-frame", "acceptance"),
     "curator": ("authority", "invariants", "acceptance"),
     "reviewer": ("authority", "invariants", "loop", "acceptance"),
+    "consolidator": ("authority", "invariants", "acceptance"),
     "investigator": ("authority", "invariants", "acceptance"),
     "bootstrap": ("authority", "invariants", "acceptance"),
 }

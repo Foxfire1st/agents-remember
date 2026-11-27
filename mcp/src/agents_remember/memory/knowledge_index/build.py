@@ -555,14 +555,23 @@ def _write_revisions(
     records = (indexed.record for indexed in parsed.records.values())
     connection.executemany(
         "INSERT INTO ix_revision (record, revision, writer_role, writer_harness, writer_model, "
-        "seat, reviewed) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "seat, reviewed, consolidation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [_revision_row(one) for one in named_revisions(records, states)],
     )
 
 
 def _revision_row(one: NamedRevision) -> tuple[str | int | None, ...]:
     role, harness, model = one.writer if one.writer is not None else (None, None, None)
-    return (one.record, one.revision, role, harness, model, one.seat, int(one.reviewed))
+    return (
+        one.record,
+        one.revision,
+        role,
+        harness,
+        model,
+        one.seat,
+        int(one.reviewed),
+        one.consolidation,
+    )
 
 
 def _write_meta(

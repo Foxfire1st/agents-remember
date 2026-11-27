@@ -129,10 +129,11 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         worker: dict[str, Any] | None = None,
         reviewer: dict[str, Any] | None = None,
         curator: dict[str, Any] | None = None,
+        consolidator: dict[str, Any] | None = None,
         replaces: dict[str, str] | None = None,
         replaces_interrupt_turn: bool = False,
     ) -> dict[str, object]:
-        """Start a leaf's Worker, Reviewer and Curator in one call (MIK-R100 rule 1). Only a role agent that AR launched can call this (owning Manager only). Worker opens; Reviewer/Curator stay held unless reviewer_message opens Reviewer. A repeat with the same request id reconciles the same three agents: it creates no fourth and opens no held seat. Docs: docs/tool-details.md."""
+        """Start a leaf's seats in one call (MIK-R100 rule 1): Worker, Reviewer and Curator, or Consolidator and Reviewer when the task document names a consolidationList. Only a role agent that AR launched can call this (owning Manager only). Worker or Consolidator opens; Reviewer/Curator stay held unless reviewer_message opens Reviewer. A repeat with the same request id reconciles the same agents: it creates no new one and opens no held seat. Docs: docs/tool-details.md."""
         try:
             call = RoleStartSetCall(
                 request_id=request_id,
@@ -143,6 +144,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
                 worker=seat_override("worker", worker),
                 reviewer=seat_override("reviewer", reviewer),
                 curator=seat_override("curator", curator),
+                consolidator=seat_override("consolidator", consolidator),
                 replaces=replaces or {},
                 replaces_interrupt_turn=replaces_interrupt_turn,
             )

@@ -149,6 +149,8 @@ const mergeTaskDocumentBody = (summary: TaskSummary, body: Partial<TaskSummary>)
     ...mergeCurrentStatus(summary, body),
     steps: mergeCurrentSteps(summary, body),
     reviewState: mergeCurrentReview(summary, body),
+    // The summary carries a consolidation pass's counts only; the current body adds its rows.
+    consolidation: body.consolidation ?? summary.consolidation,
   };
 };
 

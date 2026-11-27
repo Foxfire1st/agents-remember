@@ -1,6 +1,6 @@
 # Knowledge use at the working step
 
-All eight roles use this file to read code with attributed knowledge, bind and complete knowledge reads, distinguish recorded proofs from fresh results, and inspect the source that owns a setting. The Architect, Investigator, Worker and Reviewer sections state their additional actions.
+All nine roles use this file to read code with attributed knowledge, bind and complete knowledge reads, distinguish recorded proofs from fresh results, and inspect the source that owns a setting. The Architect, Investigator, Worker and Reviewer sections state their additional actions.
 
 ## Read code and knowledge together
 

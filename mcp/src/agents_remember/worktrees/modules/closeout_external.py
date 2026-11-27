@@ -69,7 +69,8 @@ from agents_remember.worktrees.queue.closeout_recovery import (
     require_admitted_tip,
     resume_external_commits,
 )
-from agents_remember.worktrees.review_fact_source import NO_PASS_SENTENCE, leaf_review_fact
+from agents_remember.worktrees.review_fact_source import leaf_review_fact
+from agents_remember.worktrees.review_note import closed_history_review_note
 from agents_remember.worktrees.role_reports import is_collected_report_ref
 from agents_remember.worktrees.series_closeout import series_memory_closeout
 from agents_remember.worktrees.services import LeafPublication, refresh_written_memory_briefs
@@ -163,7 +164,7 @@ def _review_note(closing: HistoryClosing, review: ReviewFact | None) -> str:
     if closing.written == closing.previous:
         return ""
     if review is None:
-        return NO_PASS_SENTENCE
+        return closed_history_review_note(closing.written)
     if review.verdict_ref is not None and not is_collected_report_ref(review.verdict_ref):
         return unmapped_verdict_ref_note(review.verdict_ref)
     return ""

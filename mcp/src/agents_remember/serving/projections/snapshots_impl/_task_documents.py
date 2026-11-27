@@ -70,6 +70,7 @@ from agents_remember.tasks import (
     step_total,
 )
 
+from ._task_consolidation import consolidation_fields
 from ._task_document_parse import projected_document as _projected_document
 from ._task_graph_view import declared_task_reference, documents_by_ref, execution_graph_view
 from ._task_order import OrderFields, build_order_fields, read_order_fields
@@ -506,6 +507,7 @@ def _task_doc_node(
     # body carries every note and whole string. Totals always name the whole
     # collection for the page's counted links.
     preview = not options.include_body
+    consolidation, body_revision = consolidation_fields(doc, body_revision, preview=preview)
     header_notes = [
         TaskHeaderNoteNode(label=note.label, value=note.value) for note in doc.headerNotes
     ]
@@ -523,6 +525,7 @@ def _task_doc_node(
         headerNotes=(header_notes[:_SUMMARY_HEADER_NOTES] if preview else header_notes),
         headerNotesTotal=len(header_notes),
         reviewState=_task_review_state_node(doc, preview=preview),
+        consolidation=consolidation,
         stepsDone=step_done(doc),
         stepsTotal=step_total(doc),
         currentStep=current_step(doc),

@@ -33,6 +33,7 @@ LauncherRole = Literal[
     "worker",
     "reviewer",
     "curator",
+    "consolidator",
     "bootstrap",
 ]
 

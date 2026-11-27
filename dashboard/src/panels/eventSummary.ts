@@ -126,6 +126,7 @@ function legacyOutcome(ok: boolean | undefined): string | undefined {
 // their friendly labels, unknown role values are shown verbatim.
 const KNOWN_ROLES = new Set([
   'architect',
+  'consolidator',
   'curator',
   'manager',
   'orchestrator',

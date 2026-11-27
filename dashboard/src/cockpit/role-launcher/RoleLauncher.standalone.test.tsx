@@ -187,6 +187,33 @@ describe('the launcher on a master that no sprint commands', () => {
     );
   });
 
+  it('lists the Consolidator after the Worker and gives it its master and task as a Worker', () => {
+    const { view, lastSelection } = renderRig('consolidator');
+    expect(optionTexts(view.getByLabelText('Role') as HTMLSelectElement)).toEqual([
+      'Architect',
+      'Investigator',
+      'Orchestrator',
+      'Manager',
+      'Worker',
+      'Consolidator',
+      'Reviewer',
+      'Curator',
+    ]);
+    fireEvent.change(view.getByLabelText('AR master'), { target: { value: '0' } });
+    expect((view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    fireEvent.change(view.getByLabelText('AR task'), { target: { value: '0' } });
+    expect(lastSelection()).toEqual({
+      role: 'consolidator',
+      masterDocumentRef: soloRef,
+      taskDocumentRef: soloLeafRef,
+    });
+    expect((view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
   it('still requires its sprint from the Orchestrator', () => {
     const { view } = renderRig('orchestrator');
     expect((view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement).disabled).toBe(

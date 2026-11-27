@@ -82,8 +82,15 @@ class MayStartRuleTests(unittest.TestCase):
     def test_each_role_may_start_exactly_the_roles_the_rule_names(self) -> None:
         allowed = {
             "architect": set(ROLES) - {"architect"},
-            "orchestrator": {"manager", "worker", "reviewer", "curator", "investigator"},
-            "manager": {"worker", "reviewer", "curator", "investigator"},
+            "orchestrator": {
+                "manager",
+                "worker",
+                "consolidator",
+                "reviewer",
+                "curator",
+                "investigator",
+            },
+            "manager": {"worker", "consolidator", "reviewer", "curator", "investigator"},
         }
         self.assertEqual({role: set(started) for role, started in MAY_START.items()}, allowed)
         for caller in ROLES:

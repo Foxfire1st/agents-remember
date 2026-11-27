@@ -62,7 +62,8 @@ export type DocView =
   | { kind: 'group'; status: 'done' | 'gone' }
   | { kind: 'rows' }
   | { kind: 'orderGraph' }
-  | { kind: 'findings' };
+  | { kind: 'findings' }
+  | { kind: 'consolidation' };
 
 export type StatusTone = 'work' | 'wait' | 'done' | 'gone';
 

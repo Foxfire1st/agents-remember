@@ -110,8 +110,9 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         kinds: list[str] | None = None,
         recordIds: list[str] | None = None,
         compact: bool = False,
+        masterId: str | None = None,
     ) -> dict[str, Any]:
-        """Read memory. Views: source_context, invariant, family, record, records (batch full text), impact (files/folder), search (FTS5), weakness, dependent (compact=true), writers (per-writer counts + report path). Auto-pairs code tree via repo_id/contractPath/memoryRoot; repositoryRoot/codeTreeId override. recordId/recordIds take text IDs (INV-/WKN-/DPD-). Writes: `agents-remember knowledge-ingest` or `agents-remember knowledge-bootstrap`. Docs: docs/reference/mcp-tools.md."""
+        """Read memory. Views: source_context, invariant, family, record, records (batch text), impact (files/folder), search (FTS5), weakness, dependent (compact), writers (counts+report), consolidation_proposal (masterId). Auto-pairs code tree (repo_id/contractPath/memoryRoot; repositoryRoot/codeTreeId override). recordId/recordIds take text IDs (INV-/WKN-/DPD-). Writes: `agents-remember knowledge-ingest` or `agents-remember knowledge-bootstrap`. Docs: docs/reference/mcp-tools.md."""
 
         return tools.knowledge_read_payload(
             tools.ReadToolRequest(
@@ -138,11 +139,12 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
                 kinds=None if kinds is None else tuple(kinds),
                 record_ids=None if recordIds is None else tuple(recordIds),
                 compact=compact,
+                master_id=masterId,
             ),
             workspace_root=str(config.workspace_root),
             coordination_root=str(config.coordination_root),
             relative_locations=_worktree_relative_locations(config, memoryRoot),
-            repositories=config.repositories,
+            repositories=getattr(config, "repositories", None),
         )
 
 

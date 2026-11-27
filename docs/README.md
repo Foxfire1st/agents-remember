@@ -51,7 +51,7 @@ The page of each harness:
   it, how you see its state, how you stop and start it, its ports and an update of the install.
 - [The Dashboard](dashboard.md) describes every tab, the role launcher, the task list, the task
   document, the review page and the tray.
-- [Roles and role agents](roles.md) describes the eight roles, who starts whom and who
+- [Roles and role agents](roles.md) describes the nine roles, who starts whom and who
   coordinates the work.
 - [Workflows](workflows.md) describes how a request becomes a task and how a task lands.
 - [Harnesses and role settings](reference/harnesses.md) describes how you choose the harness, the

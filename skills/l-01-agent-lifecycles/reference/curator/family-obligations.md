@@ -1,6 +1,6 @@
 # Examine and author family obligations
 
-Curators read this topic before deciding family coverage or updating a family. It covers the joint guarantee, membership judgment, authored history and readback of that family.
+Curators and Consolidators read this topic before deciding family coverage or updating a family. It covers the joint guarantee, membership judgment, authored history and readback of that family.
 
 For every scoped obligation, decide whether evidence and project intent justify a joint obligation with others. Where they do, author a `family` record in the same list's `records` section. Give the family its own guarantee, members, routes and admission. An obligation may belong to several families. Never group merely by directory, route, label or shared anchor.
 

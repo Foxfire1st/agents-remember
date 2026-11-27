@@ -1,6 +1,6 @@
 # Prepare coherence judgments
 
-Curators read this topic before preparing a coherence judgment. It explains what to verify before publishing and defines the judgment fields.
+Curators and Consolidators read this topic before preparing a coherence judgment. It explains what to verify before publishing and defines the judgment fields.
 
 In a full `memory_quality_check` answer, `finalFullCatalog` is the projection for later certification: affected closure, census certification and `finalizationEligible`. It is not a leaf gate. The leaf's memory gates are readiness for closeout, current coherence and integrity.
 

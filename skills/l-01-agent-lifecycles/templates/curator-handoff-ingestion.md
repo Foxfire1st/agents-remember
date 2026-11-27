@@ -1,6 +1,6 @@
 # Curator handoff-list ingestion
 
-Curators use this reference to author their handoff-list fields, prepare writer input, admit records and record decisions. The [producer contract](curator-handoff-list.md#the-entry) owns the thirteen entry fields and the producer/Curator boundary.
+Curators and Consolidators use this reference to author their handoff-list fields, prepare writer input, admit records and record decisions. The [producer contract](curator-handoff-list.md#the-entry) owns the thirteen entry fields and the producer/Curator boundary.
 
 ## Curator-authored semantic scope
 
@@ -494,6 +494,16 @@ decision yourself: `raise` it. When alternatives change without restating links,
 moves each stored reconsideration link by the exact unique old option text. If that text
 is missing or ambiguous, restate `links`; never rely on an ordinal to retarget it.
 A same-leaf `still_rejected` refresh with no fired item restores a current base link.
+
+#### Consolidation judgments
+
+A consolidation task declares `consolidationList` (`families` and `rules`) in its task document before launch. Its worklist includes one `consolidation_target` item per listed family and per rule listed directly or through a listed family.
+
+- `stands`: confirms that a listed invariant or family remains accurate against the code tree without changing its meaning or card realization/proof entries. Giving a listed rule a missing `title` does not raise its revision and uses `stands`. Give a concrete one-line `reason`.
+- `unresolved`: records that a listed invariant or family cannot be resolved in the pass (contradiction between rule and code that the Consolidator cannot decide, or a failing named proof test). Change nothing on that record and state the contradiction or failing test in `reason`. When a listed subject is `unresolved` and also has an existing-kind worklist item, the `unresolved` row closes both.
+- Proof evidence fields on every invariant row in a consolidation task: `testsRun` (list of executed named proof tests with results), `testsNotRun` (list of named tests that could not be run in the seat, with reason), or `noProofRecorded: true` when no proof is recorded.
+- Corrected subjects use the existing row dispositions (`changed`, `extended`, `moved`, `deleted`, `rerouted`, `assigned`, `retired`). For card-entries-only edits that leave rule text unchanged, write the ordinary row naming the revision read. When a listed family is also reached by a corrected member, or a listed rule is touched by a newly linked proof, that one row closes both items.
+- `stands` and `unresolved` apply to invariants and families only; other record kinds keep their existing dispositions.
 
 ### Local handles
 

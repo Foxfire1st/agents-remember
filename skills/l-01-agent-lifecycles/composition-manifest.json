@@ -10,6 +10,7 @@
     "worker",
     "curator",
     "reviewer",
+    "consolidator",
     "investigator",
     "bootstrap"
   ],
@@ -45,6 +46,7 @@
         "worker",
         "curator",
         "reviewer",
+        "consolidator",
         "investigator",
         "bootstrap"
       ]
@@ -118,7 +120,16 @@
         "curator",
         "investigator",
         "bootstrap",
-        "reviewer"
+        "reviewer",
+        "consolidator"
+      ]
+    },
+    "consolidation": {
+      "source": "operations/consolidation.md",
+      "purpose": "Re-read listed families and rules against paired code and named tests, write allowed memory corrections, and hand over to the Reviewer.",
+      "audience": "sections",
+      "applies_to_roles": [
+        "consolidator"
       ]
     },
     "bootstrap": {
@@ -481,6 +492,46 @@
         "plan-review.md"
       ]
     },
+    "consolidator": {
+      "file": "roles/consolidator.md",
+      "altitude": "leaf",
+      "tools": [
+        "server_info",
+        "context_packet",
+        "read_ar_files",
+        "memory_quality_check",
+        "worktree_status",
+        "worktree_sync",
+        "task_doc",
+        "curator_coherence",
+        "role_message",
+        "knowledge_read",
+        "knowledge_diff",
+        "knowledge_integrity_check",
+        "knowledge_write"
+      ],
+      "skills": [
+        "l-01-agent-lifecycles"
+      ],
+      "seat": "Consolidator for one selected consolidation leaf; re-reads listed families and rules against code and named tests, writes allowed memory corrections, and hands over to the Reviewer.",
+      "core": [
+        "authority",
+        "invariants",
+        "acceptance",
+        "every-role"
+      ],
+      "operations": [
+        "orientation",
+        "consolidation",
+        "recovery"
+      ],
+      "templates": [
+        "curator-handoff-ingestion.md"
+      ],
+      "criteria": [
+        "onboarding-memory.md"
+      ]
+    },
     "investigator": {
       "file": "roles/investigator.md",
       "altitude": "sprint",
@@ -572,7 +623,7 @@
     "digest-map": {
       "source": "core/digest-map.json",
       "description": "Source dispositions backing the shared every-role digest.",
-      "rolesReason": "The Architect, Orchestrator, Manager, Worker, Curator, Reviewer, Investigator and Bootstrap use these source dispositions backing the shared every-role digest.",
+      "rolesReason": "The Architect, Orchestrator, Manager, Worker, Curator, Reviewer, Consolidator, Investigator and Bootstrap use these source dispositions backing the shared every-role digest.",
       "injected": false,
       "step_detail": false,
       "step": null
@@ -912,6 +963,12 @@
       "description": "Unfinished closeout recovery, task projection rebuilds, flat-mode paired closeout, Orchestrator recipient switch, and child permission notices.",
       "injected": false,
       "step_detail": true
+    },
+    "consolidation-pass": {
+      "source": "reference/consolidation-pass.md",
+      "description": "Consolidation pass outcome rules, clean named test execution, unresolved and gap reporting, and handover report shape.",
+      "injected": false,
+      "step_detail": true
     }
   },
   "composition_order": [
@@ -922,7 +979,7 @@
     "Routing metadata only: the role route composes exactly one role source and one applicable operation source.",
     "Core metadata records source ownership; shared core blocks are not injected into role capsules; the digest accompanies the capsule in the first message.",
     "Canonical task references and workspace bindings travel in the handover as data, separate from instruction blocks.",
-    "The manifest names eight launchable roles and nine operations; role and operation applicability must agree.",
+    "The manifest names nine launchable roles and ten operations; role and operation applicability must agree.",
     "Paseo is the host. Role agents start and message each other with the AR tools role_start and role_message on the agents-remember-task tool server."
   ],
   "derived": {
@@ -935,6 +992,7 @@
           "worker",
           "curator",
           "reviewer",
+          "consolidator",
           "investigator",
           "bootstrap"
         ]
@@ -965,9 +1023,10 @@
       },
       "curator/worklist": {
         "roles": [
-          "curator"
+          "curator",
+          "consolidator"
         ],
-        "step": "row: intake/worklist"
+        "step": "row: pass/worklist; row: intake/worklist"
       },
       "refused-write": {
         "roles": [
@@ -977,6 +1036,7 @@
           "worker",
           "curator",
           "reviewer",
+          "consolidator",
           "investigator",
           "bootstrap"
         ],
@@ -984,9 +1044,10 @@
       },
       "writing/technical-english-profile": {
         "roles": [
-          "curator"
+          "curator",
+          "consolidator"
         ],
-        "step": "row: cards/style; before writing walkthrough prose, labels or narrated obligations"
+        "step": "row: write/families; row: cards/style; before writing walkthrough prose, labels or narrated obligations"
       },
       "writing/visual-explainers": {
         "roles": [
@@ -1004,6 +1065,7 @@
           "worker",
           "curator",
           "reviewer",
+          "consolidator",
           "investigator"
         ],
         "step": "row: process, claims, dev/child qs, `role_message`; row: coherence/msg; row: research/shortfalls/msg; row: master (`task_doc`/`worktree_abandon`/`record_landing`), retire, cmds, msgs, sandbox, child; row: `knowledge_read`/`context_packet`, `role_message`, sandbox, child qs; row: templates & msg; row: msg/sync/repairs; before sending a question or developer answer to its waiting child; before composing a message; before handling a full-store refusal"
@@ -1028,6 +1090,7 @@
           "worker",
           "curator",
           "reviewer",
+          "consolidator",
           "investigator",
           "bootstrap"
         ],
@@ -1054,6 +1117,7 @@
           "worker",
           "curator",
           "reviewer",
+          "consolidator",
           "investigator",
           "bootstrap"
         ],
@@ -1199,6 +1263,7 @@
           "worker",
           "curator",
           "reviewer",
+          "consolidator",
           "investigator",
           "bootstrap"
         ],
@@ -1218,7 +1283,8 @@
       },
       "curator/coherence-judgments": {
         "roles": [
-          "curator"
+          "curator",
+          "consolidator"
         ],
         "step": "row: coherence/msg"
       },
@@ -1236,27 +1302,31 @@
       },
       "curator/family-obligations": {
         "roles": [
-          "curator"
+          "curator",
+          "consolidator"
         ],
-        "step": "row: write/route"
+        "step": "row: write/families; row: write/route"
       },
       "curator/governing-sources": {
         "roles": [
-          "curator"
+          "curator",
+          "consolidator"
         ],
-        "step": "row: cards/style; before choosing domain evidence"
+        "step": "row: write/families; row: cards/style; before choosing domain evidence"
       },
       "curator/knowledge-ingest": {
         "roles": [
-          "curator"
+          "curator",
+          "consolidator"
         ],
-        "step": "row: write/route"
+        "step": "row: write/families; row: write/route"
       },
       "curator/publication-report": {
         "roles": [
-          "curator"
+          "curator",
+          "consolidator"
         ],
-        "step": "row: write/route; before interpreting final writer checks; before interpreting the ingest result"
+        "step": "row: write/families; row: write/route; before interpreting final writer checks; before interpreting the ingest result"
       },
       "curator/intent-reconciliation": {
         "roles": [
@@ -1285,6 +1355,7 @@
           "worker",
           "curator",
           "reviewer",
+          "consolidator",
           "investigator",
           "bootstrap"
         ],
@@ -1324,6 +1395,12 @@
           "manager"
         ],
         "step": "row: meas., advisory, flat closeout; row: seats (`retire_child`), 3rd, sync (`worktree_closeout_preview`), switch (`worktree_closeout_*`); row: manager brief, stages (`role_start`), hand-off, seats (`retire_child`), master/decisions (`task_doc`), closeout"
+      },
+      "consolidation-pass": {
+        "roles": [
+          "consolidator"
+        ],
+        "step": "row: pass/worklist"
       }
     },
     "core": {
@@ -1335,6 +1412,7 @@
           "worker",
           "curator",
           "reviewer",
+          "consolidator",
           "investigator",
           "bootstrap"
         ]

@@ -211,9 +211,17 @@ def review_state_field(payload: dict[str, Any] | None) -> str:
     return "memoryReviewState" if kind == "memory" else "reviewState"
 
 
+# The review lane that judges each counted role's work: the Worker authors the code, the Curator
+# and the Consolidator author the memory. A role outside this map authors nothing a round counts.
+_REVIEW_LANE_OF_AUTHOR = {"worker": "code", "curator": "memory", "consolidator": "memory"}
+
+
 def role_review_state(document: TaskDocument, role: str) -> ReviewState | None:
     """Return the persisted lane for a counted role; never reinterpret legacy code rows."""
-    return {"worker": document.reviewState, "curator": document.memoryReviewState}.get(role)
+    lane = _REVIEW_LANE_OF_AUTHOR.get(role)
+    if lane is None:
+        return None
+    return document.reviewState if lane == "code" else document.memoryReviewState
 
 
 @dataclass(frozen=True)
@@ -301,14 +309,14 @@ def review_count_unavailable(state: ReviewState | None) -> str | None:
 
 def failed_role_tries(document: TaskDocument, role: str) -> int | None:
     """Read failed code/Worker or memory/Curator rounds, never count record checks."""
-    if document.review_read_error and role in {"worker", "curator"}:
+    if document.review_read_error and role in _REVIEW_LANE_OF_AUTHOR:
         return None
     return failed_review_tries(role_review_state(document, role), role)
 
 
 def failed_review_tries(state: ReviewState | None, role: str) -> int | None:
     """A missing typed historical round makes a counted role's total unknown, not zero."""
-    kind = {"worker": "code", "curator": "memory"}.get(role)
+    kind = _REVIEW_LANE_OF_AUTHOR.get(role)
     if state is None or kind is None:
         return 0
     if review_count_unavailable(state):

@@ -127,6 +127,15 @@ _OPERATION_CHANNELS: Mapping[CapsuleOperation, tuple[ProjectionChannel, ...]] = 
     ),
     "review": ("objective", "requirements", "acceptance", "decisions", "preservation", "evidence"),
     "curation": ("objective", "requirements", "acceptance", "scope", "evidence", "handoff"),
+    "consolidation": (
+        "objective",
+        "requirements",
+        "acceptance",
+        "scope",
+        "decisions",
+        "evidence",
+        "handoff",
+    ),
     "coordination": ("objective", "requirements", "decisions", "portfolio", "handoff"),
     "authorized-closeout": ("objective", "requirements", "scope", "decisions", "handoff"),
     "recovery": (

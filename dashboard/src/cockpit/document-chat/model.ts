@@ -45,15 +45,27 @@ function masterBindings(
   for (const key of master.children) {
     const leaf = entries.get(key);
     if (!leaf?.reference || leaf.summary?.form !== 'task') continue;
+    const roles = leafRoles(leaf);
     bindings.push({
       ref: leaf.reference,
       binding: {
-        selection: { role: 'worker', ...scope, taskDocumentRef: leaf.reference },
-        roles: ['worker', 'reviewer', 'curator'],
+        selection: { role: roles[0], ...scope, taskDocumentRef: leaf.reference },
+        roles,
       },
     });
   }
   return bindings;
+}
+
+/**
+ * The seats of one task, its primary role first. A task whose document names the list of a
+ * consolidation pass is served with that list, and its seats are a Consolidator and a Reviewer;
+ * any other task has a Worker, a Reviewer and a Curator.
+ */
+function leafRoles(leaf: TaskEntry): LauncherRole[] {
+  return leaf.summary?.consolidation
+    ? ['consolidator', 'reviewer']
+    : ['worker', 'reviewer', 'curator'];
 }
 
 /** Follow the served task tree in order. Identity and parentage are never rebuilt from documents. */

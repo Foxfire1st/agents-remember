@@ -87,7 +87,7 @@ KNOWN_LOOP_LEVEL_FIELDS = frozenset({"loop"})
 # The dispatch-time complexity scale (blast radius x novelty x size) the loop
 # thresholds are expressed on (l-01 The Three-Party Loop).
 COMPLEXITY_SCALE = ("low", "medium", "high")
-# The eight portable role lifecycles the l-01 registry defines. Kept in step with
+# The nine portable role lifecycles the l-01 registry defines. Kept in step with
 # ``models.role_capsules.vocabulary.CAPSULE_ROLES`` by a test: an orchestration knob
 # addressed to a role the registry does not publish must fail loud, and a role the
 # registry publishes must be configurable.
@@ -99,10 +99,15 @@ KNOWN_ROLES = frozenset(
         "worker",
         "curator",
         "reviewer",
+        "consolidator",
         "investigator",
         "bootstrap",
     }
 )
+# The leaf roles whose failed review rounds a step-up counts: each authors the change a review
+# round judges (the Worker the code, the Curator and the Consolidator the memory), so repeated
+# failed rounds speak about that seat's model. A Reviewer judges and is never counted.
+STEP_UP_COUNTED_ROLES = frozenset({"worker", "curator", "consolidator"})
 # Removed role names remain readable as reported, inert settings keys.
 UNUSED_ROLES = frozenset({"designer", "strategist"})
 
@@ -113,6 +118,13 @@ UNUSED_ROLES = frozenset({"designer", "strategist"})
 # carry no permission authority). A capability is never dispatchable as a seat: ``CAPSULE_ROLES``,
 # the dispatch tables and ``ROLE_LEVELS`` stay seat-only, and nothing resolves one from here.
 CAPABILITY_IDS = frozenset({"review-presenter"})
+# The rows that refine one seat's row for one kind of task. Each is admitted under
+# ``orchestration.roles`` and ``orchestration.rolesPerLevel.<level>`` with every key a seat's row
+# takes, extra arguments included, because the seat it refines is an ordinary role seat and not a
+# confined capability. It is never a role: no start selects it, and the seat's launch reads it
+# field by field over the seat's own row (``cli/seat_variant_rows.py``).
+CONSOLIDATION_REVIEWER_ROW = "consolidation-reviewer"
+SEAT_VARIANT_ROWS = frozenset({CONSOLIDATION_REVIEWER_ROW})
 KNOWN_ROLE_LAUNCH_FIELDS = frozenset(
     {
         "harness",
@@ -448,20 +460,30 @@ class AgenticSettings:
         if override is None:
             require_distinct_step_up(base, self.spawn_harness)
             return base
-        resolved = RoleKnobs(
-            harness=override.harness or base.harness,
-            model=override.model or base.model,
-            effort=override.effort or base.effort,
-            service_tier=override.service_tier or base.service_tier,
-            mode=override.mode or base.mode,
-            feature_values={**base.feature_values, **override.feature_values},
-            notes=override.notes or base.notes,
-            extra_args={**base.extra_args, **override.extra_args},
-            origins={**base.origins, **override.origins},
-            step_up=override.step_up or base.step_up,
-        )
+        resolved = overlay_role_knobs(base, override)
         require_distinct_step_up(resolved, self.spawn_harness)
         return resolved
+
+
+def overlay_role_knobs(base: RoleKnobs, override: RoleKnobs) -> RoleKnobs:
+    """``override`` laid over ``base`` field by field: an unset field takes the base's value.
+
+    Each field keeps its own origin, so a choice taken from ``base`` stays bound to the provider
+    of the row that authored it rather than being read as the override's.
+    """
+
+    return RoleKnobs(
+        harness=override.harness or base.harness,
+        model=override.model or base.model,
+        effort=override.effort or base.effort,
+        service_tier=override.service_tier or base.service_tier,
+        mode=override.mode or base.mode,
+        feature_values={**base.feature_values, **override.feature_values},
+        notes=override.notes or base.notes,
+        extra_args={**base.extra_args, **override.extra_args},
+        origins={**base.origins, **override.origins},
+        step_up=override.step_up or base.step_up,
+    )
 
 
 def agentic_settings_path(root: Path) -> Path:

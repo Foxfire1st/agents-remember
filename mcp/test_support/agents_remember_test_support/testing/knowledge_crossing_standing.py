@@ -173,6 +173,10 @@ def matrix_records(
             _, kept = histories.setdefault(
                 keeper, (fact, {"closed": True, "leaf": keeper, "rows": []})
             )
+            # A consolidation task's file names the records its pass's list reached; a kept row
+            # consolidates only such a record.
+            listed = kept.setdefault("consolidationSubjects", [])
+            listed[:] = sorted({*listed, base["id"]})
             if fact == "consolidator-keep":
                 kept["rows"].append({**kept_row(base["id"], 2), "id": f"ROW-{number:06X}"})
     combined_path, combined = matrix_base(0, seed)

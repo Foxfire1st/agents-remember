@@ -59,7 +59,11 @@ def _unreadable_item(item: Any) -> bool:
     facts = item.get("facts", {})
     if not isinstance(facts, Mapping):
         return True
-    record = facts.get("record", {}) if item.get("kind") != "link_target" else {}
+    record = (
+        facts.get("record", {})
+        if item.get("kind") not in {"link_target", "consolidation_target"}
+        else {}
+    )
     if not isinstance(record, Mapping) or (
         record.get("baseRevision") is not None and type(record["baseRevision"]) is not int
     ):

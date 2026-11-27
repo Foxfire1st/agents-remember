@@ -94,6 +94,7 @@ KNOWLEDGE_INDEX_POINTERS: dict[str, tuple[str, str, str]] = {
     "worker": ("Knowledge/CLI", "use", ""),
     "reviewer": ("Baseline/knowledge", "use", ""),
     "curator": ("Knowledge/CLI", "use", ""),
+    "consolidator": ("Knowledge/CLI", "use", ""),
 }
 ADVICE_RULE = (
     "Reviews, cold reads, re-checks, sweeps and Investigator reports are advice, not requirements. "
