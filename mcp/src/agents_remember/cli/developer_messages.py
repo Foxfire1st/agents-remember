@@ -35,9 +35,9 @@ and room for the JSON around them, ``MAX_BODY_BYTES``): a larger one is refused 
 is refused as ``invalid-request`` with the parser's detail; an image of a type the tray does not
 send as ``image-type-unsupported``. Every refusal is a delivery answer, never a bare 422.
 
-The repository a target without a task files under is the one the page names; a page that names
-none sends none, and the server takes its one configured repository, or refuses by name
-(``unknown-repository``) when it has several.
+A target that belongs to a task files under its own task's repository and task folder; a target
+without a task files under ``taskless/<agent id>/``. Any optional ``repository`` on the request is
+non-blocking page context only and never chooses a filing folder or refuses a send.
 """
 
 from __future__ import annotations
@@ -190,7 +190,7 @@ class DeveloperPick(_Wire):
 
 class DeveloperMessageRequest(_Wire):
     message_id: uuid.UUID
-    # The page's repository; a page without one sends none (L89 P-T3).
+    # Optional non-blocking page context; retained for wire compatibility.
     repository: Segment | None = None
     text: str
     picks: list[DeveloperPick] = Field(default_factory=list, max_length=_PARSE_PICKS_LIMIT)
@@ -202,8 +202,6 @@ class _Prepared:
 
     forms: dict[int, tuple[str, ...]]
     images: dict[int, bytes]
-    # The repository a target without a task files under; None when the server cannot name one.
-    repository: str | None
 
 
 class _Refusal(Exception):
@@ -231,17 +229,10 @@ def send_developer_message(
 
     message_id = str(request.message_id)
     try:
-        prepared = _prepare(config, request, FormRoots(config, leaf_memory_root))
+        prepared = _prepare(request, FormRoots(config, leaf_memory_root))
         walk = walk_seats(config)
         record, receipt = _recipient(config, walk, agent_id)
         task = task_of(config, record)
-        repository = task["repository"] if task else prepared.repository
-        if repository is None:
-            raise _Refusal(
-                "unknown-repository",
-                f"The page names no repository and this server has {len(config.repositories)}; "
-                "a target without a task needs one to file under.",
-            )
         if read_developer_message(config, message_id, recipient_agent_id=agent_id):
             raise _Refusal(
                 "message-id-reused",
@@ -250,7 +241,9 @@ def send_developer_message(
             )
     except _Refusal as refusal:
         return _answer("refused", message_id, None, reason=refusal.reason, detail=refusal.detail)
-    folder = target_folder(config, repository, task["id"] if task else None, agent_id)
+    folder = target_folder(
+        config, task["repository"] if task else None, task["id"] if task else None, agent_id
+    )
     when = datetime.now(UTC)
     target = _Target(record, receipt, task, walk)
     try:
@@ -320,17 +313,11 @@ def _log(
     )
 
 
-def _prepare(
-    config: McpRuntimeConfig, request: DeveloperMessageRequest, roots: FormRoots
-) -> _Prepared:
+def _prepare(request: DeveloperMessageRequest, roots: FormRoots) -> _Prepared:
     """Check the bounds and render every reference; nothing is written yet."""
 
     if not request.text.strip() and not request.picks:
         raise _Refusal("empty-message", "The message has no text and no pick.")
-    if request.repository is not None and request.repository not in config.repositories:
-        raise _Refusal(
-            "unknown-repository", f"Repository {request.repository!r} is not one of this server's."
-        )
     if len(request.picks) > MAX_PICKS:
         raise _Refusal(
             "too-many-picks",
@@ -348,7 +335,7 @@ def _prepare(
         raise _Refusal(
             "message-too-large", f"The message is {size} bytes; the bound is {MAX_MESSAGE_BYTES}."
         )
-    return _Prepared(_forms(request, roots), images, _repository(config, request))
+    return _Prepared(_forms(request, roots), images)
 
 
 def _forms(request: DeveloperMessageRequest, roots: FormRoots) -> dict[int, tuple[str, ...]]:
@@ -403,15 +390,6 @@ def _is_time(value: str) -> bool:
             continue
         return True
     return False
-
-
-def _repository(config: McpRuntimeConfig, request: DeveloperMessageRequest) -> str | None:
-    """The page's repository, else the server's one configured repository, else none."""
-
-    if request.repository is not None:
-        return request.repository
-    configured = list(config.repositories)
-    return configured[0] if len(configured) == 1 else None
 
 
 def _decoded(index: int, image: ImagePick) -> bytes:

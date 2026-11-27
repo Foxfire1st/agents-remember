@@ -731,16 +731,18 @@ The field "Your message with these picks" takes the message. The button "to: <na
 "Send the tray to", the list of live chats, each named by role and task. The send button reads
 "Send to <role · task>" or "Send".
 
-One send composes one message from the picks, their notes and the text, and delivers it to each
-chosen chat. The tray then reports "Delivered to …", "Held for …" or "Refused by …". For a chat
-whose agent reached the usage limit of its model provider the line reads "Held for <chat>: rate
-limited: <time left>, until <time>.", and the minimised tray says "held · rate limited: <time
-left> for <chat>". After a refusal the picks and the text stay in the tray.
+One send needs only the recipient's address and non-empty text or picks; whether the current page
+names a repository is optional context and never blocks a send. It composes one message from the
+picks, their notes and the text, and delivers it to each chosen chat. The tray then reports
+"Delivered to …", "Held for …" or "Refused by …". For a chat whose agent reached the usage limit of
+its model provider the line reads "Held for <chat>: rate limited: <time left>, until <time>.", and
+the minimised tray says "held · rate limited: <time left> for <chat>". After a refusal the picks
+and the text stay in the tray.
 
 The product files every send as a message file under
 `<coordination-root>/notes/reports/developer-messages/<repository>/<task>/`. The file of a
 refused delivery has a name that ends in `.undelivered.md`. The files for a chat without a task
-stand under `<coordination-root>/notes/reports/developer-messages/<repository>/taskless/<agent id>/`.
+stand under `<coordination-root>/notes/reports/developer-messages/taskless/<agent id>/`.
 
 ### The foot of the tray
 

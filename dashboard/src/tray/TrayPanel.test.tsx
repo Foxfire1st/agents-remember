@@ -555,14 +555,19 @@ describe('the tray', () => {
     expect(row?.getAttribute('title')).toBe(why);
   });
 
-  it('sends from a page without a repository and shows every refusal by name', async () => {
+  it('sends to a taskless Projects Architect from a page without a repository and shows refusals by name', async () => {
     const explainer: TraySeat = { ...worker, agentId: 'b1d2c3e4-0000-4000-8000-000000000004', role: 'explainer' };
     liveSeats = [architect, manager, worker, explainer];
     const refused = (reason: string, detail: string, messageId: string | null = 'm') =>
       jsonResponse({ state: 'refused', messageId, messageFile: null, messageFileSha256: null, reason, detail });
-    const answers: Record<string, () => Response> = {
-      [architect.agentId]: () =>
-        refused('unknown-repository', 'The page names no repository and this server has 2; a target without a task needs one to file under.'),
+    const answers: Record<string, (messageId: string) => Response> = {
+      [architect.agentId]: (messageId) =>
+        jsonResponse({
+          state: 'delivered',
+          messageId,
+          messageFile: `/coord/notes/reports/developer-messages/taskless/${architect.agentId}/x.md`,
+          messageFileSha256: 'c'.repeat(64),
+        }),
       [manager.agentId]: () => refused('image-type-unsupported', "Pick 1 is an image of type 'image/bmp'; the tray sends png, jpeg, gif and webp."),
       [worker.agentId]: () => refused('invalid-request', 'picks.0.title: Field required', null),
       [explainer.agentId]: () => refused('message-too-large', 'The message is 21000000 bytes; the bound is 20971520.'),
@@ -572,8 +577,9 @@ describe('the tray', () => {
       'fetch',
       vi.fn(async (url: string, init?: RequestInit) => {
         if (!url.endsWith('/message')) return server(url, init);
-        posts.push({ url, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
-        return answers[decodeURIComponent(url.split('/')[3])]();
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        posts.push({ url, body });
+        return answers[decodeURIComponent(url.split('/')[3])](String(body.messageId));
       }),
     );
     act(() => {
@@ -589,23 +595,57 @@ describe('the tray', () => {
     render(<Shell />);
     await waitFor(() => expect(seatStore.getState().status).toBe('ready'));
     fireEvent.click(screen.getByRole('button', { name: 'Send to 4 chats' }));
-    // After the Send the tray is its line again (15f92a8f), which names every refusal under it.
+    // After the Send the tray is its line again, naming the delivered chat and every refusal under it.
     const outcome = await screen.findByTestId('tray-line-refusals');
     expect(screen.queryByTestId('tray-panel')).toBeNull();
-    // The taskless seat's message names no repository: the server takes its sole one or refuses.
+    // The taskless seat's message omits repository and still delivers cleanly.
     expect(posts.map((post) => [post.url.split('/')[3], post.body.repository])).toEqual([
       [architect.agentId, undefined],
       [manager.agentId, 'agents-remember'],
       [worker.agentId, 'agents-remember'],
       [explainer.agentId, 'agents-remember'],
     ]);
+    expect(trayStore.getState().targets).toEqual([manager.agentId, worker.agentId, explainer.agentId]);
     const stays = ' The picks and your text stay, with this chat as the target.';
     expect(Array.from(outcome.querySelectorAll('li'), (line) => line.textContent)).toEqual([
-      `Refused by Architect · Projects · b1d2c3e4: unknown-repository: The page names no repository and this server has 2; a target without a task needs one to file under.${stays}`,
       `Refused by Manager · 260928-MIK · b1d2c3e4: image-type-unsupported: Pick 1 is an image of type 'image/bmp'; the tray sends png, jpeg, gif and webp.${stays}`,
       `Refused by Worker · L118 · b1d2c3e4: invalid-request: picks.0.title: Field required.${stays}`,
       `Refused by Explainer · L118 · b1d2c3e4: message-too-large: The message is 21000000 bytes; the bound is 20971520.${stays}`,
     ]);
+  });
+
+  it('sends cleanly to a taskless Projects Architect from a page without a repository', async () => {
+    liveSeats = [architect];
+    const posts: { url: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (!url.endsWith('/message')) return server(url, init);
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        posts.push({ url, body });
+        return jsonResponse({
+          state: 'delivered',
+          messageId: body.messageId,
+          messageFile: `/coord/notes/reports/developer-messages/taskless/${architect.agentId}/x.md`,
+          messageFileSha256: 'c'.repeat(64),
+        });
+      }),
+    );
+    act(() => {
+      trayStore.getState().setText('Need only the recipient address.');
+      trayStore.getState().setTargets([architect.agentId]);
+      trayStore.getState().setOpen(true);
+    });
+    render(<Shell />);
+    await waitFor(() => expect(seatStore.getState().status).toBe('ready'));
+    fireEvent.click(screen.getByRole('button', { name: 'Send to Architect · Projects · b1d2c3e4' }));
+    const summary = await screen.findByTestId('tray-line-outcome');
+    expect(summary.textContent).toBe('Sent: delivered to Architect · Projects · b1d2c3e4.');
+    expect(posts).toHaveLength(1);
+    expect('repository' in posts[0].body).toBe(false);
+    expect(trayStore.getState().picks).toEqual([]);
+    expect(trayStore.getState().text).toBe('');
+    expect(trayStore.getState().targets).toEqual([]);
   });
 
   it('sends to several chosen chats and shows a held target as held', async () => {
