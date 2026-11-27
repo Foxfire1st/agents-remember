@@ -336,7 +336,12 @@ role agents.
 The hover text of "rate limited" has one line per affected agent: "<role> · <agent id> · <source>
 · <account> · <window> · resets <time>". The limit and its end come from the usage report of the
 host for that agent: <source> and <account> are the names that report gives its source and the
-account, and <window> names the used-up usage window whose reset ends the limit. The counts of
+account, and <window> names the used-up usage window whose reset ends the limit. Paseo's usage
+report remains the only source that creates a limit; a falsely reported exhausted window may be
+suppressed until its reset automatically when a mapped bound seat proves a live turn started
+strictly after the limit was recorded, or explicitly via `agents-remember provider-limits
+suppress` (and restored with `unsuppress`), updating the displayed deadline to any remaining
+unsuppressed window or clearing the rate-limited state when none remain. The counts of
 the top bar count a rate-limited task as paused.
 
 The hover text of "waiting" has one line per waiting agent: the role, the agent id, what it

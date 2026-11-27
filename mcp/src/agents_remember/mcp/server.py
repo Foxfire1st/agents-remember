@@ -88,6 +88,11 @@ class AgentsRememberMCP(FastMCP):
     # replaced seat answers by name. None on an ordinary server.
     _explainer_binding: Any | None = None
 
+    # Snapshotted once at server creation from read_agent_binding(); None when unbound or
+    # malformed. Used to suppress falsely reported provider-limit windows after a live turn
+    # starts strictly later than recordedAt.
+    _bound_agent_id: str | None = None
+
     _synchronous_write_lock: asyncio.Lock | None = None
 
     async def list_tools(self) -> list[Any]:
@@ -160,6 +165,7 @@ class AgentsRememberMCP(FastMCP):
                     else None
                 )
                 waiting_for = None
+                await self._maybe_suppress_provider_limits(config)
                 with tool_build_currentness(reading):
                     if (
                         reading is not None
@@ -184,6 +190,18 @@ class AgentsRememberMCP(FastMCP):
             except Exception as error:
                 _log_raised_tool_call(name, arguments, config, error)
                 raise
+
+    async def _maybe_suppress_provider_limits(self, config: Any | None) -> None:
+        """Suppress falsely limited windows when a bound seat proves a post-limit live turn."""
+        agent_id = getattr(self, "_bound_agent_id", None)
+        if config is None or not isinstance(agent_id, str) or not agent_id:
+            return
+        with suppress(Exception):
+            from agents_remember.serving.paseo.provider_limits import (  # noqa: PLC0415
+                suppress_provider_limits_for_live_tool_call,
+            )
+
+            await asyncio.to_thread(suppress_provider_limits_for_live_tool_call, config, agent_id)
 
     async def _dispatch_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         """Keep synchronous writes ordered while their handlers leave the event loop."""
@@ -434,6 +452,16 @@ def _scope_server_tools(server: FastMCP, allowed: frozenset[str]) -> None:
             server.remove_tool(name)
 
 
+def _snapshot_bound_agent_id() -> str | None:
+    """Capture the bound agent id once at server creation; ``None`` if unbound or malformed."""
+
+    try:
+        agent_binding = read_agent_binding()
+    except ValueError:
+        return None
+    return agent_binding.agent_id if agent_binding is not None else None
+
+
 def create_server(config: McpRuntimeConfig) -> Any:
     install_compact_content()
     # MIK-R204 @ v1 rule 3: the worktree services are an operation collaborator, not discovery work. The
@@ -449,6 +477,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     # MIK-R108 rule 3: the dispatch carries this server's config (coordination
     # and transcript roots, toolLog keeping) to the answer boundary per call.
     server._agents_remember_config = config
+    server._bound_agent_id = _snapshot_bound_agent_id()
     # The tool surface itself lives in `.registration`, one module per family; this is the only place
     # that decides which families a server advertises. MIK-R211 v5 rule 3: a launch that bound this
     # process as an explainer seat gets AR's general tools, as a task agent has them, and the

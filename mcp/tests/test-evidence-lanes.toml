@@ -461,6 +461,7 @@ unit-regression = [
   "mcp/tests/test_provider_limit_hold.py",
   "mcp/tests/test_provider_limit_layering.py",
   "mcp/tests/test_provider_limit_storage.py",
+  "mcp/tests/test_provider_limit_suppression.py",
   "mcp/tests/test_provider_limits.py",
   "mcp/tests/test_public_docs_check.py",
   "mcp/tests/test_publication_merge_admission.py",
