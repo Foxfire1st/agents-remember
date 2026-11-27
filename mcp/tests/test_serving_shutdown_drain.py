@@ -203,6 +203,7 @@ class _ServingFixture:
                 master_preparation=None,
                 clock=self.clock.now,
                 background_ledger=None,
+                held_reset_delivery=None,
                 # The merged runtime carries the explainer's application port (MIK-R186); this
                 # stand-in runs no explainer, so the lifespan admits no move watcher.
                 explainer_application=None,

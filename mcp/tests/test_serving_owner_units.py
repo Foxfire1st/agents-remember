@@ -426,6 +426,7 @@ class MaterialOwnerUnitTests(unittest.IsolatedAsyncioTestCase):
                     observer_root=root,
                     background_ledger=clock.ledger,
                     clock=lambda: datetime(2026, 10, 13, tzinfo=UTC),
+                    held_reset_delivery=None,
                     projector=SimpleNamespace(
                         close_readiness=mock.Mock(), prime=mock.AsyncMock(), run=parked
                     ),
@@ -490,6 +491,7 @@ class MaterialOwnerUnitTests(unittest.IsolatedAsyncioTestCase):
                         observer_root=Path(tmp),
                         background_ledger=clock.ledger,
                         clock=lambda: datetime(2026, 10, 13, tzinfo=UTC),
+                        held_reset_delivery=None,
                         explainer_application=None,
                     ),
                 )

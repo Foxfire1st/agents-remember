@@ -206,8 +206,9 @@ describe("launcher bar and the execution's state", () => {
         }
         if (url === '/api/role-launch/dispatch') {
           dispatched.push(sent);
-          if (dispatchTransportFailure) throw new TypeError('dispatch connection closed');
+          // The host can persist a receipt before the response connection fails.
           afterDispatch?.(sent);
+          if (dispatchTransportFailure) throw new TypeError('dispatch connection closed');
           return new Response(JSON.stringify(dispatchReply.body), { status: dispatchReply.status });
         }
         return new Response(JSON.stringify({ available: false }), { status: 503 });
@@ -506,18 +507,21 @@ describe("launcher bar and the execution's state", () => {
     const start = getByRole('button', { name: 'Start role' }) as HTMLButtonElement;
     await waitFor(() => expect(start.disabled).toBe(false));
     fireEvent.click(start);
-    await waitFor(() => expect(resultReads).toBeGreaterThanOrEqual(3));
+    await waitFor(() => expect(resultReads).toBe(2));
     await waitFor(() =>
       expect(
         (getByRole('button', { name: 'Refresh role agents' }) as HTMLButtonElement).disabled,
       ).toBe(false),
     );
     const launcher = getByTestId('role-launcher');
+    expect(resultReads).toBe(2);
     expect(launcher.querySelectorAll('[role="alert"]')).toHaveLength(1);
     expect(launcher.querySelector('[role="alert"]')?.textContent).toBe(
       'The role handover was not accepted (HTTP 502): ' + reason,
     );
+    results = [{ ...completed, requestId: String(dispatched[0].requestId) }];
     fireEvent.click(getByRole('button', { name: 'Refresh role agents' }));
+    await waitFor(() => expect(resultReads).toBe(3));
     await waitFor(() => expect(launcher.querySelector('[role="alert"]')).toBeNull());
   });
 
@@ -599,10 +603,11 @@ describe("launcher bar and the execution's state", () => {
     }
   });
 
-  it('shows a 202 unresolved launch without claiming an agent failed until a known receipt arrives', async () => {
+  it.each(['202 dispatch reply', 'offline dispatch'])('rereads an unresolved launch after %s until a known receipt arrives', async (completion) => {
     const initial = execution({ status: 'completed', canStart: true });
     results = [initial];
     dispatchReply = { status: 202, body: {} };
+    dispatchTransportFailure = completion === 'offline dispatch';
     afterDispatch = (sent) => {
       const unresolved = execution({
         status: 'unknown',
@@ -618,10 +623,11 @@ describe("launcher bar and the execution's state", () => {
     const start = getByRole('button', { name: 'Start role' }) as HTMLButtonElement;
     await waitFor(() => expect(start.disabled).toBe(false));
     fireEvent.click(start);
-    await waitFor(() => expect(resultReads).toBeGreaterThanOrEqual(3));
+    await waitFor(() => expect(resultReads).toBe(3));
     const launcher = getByTestId('role-launcher');
     expect(launcher.querySelectorAll('[role="alert"]')).toHaveLength(1);
     expect(launcher.querySelector('[role="alert"]')?.textContent).toContain('bridge timed out');
+    expect(getByRole('button', { name: 'Retry role launch' })).toBeDefined();
     expect(launcher.textContent).not.toMatch(
       /agent failed|Current role execution|Last reply|Report:/i,
     );
@@ -633,6 +639,7 @@ describe("launcher bar and the execution's state", () => {
     results = [known];
     fireEvent.click(getByRole('button', { name: 'Refresh role result' }));
     await waitFor(() => getByTestId('notes-reader-back'));
+    expect(resultReads).toBe(4);
     fireEvent.click(getByTestId('notes-reader-back'));
     expect(launcher.querySelector('[role="alert"]')).toBeNull();
   });

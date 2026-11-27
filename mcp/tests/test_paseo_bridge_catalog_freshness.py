@@ -75,13 +75,41 @@ class CatalogFreshnessBridgeTests(unittest.TestCase):
             "if (scenario.configError)",
             "if (scenario.hangConfig) return new Promise(() => {}); if (scenario.configError)",
         )
+        stub = stub.replace(
+            "providers: scenario.providerEntries ?? {}",
+            "providers: scenario.providerEntries ?? {}, agentProfiles: scenario.agentProfiles ?? []",
+        )
         package.write_text(stub)
 
     def test_successful_empty_is_explicit_and_every_question_reaches_paseo(self) -> None:
-        first = self.fixture.call("catalog", {}, entries=[_provider()])
+        codex_options = {"extraArgs": {"example": None}, "supportsMcpServers": True}
+        claude_params = {"extraArgs": {"allowed-tools": "Read"}, "supportsMcpServers": False}
+        providers = {
+            "codex": {
+                "options": {**codex_options, "unrelated": "not part of launcher configuration"},
+                "params": {"supportsMcpServers": False},
+                "env": {"MODEL_KEY": "not passed on"},
+                "command": ["codex"],
+            },
+            "claude": {"options": None, "params": claude_params},
+        }
+        profiles = [{"id": "worker-profile", "name": "worker", "provider": "codex"}]
+        first = self.fixture.call(
+            "catalog", {}, entries=[_provider()], providerEntries=providers, agentProfiles=profiles
+        )
         self.assertEqual(first["providers"][0]["models"], [])
         self.assertEqual(first["providers"][0]["modes"], [])
         self.assertTrue(first["providers"][0]["acceptsToolServers"])
+        self.assertEqual(
+            first["daemonConfig"],
+            {
+                "agentProfiles": profiles,
+                "providers": {
+                    "codex": {"options": codex_options},
+                    "claude": {"params": claude_params},
+                },
+            },
+        )
         self.assertIn("readAt", first)
         self.assertFalse(any(row["via"] == "refresh" for row in self.fixture.recorded()))
         second = self.fixture.call("catalog", {"refresh": True}, entries=[])
@@ -112,6 +140,8 @@ class CatalogFreshnessBridgeTests(unittest.TestCase):
         for provider in reply["providers"]:
             self.assertNotIn("acceptsToolServers", provider)
             self.assertEqual(provider["toolServerError"], "configuration unavailable")
+        self.assertEqual(reply["daemonConfigError"], "configuration unavailable")
+        self.assertNotIn("daemonConfig", reply)
 
     def test_whole_discovery_failure_is_never_an_empty_success(self) -> None:
         for scenario in (

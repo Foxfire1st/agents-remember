@@ -156,6 +156,7 @@ class PreviewLifespanTests(unittest.IsolatedAsyncioTestCase):
                 background_ledger=None,
                 review_trees_shutdown=None,
                 master_preparation=None,
+                held_reset_delivery=None,
                 # The move watcher is admitted, so the switch's effect on it is visible.
                 explainer_application=SimpleNamespace(watcher=object()),
             ),

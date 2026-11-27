@@ -218,7 +218,7 @@ describe('when the options effect runs', () => {
 });
 
 describe('L150-CODE-04: newer Result authority survives a delayed options reply', () => {
-  it('keeps the Result offered when an older options execution settles later', async () => {
+  it.each(['dispatch reply', 'offline recovery'])('keeps the fetched Result after %s through the options refresh', async (completion) => {
     reply('/api/role-launch/options', 200, optionsBody());
     const view = renderPane();
     const start = await startEnabled(view);
@@ -234,6 +234,9 @@ describe('L150-CODE-04: newer Result authority survives a delayed options reply'
           parked.push({ answer });
         });
       }
+      if (url === '/api/role-launch/dispatch' && completion === 'offline recovery') {
+        throw new TypeError('offline');
+      }
       const next = take(url);
       const requestBody = init?.body ? JSON.parse(String(init.body)) : undefined;
       const body =
@@ -244,11 +247,9 @@ describe('L150-CODE-04: newer Result authority survives a delayed options reply'
     });
     reply('/api/role-launch/dispatch', 200, (request: unknown) => receiptBody(request));
     reply('/api/role-launch/result', 200, (request: unknown) => receiptBody(request));
+    reply('/api/role-launch/result', 404, {});
     fireEvent.click(start);
-    // The dispatch completes first: its receipt is the active authority.
-    await waitFor(() =>
-      expect(view.queryByRole('button', { name: 'Refresh role result' })).not.toBeNull(),
-    );
+    // The options load begins after the dispatch has already read its result.
     await waitFor(() => expect(parked).toHaveLength(1));
     // The older options reply settles later with a foreign execution: authority stays.
     await act(async () => {
@@ -266,6 +267,8 @@ describe('L150-CODE-04: newer Result authority survives a delayed options reply'
     });
     // Flush effects and settled fetches deterministically instead of a wall-clock sleep.
     await act(async () => {});
+    const [sent] = bodies('/api/role-launch/dispatch') as { requestId: string }[];
+    expect(bodies('/api/role-launch/result')).toEqual([{ role: 'architect', requestId: sent.requestId }]);
     expect(view.queryByRole('button', { name: 'Refresh role result' })).not.toBeNull();
     expect(view.queryByTestId('role-launch-error')).toBeNull();
   });

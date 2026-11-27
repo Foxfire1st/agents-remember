@@ -15,7 +15,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +38,11 @@ from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoRuntimeSettings,
 )
 from agents_remember.kernel.primitives.runtime_config import ConfigError, McpRuntimeConfig
+from agents_remember.kernel.read_cancellation import (
+    ReadCancelled,
+    raise_if_read_cancelled,
+    read_cancellation,
+)
 from agents_remember.serving.paseo.paseo_daemon_config import (
     DAEMON_CONFIG_COMMAND,
     DAEMON_CONFIG_UNVERIFIED,
@@ -57,6 +68,7 @@ __all__ = [
 ]
 
 PASEO_BRIDGE_TIMEOUT_SECONDS = 60
+_BRIDGE_POLL_SECONDS = 0.05
 # The script's own budget, so it can answer with a named timeout before the hard stop.
 _SCRIPT_DEADLINE_MS = 55_000
 _SERVER_ID_FILE = "server-id"
@@ -88,6 +100,83 @@ class PaseoBridgeFailure(RuntimeError):
         self.code = code
 
 
+@dataclass(frozen=True)
+class _DaemonConfigAnswer:
+    document: dict[str, Any] | None
+    error: str | None
+    read_at: str | None
+
+
+_OPERATION_DAEMON_CONFIG: ContextVar[dict[tuple[str, ...], _DaemonConfigAnswer] | None] = (
+    ContextVar("paseo_operation_daemon_config", default=None)
+)
+
+
+def paseo_catalog_scope(config: McpRuntimeConfig) -> tuple[str, str, str, str]:
+    """The identity of one Paseo runtime and its saved catalogue."""
+    settings = require_bridge_runtime(config)
+    return (
+        settings.install_prefix.as_posix(),
+        settings.home.as_posix(),
+        settings.listen,
+        settings.version,
+    )
+
+
+@contextmanager
+def launcher_daemon_configuration() -> Iterator[None]:
+    """Keep configuration answers within the enclosing catalog question."""
+    token = _OPERATION_DAEMON_CONFIG.set({})
+    try:
+        yield
+    finally:
+        _OPERATION_DAEMON_CONFIG.reset(token)
+
+
+def record_operation_daemon_config(
+    scope: tuple[str, ...], reply: dict[str, Any] | None, error: str | None
+) -> None:
+    """Record the metadata call's configuration answer or its failure."""
+    answers = _OPERATION_DAEMON_CONFIG.get()
+    if answers is None:
+        return
+    data = reply or {}
+    document = data.get("daemonConfig")
+    error = error if error is not None else data.get("daemonConfigError")
+    if isinstance(document, dict) or isinstance(error, str):
+        answers[scope] = _DaemonConfigAnswer(
+            document if isinstance(document, dict) else None,
+            error if isinstance(error, str) else None,
+            data.get("readAt"),
+        )
+    else:
+        answers.pop(scope, None)
+
+
+def _operation_daemon_answer(config: McpRuntimeConfig) -> _DaemonConfigAnswer | None:
+    answers = _OPERATION_DAEMON_CONFIG.get()
+    return answers.get(paseo_catalog_scope(config)) if answers else None
+
+
+def operation_daemon_config(
+    config: McpRuntimeConfig,
+) -> tuple[bool, dict[str, Any] | None, str | None]:
+    """Return whether this operation recorded a configuration, and its document or error."""
+    answer = _operation_daemon_answer(config)
+    return (True, answer.document, answer.error) if answer is not None else (False, None, None)
+
+
+def operation_role_profiles(config: McpRuntimeConfig) -> dict[str, Any] | None:
+    """Project role profiles from the operation's configuration with its original read time."""
+    answer = _operation_daemon_answer(config)
+    if answer is None:
+        return None
+    if answer.error is not None:
+        raise PaseoBridgeFailure(DAEMON_CONFIG_UNVERIFIED, answer.error)
+    assert answer.document is not None
+    return {"profiles": answer.document.get("agentProfiles", []), "readAt": answer.read_at}
+
+
 def bridge_call(
     config: McpRuntimeConfig,
     command: str,
@@ -97,6 +186,7 @@ def bridge_call(
 ) -> dict[str, Any]:
     """Run one bridge command against the configured Paseo runtime and return its result."""
 
+    raise_if_read_cancelled()
     if timeout_seconds is None:
         timeout_seconds = PASEO_BRIDGE_TIMEOUT_SECONDS
     settings = require_bridge_runtime(config)
@@ -117,16 +207,10 @@ def bridge_call(
             f"The Paseo bridge needs this build's product Node and packaged script. {remedy}",
         )
     try:
-        completed = subprocess.run(
+        completed = _run_bridge(
             [node.as_posix(), script.as_posix(), command],
-            input=json.dumps(payload, ensure_ascii=False),
-            encoding="utf-8",
-            # Output that is not UTF-8 is read with replacement characters: it then fails as an
-            # unreadable reply, a named failure, instead of leaving this call as a decoding error.
-            errors="replace",
-            capture_output=True,
-            check=False,
-            timeout=timeout_seconds,
+            json.dumps(payload, ensure_ascii=False),
+            timeout_seconds,
             env={
                 **_bridge_environment(settings),
                 "AR_PASEO_DEADLINE_MS": str(
@@ -135,12 +219,14 @@ def bridge_call(
             },
         )
     except subprocess.TimeoutExpired as error:
+        raise_if_read_cancelled()
         raise PaseoBridgeFailure(
             BRIDGE_TIMEOUT,
             f"The Paseo bridge call {command!r} did not end within "
             f"{timeout_seconds} seconds and was stopped.",
         ) from error
     except OSError as error:
+        raise_if_read_cancelled()
         raise PaseoBridgeFailure(
             BRIDGE_UNAVAILABLE, f"The Paseo bridge could not be started: {error}"
         ) from error
@@ -166,6 +252,57 @@ def bridge_call(
     }
 
 
+def _run_bridge(
+    argv: list[str], input_text: str | None, timeout: float, *, env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    # Let malformed UTF-8 reach the named unreadable-reply path in either runner.
+    if read_cancellation() is None:
+        return subprocess.run(
+            argv,
+            input=input_text,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            check=False,
+            timeout=timeout,
+            env=env,
+        )
+
+    raise_if_read_cancelled()
+    with subprocess.Popen(
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        start_new_session=True,
+    ) as process:
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                raise_if_read_cancelled()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(argv, timeout)
+                try:
+                    stdout, stderr = process.communicate(
+                        input=input_text, timeout=min(_BRIDGE_POLL_SECONDS, remaining)
+                    )
+                except subprocess.TimeoutExpired:
+                    input_text = None  # communicate resumes draining from its first call
+                    continue
+                raise_if_read_cancelled()
+                return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+        except (OSError, ReadCancelled, subprocess.TimeoutExpired):
+            if process.returncode is None:
+                with suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+            raise
+
+
 def daemon_configuration(config: McpRuntimeConfig) -> dict[str, Any]:
     """The running daemon's configuration document, as its own ``daemon-config`` command reads it.
 
@@ -175,15 +312,18 @@ def daemon_configuration(config: McpRuntimeConfig) -> dict[str, Any]:
     configuration object, both raise: a map that was not read is not a clean one (MIK-R192 rule 8).
     """
 
+    recorded, document, error = operation_daemon_config(config)
     try:
-        reply = bridge_call(config, DAEMON_CONFIG_COMMAND, {})
-    except PaseoBridgeFailure as error:
+        if error is not None:
+            raise PaseoBridgeFailure(DAEMON_CONFIG_UNVERIFIED, error)
+        if not recorded:
+            document = bridge_call(config, DAEMON_CONFIG_COMMAND, {}).get("config")
+    except PaseoBridgeFailure as failure:
         raise PaseoRuntimeFailure(
             DAEMON_CONFIG_UNVERIFIED,
             "config",
-            f"the running daemon's configuration could not be read ({error.code}): {error}",
-        ) from error
-    document = reply.get("config")
+            f"the running daemon's configuration could not be read ({failure.code}): {failure}",
+        ) from failure
     if not isinstance(document, dict):
         raise PaseoRuntimeFailure(
             DAEMON_CONFIG_UNVERIFIED,

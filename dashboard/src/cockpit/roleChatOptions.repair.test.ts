@@ -21,6 +21,7 @@ function loaderArgs(over: Partial<RoleChatOptionsLoaderArgs> = {}): RoleChatOpti
     optionsScope: roleOptionsScope(SELECTION),
     optionsRefresh: 0,
     catalogRefresh: 0,
+    resultReadRef: { current: undefined },
     bumpOptionsRefresh: vi.fn(),
     bumpCatalogRefresh: vi.fn(),
     currentSelectionRef: { current: SELECTION },

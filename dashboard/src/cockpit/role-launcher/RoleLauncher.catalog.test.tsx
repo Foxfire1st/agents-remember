@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RoleLauncher } from './RoleLauncher';
-import { launchChoiceProblem, type RoleAgentChoice } from '../roleLaunchModel';
+import { launchChoiceProblem, roleOptionsScope, type RoleAgentChoice } from '../roleLaunchModel';
 import { resolveLauncherCatalog, resolveOptionsDisplay } from '../roleChatExecutionView';
 
 afterEach(cleanup);
@@ -67,12 +67,19 @@ describe('sealed launcher regressions', () => {
     expect(onLaunch).toHaveBeenCalledWith(selection);
   });
 
-  it.each(['agent change', 'same-scope refresh'])('R5 offers only the disk snapshot during %s, with the page\'s settled role defaults (R215)', (change) => {
-    const scope = { role: 'architect' as const, agentId: 'codex' };
-    const nextScope = change === 'agent change' ? { ...scope, agentId: 'claude' } : scope;
+  it('keeps the settled catalog available when the selected agent changes', () => {
+    const scope = roleOptionsScope({ role: 'architect', agentOverride: { agentId: 'codex' } });
+    const nextScope = roleOptionsScope({ role: 'architect', agentOverride: { agentId: 'claude' } });
+    const oldAnswer = { roleDefaults: { agent: 'codex' }, agents: [agent], catalogDiscovery: fresh };
+    const display = resolveOptionsDisplay({ scope, value: oldAnswer }, nextScope, null);
+    expect(display).toEqual({ options: oldAnswer, optionsLoading: false });
+  });
+
+  it('R5 offers only the disk snapshot during a refresh, with the page\'s settled role defaults (R215)', () => {
+    const scope = roleOptionsScope({ role: 'architect' });
     const oldAnswer = { roleDefaults: { agent: 'codex' }, agents: [agent], catalogDiscovery: fresh, catalogOrigin: 'paseo:old' };
     const disk = { agents: [{ id: 'claude', label: 'Disk Claude', models: [] }], catalogDiscovery: saved, catalogOrigin: 'paseo:disk' };
-    const display = resolveOptionsDisplay({ scope, value: oldAnswer }, nextScope, nextScope);
+    const display = resolveOptionsDisplay({ scope, value: oldAnswer }, scope, scope);
     const catalog = resolveLauncherCatalog(display.options, display.optionsLoading, disk, oldAnswer.roleDefaults);
     expect(display.options).toBeNull();
     expect(catalog.agents).toEqual(disk.agents);

@@ -137,6 +137,7 @@ def _build_serving_runtime(
         launcher_catalog_prepare=collaborators.launcher_catalog_prepare,
         background_ledger=ledger,
         usage_read=collaborators.usage_read,
+        held_reset_delivery=collaborators.held_reset_delivery,
         explainer_application=collaborators.explainer_application,
     )
     return runtime

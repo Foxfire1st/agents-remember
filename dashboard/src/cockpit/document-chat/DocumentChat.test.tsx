@@ -464,7 +464,7 @@ describe("the document's native chat and the shared bound launcher", () => {
     );
   });
 
-  it('marks an open Projects role as running and does not offer a second start in the bound row', async () => {
+  it('keeps the bound running Projects role and its launcher reads stable across unrelated task deltas', async () => {
     sessionStorage.clear();
     const execution = {
       requestId: '00000000-0000-4000-8000-000000000001',
@@ -473,29 +473,27 @@ describe("the document's native chat and the shared bound launcher", () => {
       canRevive: false,
       execution: { kind: 'paseo-agent', agentId: 'architect', workspaceId: 'projects' },
     };
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        const value = url.endsWith('/frame')
-          ? {
-              available: true,
-              frameBaseUrl: 'https://host.example',
-              serverId: 'server',
-              projectsWorkspaceId: 'projects',
-            }
-          : url.endsWith('/document-chats')
-            ? { agents: [architect] }
-            : url.endsWith('/result')
-              ? execution
-              : {
-                  roleDefaults: { agent: 'codex', available: true },
-                  agents: [{ id: 'codex', label: 'Codex', models: [] }],
-                  executions: [execution],
-                };
-        return new Response(JSON.stringify(value));
-      }),
-    );
-    const { getByText, getByRole } = render(<DocumentChat active tasks={[sprint, master, leaf]} />);
+    const fetcher = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async (url) => {
+      const value = url.endsWith('/frame')
+        ? {
+            available: true,
+            frameBaseUrl: 'https://host.example',
+            serverId: 'server',
+            projectsWorkspaceId: 'projects',
+          }
+        : url.endsWith('/document-chats')
+          ? { agents: [architect] }
+          : url.endsWith('/result')
+            ? execution
+            : {
+                roleDefaults: { agent: 'codex', available: true },
+                agents: [{ id: 'codex', label: 'Codex', models: [] }],
+                executions: [execution],
+              };
+      return new Response(JSON.stringify(value));
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const { getByText, getByRole, rerender } = render(<DocumentChat active tasks={[sprint, master, leaf]} />);
     await waitFor(() => expect(getByText('Launch role')).not.toBeNull());
     fireEvent.click(getByText('Launch role'));
     await waitFor(() =>
@@ -505,6 +503,15 @@ describe("the document's native chat and the shared bound launcher", () => {
     );
     expect((getByRole('button', { name: 'Start role' }) as HTMLButtonElement).disabled).toBe(true);
     expect(getByRole('combobox', { name: 'Role' }).textContent).toContain('Architect (running)');
+    const reads = () => fetcher.mock.calls.filter(([url]) => /\/(saved-catalog|options|result)$/.test(url));
+    expect(reads().map(([url]) => url)).toEqual([
+      '/api/role-launch/saved-catalog', '/api/role-launch/options', '/api/role-launch/result',
+    ]);
+    const firstReads = reads();
+    rerender(<DocumentChat active tasks={[sprint, master, { ...leaf, title: 'Updated leaf' }]} />);
+    await act(async () => {});
+    expect(reads()).toEqual(firstReads);
+    expect(firstReads.some(([, init]) => init?.signal?.aborted)).toBe(false);
     const pending = { requestId: 'uncertain-original', pending: true };
     expect(boundTasklessRequest([execution], pending)).toBe(pending);
   });
