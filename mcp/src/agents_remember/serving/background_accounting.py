@@ -19,9 +19,10 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from functools import partial
 
 #: Threads the background owners run on. Their own pool, never the loop's default executor:
 #: the default one is what Starlette runs a sync route on, so before this the projection and a
@@ -595,7 +596,30 @@ async def offload[R](
     _run.__wrapped__ = function  # type: ignore[attr-defined]
     # Keep an explicit task for the exact thread unit: shutdown shields and drains this
     # task even when its owner is cancelled repeatedly. Its executor stays background-only.
-    worker = asyncio.create_task(_background_thread(_run))
+    return await _drain_worker(asyncio.create_task(_background_thread(_run)))
+
+
+async def offload_on[R](
+    executor: Executor,
+    owner: str,
+    ledger: BackgroundLedger | None,
+    function: Callable[..., R],
+    /,
+    *args: object,
+) -> R:
+    """Attribute and drain an exact worker on a caller's dedicated executor."""
+
+    def run() -> R:
+        with measured(owner, ledger):
+            return function(*args)
+
+    context = contextvars.copy_context()
+    submit = partial(context.run, run)
+    worker = asyncio.get_running_loop().run_in_executor(executor, submit)
+    return await _drain_worker(worker)
+
+
+async def _drain_worker[R](worker: asyncio.Future[R]) -> R:
     try:
         return await asyncio.shield(worker)
     except BaseException:

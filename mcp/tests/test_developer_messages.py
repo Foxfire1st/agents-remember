@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 from agents_remember.canvas.explainer_paths import seat_counter_path
 from agents_remember.canvas.explainer_state import seat_for_workspace
-from agents_remember.cli import developer_delivery, developer_message_files
+from agents_remember.cli import developer_delivery, developer_message_files, held_reset_delivery
 from agents_remember.cli.dashboard import serving_collaborators
 from agents_remember.cli.developer_message_files import (
     append_sent,
@@ -1015,7 +1015,7 @@ class DeveloperSendTests(RoleToolsTestCase):
             self.assertIn("first message", taken)
         with self.subTest("a send whose own part went out is delivered"):
             _request, reviewer = self.started("reviewer", status="running")
-            noted = developer_delivery.note_held_receipt
+            noted = held_reset_delivery.note_held_receipt
 
             def another_behind(config: Any, path: Path) -> None:
                 # Another sender's message is taken behind this one before the drain runs.
@@ -1027,7 +1027,7 @@ class DeveloperSendTests(RoleToolsTestCase):
                 self.runtime.agents[reviewer].update(status="idle")
 
             self.runtime._agent_send = refusing_both("third message", "a message behind it")
-            with patch.object(developer_delivery, "note_held_receipt", another_behind):
+            with patch.object(held_reset_delivery, "note_held_receipt", another_behind):
                 third = self.send(reviewer, text="third message")
             self.assertEqual(third["state"], "delivered")
             (taken,) = self.received(reviewer)

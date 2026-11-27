@@ -35,6 +35,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from agents_remember.cli.developer_explainer_seats import EXPLAINER_RECIPIENT
+from agents_remember.cli.held_reset_delivery import hold_at_receipt
 from agents_remember.cli.investigator_receipts import investigator_message_capacity
 from agents_remember.cli.paseo_role_tools import (
     _archived,
@@ -51,8 +52,6 @@ from agents_remember.cli.role_held_messages import (
     HeldStoreFull,
     apply_drain_to_receipt,
     drain_held,
-    hold_message,
-    note_held_receipt,
     waiting_total,
 )
 from agents_remember.cli.role_held_store import HeldSeatClosed, held_seat_ref, open_held_store
@@ -228,7 +227,9 @@ def _hold(  # noqa: PLR0913 - one hold states the message's own reasons
     ref = held_seat_ref(path, receipt)
     try:
         with open_held_store(ref):
-            taken = hold_message(
+            taken = hold_at_receipt(
+                delivery.config,
+                path,
                 folder,
                 delivery.agent_id,
                 HeldMessage(
@@ -254,7 +255,6 @@ def _hold(  # noqa: PLR0913 - one hold states the message's own reasons
         raise _Refused(
             "recipient-not-found", str(error), "", recipientAgentId=delivery.agent_id
         ) from error
-    note_held_receipt(delivery.config, path)
     _note_waiting(ref, taken["waitingTotal"])
     try:
         drain = drain_held(delivery.config, path, receipt)

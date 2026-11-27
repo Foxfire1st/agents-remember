@@ -393,7 +393,13 @@ class HeldMessage:
     limited_until: str | None = None
 
 
-def hold_message(workspace_path: str | Path, agent_id: str, message: HeldMessage) -> dict[str, Any]:
+def hold_message(
+    workspace_path: str | Path,
+    agent_id: str,
+    message: HeldMessage,
+    *,
+    before_commit: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     """Take one message the host cannot take now; refuse a message beyond the bound."""
 
     path = store_path_for(workspace_path, agent_id)
@@ -430,6 +436,8 @@ def hold_message(workspace_path: str | Path, agent_id: str, message: HeldMessage
     if message.limited_until:
         # Rule 9's reset time rides on the waiting row: why it waits, and until when.
         row["limitedUntil"] = message.limited_until
+    if message.limited_until and before_commit is not None:
+        before_commit(message.limited_until)
     messages.append(row)
     _write_store_file(path, store)
     mine, total = waiting_counts(store, message.sender_agent_id)

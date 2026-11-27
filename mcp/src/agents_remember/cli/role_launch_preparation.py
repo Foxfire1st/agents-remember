@@ -35,6 +35,8 @@ from agents_remember.cli import role_launch_enclosure
 from agents_remember.cli.leaf_seat_handover import leaf_seats
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import (
+    LauncherCatalog,
+    launcher_catalog,
     launcher_options,
     provider_accepts_tool_servers,
     read_host_role,
@@ -220,10 +222,10 @@ def prepare_role_handover(  # noqa: PLR0913 -- chat_started rides the rule-6 lau
     """Prepare the canonical role handover and the exact launch inputs of one role."""
 
     # The selection is validated against the cached catalog before anything is created for it.
-    defaults, harness_order = _role_defaults(config, context)
+    catalog, defaults, harness_order = _catalog_and_role_defaults(config, context)
     defaults = selected_defaults(config, context, defaults, step_up)
     agent_id, session_options = resolve_agent_selection(
-        config, defaults, harness_order, agent_override
+        config, defaults, harness_order, agent_override, catalog=catalog
     )
     if agent_id == NATIVE_ANTIGRAVITY:
         raise native_antigravity_role_start_refusal()
@@ -398,8 +400,24 @@ def _launcher_catalog(
 ) -> dict[str, Any]:
     """Role defaults and model metadata; Refresh first renews the provider snapshot."""
 
+    catalog, defaults, harness_order = _catalog_and_role_defaults(
+        config, context, refresh=request.refresh_catalog
+    )
+    return launcher_options(config, defaults, harness_order, catalog=catalog)
+
+
+def _catalog_and_role_defaults(
+    config: McpRuntimeConfig, context: RoleLaunchContext, *, refresh: bool = False
+) -> tuple[LauncherCatalog, dict[str, Any], tuple[str, ...]]:
+    # Catalog discovery supplies the host profile and extra-args reads. When discovery
+    # raises, a defaults error still takes precedence as it did before prefetching.
+    try:
+        catalog = launcher_catalog(config, refresh=refresh)
+    except (PaseoBridgeFailure, OSError, ValueError):
+        _role_defaults(config, context)
+        raise
     defaults, harness_order = _role_defaults(config, context)
-    return launcher_options(config, defaults, harness_order, refresh=request.refresh_catalog)
+    return catalog, defaults, harness_order
 
 
 def _role_defaults(

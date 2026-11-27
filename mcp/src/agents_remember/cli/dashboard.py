@@ -416,6 +416,8 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
             app, config, leaf_memory_root=partial(_review_memory_root, config)
         )
 
+    from agents_remember.cli.held_reset_delivery import reset_delivery_ports  # noqa: PLC0415
+
     collaborators = ServingCollaborators(
         launcher_catalog_prepare=partial(launcher_catalog, config),
         explainer_host=PaseoExplainerHost(config),
@@ -425,6 +427,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         explainer_stale_answers=recorded_answers.stale,
         host_activity_reconcile=RoleRegistryActivityReader(),
         usage_read=read_usage_for_agents,
+        held_reset_delivery=reset_delivery_ports(config),
         review_memory_root=partial(_review_memory_root, config),
         knowledge_review=review_port,
         knowledge_review_entries=review_entries_port,

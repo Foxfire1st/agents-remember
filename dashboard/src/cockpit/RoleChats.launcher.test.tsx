@@ -163,12 +163,12 @@ describe('launcher bar and the host catalog', () => {
 
     // Naming the role's own agent keeps the role's unoffered model, so Start stays disabled.
     fireEvent.change(getByLabelText('Role agent override'), { target: { value: 'codex' } });
-    await waitFor(() => expect(optionsRequests.length).toBe(2));
     await waitFor(() =>
       expect(queryByTestId('role-choice-problem')?.textContent).toContain(
         'Model gpt-z is not offered for Codex',
       ),
     );
+    expect(optionsRequests).toEqual([{ role: 'architect' }]);
     expect(start.disabled).toBe(true);
 
     fireEvent.change(getByLabelText('Role model override'), { target: { value: 'gpt-a' } });
@@ -477,8 +477,8 @@ describe('the launcher mode', () => {
     fireEvent.change(view.getByLabelText('Role mode override'), {
       target: { value: 'full-access' },
     });
-    // The agent id joins the options scope, so the launcher rereads them before it can start.
-    await waitFor(() => expect(start.disabled).toBe(false));
+    expect(start.disabled).toBe(false);
+    expect(optionsRequests).toEqual([{ role: 'architect' }]);
     fireEvent.click(start);
     await waitFor(() => expect(requests).toHaveLength(1));
     expect(requests[0].agentOverride).toEqual({ agentId: 'codex', modeId: 'full-access' });
@@ -546,7 +546,7 @@ describe('R214 cold saved preview', () => {
 
 
 describe('R5 pending launcher provenance', () => {
-  it.each(['agent change', 'same-scope refresh'])('replaces the previous fresh display with the disk snapshot on %s, silently (R215)', async (change) => {
+  it('replaces the previous fresh display with the disk snapshot on explicit refresh, silently (R215)', async () => {
     optionsReplies = [optionsReply({ agent: 'codex', model: 'gpt-a', available: true })];
     const view = renderLauncher();
     const start = view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement;
@@ -557,11 +557,7 @@ describe('R5 pending launcher provenance', () => {
       agents: [{ id: 'disk', label: 'Disk Agent', models: [] }, { id: 'eve', label: 'Disk Eve', models: [] }],
       catalogDiscovery: { source: 'saved', readAt: '2026-10-26T16:20:00Z' }, catalogOrigin: 'paseo:disk',
     } };
-    if (change === 'agent change') {
-      fireEvent.change(view.getByLabelText('Role agent override'), { target: { value: 'eve' } });
-    } else {
-      fireEvent.click(view.getByRole('button', { name: 'Refresh role agents' }));
-    }
+    fireEvent.click(view.getByRole('button', { name: 'Refresh role agents' }));
     const agent = view.getByLabelText('Role agent override') as HTMLSelectElement;
     await waitFor(() => expect(agent.textContent).toContain('Disk Agent'));
     expect(agent.textContent).not.toContain('Codex');
@@ -667,14 +663,14 @@ describe('R215 the launcher speaks only of real errors', () => {
     expect(dispatched[0].role).toBe('architect');
     expect(dispatched[0]).not.toHaveProperty('agentOverride');
 
-    // Picking an agent lists its models from the saved answer alone: the fresh question the new
-    // scope asks never answers, and the saved one is read again from disk for it.
-    const readsBeforePick = savedCatalogReads();
+    // The dispatch starts one metadata refresh. Picking an agent uses the saved
+    // answer already on show while that refresh is pending.
+    await waitFor(() => expect(savedCatalogReads()).toBe(2));
     fireEvent.change(agent, { target: { value: 'codex' } });
-    await waitFor(() => expect(savedCatalogReads()).toBeGreaterThan(readsBeforePick));
     await waitFor(() => expect(optionLabels(view.getByLabelText('Role model override'))).toEqual(['Agent default', 'Saved GPT A', 'Saved GPT B']));
     expect((view.getByLabelText('Role model override') as HTMLSelectElement).disabled).toBe(false);
-    expect(optionsRequests.at(-1)?.agentId).toBe('codex');
+    expect(savedCatalogReads()).toBe(2);
+    expect(optionsRequests).toEqual([{ role: 'architect' }, { role: 'architect' }]);
     expect(view.queryByRole('status', { name: 'Paseo catalog status' })).toBeNull();
   });
 

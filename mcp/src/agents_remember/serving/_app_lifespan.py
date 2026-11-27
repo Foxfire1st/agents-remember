@@ -49,6 +49,7 @@ from agents_remember.serving.heap_diag import (
     start_heap_tracing,
     trim_malloc,
 )
+from agents_remember.serving.held_reset_scheduler import run_held_reset_scheduler
 from agents_remember.serving.projections.host_activity import UsageReadPort
 from agents_remember.serving.server_registry import register_server
 
@@ -481,6 +482,18 @@ def _running_lifespan(
         held_delivery_task = _live_background_task(
             "held-delivery", suppressed, _held_delivery_loop, runtime
         )
+        reset_delivery_task = (
+            _live_background_task(
+                "held-delivery",
+                suppressed,
+                run_held_reset_scheduler,
+                runtime.config,
+                runtime.held_reset_delivery,
+                runtime.background_ledger,
+            )
+            if runtime.held_reset_delivery is not None
+            else None
+        )
         river_compaction_task = _live_background_task(
             "workspace-river-compaction", suppressed, _workspace_river_compaction_loop, runtime
         )
@@ -510,6 +523,7 @@ def _running_lifespan(
                 archive_recovery_task,
                 river_compaction_task,
                 held_delivery_task,
+                reset_delivery_task,
                 warmup_watch_task,
                 move_watch_task,
             )

@@ -899,6 +899,7 @@ def test_the_recovery_loop_is_a_background_task_of_the_serving_lifespan_and_keep
                 observer_root=None,
                 clock=lambda: None,
                 review_trees_shutdown=None,
+                held_reset_delivery=None,
                 # The lifespan reads the explainer's ports to decide whether the moved
                 # watcher starts (``_app_common.py``: ``explainer_application = None``).
                 explainer_application=None,

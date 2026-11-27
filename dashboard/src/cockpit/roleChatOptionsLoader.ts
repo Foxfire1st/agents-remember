@@ -5,7 +5,6 @@ import {
   isTasklessRole,
   isUncertainRoleExecution,
   readSelectedRoleRequest,
-  roleDocumentScope,
   roleOptionsScope,
   roleRequestKey,
   sameRoleDocumentScope,
@@ -20,6 +19,7 @@ import {
   type SavedRoleCatalog,
 } from "./roleLaunchModel";
 import { rememberRoleDefaults } from "./launcherDefaultsMemory";
+import type { DispatchResultRead } from "./roleChatDispatch";
 import type { ActiveRequestsRef, ExecutionErrorState, ResultFlowState } from "./roleChatResult";
 
 // How soon the options are read again after the backend answered that a launch is in progress.
@@ -61,18 +61,6 @@ export function useLaunchReread(requestOptionsRefresh: () => void): {
   return { waitForLaunch };
 }
 
-function buildOptionsBody(
-  documentScope: RoleDocumentScope,
-  requestScope: RoleOptionsScope,
-  refreshAgentCatalog: boolean,
-) {
-  return {
-    ...documentScope,
-    ...(requestScope.agentId ? { agentId: requestScope.agentId } : {}),
-    ...(refreshAgentCatalog ? { refreshCatalog: true } : {}),
-  };
-}
-
 function adoptBoundRequest(
   bound: boolean,
   scope: RoleDocumentScope,
@@ -86,19 +74,10 @@ function adoptBoundRequest(
   return request;
 }
 
-interface ExecutionWriters {
-  setExecutionState: SetExecutionState;
-  setExecutionErrorState: ResultFlowState["setExecutionErrorState"];
-  updateActiveRequest: ResultFlowState["updateActiveRequest"];
-  rememberExecution: ResultFlowState["rememberExecution"];
-  rememberFailureExecution: ResultFlowState["rememberExecution"];
-  fetchExecutionResult: (scope: RoleDocumentScope, reportNotFound: boolean, requestId?: string) => Promise<RoleExecutionReceipt | undefined>;
-}
-
 // A saved execution behind the active request becomes the run's receipt: pending while
 // uncertain (keeping the retry selection), settled otherwise.
 function adoptSavedExecution(
-  writers: ExecutionWriters,
+  writers: Pick<OptionsLoadContext, "updateActiveRequest" | "rememberExecution">,
   requestScope: RoleOptionsScope,
   activeRequest: RoleTasklessActiveRequest | undefined,
   savedExecution: RoleExecutionReceipt | undefined,
@@ -123,64 +102,60 @@ function adoptSavedExecution(
 // The saved execution behind the active request is adopted, then a resumed request id
 // polls its result.
 function adoptRequestExecutionState(
-  writers: ExecutionWriters,
-  activeRequestsRef: ActiveRequestsRef,
-  boundSelection: RoleLaunchSelection | undefined,
-  requestScope: RoleOptionsScope,
+  ctx: OptionsLoadContext,
   executions: RoleExecutionReceipt[],
+  settledRequestId: string | undefined,
 ): void {
+  const { activeRequestsRef, optionsScope: requestScope } = ctx;
+  const key = roleRequestKey(requestScope);
+  const currentRequest = activeRequestsRef.current[key];
+  // A dispatch's result already owns this request, including against an older saved receipt.
+  if (currentRequest && currentRequest.requestId === settledRequestId) return;
   const activeRequest = adoptBoundRequest(
-    Boolean(boundSelection),
+    ctx.hasBoundSelection,
     requestScope,
     executions,
-    activeRequestsRef.current[roleRequestKey(requestScope)] ?? readSelectedRoleRequest(requestScope),
-    writers.updateActiveRequest,
+    currentRequest ?? readSelectedRoleRequest(requestScope),
+    ctx.updateActiveRequest,
   );
-  const savedExecution = activeRequest
+  const savedExecution = activeRequest && activeRequest.requestId !== settledRequestId
     ? executions.find((execution) => execution.requestId === activeRequest?.requestId)
     : undefined;
-  adoptSavedExecution(writers, requestScope, activeRequest, savedExecution);
-  const activeRequestId = activeRequestsRef.current[roleRequestKey(requestScope)]?.requestId;
-  if (activeRequestId) void writers.fetchExecutionResult(roleDocumentScope(requestScope), false, activeRequestId);
-}
-
-interface OptionsStores {
-  setSavedCatalogState: (state: OptionsFlowState["savedCatalogState"]) => void;
-  setOptionsErrorState: (state: OptionsFlowState["optionsErrorState"]) => void;
-  setOptionsState: (state: OptionsFlowState["optionsState"]) => void;
+  adoptSavedExecution(ctx, requestScope, activeRequest, savedExecution);
+  const activeRequestId = activeRequestsRef.current[key]?.requestId;
+  if (activeRequestId && activeRequestId !== settledRequestId) {
+    void ctx.fetchExecutionResult(requestScope, false, activeRequestId);
+  }
 }
 
 // A 200 answers the launch options: the role defaults, the agent catalog, and the
 // saved execution behind the active request.
 function applyOptionsSuccess(
-  stores: OptionsStores,
-  writers: ExecutionWriters,
-  activeRequestsRef: ActiveRequestsRef,
-  boundSelection: RoleLaunchSelection | undefined,
+  ctx: OptionsLoadContext,
   value: RoleLauncherOptions,
-  requestScope: RoleOptionsScope,
-  refresh: { catalog: number; options: number; requested: boolean; retry: boolean },
+  refresh: { requested: boolean; retry: boolean; settledRequestId?: string },
 ): void {
-  stores.setOptionsErrorState(null);
+  const { optionsScope: requestScope } = ctx;
+  ctx.setOptionsErrorState(null);
   // The options answer's execution becomes the failure reference only — never the
   // active execution authority. A delayed options reply settling after a newer
   // Result receipt leaves that newer receipt in charge.
-  if (value.execution) writers.rememberFailureExecution(requestScope, value.execution);
+  if (value.execution) ctx.rememberFailureExecution(requestScope, value.execution);
   rememberRoleDefaults(requestScope, value.roleDefaults);
-  stores.setOptionsState({
-    scope: requestScope, value, catalogRefresh: refresh.catalog, optionsRefresh: refresh.options,
+  ctx.setOptionsState({
+    scope: requestScope, value, catalogRefresh: ctx.catalogRefresh, optionsRefresh: ctx.optionsRefresh,
   });
-  writers.setExecutionErrorState((current) =>
+  ctx.setExecutionErrorState((current) =>
     refresh.requested || refresh.retry || !current?.sticky ? null : current,
   );
   if (usesRequestReceipts(requestScope)) {
-    adoptRequestExecutionState(writers, activeRequestsRef, boundSelection, requestScope, value.executions ?? []);
+    adoptRequestExecutionState(ctx, value.executions ?? [], refresh.settledRequestId);
   }
 }
 
 // A refusal is a reread mark while a launch is in progress, else an options error.
 function applyOptionsRefusal(
-  setOptionsErrorState: OptionsStores["setOptionsErrorState"],
+  setOptionsErrorState: OptionsLoadContext["setOptionsErrorState"],
   waitForLaunch: () => void,
   isCurrentOptionsScope: (scope: RoleOptionsScope) => boolean,
   response: Response,
@@ -200,7 +175,7 @@ function applyOptionsRefusal(
 }
 
 function failOptionsLoad(
-  setOptionsErrorState: OptionsStores["setOptionsErrorState"],
+  setOptionsErrorState: OptionsLoadContext["setOptionsErrorState"],
   isCurrentOptionsScope: (scope: RoleOptionsScope) => boolean,
   requestScope: RoleOptionsScope,
   reason: unknown,
@@ -216,20 +191,21 @@ function failOptionsLoad(
 
 interface OptionsLoadContext {
   active: boolean;
-  boundSelection: RoleLaunchSelection | undefined;
+  hasBoundSelection: boolean;
   selectionComplete: boolean;
   documentScope: RoleDocumentScope;
   optionsScope: RoleOptionsScope;
   // The generations answered by this metadata and receipt load.
   optionsRefresh: number;
   catalogRefresh: number;
+  resultReadRef: { current: DispatchResultRead | undefined };
   activeRequestsRef: ActiveRequestsRef;
   waitForLaunch: () => void;
   isCurrentOptionsScope: (scope: RoleOptionsScope) => boolean;
   setOptionsLoadingScope: (scope: RoleOptionsScope | null) => void;
-  setOptionsErrorState: OptionsStores["setOptionsErrorState"];
-  setOptionsState: OptionsStores["setOptionsState"];
-  setSavedCatalogState: OptionsStores["setSavedCatalogState"];
+  setOptionsErrorState: (state: OptionsFlowState["optionsErrorState"]) => void;
+  setOptionsState: (state: OptionsFlowState["optionsState"]) => void;
+  setSavedCatalogState: (state: OptionsFlowState["savedCatalogState"]) => void;
   setExecutionState: SetExecutionState;
   setExecutionErrorState: ResultFlowState["setExecutionErrorState"];
   updateActiveRequest: ResultFlowState["updateActiveRequest"];
@@ -255,32 +231,25 @@ function readSavedCatalog(ctx: OptionsLoadContext, scope: RoleOptionsScope, sign
 // One options load for the selected scope: the request with its catalog-refresh mark,
 // the answer folded into the stores, and the abort on scope change.
 function runOptionsLoad(ctx: OptionsLoadContext): () => void {
+  const resultRead = ctx.resultReadRef.current;
+  ctx.resultReadRef.current = undefined;
   if (!ctx.active || !ctx.selectionComplete) return () => {};
   const requestScope = ctx.optionsScope;
   const retryOptions = ctx.explicitOptionsRefresh.current;
   ctx.explicitOptionsRefresh.current = false;
   const refreshAgentCatalog = ctx.catalogRefresh > ctx.sentCatalogRefresh.current;
+  const settledRequestId = resultRead && !retryOptions && !refreshAgentCatalog &&
+    sameRoleDocumentScope(resultRead.scope, ctx.documentScope) ? resultRead.requestId : undefined;
   const controller = new AbortController();
   let freshPending = true;
   ctx.setSavedCatalogState(null);
   readSavedCatalog(ctx, requestScope, controller.signal, () => freshPending);
-  const body = buildOptionsBody(ctx.documentScope, requestScope, refreshAgentCatalog);
-  const stores: OptionsStores = {
-    setOptionsErrorState: ctx.setOptionsErrorState,
-    setOptionsState: ctx.setOptionsState,
-    setSavedCatalogState: ctx.setSavedCatalogState,
-  };
-  const writers: ExecutionWriters = {
-    setExecutionState: ctx.setExecutionState,
-    setExecutionErrorState: ctx.setExecutionErrorState,
-    updateActiveRequest: ctx.updateActiveRequest,
-    rememberExecution: ctx.rememberExecution,
-    rememberFailureExecution: ctx.rememberFailureExecution,
-    fetchExecutionResult: ctx.fetchExecutionResult,
-  };
+  const body = { ...requestScope, ...(refreshAgentCatalog ? { refreshCatalog: true } : {}) };
   ctx.setOptionsLoadingScope(requestScope);
   ctx.setExecutionState((current) =>
-    current && sameRoleDocumentScope(current.scope, ctx.documentScope) ? null : current,
+    current && sameRoleDocumentScope(current.scope, ctx.documentScope) &&
+      (settledRequestId === undefined || current.value.requestId !== settledRequestId)
+      ? null : current,
   );
   void fetch("/api/role-launch/options", {
     method: "POST",
@@ -299,8 +268,8 @@ function runOptionsLoad(ctx: OptionsLoadContext): () => void {
     const value = (await response.json()) as RoleLauncherOptions;
     if (controller.signal.aborted || !ctx.isCurrentOptionsScope(requestScope)) return;
     if (refreshAgentCatalog) ctx.sentCatalogRefresh.current = ctx.catalogRefresh;
-    applyOptionsSuccess(stores, writers, ctx.activeRequestsRef, ctx.boundSelection, value, requestScope, {
-      catalog: ctx.catalogRefresh, options: ctx.optionsRefresh, requested: refreshAgentCatalog, retry: retryOptions,
+    applyOptionsSuccess(ctx, value, {
+      requested: refreshAgentCatalog, retry: retryOptions, settledRequestId,
     });
   }).catch((reason: unknown) => {
     if (controller.signal.aborted) return;
@@ -320,10 +289,10 @@ export type { ExecutionErrorState };
 
 // The current response and its loading/error scopes; saved catalog parts are owned by the server.
 function useOptionsStores(): OptionsFlowState & {
-  setOptionsState: OptionsStores["setOptionsState"];
-  setSavedCatalogState: OptionsStores["setSavedCatalogState"];
+  setOptionsState: OptionsLoadContext["setOptionsState"];
+  setSavedCatalogState: OptionsLoadContext["setSavedCatalogState"];
   setOptionsLoadingScope: (scope: RoleOptionsScope | null) => void;
-  setOptionsErrorState: OptionsStores["setOptionsErrorState"];
+  setOptionsErrorState: OptionsLoadContext["setOptionsErrorState"];
   sentCatalogRefresh: { current: number };
   explicitOptionsRefresh: { current: boolean };
   requestCatalogRefresh: (bump: () => void) => void;
@@ -364,6 +333,7 @@ export interface RoleChatOptionsLoaderArgs {
   optionsScope: RoleOptionsScope;
   optionsRefresh: number;
   catalogRefresh: number;
+  resultReadRef: { current: DispatchResultRead | undefined };
   bumpOptionsRefresh: () => void;
   bumpCatalogRefresh: () => void;
   currentSelectionRef: { current: RoleLaunchSelection };
@@ -387,6 +357,7 @@ export function useRoleChatOptionsLoader(args: RoleChatOptionsLoaderArgs): Optio
   requestExplicitOptionsRefresh: () => void;
 } {
   const stores = useOptionsStores();
+  const hasBoundSelection = Boolean(args.boundSelection);
   const { optionsState, savedCatalogState, optionsLoadingScope, optionsErrorState } = stores;
   const isCurrentOptionsScope = useCallback(
     (scope: RoleOptionsScope) =>
@@ -401,12 +372,13 @@ export function useRoleChatOptionsLoader(args: RoleChatOptionsLoaderArgs): Optio
   }, [stores, args.bumpOptionsRefresh]);
   useEffect(() => runOptionsLoad({
     active: args.active,
-    boundSelection: args.boundSelection,
+    hasBoundSelection,
     selectionComplete: args.selectionComplete,
     documentScope: args.documentScope,
     optionsScope: args.optionsScope,
     optionsRefresh: args.optionsRefresh,
     catalogRefresh: args.catalogRefresh,
+    resultReadRef: args.resultReadRef,
     activeRequestsRef: args.activeRequestsRef,
     waitForLaunch: args.waitForLaunch,
     isCurrentOptionsScope,
@@ -422,7 +394,7 @@ export function useRoleChatOptionsLoader(args: RoleChatOptionsLoaderArgs): Optio
     fetchExecutionResult: args.fetchExecutionResult,
     sentCatalogRefresh: stores.sentCatalogRefresh,
     explicitOptionsRefresh: stores.explicitOptionsRefresh,
-  }), [args.active, args.boundSelection, args.selectionComplete, args.documentScope, args.optionsScope, args.optionsRefresh, args.catalogRefresh, args.activeRequestsRef, args.waitForLaunch, isCurrentOptionsScope, stores.setOptionsLoadingScope, stores.setOptionsErrorState, stores.setOptionsState, stores.setSavedCatalogState, args.setExecutionState, args.setExecutionErrorState, args.updateActiveRequest, args.rememberExecution, args.rememberFailureExecution, args.fetchExecutionResult, stores.sentCatalogRefresh, stores.explicitOptionsRefresh]);
+  }), [args.active, hasBoundSelection, args.selectionComplete, args.documentScope, args.optionsScope, args.optionsRefresh, args.catalogRefresh, args.resultReadRef, args.activeRequestsRef, args.waitForLaunch, isCurrentOptionsScope, stores.setOptionsLoadingScope, stores.setOptionsErrorState, stores.setOptionsState, stores.setSavedCatalogState, args.setExecutionState, args.setExecutionErrorState, args.updateActiveRequest, args.rememberExecution, args.rememberFailureExecution, args.fetchExecutionResult, stores.sentCatalogRefresh, stores.explicitOptionsRefresh]);
   return {
     optionsState,
     savedCatalogState,
