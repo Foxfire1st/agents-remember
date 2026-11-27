@@ -257,8 +257,10 @@ def _observed_symbol(
 
     name = _locator_text(locator, "qualified_name")
     path = str(common["path"])
+    language_set = grammars.active_language_set()
     grammar = grammars.grammar_of(path)
-    if grammar is None:
+    provider = language_set.provider_for(grammar) if grammar is not None else None
+    if grammar is None or provider is None:
         return AnchorResolution(
             **common,
             observed_source_identity=object_id,
@@ -270,7 +272,9 @@ def _observed_symbol(
             ),
         )
     try:
-        definitions = _blob_definitions(repository_root, object_id, path, grammar=grammar)
+        definitions = _blob_definitions(
+            repository_root, object_id, path, grammar=grammar, provider=provider
+        )
     except (GrammarUnavailableError, _BlobUnreadable) as failure:
         return AnchorResolution(
             **common,
@@ -404,16 +408,33 @@ def _recorded_lines(repository_root: Path, object_id: str) -> tuple[str, ...]:
 
 
 def _blob_definitions(
-    repository_root: Path, object_id: str, path: str, *, grammar: str
+    repository_root: Path,
+    object_id: str,
+    path: str,
+    *,
+    grammar: str,
+    provider: grammars.LanguageProvider | None = None,
 ) -> Definitions:
-    """Cache the recorded blob's distinct defining ranges by grammar and test-file class.
+    """Cache the recorded blob's distinct defining ranges by language identity and test-file class.
 
-    JavaScript and TypeScript test files can bind names that their ordinary files do not.
-    Each reader class can share a parse across paths containing the same bytes.
+    The reader key includes the active provider's version (pinned grammar version and query digest)
+    so a changed ``LanguageSet`` never reads a stale memo entry, and distinguishes test files that
+    can bind names ordinary files do not.
     """
 
-    recognizes_cases = grammar in {grammars.JAVASCRIPT, grammars.TYPESCRIPT, grammars.TSX}
-    reader = f"{grammar}:test" if recognizes_cases and test_cases.is_test_file(path) else grammar
+    active_provider = (
+        grammars.active_language_set().provider_for(grammar) if provider is None else provider
+    )
+    version = "" if active_provider is None else active_provider.version
+    recognizes_cases = (
+        active_provider.supports_test_cases(path)
+        if active_provider is not None
+        else (
+            grammar in {grammars.JAVASCRIPT, grammars.TYPESCRIPT, grammars.TSX}
+            and test_cases.is_test_file(path)
+        )
+    )
+    reader = f"{grammar}@{version}:test" if recognizes_cases else f"{grammar}@{version}"
     key = (str(repository_root), object_id, reader)
     remembered = BLOB_DEFINITIONS.get(key)
     if remembered is not None:
@@ -430,18 +451,9 @@ def _blob_definitions(
 def _defining_extents(
     name: str, definitions: Definitions, *, grammar: str
 ) -> tuple[tuple[int, int], ...]:
-    """Distinct ranges for a whole name, or for the bound parts of a non-Lean name."""
+    """Distinct defining ranges for ``name``, sharing ``extents.qualified_spans`` containment."""
 
-    if name in definitions or grammar == grammars.LEAN:
-        found = definitions.get(name, ())
-    else:
-        parts = [part for part in name.split(".") if part]
-        if not parts or any(part not in definitions for part in parts):
-            return ()
-        found = definitions[parts[-1]]
-    return tuple(
-        dict.fromkeys((extent.start, extent.end) for extent in found if not extent.scope_uncertain)
-    )
+    return tuple(dict.fromkeys(extents.qualified_spans(name, definitions, grammar=grammar)))
 
 
 def _locator_text(locator: Any, field: str) -> str:

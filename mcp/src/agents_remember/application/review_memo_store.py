@@ -71,6 +71,7 @@ from agents_remember.application.knowledge_worklist.code import (
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.conversion.code_objects import SYMBOL_SPANS
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo, is_complete_object_id
+from agents_remember.memory_quality.style.citations import grammars
 from agents_remember.memory_quality.style.citations.grammars import GRAMMAR_PACKAGES
 from agents_remember.serving.review_answer_reuse import (
     ANSWER_WRITES,
@@ -227,10 +228,13 @@ def memo_namespace(source_digest: str, anchor: Path) -> str:
 
 @cache
 def _grammar_identity() -> list[list[str]]:
-    """The bytes of tree-sitter and of each grammar package this process parses with."""
+    """The bytes of tree-sitter, each grammar package, and the default extractor queries."""
 
     packages = sorted({"tree_sitter", *(module for module, _ in GRAMMAR_PACKAGES.values())})
-    return [[package, _package_digest(package)] for package in packages]
+    return [
+        *([package, _package_digest(package)] for package in packages),
+        ["extractor-version", grammars.extractor_version(grammars.default_language_set())],
+    ]
 
 
 def _package_digest(package: str) -> str:

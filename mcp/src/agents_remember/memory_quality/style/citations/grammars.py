@@ -1,18 +1,11 @@
 """Read the definitions and extents that citation symbols name.
 
-Python, JavaScript, JSX, TypeScript, TSX, MJS, CJS, MTS, and CTS use tree-sitter.
-A declared grammar that cannot load raises ``GrammarUnavailableError``. Lean uses the
-built-in declaration scanner. Unsupported suffixes use occurrence matching and
-therefore cannot prove a pure move.
-
-Definitions include Python functions, classes, and assignments plus JavaScript/TypeScript
-functions, classes, methods, fields, variable bindings, interfaces, types, enums,
-namespaces, ambient signatures, and interface members. Extents include attached
-decorators/exports/ambient declarations.
-
-Lean binds named declarations by their full and written names, with full names taking
-precedence. Extents include leading documentation, attributes and command wrappers
-that belong to the declaration.
+Language resolution runs through the active :class:`LanguageSet` ContextVar. Every
+tree-sitter language executes declaratively through the same :mod:`tags_engine`
+``tags.scm`` (and optional ``tests.scm``) pipeline; a declared grammar that cannot
+load raises ``GrammarUnavailableError``. Lean plugs its built-in declaration scanner
+behind the same :class:`LanguageProvider` protocol with ``.lean`` permanently
+reserved. Unsupported suffixes use occurrence matching and cannot prove a pure move.
 
 Tree-sitter false-positive boundaries:
 
@@ -36,23 +29,69 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from functools import cache
-from pathlib import PurePosixPath
+from typing import Final
 
 from tree_sitter import Language, Node, Parser, Tree
 
 from agents_remember.errors import GrammarUnavailableError
 from agents_remember.kernel.request_memo import request_owner
 from agents_remember.memory_quality.style.citations import (
-    lean_declarations,
+    language_set as _language_set,
+)
+from agents_remember.memory_quality.style.citations import (
+    tags_engine,
     test_case_ranges,
     test_cases,
 )
+from agents_remember.memory_quality.style.citations.language_set import (
+    JAVASCRIPT,
+    LEAN,
+    PYTHON,
+    RESERVED_SUFFIXES,
+    TSX,
+    TYPESCRIPT,
+    LanguageProvider,
+    LanguageSet,
+    LeanLanguageProvider,
+    TreeSitterLanguageProvider,
+)
+from agents_remember.memory_quality.style.citations.tags_engine import (
+    Binding,
+    DestructuringSpec,
+)
 
-PYTHON = "python"
-TYPESCRIPT = "typescript"
-TSX = "tsx"
-JAVASCRIPT = "javascript"
-LEAN = "lean"
+__all__ = [
+    "DEFAULT_LANGUAGE_SET",
+    "GRAMMAR_PACKAGES",
+    "JAVASCRIPT",
+    "LEAN",
+    "MEASURED_VERSIONS",
+    "PYTHON",
+    "RESERVED_SUFFIXES",
+    "SUFFIX_GRAMMARS",
+    "TSX",
+    "TYPESCRIPT",
+    "Binding",
+    "DestructuringSpec",
+    "LanguageProvider",
+    "LanguageSet",
+    "LeanLanguageProvider",
+    "TreeSitterLanguageProvider",
+    "active_language_set",
+    "bindings",
+    "default_language_set",
+    "extractor_version",
+    "grammar_of",
+    "is_default_language_set",
+    "language",
+    "language_identity",
+    "language_set_scope",
+    "parsed",
+    "parsing_scope",
+    "test_case_range",
+    "test_case_refusal",
+    "typescript_anchor_identifier",
+]
 
 SUFFIX_GRAMMARS = {
     ".lean": LEAN,
@@ -75,17 +114,18 @@ GRAMMAR_PACKAGES = {
 # Every claim this module makes about tree-sitter names one exact measured version. The
 # project bounds in `mcp/pyproject.toml` are installation compatibility, not citation
 # provenance: R30 requires dependency claims to carry the exact resolved version from a
-# lock surface. `test_memory_citation_grammars.py::PinnedDependencyTests` proves only that
-# the declared compatibility bounds still admit the measured and installed parser builds.
+# lock surface. `test_memory_citation_grammars.py::PinnedDependencyTests` proves that
+# the declared compatibility bounds, `mcp/uv.lock`, and installed parser builds stay
+# aligned with these measured versions.
 #
-#   tree-sitter 0.26.0             `Node.end_point` gives the position AFTER the node's
+#   tree-sitter 0.26.1             `Node.end_point` gives the position AFTER the node's
 #                                  last byte, so a construct ending at the end of line N
 #                                  reports row N-1 (zero-based) and one ending at a
 #                                  newline reports (N, 0).
-#   tree-sitter 0.26.0             `Node.has_error` is true for a node that CONTAINS a
+#   tree-sitter 0.26.1             `Node.has_error` is true for a node that CONTAINS a
 #                                  parse error, which is what lets one broken construct be
 #                                  skipped without blinding the rest of the file.
-#   tree-sitter 0.26.0             `Language` accepts the PyCapsule a grammar package's
+#   tree-sitter 0.26.1             `Language` accepts the PyCapsule a grammar package's
 #                                  `language()` returns, and raises when the grammar's ABI
 #                                  is out of range. Measured ABI: python 15,
 #                                  javascript 15, typescript and tsx 14.
@@ -100,70 +140,147 @@ GRAMMAR_PACKAGES = {
 #                                  in its `name` field, so the bound names come from
 #                                  unpacking it rather than from reading that field.
 MEASURED_VERSIONS = {
-    "tree-sitter": "0.26.0",
+    "tree-sitter": "0.26.1",
     "tree-sitter-python": "0.25.0",
     "tree-sitter-typescript": "0.23.2",
     "tree-sitter-javascript": "0.25.0",
 }
 
-PYTHON_BINDINGS = frozenset({"function_definition", "class_definition"})
-PYTHON_ASSIGNMENTS = frozenset({"assignment", "augmented_assignment"})
-PYTHON_PATTERNS = frozenset({"pattern_list", "tuple_pattern", "list_pattern"})
-PYTHON_WRAPPERS = frozenset({"decorated_definition"})
-
-SCRIPT_BINDINGS = frozenset(
-    {
-        "abstract_class_declaration",
-        "abstract_method_signature",
-        "class_declaration",
-        "enum_declaration",
-        "function_declaration",
-        "function_signature",
-        "generator_function_declaration",
-        "interface_declaration",
-        "internal_module",
-        "method_definition",
-        "method_signature",
-        "property_signature",
-        "public_field_definition",
-        "type_alias_declaration",
-    }
+_PYTHON_WRAPPERS: Final = frozenset({"decorated_definition"})
+_PYTHON_DESTRUCTURING: Final = DestructuringSpec(
+    leaves=frozenset({"identifier"}),
+    recurse_children=frozenset({"pattern_list", "tuple_pattern", "list_pattern"}),
 )
-SCRIPT_DECLARATOR = "variable_declarator"
-SCRIPT_PATTERNS = frozenset({"array_pattern", "object_pattern", "rest_pattern"})
-SCRIPT_LEAVES = frozenset({"identifier", "shorthand_property_identifier_pattern"})
-SCRIPT_DEFAULTED = frozenset({"assignment_pattern", "object_assignment_pattern"})
-SCRIPT_WRAPPERS = frozenset({"ambient_declaration", "export_statement"})
+_SCRIPT_WRAPPERS: Final = frozenset({"ambient_declaration", "export_statement"})
+_SCRIPT_DESTRUCTURING: Final = DestructuringSpec(
+    leaves=frozenset({"identifier", "shorthand_property_identifier_pattern"}),
+    recurse_children=frozenset({"array_pattern", "object_pattern", "rest_pattern"}),
+    recurse_fields={
+        "pair_pattern": "value",
+        "assignment_pattern": "left",
+        "object_assignment_pattern": "left",
+    },
+)
 
 
-@dataclass(frozen=True)
-class Binding:
-    """One name a construct binds: its extent, and the line the declaration itself begins on.
+@cache
+def language(grammar: str) -> Language:
+    """The loaded grammar, built once. A failure to load is fatal, never a fallback."""
+    module_name, attribute = GRAMMAR_PACKAGES[grammar]
+    try:
+        return Language(getattr(importlib.import_module(module_name), attribute)())
+    except (AttributeError, ImportError, TypeError, ValueError) as error:
+        raise GrammarUnavailableError(
+            f"the {grammar} grammar could not be loaded from {module_name}: {error}. "
+            f"Install the pinned dependency ({module_name.replace('_', '-')}); the "
+            f"citation check parses rather than guesses, and will not answer for a "
+            f"language whose grammar is missing."
+        ) from error
 
-    The two differ for a decorated Python definition. ``_widened`` grows the construct outwards
-    through ``decorated_definition`` so its extent covers the decorator, which is what makes a
-    range projected from that extent quote the whole construct. The declaration the name belongs
-    to, however, begins on the ``def``/``class`` line BELOW the decorator -- so a citation that
-    starts at exactly the declaration's own lines must be read as current for it rather than as
-    one line short of it.
-    """
 
-    span: tuple[int, int]
-    declaration: int
-    test_case: bool = False
-    full_name: str | None = None
-    scope_uncertain: bool = False
+def _build_default_language_set() -> LanguageSet:
+    python_tags = tags_engine.load_query_text("python", "tags.scm")
+    ts_tags = tags_engine.load_query_text("typescript", "tags.scm")
+    ts_tests = tags_engine.load_query_text("typescript", "tests.scm")
+    js_tags = tags_engine.load_query_text("javascript", "tags.scm")
+    js_tests = tags_engine.load_query_text("javascript", "tests.scm")
+    return LanguageSet(
+        providers=(
+            TreeSitterLanguageProvider(
+                key=PYTHON,
+                suffixes=frozenset({".py"}),
+                grammar_version=f"tree-sitter-python={MEASURED_VERSIONS['tree-sitter-python']}",
+                load_language=lambda: language(PYTHON),
+                tags_query_text=python_tags,
+                wrappers=_PYTHON_WRAPPERS,
+                destructuring=_PYTHON_DESTRUCTURING,
+            ),
+            TreeSitterLanguageProvider(
+                key=TYPESCRIPT,
+                suffixes=frozenset({".ts", ".mts", ".cts"}),
+                grammar_version=(
+                    f"tree-sitter-typescript={MEASURED_VERSIONS['tree-sitter-typescript']}"
+                ),
+                load_language=lambda: language(TYPESCRIPT),
+                tags_query_text=ts_tags,
+                wrappers=_SCRIPT_WRAPPERS,
+                destructuring=_SCRIPT_DESTRUCTURING,
+                tests_query_text=ts_tests,
+            ),
+            TreeSitterLanguageProvider(
+                key=TSX,
+                suffixes=frozenset({".tsx"}),
+                grammar_version=(
+                    f"tree-sitter-typescript={MEASURED_VERSIONS['tree-sitter-typescript']}"
+                ),
+                load_language=lambda: language(TSX),
+                tags_query_text=ts_tags,
+                wrappers=_SCRIPT_WRAPPERS,
+                destructuring=_SCRIPT_DESTRUCTURING,
+                tests_query_text=ts_tests,
+            ),
+            TreeSitterLanguageProvider(
+                key=JAVASCRIPT,
+                suffixes=frozenset({".js", ".jsx", ".mjs", ".cjs"}),
+                grammar_version=(
+                    f"tree-sitter-javascript={MEASURED_VERSIONS['tree-sitter-javascript']}"
+                ),
+                load_language=lambda: language(JAVASCRIPT),
+                tags_query_text=js_tags,
+                wrappers=_SCRIPT_WRAPPERS,
+                destructuring=_SCRIPT_DESTRUCTURING,
+                tests_query_text=js_tests,
+            ),
+            LeanLanguageProvider(),
+        ),
+        tree_sitter_version=MEASURED_VERSIONS["tree-sitter"],
+    )
+
+
+DEFAULT_LANGUAGE_SET: Final[LanguageSet] = _build_default_language_set()
+
+
+def default_language_set() -> LanguageSet:
+    """Return the process's deterministic default ``LanguageSet``."""
+    return DEFAULT_LANGUAGE_SET
+
+
+def active_language_set() -> LanguageSet:
+    """Return the ``LanguageSet`` bound in the current context, or the deterministic default."""
+    return _language_set.current_language_set(DEFAULT_LANGUAGE_SET)
+
+
+def is_default_language_set() -> bool:
+    """Whether the current context has no non-default ``LanguageSet`` override."""
+    return not _language_set.has_language_set_override(DEFAULT_LANGUAGE_SET)
+
+
+@contextmanager
+def language_set_scope(selected: LanguageSet) -> Iterator[LanguageSet]:
+    """Bind ``selected`` as the active ``LanguageSet`` for the duration of this context."""
+    with _language_set.language_set_scope(selected) as bound:
+        yield bound
+
+
+def extractor_version(selected: LanguageSet | None = None) -> str:
+    """Version identity string derived from ``selected`` or the active ``LanguageSet``."""
+    return (active_language_set() if selected is None else selected).extractor_version
+
+
+def language_identity(path: str, selected: LanguageSet | None = None) -> str | None:
+    """Resolved ``<key>@<version>`` identity for ``path`` in ``selected`` or the active set."""
+    return (active_language_set() if selected is None else selected).language_identity(path)
 
 
 @dataclass(frozen=True)
 class _ParsedSource:
     tree: Tree
-    nodes: list[Node]
+    test_calls: tuple[Node, ...] = ()
 
 
 @dataclass
 class _ParseCache:
-    values: dict[tuple[str, str, tuple[str, ...]], _ParsedSource] = dataclass_field(
+    values: dict[tuple[str, str, str, tuple[str, ...]], _ParsedSource] = dataclass_field(
         default_factory=dict
     )
     lock: threading.Lock = dataclass_field(default_factory=threading.Lock)
@@ -173,8 +290,12 @@ _parsed_in_call: ContextVar[_ParseCache | None] = ContextVar("parsed_in_call", d
 
 
 @contextmanager
-def parsing_scope() -> Iterator[None]:
+def parsing_scope(selected: LanguageSet | None = None) -> Iterator[None]:
     """Keep only trees that the test-case diagnostics can revisit during this call."""
+    if selected is not None:
+        with language_set_scope(selected), parsing_scope():
+            yield
+        return
     if _parsed_in_call.get() is not None:
         yield
         return
@@ -187,30 +308,38 @@ def parsing_scope() -> Iterator[None]:
         cache.values.clear()
 
 
-def _parsed_source(path: str, grammar: str, lines: Sequence[str]) -> _ParsedSource:
+def _parsed_source(
+    path: str,
+    provider: TreeSitterLanguageProvider,
+    lines: Sequence[str],
+    *,
+    cache_tree: bool,
+) -> _ParsedSource:
     cache = _parsed_in_call.get()
-    if (
-        cache is None
-        or grammar not in {TYPESCRIPT, TSX, JAVASCRIPT}
-        or not test_cases.is_test_file(path)
-    ):
-        return _parse_source(grammar, lines)
-    key = (path, grammar, tuple(lines))
+    if cache is None or not cache_tree:
+        return _parse_source(provider, lines, capture_test_calls=cache_tree)
+    key = (path, provider.key, provider.version, tuple(lines))
     with cache.lock:
         if key not in cache.values:
-            cache.values[key] = _parse_source(grammar, lines)
+            cache.values[key] = _parse_source(provider, lines, capture_test_calls=True)
         return cache.values[key]
 
 
-def _parse_source(grammar: str, lines: Sequence[str]) -> _ParsedSource:
+def _parse_source(
+    provider: TreeSitterLanguageProvider,
+    lines: Sequence[str],
+    *,
+    capture_test_calls: bool,
+) -> _ParsedSource:
     # A Parser holds mutable traversal state. Only its completed immutable tree is reused.
-    tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
-    return _ParsedSource(tree=tree, nodes=_walk(tree.root_node))
+    tree = Parser(provider.load_language()).parse("\n".join(lines).encode("utf-8"))
+    calls = provider.extract_test_calls_from_tree(tree) if capture_test_calls else ()
+    return _ParsedSource(tree=tree, test_calls=calls)
 
 
 def grammar_of(path: str) -> str | None:
-    """The definition reader's language key, or ``None`` for an unsupported path."""
-    return SUFFIX_GRAMMARS.get(PurePosixPath(path).suffix.lower())
+    """The active ``LanguageSet`` reader key for ``path``, or ``None`` for an unsupported path."""
+    return active_language_set().grammar_of(path)
 
 
 def parsed(path: str) -> bool:
@@ -220,24 +349,38 @@ def parsed(path: str) -> bool:
 
 @dataclass
 class _TypeScriptAnchorInputs:
-    values: dict[str, str | None] = dataclass_field(default_factory=dict)
+    values: dict[tuple[str, str], str | None] = dataclass_field(default_factory=dict)
     lock: threading.Lock = dataclass_field(default_factory=threading.Lock)
+
+
+def _typescript_provider() -> TreeSitterLanguageProvider:
+    provider = active_language_set().provider_for(TYPESCRIPT)
+    if isinstance(provider, TreeSitterLanguageProvider):
+        return provider
+    fallback = DEFAULT_LANGUAGE_SET.provider_for(TYPESCRIPT)
+    assert isinstance(fallback, TreeSitterLanguageProvider)
+    return fallback
 
 
 def typescript_anchor_identifier(text: str) -> str | None:
     """The direct identifier rooted by a complete TS call or generic type spelling."""
+    provider = _typescript_provider()
+    ts_version = provider.version
     memo = request_owner(_TypeScriptAnchorInputs, _TypeScriptAnchorInputs)
     if memo is None:
-        return _process_typescript_anchor_identifier(text)
+        if is_default_language_set():
+            return _process_typescript_anchor_identifier(ts_version, text)
+        return _parse_typescript_anchor_identifier(text, provider.load_language())
+    key = (ts_version, text)
     with memo.lock:
-        if text not in memo.values:
-            memo.values[text] = _parse_typescript_anchor_identifier(text)
-        return memo.values[text]
+        if key not in memo.values:
+            memo.values[key] = _parse_typescript_anchor_identifier(text, provider.load_language())
+        return memo.values[key]
 
 
-def _parse_typescript_anchor_identifier(text: str) -> str | None:
+def _parse_typescript_anchor_identifier(text: str, ts_language: Language) -> str | None:
     signature = f"function {text} {{}}"
-    signature_tree = Parser(language(TYPESCRIPT)).parse(signature.encode("utf-8"))
+    signature_tree = Parser(ts_language).parse(signature.encode("utf-8"))
     if not signature_tree.root_node.has_error:
         declaration = next(
             (
@@ -257,7 +400,7 @@ def _parse_typescript_anchor_identifier(text: str) -> str | None:
     )
     for prefix, suffix, kind, field in wrappers:
         source = f"{prefix}{text}{suffix}"
-        tree = Parser(language(TYPESCRIPT)).parse(source.encode("utf-8"))
+        tree = Parser(ts_language).parse(source.encode("utf-8"))
         start = len(prefix.encode("utf-8"))
         end = start + len(text.encode("utf-8"))
         for node in _walk(tree.root_node):
@@ -278,86 +421,48 @@ def _parse_typescript_anchor_identifier(text: str) -> str | None:
 
 
 @cache
-def _process_typescript_anchor_identifier(text: str) -> str | None:
-    return _parse_typescript_anchor_identifier(text)
+def _process_typescript_anchor_identifier(_version: str, text: str) -> str | None:
+    return _parse_typescript_anchor_identifier(text, language(TYPESCRIPT))
 
 
-@cache
-def language(grammar: str) -> Language:
-    """The loaded grammar, built once. A failure to load is fatal, never a fallback."""
-    module_name, attribute = GRAMMAR_PACKAGES[grammar]
-    try:
-        return Language(getattr(importlib.import_module(module_name), attribute)())
-    except (AttributeError, ImportError, TypeError, ValueError) as error:
-        raise GrammarUnavailableError(
-            f"the {grammar} grammar could not be loaded from {module_name}: {error}. "
-            f"Install the pinned dependency ({module_name.replace('_', '-')}); the "
-            f"citation check parses rather than guesses, and will not answer for a "
-            f"language whose grammar is missing."
-        ) from error
+def _resolve_provider(path: str) -> LanguageProvider | None:
+    grammar = grammar_of(path)
+    if grammar is None:
+        return None
+    return active_language_set().provider_for(grammar)
 
 
 def bindings(path: str, lines: Sequence[str]) -> dict[str, list[Binding]]:
     """Every name ``path`` binds, with both its widened extent and its declaration line.
 
-    One walk answers both, so a caller needing the declaration line does not re-parse the file.
+    One parse answers both, so a caller needing the declaration line does not re-parse the file.
     The declaration line starts the construct itself. It can follow a Python decorator
     or a Lean declaration prefix. For an exported TypeScript declaration, ``export``
     shares the declaration's first line.
     """
-    grammar = grammar_of(path)
-    if grammar is None:
+    provider = _resolve_provider(path)
+    if provider is None:
         return {}
-    if grammar == LEAN:
-        return _lean_bindings(lines)
-    source = _parsed_source(path, grammar, lines)
-    reader = _python_names if grammar == PYTHON else _script_names
-    wrappers = PYTHON_WRAPPERS if grammar == PYTHON else SCRIPT_WRAPPERS
-    test_file = grammar != PYTHON and test_cases.is_test_file(path)
-    found: dict[str, list[Binding]] = {}
-    for node in source.nodes:
-        names = [] if node.has_error else reader(node)
-        cases = test_cases.case_names(node) if test_file else ()
-        names.extend(cases)
-        if not names:
-            continue
-        binding = Binding(
-            span=_span(_widened(node, wrappers)), declaration=_span(node)[0], test_case=bool(cases)
+    if isinstance(provider, LeanLanguageProvider):
+        return provider.extract_bindings(lines)
+    if isinstance(provider, TreeSitterLanguageProvider):
+        test_file = provider.supports_test_cases(path)
+        source = _parsed_source(path, provider, lines, cache_tree=test_file)
+        return provider.extract_bindings_from_tree(
+            source.tree, test_calls=source.test_calls if test_file else ()
         )
-        for name in names:
-            found.setdefault(name, []).append(binding)
-    return found
-
-
-def _lean_bindings(lines: Sequence[str]) -> dict[str, list[Binding]]:
-    full: dict[str, list[Binding]] = {}
-    possible: dict[str, list[Binding]] = {}
-    written: dict[str, list[Binding]] = {}
-    for declaration in lean_declarations.declarations(lines):
-        binding = Binding(
-            span=(declaration.start, declaration.end),
-            declaration=declaration.declaration,
-            full_name=declaration.full_name,
-            scope_uncertain=declaration.full_name is None,
-        )
-        if declaration.full_name is not None:
-            full.setdefault(declaration.full_name, []).append(binding)
-        else:
-            for name in declaration.possible_full_names:
-                possible.setdefault(name, []).append(binding)
-        written.setdefault(declaration.written_name, []).append(binding)
-    # Use exact names before written aliases, and established names before possible ones.
-    written.update(possible)
-    written.update(full)
-    return written
+    return {}
 
 
 def test_case_refusal(path: str, lines: Sequence[str], name: str) -> str | None:
     """Diagnostic for an unresolved test-case proof; other files keep symbol diagnostics."""
-    grammar = grammar_of(path)
-    if grammar not in {TYPESCRIPT, TSX, JAVASCRIPT} or not test_cases.is_test_file(path):
+    provider = _resolve_provider(path)
+    if not isinstance(provider, TreeSitterLanguageProvider) or not provider.supports_test_cases(
+        path
+    ):
         return None
-    return test_cases.refusal(_parsed_source(path, grammar, lines).nodes, path, name)
+    source = _parsed_source(path, provider, lines, cache_tree=True)
+    return test_cases.refusal(source.test_calls, path, name)
 
 
 def test_case_range(
@@ -373,21 +478,17 @@ def test_case_range(
     is exactly one case's extent, and only when no ``path::title`` reaches that case. The extent is
     measured as every other extent in this module is, on a parse of the candidate bytes.
     """
-    grammar = grammar_of(path)
-    if grammar not in {TYPESCRIPT, TSX, JAVASCRIPT} or not test_cases.is_test_file(path):
+    provider = _resolve_provider(path)
+    if not isinstance(provider, TreeSitterLanguageProvider) or not provider.supports_test_cases(
+        path
+    ):
         return test_case_ranges.not_a_case_file(path, start, end)
-    return test_case_ranges.case_at(
-        path, _parsed_source(path, grammar, lines).nodes, start, end, reaches
-    )
+    source = _parsed_source(path, provider, lines, cache_tree=True)
+    return test_case_ranges.case_at(path, source.test_calls, start, end, reaches)
 
 
 def _walk(root: Node) -> list[Node]:
-    """Every node in the tree, at any depth, in DOCUMENT ORDER.
-
-    Order is contract, not incident: a name bound twice in one file yields its extents in
-    the order a reader meets them, and a caller comparing two runs would otherwise see the
-    same file produce two different answers.
-    """
+    """Every node in the tree, at any depth, in document order."""
     found: list[Node] = []
     pending = [root]
     while pending:
@@ -395,72 +496,3 @@ def _walk(root: Node) -> list[Node]:
         found.append(node)
         pending.extend(reversed(node.children))
     return found
-
-
-def _widened(node: Node, wrappers: frozenset[str]) -> Node:
-    """``node`` grown outwards through the syntax that decorates or exports it."""
-    while node.parent is not None and node.parent.type in wrappers:
-        node = node.parent
-    return node
-
-
-def _span(node: Node) -> tuple[int, int]:
-    """The one-based line range ``node`` occupies (one rule: :func:`test_cases.span_of`)."""
-    return test_cases.span_of(node)
-
-
-def _text(node: Node | None) -> list[str]:
-    return [] if node is None or node.text is None else [node.text.decode("utf-8")]
-
-
-def _python_names(node: Node) -> list[str]:
-    """The names one Python construct binds."""
-    if node.type in PYTHON_BINDINGS:
-        return _text(node.child_by_field_name("name"))
-    if node.type in PYTHON_ASSIGNMENTS:
-        return _python_targets(node.child_by_field_name("left"))
-    return []
-
-
-def _python_targets(node: Node | None) -> list[str]:
-    """The plain names an assignment target binds, unpacking nested tuples and lists.
-
-    An attribute or subscript target (``holder.field = 1``) binds no name this check can
-    resolve to a file, so it yields nothing rather than yielding ``holder``.
-    """
-    if node is None:
-        return []
-    if node.type == "identifier":
-        return _text(node)
-    if node.type in PYTHON_PATTERNS:
-        return [name for child in node.named_children for name in _python_targets(child)]
-    return []
-
-
-def _script_names(node: Node) -> list[str]:
-    """The names one JavaScript or TypeScript construct binds."""
-    if node.type in SCRIPT_BINDINGS:
-        return _text(node.child_by_field_name("name"))
-    if node.type == SCRIPT_DECLARATOR:
-        return _script_targets(node.child_by_field_name("name"))
-    return []
-
-
-def _script_targets(node: Node | None) -> list[str]:
-    """The names a declarator binds, unpacking destructuring one alternative at a time.
-
-    Only the BOUND side is read. ``{ p: renamed }`` binds ``renamed`` and not ``p``, and
-    ``{ a = fallback }`` binds ``a`` and not ``fallback`` -- a descendant sweep would
-    collect both halves and turn every default value into a declaration.
-    """
-    if node is None:
-        return []
-    if node.type in SCRIPT_LEAVES:
-        return _text(node)
-    if node.type == "pair_pattern":
-        return _script_targets(node.child_by_field_name("value"))
-    if node.type in SCRIPT_DEFAULTED:
-        return _script_targets(node.child_by_field_name("left"))
-    if node.type in SCRIPT_PATTERNS:
-        return [name for child in node.named_children for name in _script_targets(child)]
-    return []

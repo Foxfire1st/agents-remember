@@ -204,10 +204,12 @@ def _range(path: str, locator: Mapping[str, Any], data: bytes) -> tuple[int, int
 
 
 def _symbol_range(path: str, name: str, data: bytes) -> tuple[int, int]:
-    """The one extent the shipped extractor binds for ``name`` in these bytes."""
+    """The one extent the active ``LanguageSet`` extractor binds for ``name`` in these bytes."""
 
+    language_set = grammars.active_language_set()
     grammar = grammars.grammar_of(path)
-    if grammar is None:
+    provider = language_set.provider_for(grammar) if grammar is not None else None
+    if grammar is None or provider is None:
         raise AnchorResolutionError(
             f"the shipped extractor has no grammar or scanner for {path!r}, so a definition "
             f"of {name!r} cannot be told from a mention; cite a line_range or the file instead"

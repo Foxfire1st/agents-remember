@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import sys
+import tomllib
 import unittest
+from importlib.metadata import version
 from pathlib import Path
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
 PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
+UV_LOCK = Path(__file__).resolve().parents[1] / "uv.lock"
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
@@ -22,6 +25,72 @@ def spans(path: str, source: str) -> dict[str, list[tuple[int, int]]]:
         name: [binding.span for binding in items]
         for name, items in grammars.bindings(path, source.splitlines()).items()
     }
+
+
+def _numbered(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in text.strip().split("."))
+
+
+class PinnedDependencyTests(unittest.TestCase):
+    """Parser measurements remain aligned with pyproject bounds, uv.lock, and installed wheels."""
+
+    def setUp(self) -> None:
+        declared = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+        self.pins = {
+            name: bounds
+            for name, _, bounds in (
+                one.partition(">=") for one in declared["project"]["dependencies"]
+            )
+        }
+        lock_doc = tomllib.loads(UV_LOCK.read_text(encoding="utf-8"))
+        self.locked = {
+            pkg["name"]: pkg["version"]
+            for pkg in lock_doc.get("package", ())
+            if isinstance(pkg, dict) and "name" in pkg and "version" in pkg
+        }
+
+    def bounds(self, package: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        """The ``>=lower,<upper`` a dependency line declares, as comparable tuples."""
+        self.assertIn(package, self.pins, f"{package} is claimed but not a declared dependency")
+        lower, separator, upper = self.pins[package].partition(",<")
+        self.assertEqual(separator, ",<", f"{package} carries no upper bound: {self.pins[package]}")
+        return _numbered(lower), _numbered(upper)
+
+    def test_every_measured_version_is_a_declared_dependency_within_its_pin(self) -> None:
+        for package, measured in grammars.MEASURED_VERSIONS.items():
+            with self.subTest(package=package):
+                lower, upper = self.bounds(package)
+                self.assertLessEqual(lower, _numbered(measured))
+                self.assertLess(_numbered(measured), upper)
+
+    def test_every_measured_version_matches_uv_lock_and_installed_wheel(self) -> None:
+        for package, measured in grammars.MEASURED_VERSIONS.items():
+            with self.subTest(package=package):
+                self.assertEqual(
+                    self.locked.get(package),
+                    measured,
+                    f"{package} measured {measured!r} drifted from uv.lock {self.locked.get(package)!r}",
+                )
+                lower, upper = self.bounds(package)
+                installed = version(package)
+                self.assertLessEqual(lower, _numbered(installed))
+                self.assertLess(_numbered(installed), upper)
+                self.assertEqual(installed, measured)
+
+    def test_every_declared_language_provider_loads_and_compiles_queries(self) -> None:
+        default_set = grammars.default_language_set()
+        for suffix, key in grammars.SUFFIX_GRAMMARS.items():
+            with self.subTest(suffix=suffix, key=key):
+                self.assertEqual(default_set.grammar_of(f"sample{suffix}"), key)
+        for provider in default_set.providers:
+            with self.subTest(provider=provider.key):
+                if isinstance(provider, grammars.TreeSitterLanguageProvider):
+                    self.assertIsNotNone(provider.load_language())
+                    self.assertIsNotNone(provider.compiled_tags_query())
+                    if provider.has_test_cases:
+                        self.assertIsNotNone(provider.compiled_tests_query())
+                else:
+                    self.assertEqual(provider.key, grammars.LEAN)
 
 
 class TestCaseDefinitionTests(unittest.TestCase):
@@ -215,44 +284,6 @@ class ScriptDefinitionTests(unittest.TestCase):
             with self.subTest(suffix=suffix):
                 found = spans(f"dashboard/x{suffix}", "export function main() {}\n")
                 self.assertEqual(found["main"], [(1, 1)])
-
-
-OFFLINE_PROBE = '''\
-"""Parse one file of every supported language with every network path closed."""
-
-import socket
-import sys
-
-
-def _blocked(*args, **kwargs):
-    raise OSError("network egress is blocked by the offline parse guard")
-
-
-socket.socket.connect = _blocked
-socket.socket.connect_ex = _blocked
-socket.create_connection = _blocked
-socket.getaddrinfo = _blocked
-socket.gethostbyname = _blocked
-
-try:
-    socket.create_connection(("example.invalid", 80))
-except OSError:
-    pass
-else:
-    raise SystemExit("the network block did not take effect; the run proves nothing")
-
-from agents_remember.memory_quality.style.citations import grammars
-
-for path, source in (
-    ("k.py", "def build():\\n    return 1\\n"),
-    ("k.ts", "export class RailRow {}\\n"),
-    ("k.tsx", "export const Row = () => null;\\n"),
-    ("k.js", "export function main() {}\\n"),
-):
-    if not grammars.bindings(path, source.splitlines()):
-        raise SystemExit(f"{path} parsed to nothing with egress blocked")
-print("ok")
-'''
 
 
 if __name__ == "__main__":

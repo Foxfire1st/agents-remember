@@ -360,6 +360,12 @@ PROCESS_MUTABLE_STATES = (
         _clear_cache,
     ),
     _row(
+        "memory_quality.style.citations.tags_engine",
+        "compile_query",
+        "Forget compiled tree-sitter query memoization between test modules.",
+        _clear_cache,
+    ),
+    _row(
         "observer.tool_events",
         "_ToolEventRegistry.instance",
         "Clear the installed tool-event writer between test modules.",

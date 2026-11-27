@@ -70,6 +70,7 @@ __all__ = [
     "EntryState",
     "ObservationKey",
     "OpenedCodeTree",
+    "active_extractor_version",
     "observation_key",
     "observe_entry",
     "open_code_tree",
@@ -79,12 +80,17 @@ EntryState = Literal["current", "stale", "unverifiable"]
 ObservationKey = tuple[str, str, str, str, str]
 
 _OBSERVATION_RULE: Final = "anchor-observation/v2"
-EXTRACTOR_VERSION: Final = ";".join(
-    (
-        _OBSERVATION_RULE,
-        *(f"{name}={version}" for name, version in sorted(grammars.MEASURED_VERSIONS.items())),
-    )
-)
+EXTRACTOR_VERSION: Final = f"{_OBSERVATION_RULE};{grammars.extractor_version()}"
+
+
+def active_extractor_version() -> str:
+    """The observation extractor version derived from the active ``LanguageSet``."""
+
+    if grammars.is_default_language_set():
+        return EXTRACTOR_VERSION
+    return f"{_OBSERVATION_RULE};{grammars.extractor_version()}"
+
+
 _SUPPORTED_LOCATORS: Final = frozenset({"symbol", "line_range", "file"})
 # Bounded in entries. Measured at about 600 bytes per entry (key strings plus value), 8,192
 # entries hold about 5 MB, and stay under 10 MB even at about 1.2 KB per entry (long paths). A
@@ -213,7 +219,7 @@ def observation_key(
 
     recorded = recorded_blob if locator.get("kind") == "line_range" else ""
     spelled = json.dumps(dict(locator), sort_keys=True, separators=(",", ":"))
-    return (blob, spelled, path, recorded, EXTRACTOR_VERSION)
+    return (blob, spelled, path, recorded, active_extractor_version())
 
 
 @dataclass(frozen=True)
