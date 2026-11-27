@@ -228,6 +228,9 @@ describe('a saved page', () => {
       close: vi.fn(),
     };
     try {
+      await act(async () => {
+        await Promise.resolve();
+      });
       act(() => {
         window.dispatchEvent(
           new MessageEvent('message', {
@@ -236,6 +239,9 @@ describe('a saved page', () => {
             ports: [port as unknown as MessagePort],
           }),
         );
+      });
+      expect(port.onmessage).toEqual(expect.any(Function));
+      act(() => {
         fireEvent.load(frame);
       });
       const bindingMessages = () =>

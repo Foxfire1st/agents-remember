@@ -15,6 +15,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, R
 from agents_remember.mcp import server as server_module
 from agents_remember.mcp.registration.explainer_surface import EXPLAINER_BINDING_ENV
 from agents_remember.mcp.server import create_server
+from agents_remember.models.task_document_ref import TaskScopedReaderContext
 from agents_remember.models.tools.tool_schema_compaction import compact_tool_schema
 
 REPO = "agents-remember"
@@ -117,34 +118,50 @@ def _schema_compaction_violations(
     return violations
 
 
-def _contract_signature(node: Any, *, is_root: bool = True) -> Any:
-    """Strip only the lossless compacted metadata keys so wire contracts can be compared."""
+_SIGNATURE_MAP_KEYS = ("properties", "patternProperties", "dependentSchemas", "$defs")
+_SIGNATURE_SINGLE_KEYS = ("items", "additionalProperties", "not", "if", "then", "else")
+_SIGNATURE_LIST_KEYS = ("items", "anyOf", "oneOf", "allOf", "prefixItems")
 
-    if isinstance(node, list):
-        return [_contract_signature(item, is_root=False) for item in node]
+
+def _signature_map_entry(sub: Any, *, strip_description: bool) -> Any:
+    if not isinstance(sub, Mapping):
+        return copy.deepcopy(sub)
+    compacted = _contract_signature(sub, is_root=False)
+    if not strip_description:
+        return compacted
+    return {k: v for k, v in compacted.items() if k != "description"}
+
+
+def _signature_value(key: str, value: Any, *, is_root: bool) -> Any:
+    if isinstance(value, Mapping):
+        if key in _SIGNATURE_MAP_KEYS:
+            strip_desc = is_root and key == "$defs"
+            return {
+                name: _signature_map_entry(sub, strip_description=strip_desc)
+                for name, sub in value.items()
+            }
+        if key in _SIGNATURE_SINGLE_KEYS:
+            return _contract_signature(value, is_root=False)
+    elif isinstance(value, list) and key in _SIGNATURE_LIST_KEYS:
+        return [
+            _contract_signature(item, is_root=False)
+            if isinstance(item, Mapping)
+            else copy.deepcopy(item)
+            for item in value
+        ]
+    return copy.deepcopy(value)
+
+
+def _contract_signature(node: Any, *, is_root: bool = True) -> Any:
+    """Strip only lossless schema metadata; recurse only through JSON-Schema subschema containers."""
+
     if not isinstance(node, Mapping):
-        return node
+        return copy.deepcopy(node)
     out: dict[str, Any] = {}
     for key, value in node.items():
         if key == "title" or (key == "default" and value is None):
             continue
-        if key in ("properties", "patternProperties", "dependentSchemas", "$defs") and isinstance(
-            value, Mapping
-        ):
-            out[key] = {
-                name: (
-                    {
-                        k: v
-                        for k, v in _contract_signature(sub, is_root=False).items()
-                        if not (is_root and key == "$defs" and k == "description")
-                    }
-                    if isinstance(sub, Mapping)
-                    else sub
-                )
-                for name, sub in value.items()
-            }
-        else:
-            out[key] = _contract_signature(value, is_root=False)
+        out[key] = _signature_value(key, value, is_root=is_root)
     return out
 
 
@@ -289,3 +306,70 @@ def test_create_server_compacts_every_advertised_schema_with_contract_parity(
         assert compacted.annotations == raw.annotations
         assert _schema_compaction_violations(compacted.inputSchema) == []
         assert compacted.inputSchema == _contract_signature(raw.inputSchema)
+
+
+def test_literal_const_enum_and_default_payloads_survive_compaction_and_signature() -> None:
+    """Both production compaction and the parity oracle preserve literal JSON payloads verbatim."""
+
+    raw = {
+        "title": "LiteralPayloadArgs",
+        "type": "object",
+        "properties": {
+            "const_payload": {
+                "title": "ConstPayload",
+                "const": {"title": "fixed"},
+            },
+            "enum_payload": {
+                "title": "EnumPayload",
+                "enum": [{"title": "a", "default": None}],
+            },
+            "default_payload": {
+                "title": "DefaultPayload",
+                "type": "object",
+                "default": {"title": "x", "default": None},
+            },
+        },
+    }
+    expected = {
+        "type": "object",
+        "properties": {
+            "const_payload": {"const": {"title": "fixed"}},
+            "enum_payload": {"enum": [{"title": "a", "default": None}]},
+            "default_payload": {
+                "type": "object",
+                "default": {"title": "x", "default": None},
+            },
+        },
+    }
+
+    assert compact_tool_schema(raw) == expected
+    assert _contract_signature(raw) == expected
+
+
+def test_worktree_sync_description_keeps_raw_merge_warning(tmp_path: Path) -> None:
+    """worktree_sync warns that memory merges only through worktree_sync and raw git merge is unsupported."""
+
+    config, _workspace = _world(tmp_path)
+    tools = {tool.name: tool for tool in asyncio.run(create_server(config).list_tools())}
+    sync_description = tools["worktree_sync"].description or ""
+
+    assert len(sync_description) <= 500
+    lowered = sync_description.lower()
+    assert "merges memory only here" in lowered
+    assert "raw git merge" in lowered
+    assert "unsupported hand edit" in lowered
+
+
+def test_read_ar_files_description_names_task_scoped_reader_inputs(tmp_path: Path) -> None:
+    """read_ar_files names TaskScopedReaderContext input fields rather than response fields."""
+
+    config, _workspace = _world(tmp_path)
+    tools = {tool.name: tool for tool in asyncio.run(create_server(config).list_tools())}
+    read_description = tools["read_ar_files"].description or ""
+
+    assert len(read_description) <= 500
+    assert tuple(TaskScopedReaderContext.model_fields) == ("task_document_ref", "contract_path")
+    assert "(task_document_ref, contract_path)" in read_description
+    assert all(
+        field not in read_description for field in ("worktreeScope", "sourceRoot", "memoryRoot")
+    )

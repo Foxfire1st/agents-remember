@@ -40,7 +40,15 @@ the source repository and its generated copies.
 
 A harness starts the tool server as a process of its own with the command
 `agents-remember-mcp --config <settings file>` and speaks MCP with it over standard input and
-output. The host gives every role agent a tool server under the name `agents-remember-task`.
+output. The host gives every role agent a bound tool server under the name `agents-remember-task`,
+which narrows advertised and dispatched tools to that role's static allowlist in `PUBLIC_TOOLS`
+order (an unbound server serves the full public roster; a valid role+explainer launch adds the four
+explainer tools). When a role binding is malformed or unreadable, the server fails closed: it emits
+no launched-server instructions and serves only `server_info` (pruning all other tools including
+explainer tools), and `server_info` reports the binding error. Before role narrowing, the server
+losslessly compacts every registered tool's JSON Schema (stripping schema-level `title`, redundant
+`default: null`, and top-level `$defs` model descriptions while preserving runtime validation) and
+keeps every tool's short description within 500 characters.
 
 The tool server owns the deterministic work:
 
@@ -127,7 +135,11 @@ Bootstrap call or the tool `runtime_install` creates it with every folder below 
 
 The folder `runtime/` appears when a tool server or the dashboard's server first starts: each
 writes a record of its process into `runtime/servers/`. The tool server serves the skill from the
-package. [Runtime Layout](reference/runtime-layout.md) lists every folder, its writer
+package; when running from a non-filesystem archive, role launch preparation atomically materializes
+a verified copy under `<coordination-root>/.cache/skill-corpus/<sha256>/l-01-agent-lifecycles/` so
+on-disk `Link roots: skill="..."` paths stay valid (filesystem wheel and editable installs resolve
+directly to `package_data/runtime/skills/l-01-agent-lifecycles/` without writing `.cache/`).
+[Runtime Layout](reference/runtime-layout.md) lists every folder, its writer
 and the files outside the coordination root.
 
 These parts write the folders:

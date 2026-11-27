@@ -112,10 +112,11 @@ installs, with the host this build installs, unless an entry names another groun
     repository.
 - **A role agent also carries the tools of the tool server that you registered under the name
   `agents-remember`.** This holds when the configuration of Pi that the agent reads registers that
-  tool server, as this page tells you to; the role agent then has the tools of Agents Remember
-  twice, under `agents-remember-task` and under `agents-remember`. The whole result of
-  `role_start`, in the file that `log` names, says `"secondCopyLoaded": true` for every start on
-  Pi, also when no such registration exists.
+  tool server, as this page tells you to; the bound `agents-remember-task` server serves only the
+  seat's role-scoped tool list (`ROLE_TOOL_ALLOWLISTS[role]`), while the user-registered
+  `agents-remember` server loads the full unbound tool roster, so the seat's role tools appear on
+  both servers. The whole result of `role_start`, in the file that `log` names, says
+  `"secondCopyLoaded": true` for every start on Pi, also when no such registration exists.
   - Setting: none. The host offers no setting that keeps one tool server out of one start on Pi. A
     role agent's instructions name the tool server `agents-remember-task` for every tool call.
   - Who: Agents Remember.

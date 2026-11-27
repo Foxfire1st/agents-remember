@@ -2,7 +2,12 @@
 
 The tool server `agents-remember-mcp` serves the tools of this page to a harness. Every tool has
 one row below, and the sections follow the groups of the tools. The last column names the main
-arguments of a tool, not every argument; the tool server serves the full schema of each tool.
+arguments of a tool, not every argument; the tool server serves the full schema of each tool,
+compacted losslessly on the wire (stripping schema-level `title`, `default: null`, and top-level
+`$defs` model descriptions while preserving runtime validation). A role-bound
+`agents-remember-task` server serves only that role's canonical allowlist
+(`ROLE_TOOL_ALLOWLISTS[role]`), and a server with an unreadable role binding fails closed to
+`server_info` only.
 
 A tool that takes `dry_run` previews with `dry_run=true`. The default of `dry_run` differs from
 tool to tool, so name the value in the call. A tool that works on one code repository takes a
@@ -73,7 +78,12 @@ compact line in the short form.
 A worktree, closeout or landing answer names the state reached and the next call in `nextTool`
 with `nextArgs`. A refusal that follows from the state of a task answers `ok: false` with the
 state's own sentence, a `code` and the one following call. A dry run that names blockers answers
-a blocked state.
+a blocked state. Core refusals across six families (`role_message`, `task_doc` review/route-review,
+`worktree_sync` conflict/choice states, `knowledge_write`/`memory_quality_check`,
+`worktree_closeout_*`/`curator_coherence`/`worktree_operation_control`, and `retire_child`) also
+append a Poka-Yoke `See skill://agents-remember/skills/l-01-agent-lifecycles/...#<anchor>.` pointer
+in their guidance text (`nextAction`, `detail`, `summary`, `guidance`, `refusalDetail`, `notes`, or
+raised error text) so callers can open the exact recovery procedure on demand.
 
 Every tool carries the annotation `readOnlyHint`. It is `true` for the six tools that only read:
 `server_info`, `read_ar_files`, `knowledge_read`, `knowledge_integrity_check`, `worktree_status`
@@ -191,7 +201,7 @@ carryover.
 | Tool | Purpose | Main arguments |
 | --- | --- | --- |
 | `knowledge_read` | Name one view of a memory snapshot (`source_context`, `invariant`, `family`, `record`, `weakness`, `dependent`, `writers`). Paged record rows hold the text ID, kind, state and memory-checkout location. Open the named files for record text. The short answer of `read_ar_files` carries a source file's rules. The `writers` view returns bounded aggregates by role, harness and model, with revision counts and the path to the complete report. | `memoryRoot`, `view`, `limit=32`, `continuation`, the seed of the view (`sourcePath`, `invariantRevisionId`, `familyRevisionId`, `recordId`), filters `weaknessKind`, `includeClosed`, `staleOnly`, `standsOn` |
-| `knowledge_write` | Plan or write the [hand-off list](../concepts.md#hand-off-list) that a Curator gives it, through the one writer of knowledge files, which `agents-remember knowledge-ingest` and `agents-remember knowledge-bootstrap` also use. Without `commit` it plans and validates; with it, writes knowledge files and makes no Git commit. The answer names the whole report and all refusals, and its `notes` say what the write took but the caller should know, for example a revised invariant that has no title. | `contractPath`, `handoff` + `handoffName` or `handoffPath`, `authorizationRef`, `commit=false`; for a [foundation wave](../concepts.md#knowledge-foundation), a write that belongs to no task, `repoId` + `wave`; for a crossing, a master's crossing sync or structural merge that parked before its merge commit and opened a history file, the master's `contractPath` + `crossing` |
+| `knowledge_write` | Plan or write the [hand-off list](../concepts.md#hand-off-list) that a Curator gives it, through the one writer of knowledge files, which `agents-remember knowledge-ingest` and `agents-remember knowledge-bootstrap` also use. Without `commit` it plans and validates; with it, writes knowledge files and makes no Git commit. The answer names the whole report and all refusals, and its `notes` say what the write took but the caller should know, for example a revised invariant that has no title. When `state` is `refused`, `notes` also carries a `See skill://.../reference/curator/publication-report.md#read-the-ingest-report-before-claiming-publication.` pointer; an `invalid-input` refusal appends `See skill://.../reference/refused-write.md.` to `refusalDetail`. | `contractPath`, `handoff` + `handoffName` or `handoffPath`, `authorizationRef`, `commit=false`; for a [foundation wave](../concepts.md#knowledge-foundation), a write that belongs to no task, `repoId` + `wave`; for a crossing, a master's crossing sync or structural merge that parked before its merge commit and opened a history file, the master's `contractPath` + `crossing` |
 | `knowledge_diff` | Name the changed records of two memory trees beside a caller-readable report holding the whole comparison: the two trees, counts by kind, changed records, report location. | `memoryRoot`, `beforeRevision="HEAD"`, `afterRevision`, `recordId`, `path` |
 | `knowledge_integrity_check` | Validate a memory tree: `validation.ok`, refusal/report counts, rule counts and bounded violations. With `contractPath`, use the task's code and memory worktrees and return its latest persisted worklist; no semantic judgment is inferred. | `memoryRoot`, `codeRoot`, `baseCommits`, or a task's `contractPath` |
 
@@ -501,7 +511,11 @@ published through `record_route_review` on a routed leaf. `record_route_review` 
 `{verdict, verdictRef, routes:[{route, verdict, evidenceRef}]}`. The plane stamps the
 candidate tree and time, every evidence path must be a real task-relative file, and the
 new record becomes the current route record. A routed addition supplies the previously
-recorded routes together with the new verdict reference and `addedFindings`.
+recorded routes together with the new verdict reference and `addedFindings`. Review and route-review
+refusals (`review-admission-invalid`, `review-budget-exhausted`, `review-candidate-invalid`,
+`review-kind-invalid`, and `route-review-invalid`) append a
+`See skill://agents-remember/skills/l-01-agent-lifecycles/reference/review/rounds-and-late-findings.md#<anchor>.`
+pointer to the refusal error text.
 - Atomic masters: the operation targets the master's task document and binds the accumulated
 candidate, membership and evidence; a child publishes no independent review; master review is
 required only when the master lands into its parent. `branch_addressed=true` (accepted only for
@@ -752,7 +766,10 @@ that refusal names two ways on: wait for a delivery, or withdraw a waiting messa
 refusal names one reason: `recipient-not-found`, `recipient-archived`, `recipient-ambiguous`,
 `recipient-cannot-be-resumed`, `scope-check-failed`, `caller-has-no-binding`,
 `no-paseo-runtime-configured`, `message-too-long`, `message-file-failed`, `settings-invalid`, or
-`host-unreachable` when the host does not answer and the recipient cannot be found.
+`host-unreachable` when the host does not answer and the recipient cannot be found. The refusals
+`recipient-busy`, `message-too-long`, `message-file-failed`, and `recipient-archived` append a
+`See skill://agents-remember/skills/l-01-agent-lifecycles/reference/message-handover.md#<anchor>.`
+pointer to `nextAction` (ordinary `held` answers carry no refusal pointer).
 
 The full procedure of a sender for held answers and for a full store is
 [Message handover](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/reference/message-handover.md).

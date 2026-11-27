@@ -179,10 +179,12 @@ The keys of Agents Remember stand in the user settings file. That file can be re
 - **An agent that waits for its [helpers](../concepts.md#helper), the agents that it started in
   the background, stays idle after they have finished.** Hermes does not wake an agent whose turn
   has ended.
-  - Setting: none. In its first message, Agents Remember tells an agent on an ACP harness to end
-    such a turn with a line that starts `WAITING FOR SUBAGENTS:` and a progress report. Three
-    minutes after such a turn end, the [plug-in](../concepts.md#plug-in) that Agents Remember
-    installs in the host sends the agent a message that asks for the helpers' progress.
+  - Setting: none. Shared role instructions tell every role agent to end waits with
+    `WAITING FOR SUBAGENTS:` or `WAITING FOR BACKGROUND:`, and for an ACP harness Agents Remember
+    also adds a note in the first message reminding the agent to end a helper wait with
+    `WAITING FOR SUBAGENTS:` and a progress report. Three minutes after such a turn end, the
+    [plug-in](../concepts.md#plug-in) that Agents Remember installs in the host sends the agent a
+    message that asks for the helpers' progress.
   - Who: Agents Remember.
   - Checked: the instruction and the plug-in's question, in the code of Agents Remember. The
     behaviour of Hermes was not reproduced.
@@ -206,10 +208,11 @@ The keys of Agents Remember stand in the user settings file. That file can be re
   - Checked: the default folder, in the source of Hermes v0.21.7.
 - **A role agent also carries the tools of the tool server that you registered under the name
   `agents-remember`.** This holds when `~/.hermes/config.yaml` registers that tool server, as this
-  page tells you to; the role agent then has the tools of Agents Remember twice, under
-  `agents-remember-task` and under `agents-remember`. The whole result of `role_start`, in the
-  file that `log` names, says `"secondCopyLoaded": true` for every start on Hermes, also when no
-  such registration exists.
+  page tells you to; the bound `agents-remember-task` server serves only the seat's role-scoped
+  tool list (`ROLE_TOOL_ALLOWLISTS[role]`), while the user-registered `agents-remember` server
+  loads the full unbound tool roster, so the seat's role tools appear on both servers. The whole
+  result of `role_start`, in the file that `log` names, says `"secondCopyLoaded": true` for every
+  start on Hermes, also when no such registration exists.
   - Setting: none. The host offers no setting that keeps one tool server out of one start on
     Hermes. A role agent's instructions name the tool server `agents-remember-task` for every tool
     call.

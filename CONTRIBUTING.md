@@ -147,8 +147,10 @@ Git tracks the instruction, documentation, runtime and projection copies. Git ig
 neither is committed.
 
 After changing an instruction sentence, run `mcp/.venv/bin/python scripts/renew-instructions.py`. The command
-renews measured sizes, hashes, passage locations, routing metadata and package copies; its output
-shows which sizes grew or shrank. Authored ceilings and semantic decisions remain separate.
+renews measured word counts, hashes, passage locations, routing metadata and package copies, enforces
+`COMPILED_CAPSULE_TOKEN_CEILINGS` in `scripts/instruction_renewal/budgets.py` (which replaced the retired
+word ceilings; full Turn-1 wire envelopes are gated by `WIRE_TOKEN_CEILINGS` in the test suite), and
+reports which sizes grew or shrank. Authored ceilings and semantic decisions remain separate.
 When a mapped passage changes, the command names the affected units and shows the held and current
 text. Name the intended passage with `--bind-unit UNIT=FILE:START-END`, then run the same command.
 Evidence passages and clauses keep their own text bindings. To name a changed clause explicitly,

@@ -392,12 +392,12 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
                     # The handover names the one server to use for AR tools, and no other.
                     self.assertEqual(handover["host"]["arToolServer"], "agents-remember-task")
                     for sentence in (
-                        "Use agents-remember-task (agents_remember_task): "
-                        "direct mcp__agents_remember_task__server_info or "
-                        "mcp__agents_remember_task search/script; "
-                        "ignore proxies without it, other install.",
-                        "Never use agents-remember or another AR server (different install).",
-                        "Retry once after start/resume if agents-remember-task is missing.",
+                        "Use agents-remember-task (agents_remember_task: "
+                        "mcp__agents_remember_task__server_info or "
+                        "mcp__agents_remember_task search/script); "
+                        "ignore unlisted proxies.",
+                        "Never use agents-remember or other AR servers.",
+                        "Retry once if agents-remember-task is missing.",
                     ):
                         self.assertIn(sentence, handover["host"]["arMcpUsage"])
                     self.assertNotIn("existing shared", prepared["prompt"])
@@ -584,7 +584,7 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
         self.assertEqual(source["semanticDigest"], prepared["capsuleDigest"])
         self.assertFalse(source["ambientRoleFilesSelected"])
         self.assertIn("do not load them as a second role", handover["ownerHandover"])
-        self.assertIn("Preserve system/developer instructions", prepared["prompt"])
+        self.assertIn("keep system/developer/sandbox/repo rules.", prepared["prompt"])
         self.assertEqual(
             {
                 key: handover["arMcpContext"][key]

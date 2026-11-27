@@ -37,10 +37,12 @@ Each harness page has a section that lists what that harness needs to work with 
 [Host](../host.md#what-the-host-needs) lists what a harness needs when the host runs it for a
 role agent.
 
-A role agent receives the tools of Agents Remember from one tool server that its start gives it,
-named `agents-remember-task`. The whole result of `role_start`, in the file that `log` names,
-says `"secondCopyLoaded": false` when the start kept the tools of the tool server
-`agents-remember` out of the role agent, which it does on Claude Code only, and `true` otherwise.
+A role agent receives only its seat's role allowlist (`ROLE_TOOL_ALLOWLISTS[role]`) from the bound
+tool server that its start gives it, named `agents-remember-task` (a server whose role binding
+cannot be read fails closed to `server_info` only). The whole result of `role_start`, in the file
+that `log` names, says `"secondCopyLoaded": false` when the start kept the full-roster user tool
+server `agents-remember` out of the role agent, which it does on Claude Code only, and `true`
+otherwise.
 
 ## The harness ids of the role settings
 
