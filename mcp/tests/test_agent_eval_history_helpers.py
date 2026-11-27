@@ -474,7 +474,7 @@ class HistoryHelperGraderTests(unittest.TestCase):
         self.assertEqual(grade_history(observation).status, "unknown")
 
     def test_same_revision_restatement_requires_actual_prior_frozen_governing_row(self) -> None:
-        # Product history.py invariant_revision_violation documents this L37 exception.
+        # Product history_writer_checks.py invariant_revision_violation documents this L37 exception.
         record, judgment = invariant(), row("changed")
         record["revision"] = judgment["revision"] = 2
         judgment["effect"] = "clarify"

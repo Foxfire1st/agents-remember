@@ -28,6 +28,8 @@ from agents_remember.kernel._agentic_settings_core import (
     KNOWN_ROLES,
     KNOWN_SPAWN_FIELDS,
     RESERVED_EXTRA_ARG_NAMES,
+    SEAT_VARIANT_ROWS,
+    STEP_UP_COUNTED_ROLES,
     UNUSED_HARNESS_ENTRY_FIELDS,
     UNUSED_ROLE_KNOB_FIELDS,
     UNUSED_ROLES,
@@ -281,15 +283,14 @@ def _parse_step_up(raw: object, role: str, owner: str, source: str) -> RoleStepU
             f"on the role's own row or on its harness entry: {source}"
         )
     _refuse_unknown(row, KNOWN_ROLE_LAUNCH_FIELDS | {"afterTries"}, owner, source)
-    if "afterTries" in row and role not in {"worker", "curator"}:
-        raise AgenticSettingsError(
-            f"{owner}.afterTries is only counted for worker and curator: {source}"
-        )
+    if "afterTries" in row and role not in STEP_UP_COUNTED_ROLES:
+        counted = ", ".join(sorted(STEP_UP_COUNTED_ROLES))
+        raise AgenticSettingsError(f"{owner}.afterTries is only counted for {counted}: {source}")
     after = (
         _require_positive_int(row["afterTries"], f"{owner}.afterTries", source)
         if "afterTries" in row
         else 3
-        if role in {"worker", "curator"}
+        if role in STEP_UP_COUNTED_ROLES
         else None
     )
     choices = _role_choices(row, owner, source)
@@ -301,7 +302,10 @@ def _resolve_role_keys(raw: object, *, owner: str, source: str) -> dict[str, Any
     """Admit the earlier role key without rewriting the settings file."""
     roles = _require_object(raw, owner, source)
     _refuse_unknown(
-        roles, KNOWN_ROLES | CAPABILITY_IDS | UNUSED_ROLES | {"system-specialist"}, owner, source
+        roles,
+        KNOWN_ROLES | CAPABILITY_IDS | SEAT_VARIANT_ROWS | UNUSED_ROLES | {"system-specialist"},
+        owner,
+        source,
     )
     if "system-specialist" not in roles:
         return roles

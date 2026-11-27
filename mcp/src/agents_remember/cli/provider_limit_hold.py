@@ -34,6 +34,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     load_paseo_runtime_settings,
 )
 from agents_remember.kernel.primitives.user_settings_location import user_settings_path
+from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.observer.provider_limits import (
     ProviderLimits,
     limited_until,
@@ -95,10 +96,6 @@ def provider_limit_hold(
     }
 
 
-# The leaf seats, which are the roles whose stale entries the bridge refreshes.
-_LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
-
-
 def read_usage_for_agents(config: McpRuntimeConfig, batch: UsageReadBatch) -> ProviderLimits | None:
     """Read stamped ends and due limits in one bridge process before delivery."""
 
@@ -118,7 +115,8 @@ def read_usage_for_agents(config: McpRuntimeConfig, batch: UsageReadBatch) -> Pr
     leaf = [
         agent_id
         for agent_id in batch.stamped_agents
-        if records.get(agent_id, {}).get("role", "") in _LEAF_ROLES
+        # The leaf seats are the roles whose stale entries the bridge refreshes.
+        if records.get(agent_id, {}).get("role", "") in LEAF_ROLES
     ]
     try:
         reply = bridge_call(

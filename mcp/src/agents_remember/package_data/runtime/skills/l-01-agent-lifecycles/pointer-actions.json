@@ -162,7 +162,8 @@
         "roles/orchestrator.md"
       ],
       "message-handover-row-coherence-msg-4fd2173c49": [
-        "roles/curator.md"
+        "roles/curator.md",
+        "roles/consolidator.md"
       ],
       "message-handover-row-master-task-doc-worktree-abandon-record-landing-ret-5878c05118": [
         "roles/manager.md"
@@ -201,7 +202,8 @@
         "operations/recovery.md"
       ],
       "sync-and-repairs-row-exceptions-sync-b514d0c6a5": [
-        "roles/curator.md"
+        "roles/curator.md",
+        "roles/consolidator.md"
       ],
       "sync-and-repairs-row-msg-sync-repairs-fc65361da6": [
         "roles/worker.md"

@@ -8,6 +8,7 @@ export type LauncherRole =
   | 'orchestrator'
   | 'manager'
   | 'worker'
+  | 'consolidator'
   | 'reviewer'
   | 'curator';
 export type RoleAction = 'start' | 'revive';
@@ -18,6 +19,7 @@ export const LAUNCHER_ROLES: { id: LauncherRole; label: string }[] = [
   { id: 'orchestrator', label: 'Orchestrator' },
   { id: 'manager', label: 'Manager' },
   { id: 'worker', label: 'Worker' },
+  { id: 'consolidator', label: 'Consolidator' },
   { id: 'reviewer', label: 'Reviewer' },
   { id: 'curator', label: 'Curator' },
 ];
@@ -386,12 +388,15 @@ export function readTasklessActiveRequests(): Partial<
   return active;
 }
 
+/** The leaf roles: each is started on one task, under the master that lists it. */
+const LEAF_ROLES: readonly LauncherRole[] = ['worker', 'consolidator', 'reviewer', 'curator'];
+
 export function roleNeedsMaster(role: LauncherRole): boolean {
-  return role === 'manager' || role === 'worker' || role === 'reviewer' || role === 'curator';
+  return role === 'manager' || roleNeedsTask(role);
 }
 
 export function roleNeedsTask(role: LauncherRole): boolean {
-  return role === 'worker' || role === 'reviewer' || role === 'curator';
+  return LEAF_ROLES.includes(role);
 }
 
 export function roleDocumentScope(selection: RoleLaunchSelection): RoleDocumentScope {

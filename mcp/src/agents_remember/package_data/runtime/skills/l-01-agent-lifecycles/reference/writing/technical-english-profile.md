@@ -1,6 +1,6 @@
 # Shared Simplified Technical English writing profile
 
-Curators and explainer authors use this profile for invariant statements, family guarantees, history reasons and walkthrough prose. It selects clarity principles from [ASD-STE100](https://asd-ste100.org/about_STE.html); it does not claim full compliance, an "80 percent" measurement or a new controlled-language standard.
+Curators, Consolidators and explainer authors use this profile for invariant statements, family guarantees, history reasons and walkthrough prose. It selects clarity principles from [ASD-STE100](https://asd-ste100.org/about_STE.html); it does not claim full compliance, an "80 percent" measurement or a new controlled-language standard.
 
 ## State one precise promise
 

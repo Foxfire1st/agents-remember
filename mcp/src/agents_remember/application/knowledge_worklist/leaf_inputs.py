@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from agents_remember.application.knowledge_worklist.consolidation import Listing
 from agents_remember.application.knowledge_worklist.planned_effects import Declaration
 
 
@@ -43,3 +44,5 @@ class ExplicitSides:
     """Where requirement endpoints' owning tasks live (MIK-R14); ``None`` resolves none."""
     held_base_tree: str | None = None
     """The captured comparison's converted K_B tree; read it without converting again."""
+    consolidation: Listing | None = None
+    """A consolidation task's list of its pass; ``None`` for every other task."""

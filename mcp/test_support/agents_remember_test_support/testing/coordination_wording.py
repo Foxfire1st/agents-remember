@@ -12,7 +12,7 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "with that Manager's exact ID, master ref, and state (reuses it, no duplicate) "
         "and name the Orchestrator's ID to the Manager in 1 message (reporting recipient "
         "switches; launch parent stays fixed).",
-        "Start all 6 roles via `role_start` with exact refs/request ID; keep returned IDs/paths.",
+        "Start all 7 roles via `role_start` with exact refs/request ID; keep returned IDs/paths.",
         "Under direct coordination, send repairs to the same Worker via `role_message` "
         "(review full diff).",
         "Own developer chat, semantic plans, requirements, and delegation in Agents Remember (AR).",
@@ -48,7 +48,7 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "Agents Remember (AR) acceptance.",
         "Reuse every existing Manager named in Architect's handover and start 1 Manager "
         "per other master via `role_start` under sprint (permitted: Manager, Worker, "
-        "Reviewer, Curator, Investigator). Keep returned IDs, address explicitly, "
+        "Reviewer, Curator, Consolidator, Investigator). Keep returned IDs, address explicitly, "
         "never proxy invisibly.",
         "Managers keep leaf finding-trail judgment, leaf-diff/repair/evidence loops, "
         "and planned-gap skeleton answers",
@@ -82,7 +82,7 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "Report to launching parent unless Architect instructs an Orchestrator recipient.",
         "Check packet deps before starting/integrating (the product does not perform that "
         "check); follow [leaf stages](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake).",
-        "Permitted `role_start`: Worker, Reviewer, Curator, Investigator.",
+        "Permitted `role_start`: Worker, Reviewer, Curator, Consolidator, Investigator.",
         "Inspect full diff, verdicts, and listed final checks before gates; keep "
         "closeout/integration/status/acceptance/landing order without relaying "
         "freeze/finding/verdict/memory changes.",
@@ -119,8 +119,8 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "1 master -> 1 Manager; 2+ concurrent masters -> 1 sprint Orchestrator (1 Manager/master).",
         "Direct Architect coordination or single-master Orchestrator needs developer "
         "instruction; report refused starts without fallback.",
-        "Call `role_start` with role, refs, and request ID (Architect: all 6; Orchestrator: "
-        "all except Orchestrator, sprint; Manager: Worker/Reviewer/Curator/Investigator, "
+        "Call `role_start` with role, refs, and request ID (Architect: all 7; Orchestrator: "
+        "all except Orchestrator, sprint; Manager: Worker/Reviewer/Curator/Consolidator/Investigator, "
         "master). Keep AR-paired enclosure (no Paseo worktree/global memory); save IDs/paths; "
         "reconcile uncertain starts via same request ID.",
         "The Manager calls `role_start` once per stage: Worker first, Reviewer at the freeze, "

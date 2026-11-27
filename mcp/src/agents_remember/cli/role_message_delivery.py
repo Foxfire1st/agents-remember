@@ -74,10 +74,21 @@ _CANDIDATE_LIMIT = 24
 _NO_AGENT_STATUSES = frozenset({"stopped", "rejected"})
 # The receipt statuses of a start that has not answered yet, or answered without a result.
 _UNFINISHED_START_STATUSES = frozenset({"starting", "unknown"})
+# Who may start whom: only supervising roles start another role. This one table answers both a
+# start and the remedy a message refusal names, so the two never disagree. A Consolidator is
+# started wherever a Worker may be.
 MAY_START: dict[str, tuple[str, ...]] = {
-    "architect": ("investigator", "orchestrator", "manager", "worker", "reviewer", "curator"),
-    "orchestrator": ("manager", "worker", "reviewer", "curator", "investigator"),
-    "manager": ("worker", "reviewer", "curator", "investigator"),
+    "architect": (
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "consolidator",
+        "reviewer",
+        "curator",
+    ),
+    "orchestrator": ("manager", "worker", "consolidator", "reviewer", "curator", "investigator"),
+    "manager": ("worker", "consolidator", "reviewer", "curator", "investigator"),
 }
 
 

@@ -338,7 +338,12 @@ export const TURN_ENDED_SENT_BACK_LIMIT = 2;
  * MIK-R183 rule 6: the roles whose hand-off-less turn is sent back to the seat
  * itself. Every other role keeps MIK-R172's line to whoever waits.
  */
-export const TURN_ENDED_SEAT_ROLES: ReadonlySet<string> = new Set(["worker", "reviewer", "curator"]);
+export const TURN_ENDED_SEAT_ROLES: ReadonlySet<string> = new Set([
+  "worker",
+  "reviewer",
+  "curator",
+  "consolidator",
+]);
 
 /** MIK-R183 rule 4: the wait after a silent end. */
 export const TURN_ENDED_WAIT_MS = 60_000;

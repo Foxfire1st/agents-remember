@@ -14,7 +14,13 @@ A writer is counted as its stamp names it: role, harness and model
   is never counted as changed by another writer (nothing is guessed);
 * **retired** -- of them, the revision that was live when its record was retired. Retiring a record
   changes only its ``status``, which is no meaning field, so the revision number does not rise: the
-  current revision of a retired record is the one that was live at retirement.
+  current revision of a retired record is the one that was live at retirement;
+* **the Consolidator's columns** -- of them, the revisions a consolidation pass read, by what it
+  did with them (:mod:`.consolidation_outcomes`): kept (the revision reads consolidated without a
+  new one, also where only its card entries changed), corrected (the Consolidator wrote a
+  successor), merged (the record was retired and a successor names it, which a split is too),
+  retired (retired without a successor) and unresolved. They count for the writer of the revision
+  that was read, so they say how that writer's work held up when it was read again.
 
 The revisions of a record are its current revision (stamped by the record's ``writer``), every
 revision a history file of the tree names in ``written`` with its stamp, every revision a history
@@ -31,8 +37,8 @@ counts those rows with each record's current revision, so a read opens no histor
 A seat is unknown when the revision has no stamp or its stamp's ``seat`` reads ``unknown`` (the
 stamps the conversion gave old records read ``unknown`` throughout).
 
-Not counted yet: a Consolidator's columns (kept, corrected, merged, retired or left unresolved by
-it). They come with the Consolidator role; until it exists no revision has them.
+A revision a consolidation pass read is named too, with its outcome, so the read counts it without
+the history files; the outcome is decided once, at the build.
 """
 
 from __future__ import annotations
@@ -41,6 +47,11 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Final
 
+from agents_remember.memory.knowledge_index.consolidation_outcomes import (
+    OUTCOME_COLUMNS,
+    Outcome,
+    consolidation_outcomes,
+)
 from agents_remember.models.knowledge_files.record_state import RevisionStates
 from agents_remember.models.knowledge_files.records import KnowledgeRecord
 from agents_remember.models.knowledge_files.writer_stamp import UNKNOWN, WriterStamp
@@ -54,6 +65,7 @@ COLUMNS: Final = (
     "laterChangedByAnother",
     "laterChangedWriterUnknown",
     "retired",
+    *OUTCOME_COLUMNS.values(),
 )
 _REVIEWED_STATES: Final = frozenset({"reviewed", "consolidated"})
 
@@ -122,6 +134,8 @@ class NamedRevision:
     writer: WriterKey | None
     seat: str | None
     reviewed: bool
+    consolidation: Outcome | None = None
+    """What a consolidation pass did with this revision when it read it; None if none read it."""
 
 
 @dataclass(frozen=True)
@@ -140,6 +154,7 @@ class _Revision:
     reviewed: bool
     named: bool
     """Named by a file of the tree (the record, a ``written`` row or a history row)."""
+    consolidation: Outcome | None = None
 
 
 def named_revisions(
@@ -152,11 +167,13 @@ def named_revisions(
     view. The order of the history files never decides which content a revision held.
     """
 
+    records = list(records)
+    outcomes = consolidation_outcomes(states.files.values(), records)
     named: dict[str, dict[int, WriterStamp | None]] = {}
     for record_id, revision in states.written_by:
         named.setdefault(record_id, {})[revision] = states.written_stamp(record_id, revision)
     current: dict[str, int] = {}
-    current_reviewed: dict[tuple[str, int], bool] = {}
+    current_state: dict[tuple[str, int], str | None] = {}
     for record in records:
         revision = getattr(record, "revision", None)
         if not isinstance(revision, int):
@@ -164,27 +181,33 @@ def named_revisions(
         stamps = named.setdefault(record.id, {})
         state, stamps[revision] = states.current_standing(record, retired=False)
         current[record.id] = revision
-        current_reviewed[(record.id, revision)] = state in _REVIEWED_STATES
-    for record_id, revision in states.row_files:
+        current_state[(record.id, revision)] = state
+    for record_id, revision in (*states.row_files, *outcomes):
         # A revision a history row read is named too, so its state is read; it has no stamp.
         if revision <= current.get(record_id, 0):
-            named[record_id].setdefault(revision, None)
-    return [
-        NamedRevision(
-            record=record_id,
-            revision=revision,
-            writer=None if stamp is None else stamp.writer_key(),
-            seat=_seat(stamp),
-            reviewed=(
-                current_reviewed[(record_id, revision)]
-                if (record_id, revision) in current_reviewed
+            named.setdefault(record_id, {}).setdefault(revision, None)
+    rows = []
+    for record_id, stamps in named.items():
+        for revision, stamp in stamps.items():
+            state = (
+                current_state[(record_id, revision)]
+                if (record_id, revision) in current_state
                 else states.state_of(record_id, revision, retired=False, writer=stamp)
-                in _REVIEWED_STATES
-            ),
-        )
-        for record_id, stamps in named.items()
-        for revision, stamp in stamps.items()
-    ]
+            )
+            outcome = outcomes.get((record_id, revision))
+            rows.append(
+                NamedRevision(
+                    record=record_id,
+                    revision=revision,
+                    writer=None if stamp is None else stamp.writer_key(),
+                    seat=_seat(stamp),
+                    reviewed=state in _REVIEWED_STATES,
+                    consolidation=None
+                    if outcome == "kept" and state != "consolidated"
+                    else outcome,
+                )
+            )
+    return rows
 
 
 def writer_table(
@@ -220,7 +243,9 @@ def _revisions_of(
             revisions.append(_Revision(run, None, None, reviewed=False, named=False))
         one = by_number[number]
         span = RevisionSpan(record_id, number, number)
-        revisions.append(_Revision(span, one.writer, one.seat, one.reviewed, named=True))
+        revisions.append(
+            _Revision(span, one.writer, one.seat, one.reviewed, True, one.consolidation)
+        )
         expected = number + 1
     return revisions
 
@@ -248,6 +273,8 @@ def _count_record(
             tally.add(change, span)
         if retired_at is not None and span.first == retired_at:
             tally.add("retired", span)
+        if one.consolidation is not None:
+            tally.add(OUTCOME_COLUMNS[one.consolidation], span)
         later.see(one.seat)
 
 

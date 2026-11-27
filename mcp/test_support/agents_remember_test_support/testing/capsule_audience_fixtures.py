@@ -219,6 +219,21 @@ ROLE_POINTER_ACTIONS = {
         ("reference/message-handover.md", "| Templates & msg |"),
         ("reference/sandbox-actors.md", "| Sandbox/ask |"),
     ],
+    "consolidator": [
+        ("reference/knowledge/use.md", "| Knowledge/CLI |"),
+        ("reference/knowledge/commands.md", "| Knowledge/CLI |"),
+        ("reference/consolidation-pass.md", "| Pass/worklist |"),
+        ("reference/curator/worklist.md", "| Pass/worklist |"),
+        ("reference/curator/knowledge-ingest.md", "| Write/families |"),
+        ("reference/curator/publication-report.md", "| Write/families |"),
+        ("reference/curator/family-obligations.md", "| Write/families |"),
+        ("reference/curator/governing-sources.md", "| Write/families |"),
+        ("reference/writing/technical-english-profile.md", "| Write/families |"),
+        ("reference/curator/coherence-judgments.md", "| Coherence/msg |"),
+        ("reference/message-handover.md", "| Coherence/msg |"),
+        ("reference/worker/sync-and-repairs.md", "| Exceptions/sync |"),
+        ("reference/sandbox-actors.md", "| Exceptions/sync |"),
+    ],
     "investigator": [
         ("reference/knowledge/commands.md", "| Knowledge readers |"),
         ("reference/knowledge/use.md", "| Knowledge readers |"),
@@ -241,6 +256,7 @@ OPERATION_POINTER_ACTIONS = {
         "worker": [],
         "curator": [],
         "reviewer": [],
+        "consolidator": [],
         "investigator": [],
         "bootstrap": [],
     },
@@ -262,7 +278,9 @@ OPERATION_POINTER_ACTIONS = {
         "investigator": [],
         "bootstrap": [],
         "reviewer": [],
+        "consolidator": [],
     },
+    "consolidation": {"consolidator": []},
     "bootstrap": {
         "bootstrap": [
             (
@@ -330,6 +348,7 @@ R125_OPERATION_ROLES = {
         "worker",
         "curator",
         "reviewer",
+        "consolidator",
         "investigator",
         "bootstrap",
     ),
@@ -348,7 +367,9 @@ R125_OPERATION_ROLES = {
         "investigator",
         "bootstrap",
         "reviewer",
+        "consolidator",
     ),
+    "consolidation": ("consolidator",),
     "bootstrap": ("bootstrap",),
 }
 

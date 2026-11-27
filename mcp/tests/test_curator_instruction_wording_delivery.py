@@ -237,6 +237,7 @@ def assert_message_handover_delivery(case: unittest.TestCase, roles: tuple[str, 
         "worker": ("msg", ""),
         "reviewer": ("msg", ""),
         "curator": ("msg", ""),
+        "consolidator": ("msg", ""),
         "investigator": ("msgs", "#send-a-message-that-names-the-files"),
     }
     for role_name in roles:

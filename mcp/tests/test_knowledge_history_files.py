@@ -35,17 +35,19 @@ from agents_remember.models.knowledge_files.history import (
     FAMILY_DISPOSITIONS,
     INVARIANT_DISPOSITIONS,
     empty_history,
-    invariant_revision_violation,
     is_closed_history,
-    reanchor_mismatches,
     row_kind_for_subject,
-    sidecar_entry_anchors,
-    stale_examined_members,
-    unknown_subjects,
 )
 from agents_remember.models.knowledge_files.history_governing_rows import (
     changed_family_row_violation,
     changed_record_row_violation,
+)
+from agents_remember.models.knowledge_files.history_writer_checks import (
+    invariant_revision_violation,
+    reanchor_mismatches,
+    sidecar_entry_anchors,
+    stale_examined_members,
+    unknown_subjects,
 )
 from agents_remember.models.knowledge_files.ids import mint_id
 from agents_remember.models.knowledge_files.sidecars import FileSidecar
@@ -306,9 +308,26 @@ def test_row_kind_registry_owns_disjoint_subject_forms() -> None:
         with pytest.raises(ValueError, match="no registered"):
             row_kind_for_subject(subject)
     # D28: the seven dispositions (D6's four, extended, rerouted, assigned) plus the family's
-    # `retired`, which MIK-R07 rule 5 lists; the effect vocabulary is the unchanged nine.
-    assert INVARIANT_DISPOSITIONS == ("changed", "moved", "deleted", "extended", "no_impact")
-    assert FAMILY_DISPOSITIONS == ("changed", "rerouted", "assigned", "retired", "no_impact")
+    # `retired`, which MIK-R07 rule 5 lists; the effect vocabulary is the unchanged nine. A
+    # consolidation pass adds `stands` and `unresolved` to both row kinds.
+    assert INVARIANT_DISPOSITIONS == (
+        "changed",
+        "moved",
+        "deleted",
+        "extended",
+        "no_impact",
+        "stands",
+        "unresolved",
+    )
+    assert FAMILY_DISPOSITIONS == (
+        "changed",
+        "rerouted",
+        "assigned",
+        "retired",
+        "no_impact",
+        "stands",
+        "unresolved",
+    )
     # The nine are declared twice: as the tuple the planned subject key is built from, and as the
     # literal type a row's effect validates against. Both are pinned to the same nine names, so a
     # tenth label cannot enter one of them and be admitted by a row or by a planned subject.
@@ -391,9 +410,17 @@ def test_invariant_row_dispositions_and_shape(fields: dict[str, Any], refusal: s
     assert history.to_document() == json.loads(json.dumps(document))
 
 
+def _read(disposition: str) -> dict[str, Any]:
+    """A family row of ``disposition``; a ``stands`` row also names the revision it read."""
+
+    return {"disposition": disposition, **({"revision": 1} if disposition == "stands" else {})}
+
+
 def test_family_row_dispositions_and_examined_members() -> None:
     for disposition in FAMILY_DISPOSITIONS:
-        HistoryFile.model_validate(_history(_family_row(disposition=disposition)))
+        HistoryFile.model_validate(_history(_family_row(**_read(disposition))))
+    # A stands row names the revision it read; the writer records it.
+    _refused(_history(_family_row(disposition="stands")), "names the revision it read")
     for disposition in ("moved", "extended", "deleted"):
         _refused(_history(_family_row(disposition=disposition)), "not allowed on a family row")
     _refused(_history(_family_row(examined=[{"id": INV, "revision": 1}] * 2)), "repeat")
@@ -481,7 +508,7 @@ def test_revision_binding_for_invariant_and_family_rows() -> None:
     # retires it; a route row or a no_impact row would replace that judgment.
     of_families = {
         disposition: changed_family_row_violation(
-            FamilyRow.model_validate(_family_row(disposition=disposition)), guarantee_changed=True
+            FamilyRow.model_validate(_family_row(**_read(disposition))), guarantee_changed=True
         )
         for disposition in FAMILY_DISPOSITIONS
     }

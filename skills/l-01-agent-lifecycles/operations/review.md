@@ -1,7 +1,7 @@
 <!-- ar:roles all -->
 # Operation — Review
 
-Cold reads = no round; advisory Investigators report to Architect only (Reviewer stays grade).
+Cold reads=no round; advisory->Architect only (Reviewer=grade).
 
 <!-- ar:roles architect -->
 ## Advisory reviews
@@ -11,12 +11,12 @@ Before commissioning/routing advisory reviews via `role_start`, read [advisory-r
 <!-- ar:roles all -->
 ## Outputs
 
-Verdict: Catalog Binding, recommendation, checklist, coverage, findings (ID/loc/evidence/impact/repair), checks/limits. Baseline covers full diff (tests != acceptance); `fix-verification` = sealed IDs only; no `## Final checks`.
+Verdict: Catalog Binding, recommendation, checklist, coverage, findings (ID/loc/evidence/impact/repair), checks. Baseline covers full diff (tests != acceptance); `fix-verification` = sealed IDs only; no `## Final checks`.
 
 <!-- ar:roles reviewer -->
 ## Focused tests and handover
 
-Baseline: rerun focused tests + freeze search (unrun = finding). `fix-verification`: search touched names (unrun stays open).
+Baseline: rerun focused tests+freeze search (unrun=finding). `fix-verification`: search touched names (unrun stays open).
 
 <!-- ar:gives producer-list to curator: list-file, freeze-identity, handoff-check-result -->
 If mode is absent, ask starter via `role_message` (developer if parentless) and wait.
@@ -31,12 +31,12 @@ Name leaf, candidate, path + next stretch (sibling role, leaf refs, whole IDs). 
 <!-- ar:roles all -->
 ## Rounds
 
-Open leaf code rounds via `task_doc(begin_review)`, record via `record_review`/`record_route_review`; non-leaf keeps owner recording. Manager owns gate acceptance and records Architect/developer extra-round approvals. Memory review uses a separate lane (`reviewKind=memory`; own sealed reports/IDs/pass count, same limit; extra passes need Architect/developer instruction recorded by Manager); code verdict/baseline stay unchanged.
+Open leaf code rounds via `task_doc(begin_review)`, record via `record_review`/`record_route_review`; non-leaf keeps owner recording. Manager owns gate acceptance and records Architect/developer extra-round approvals. Memory review uses a separate lane (`reviewKind=memory`; own sealed reports/IDs/pass count, same limit; extra passes need Architect/developer instruction recorded by Manager); code verdict/baseline stay unchanged. Memory `record_review`: `candidateTree`+`verdictRef`.
 
 ## Boundaries
 
-After code+memory PASS & `## Final checks`: tell Manager closeout-ready (freeze, verdicts, final checks/none). Other notices: authority, ownership, recovery, extra rounds, Curator dispute.
+Post code+memory PASS+`## Final checks`: tell Manager closeout-ready (freeze/verdicts/final checks). Other notices: authority/ownership/recovery/extra rounds/Curator dispute.
 
 <!-- ar:roles reviewer -->
-Answer Curator's evidenced code concern directly to Curator+Worker (reopen or refute); dispute -> Manager.
+Answer Curator code concern directly to Curator+Worker (reopen/refute); dispute->Manager.
 <!-- ar:roles all -->

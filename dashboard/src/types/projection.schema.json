@@ -2347,6 +2347,144 @@
       "title": "TaskCodeExampleNode",
       "type": "object"
     },
+    "TaskConsolidationNode": {
+      "additionalProperties": false,
+      "description": "The list of a consolidation pass and the outcome of each subject it reaches.\n\nThe counts always cover every subject: the listed families, and the listed rules with the\nmembers of the listed families, each once. ``memoryRead`` is false when the task's memory\nworktree could not be read; the subjects are then the listed ids as listed, and every one\ncounts as open because no history row was read. The always-on summary carries the counts\nonly, with no ``rows``; the on-demand body carries every row.",
+      "properties": {
+        "corrected": {
+          "default": 0,
+          "title": "Corrected",
+          "type": "integer"
+        },
+        "families": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Families",
+          "type": "array"
+        },
+        "memoryRead": {
+          "default": false,
+          "title": "Memoryread",
+          "type": "boolean"
+        },
+        "open": {
+          "default": 0,
+          "title": "Open",
+          "type": "integer"
+        },
+        "rows": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/TaskConsolidationRowNode"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rows"
+        },
+        "rules": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Rules",
+          "type": "array"
+        },
+        "stands": {
+          "default": 0,
+          "title": "Stands",
+          "type": "integer"
+        },
+        "total": {
+          "default": 0,
+          "title": "Total",
+          "type": "integer"
+        },
+        "unresolved": {
+          "default": 0,
+          "title": "Unresolved",
+          "type": "integer"
+        }
+      },
+      "title": "TaskConsolidationNode",
+      "type": "object"
+    },
+    "TaskConsolidationRowNode": {
+      "additionalProperties": false,
+      "description": "One subject of a consolidation pass's list with the outcome its history row gives it.\n\n``family`` names the listed family that reached a rule the list does not name itself.\n``disposition`` and ``reason`` are the row's own; both are absent while the subject is open.",
+      "properties": {
+        "disposition": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition"
+        },
+        "family": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Family"
+        },
+        "kind": {
+          "enum": [
+            "family",
+            "rule"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "stands",
+            "corrected",
+            "unresolved",
+            "open"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "subject": {
+          "title": "Subject",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "kind",
+        "outcome"
+      ],
+      "title": "TaskConsolidationRowNode",
+      "type": "object"
+    },
     "TaskCounts": {
       "additionalProperties": false,
       "properties": {
@@ -3471,6 +3609,17 @@
           ],
           "default": null,
           "title": "Completedat"
+        },
+        "consolidation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskConsolidationNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "createdAt": {
           "default": "",

@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from agents_remember.application.agent_binding import AgentBinding
 from agents_remember.cli import role_agent_override as launch_overrides
+from agents_remember.cli.leaf_set_seats import set_seat_roles
 from agents_remember.cli.paseo_bridge import (
     BRIDGE_REFUSED,
     RUNTIME_NOT_CONFIGURED,
@@ -29,12 +30,11 @@ from agents_remember.cli.role_launch_preparation import ROLE_START_TOOL
 from agents_remember.cli.role_launch_receipts import _read_receipt, _receipt_path
 from agents_remember.cli.role_launch_request_rules import with_caller_harness
 from agents_remember.cli.role_launch_routes import (
-    SET_SEAT_ROLES,
     LaunchLockBusy,
     _role_launch_dispatch_endpoint,
     dispatch_leaf_set,
 )
-from agents_remember.cli.role_message_delivery import _Refused
+from agents_remember.cli.role_message_delivery import MAY_START, _Refused
 from agents_remember.cli.role_start_answer import (
     _launch_refused,
     _started_agent_id,
@@ -51,13 +51,6 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 # Concurrent starts from one tool server share the launcher's transaction lock.
 LOCK_WAIT_SECONDS = 60
 
-# Only supervising roles may start another role.
-MAY_START: dict[str, tuple[str, ...]] = {
-    "architect": ("investigator", "orchestrator", "manager", "worker", "reviewer", "curator"),
-    "orchestrator": ("manager", "worker", "reviewer", "curator", "investigator"),
-    "manager": ("worker", "reviewer", "curator", "investigator"),
-}
-
 
 def start_rule_violation(binding: AgentBinding, selection: RoleSelection) -> tuple[str, str] | None:
     """The rule a start would violate, as (refusal, the rule in words); ``None`` when allowed."""
@@ -69,8 +62,9 @@ def start_rule_violation(binding: AgentBinding, selection: RoleSelection) -> tup
             "role-may-not-start-role",
             f"A {binding.role} may start {offered}; it may not start a {selection.role}. "
             "(An architect may start every role except architect; an orchestrator may start "
-            "manager, worker, reviewer, curator and investigator; a manager may start worker, reviewer, "
-            "curator and investigator; worker, reviewer, curator and investigator may start none.)",
+            "manager, worker, consolidator, reviewer, curator and investigator; a manager may "
+            "start worker, consolidator, reviewer, curator and investigator; worker, "
+            "consolidator, reviewer, curator and investigator may start none.)",
         )
     if binding.role == "orchestrator" and selection.sprint_document_ref != binding.sprint_ref:
         return (
@@ -104,7 +98,7 @@ def start_leaf_set(
     *,
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Start a leaf's Worker, Reviewer and Curator in one call (MIK-R100 rule 1)."""
+    """Start a leaf's seats in one call (MIK-R100 rule 1), as its task document names them."""
 
     try:
         binding = _caller(config, environment)
@@ -113,11 +107,11 @@ def start_leaf_set(
             # permission is unchanged; only the set is restricted.
             raise _Refused(
                 "role-may-not-start-role",
-                f"Only the leaf's owning Manager starts Worker, Reviewer and Curator in one "
-                f"call (caller role: {binding.role}).",
+                f"Only the leaf's owning Manager starts a leaf's seats in one call (caller "
+                f"role: {binding.role}).",
                 "Start single roles with role_start, or have the owning Manager start the set.",
             )
-        selections = _set_selections(call)
+        selections = _set_selections(config, call)
         for selection in selections:
             violated = start_rule_violation(binding, selection)
             if violated is not None:
@@ -190,15 +184,10 @@ def _with_second_copies(
     return answer
 
 
-def _set_selections(call: RoleStartSetCall) -> list[RoleSelection]:
-    """The three seat selections of a set, validated before anything is prepared for them."""
+def _set_selections(config: McpRuntimeConfig, call: RoleStartSetCall) -> list[RoleSelection]:
+    """The seat selections of a set, validated before anything is prepared for them."""
 
-    unknown = sorted(set(call.replaces or ()) - set(SET_SEAT_ROLES))
-    if unknown:
-        raise _launch_refused(
-            f"The set names replacements for no seat of a leaf: {', '.join(unknown)}. "
-            "A set replaces only worker, reviewer or curator."
-        )
+    roles = set_seat_roles(config.coordination_root, call)
     try:
         return [
             RoleSelection.model_validate(
@@ -209,7 +198,7 @@ def _set_selections(call: RoleStartSetCall) -> list[RoleSelection]:
                     "taskDocumentRef": call.task_document_ref,
                 }
             )
-            for role in SET_SEAT_ROLES
+            for role in roles
         ]
     except (ValidationError, ValueError) as error:
         raise _launch_refused(f"The set selection is not valid: {error}") from error

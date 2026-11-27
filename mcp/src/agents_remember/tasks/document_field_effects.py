@@ -23,6 +23,7 @@ from agents_remember.models.task_intent import (
 )
 from agents_remember.models.task_retirement import MasterRetirementProof, RetirementEdgeSelection
 
+from .consolidation_list import ConsolidationList
 from .document import (
     AddedFindingRound,
     CodeExample,
@@ -173,6 +174,7 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "lifecycleId": LIFECYCLE,
         "knowledgeMaintenanceScope": LIFECYCLE,
         "expectedKnowledgeEffects": NORMATIVE,
+        "consolidationList": LIFECYCLE,
         "intentReview": NORMATIVE,
         "objective": NORMATIVE,
         "requirements": NORMATIVE,
@@ -316,6 +318,7 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "effect": NORMATIVE,
         "requirementRef": NORMATIVE,
     },
+    ConsolidationList: {"families": LIFECYCLE, "rules": LIFECYCLE},
     IntentReview: {
         "state": NORMATIVE,
         "decisionRef": NORMATIVE,

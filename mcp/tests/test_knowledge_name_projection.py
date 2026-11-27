@@ -563,7 +563,7 @@ class KnowledgeNameProjectionTests(unittest.TestCase):
         from agents_remember.application.published_intent import (  # noqa: PLC0415
             select_knowledge_dataset,
         )
-        from agents_remember.mcp.tools.knowledge import (  # noqa: PLC0415
+        from agents_remember.memory.knowledge_index import (  # noqa: PLC0415
             INDEX_REPOSITORY_ID,
         )
         from agents_remember.models.knowledge.read import PathSeed  # noqa: PLC0415

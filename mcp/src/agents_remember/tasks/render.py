@@ -28,6 +28,7 @@ from agents_remember.models.task_intent import (
     TaskIntentIdentity,
 )
 
+from .consolidation_list import ConsolidationList
 from .document import (
     CodeExample,
     Decision,
@@ -283,12 +284,21 @@ def _header_lines(
             f"- `{one.subject}` — `{one.effect}` ({one.requirementRef})"
             for one in doc.expectedKnowledgeEffects
         ]
+    if doc.consolidationList is not None:  # the list of a consolidation pass
+        lines.append(_consolidation_list_line(doc.consolidationList))
     if doc.seats:  # the sprint's first-class seats (L14-R3); sprint-only by schema
         lines += _seat_lines(doc.seats)
     lines += [
         f"**{note.label}:** {note.value}" for note in doc.headerNotes
     ]  # extra header lines (R4)
     return lines
+
+
+def _consolidation_list_line(listing: ConsolidationList) -> str:
+    """One header line naming the pass's listed families and rules, in the listed order."""
+
+    named = ", ".join(f"`{one}`" for one in listing.listed_ids())
+    return f"**Consolidation list:** {named}"
 
 
 def _declared_scope_lines(doc: TaskDocument) -> list[str]:

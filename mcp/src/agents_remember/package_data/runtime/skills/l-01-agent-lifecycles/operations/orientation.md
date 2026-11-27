@@ -5,15 +5,15 @@
 
 Keep launcher role/assignment (Projects = workspace, not repo); restore saved authority; read only selected packets/rendered docs via file tools (no `.json` or unrelated corpus); verify refs/roots/contract/report; dashboard roles need no parent.
 
-<!-- ar:roles architect,orchestrator,manager,worker,curator,reviewer -->
+<!-- ar:roles architect,orchestrator,manager,worker,curator,reviewer,consolidator -->
 Edit admitted canonical task docs via `task_doc` first; rendered copies overwrite on publication.
 <!-- ar:roles all -->
 
 ## Confirm the workspace and tool server
 
-Leaves use AR-paired enclosure (Worker code, Curator memory, report). Call Agents Remember (AR) tools only via `agents-remember-task` (`agents_remember_task`); ignore unlisted proxies, never call `agents-remember`. Server binding = identity.
+Leaves use AR-paired enclosure (Worker code, Curator/Consolidator memory, report). Call Agents Remember (AR) tools only via `agents-remember-task` (`agents_remember_task`); ignore unlisted proxies, never call `agents-remember`. Server binding = identity.
 
-<!-- ar:roles architect,orchestrator,manager,worker,curator,reviewer,investigator -->
+<!-- ar:roles architect,orchestrator,manager,worker,curator,reviewer,consolidator,investigator -->
 ## Reply to peers
 
 Peer messages start with `From`; turn replies reach waiting senders only, else `role_message`.
@@ -23,7 +23,7 @@ Peer messages start with `From`; turn replies reach waiting senders only, else `
 
 Never bypass an open/denied harness permission; wait while open, else continue without it and report.
 
-<!-- ar:roles architect,orchestrator,manager,worker,curator,reviewer,investigator -->
+<!-- ar:roles architect,orchestrator,manager,worker,curator,reviewer,consolidator,investigator -->
 ## Ask for a developer decision
 
 Send every question requiring the developer's decision to the reporting recipient your role instructs. If your role names none, use the parent named in `host.parent`, addressed by its agent ID. When neither exists, ask the developer in your own chat and end your turn.

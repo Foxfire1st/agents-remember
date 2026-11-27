@@ -72,6 +72,7 @@ SHIPPED_ROLES = (
     "worker",
     "curator",
     "reviewer",
+    "consolidator",
     "investigator",
     "bootstrap",
 )
@@ -86,6 +87,7 @@ SHIPPED_OPERATIONS = (
     "authorized-closeout",
     "recovery",
     "bootstrap",
+    "consolidation",
 )
 
 
@@ -137,9 +139,9 @@ def worker_binding(*, tool_policy: CapsuleToolPolicy | None = None) -> CapsuleBi
 
 def test_the_frozen_vocabulary_is_exactly_the_eight_roles_and_nine_operations() -> None:
     assert CAPSULE_ROLES == SHIPPED_ROLES
-    assert len(CAPSULE_ROLES) == 8
+    assert len(CAPSULE_ROLES) == 9
     assert CAPSULE_OPERATIONS == SHIPPED_OPERATIONS
-    assert len(CAPSULE_OPERATIONS) == 9
+    assert len(CAPSULE_OPERATIONS) == 10
 
 
 def test_the_role_and_operation_literals_agree_with_their_runtime_tuples() -> None:

@@ -44,7 +44,9 @@ def with_review_step_up(config: McpRuntimeConfig, answer: dict[str, Any]) -> dic
         )
         return answer
     next_steps = []
-    for role in ("curator",) if memory_review else ("worker",):
+    # The memory lane judges the Curator's or the Consolidator's work; only a role whose own row
+    # names a step-up is advised, so a task's seat that has none is never named.
+    for role in ("curator", "consolidator") if memory_review else ("worker",):
         step = settings.resolved_role_knobs(role).step_up
         tries = failed_review_tries(state, role)
         if step is not None and tries is None:

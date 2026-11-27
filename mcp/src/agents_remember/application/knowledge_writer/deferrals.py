@@ -145,7 +145,10 @@ def _author_deferral_only(
             "after editing the document",
         )
         return
-    batch = _DeferralBatch.start(authoring, before, where)
+    batch = _start_batch(authoring, before, authored, where)
+    if batch is None:
+        document.pop("deferrals", None)
+        return
     _apply_lifts(batch, authored.get("lift"))
     _apply_redefers(batch, authored.get("redefer"))
     _apply_defers(batch, authored.get("defer"))
@@ -159,42 +162,143 @@ def _author_confirmation(
     before: Mapping[str, Any] | None,
     authored: Mapping[str, Any],
 ) -> None:
-    """Confirm a dependent, refusing unedited confirmations while open deferrals remain."""
+    """Confirm a dependent, refusing leaf unedited confirmations while open deferrals remain."""
 
     record_id = str(document["id"])
-    batch = _DeferralBatch.start(authoring, before, where)
-    doc_path = document.get("document")
-    doc_edited = (
-        isinstance(doc_path, str)
-        and bool(doc_path)
-        and authoring.base_code_blobs is not None
-        and authoring.base_code_blobs.get(doc_path) != authoring.code.blobs.get(doc_path)
-    )
-    if before is not None and batch.deferrals and not doc_edited:
-        authoring.problem(
-            where, _unedited_deferred_refusal(record_id, str(doc_path or ""), batch.deferrals)
-        )
+    batch = _start_batch(authoring, before, authored, where)
+    if batch is None:
+        document.pop("deferrals", None)
         return
-    if "lift" in authored and authored.get("lift") is not None:
-        authoring.problem(
-            f"{where}.lift",
-            "'lift' ends a deferral without editing the document and must be recorded as its own "
-            "'deferral_lifted' operation; use 'resolveDeferrals' when confirming an edited "
-            "document, or run 'lift' in a deferral-only write (without 'confirmed')",
-        )
+    doc_path = document.get("document")
+    require_edit = authoring.owner.kind != "crossing" and not _document_edited(authoring, doc_path)
+    if before is not None and _refuse_unedited_deferred(batch, record_id, doc_path, require_edit):
+        return
+    if _refuse_confirmation_lift(authoring, authored, where):
         return
     authoring._confirm_dependent(document, record_id, where, authored)
     if "resolveDeferrals" in authored:
         _apply_resolves(batch, authored.get("resolveDeferrals"))
     _apply_redefers(batch, authored.get("redefer"))
     _apply_defers(batch, authored.get("defer"))
-    if batch.deferrals and not doc_edited:
-        authoring.problem(
-            where, _unedited_deferred_refusal(record_id, str(doc_path or ""), batch.deferrals)
-        )
+    if _refuse_unedited_deferred(batch, record_id, doc_path, require_edit):
         return
     batch.ops.confirmed = True
     batch.finish(document, record_id)
+
+
+def _refuse_unedited_deferred(
+    batch: _DeferralBatch, record_id: str, doc_path: Any, require_edit: bool
+) -> bool:
+    if not (require_edit and batch.deferrals):
+        return False
+    batch.authoring.problem(
+        batch.where, _unedited_deferred_refusal(record_id, str(doc_path or ""), batch.deferrals)
+    )
+    return True
+
+
+def _refuse_confirmation_lift(
+    authoring: Authoring, authored: Mapping[str, Any], where: str
+) -> bool:
+    if authored.get("lift") is None:
+        return False
+    authoring.problem(
+        f"{where}.lift",
+        "'lift' ends a deferral without editing the document and must be recorded as its own "
+        "'deferral_lifted' operation; use 'resolveDeferrals' when confirming an edited "
+        "document, or run 'lift' in a deferral-only write (without 'confirmed')",
+    )
+    return True
+
+
+def _document_edited(authoring: Authoring, doc_path: Any) -> bool:
+    return (
+        isinstance(doc_path, str)
+        and bool(doc_path)
+        and authoring.base_code_blobs is not None
+        and authoring.base_code_blobs.get(doc_path) != authoring.code.blobs.get(doc_path)
+    )
+
+
+def _start_batch(
+    authoring: Authoring,
+    before: Mapping[str, Any] | None,
+    authored: Mapping[str, Any],
+    where: str,
+) -> _DeferralBatch | None:
+    """Initialize a deferral batch from ``before``, adopting explicit crossing ``deferrals``."""
+
+    batch = _DeferralBatch.start(authoring, before, where)
+    if (
+        authoring.owner.kind == "crossing"
+        and "deferrals" in authored
+        and not _adopt_crossing_deferrals(batch, authored.get("deferrals"))
+    ):
+        return None
+    return batch
+
+
+def _adopt_crossing_deferrals(batch: _DeferralBatch, raw: Any) -> bool:
+    """Validate and adopt an explicit ``deferrals`` list on a crossing resolution write."""
+
+    at = f"{batch.where}.deferrals"
+    if raw is None:
+        batch.deferrals = []
+        batch.taken = set()
+        return True
+    if not isinstance(raw, list):
+        batch.authoring.problem(
+            at, "'deferrals' must be a list of deferral objects or null on a crossing write"
+        )
+        return False
+    adopted: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    valid = True
+    for position, item in enumerate(raw, start=1):
+        entry = _validate_crossing_deferral(batch.authoring, item, seen_ids, f"{at}[{position}]")
+        if entry is None:
+            valid = False
+        else:
+            adopted.append(entry)
+    if not valid:
+        return False
+    batch.deferrals = adopted
+    batch.taken = seen_ids
+    return True
+
+
+def _validate_crossing_deferral(
+    authoring: Authoring, item: Any, seen_ids: set[str], where: str
+) -> dict[str, Any] | None:
+    if not isinstance(item, Mapping):
+        authoring.problem(where, "each 'deferrals' item must be a JSON object")
+        return None
+    try:
+        parsed = DependentDeferral.model_validate(item)
+    except ValidationError as error:
+        authoring.problem(where, _format_validation_error(error))
+        return None
+    if parsed.id in seen_ids:
+        authoring.problem(
+            f"{where}.id",
+            f"duplicate deferral id {parsed.id!r}; each deferral in 'deferrals' must have a unique id",
+        )
+        return None
+    seen_ids.add(parsed.id)
+    if (
+        parsed.condition.file is not None
+        and _validate_condition_file(authoring, parsed.condition.file, f"{where}.condition.file")
+        is None
+    ):
+        return None
+    return parsed.to_document()
+
+
+def _format_validation_error(error: ValidationError) -> str:
+    return "; ".join(
+        f"{'.'.join(str(part) for part in one['loc']) or '-'}: {one['msg']}"
+        for one in error.errors()
+    )
 
 
 def _unedited_deferred_refusal(
@@ -370,11 +474,7 @@ def _build_deferral(
     try:
         DependentDeferral.model_validate(deferral)
     except ValidationError as error:
-        details = "; ".join(
-            f"{'.'.join(str(part) for part in one['loc']) or '-'}: {one['msg']}"
-            for one in error.errors()
-        )
-        batch.authoring.problem(where, details)
+        batch.authoring.problem(where, _format_validation_error(error))
         return None
     return deferral
 

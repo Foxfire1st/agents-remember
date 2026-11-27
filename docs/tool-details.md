@@ -285,9 +285,9 @@ one commands the master), the task's
 intent, and the SHA-256 of the attestation of the [Curator's checklist](concepts.md#curators-checklist).
 `expected_attestation_sha256` is the SHA-256 of the complete attestation file that
 `prepare` observed; pass it unchanged.
-`caller` names the caller's role and a task document: the task's own document for a Curator; for
-any other role the sprint's document when one commands the master, otherwise the master's
-document. Each action takes only its own arguments, so `status`,
+`caller` names the caller's role and a task document: the task's own document for a Curator or a
+Consolidator; for any other role the sprint's document when one commands the master, otherwise the
+master's document. Each action takes only its own arguments, so `status`,
 `prepare` and `validate` refuse a call that supplies any of these nine. `publish` rejects missing,
 extra, duplicate, malformed, or stale judgments and publishes atomically; with
 `freeze_snapshot=true` it also writes an unchangeable snapshot that ties the delivery attempt to
@@ -458,16 +458,21 @@ to `delegated seat retired`.
 
 ## `role_start_set`
 
-Start the Worker, the Reviewer and the Curator of one task in one call.
+Start the role agents of one task in one call: the Worker, the Reviewer and the Curator, or, for
+a [consolidation task](roles.md#a-consolidation-task), the Consolidator and the Reviewer. The task
+document decides which: a task whose document names a `consolidationList` has a Consolidator and no
+Worker and no Curator. A call that names a choice or a holder for a role the task does not have is
+refused before anything is prepared, and the refusal names the roles the task has.
 
 Only the Manager of the task's master can call this: any other caller is refused
-before anything is prepared. Each of the three is then checked as a start of its
-role is. The three have the calling Manager as their parent and the same
+before anything is prepared. Each of them is then checked as a start of its
+role is. They have the calling Manager as their parent and the same
 task as their selection, and each takes its agent, model, effort and
 feature values as any start of its role does: pass them
-for each role in `worker`, `reviewer` and `curator` (`agent`, `model`, `effort`, `featureValues`).
+for each role in `worker`, `consolidator`, `reviewer` and `curator` (`agent`, `model`, `effort`,
+`featureValues`).
 
-The Worker opens at once. The Reviewer and the Curator are held: each exists on
+The Worker or the Consolidator opens at once. The Reviewer and the Curator are held: each exists on
 the host, is reached by its role and the task's document reference, and has taken no
 turn, with its handover written when the role agent is prepared. reviewer_message is
 the Reviewer's first work: carried, the Reviewer opens at once with its handover
@@ -481,9 +486,9 @@ the task, its holder; the start retires the holder first and then starts the suc
 describes for `role_start`. `replaces_interrupt_turn` is the word, for the whole set, that a
 replaced holder's turn may be interrupted.
 
-The answer names the three agent ids and says for each whether it has taken a
-turn. A repeat with the same request id reconciles the same three agents: it
-creates no fourth and opens no held role agent. If one of the three cannot be created,
+The answer names the agent ids and says for each whether it has taken a
+turn. A repeat with the same request id reconciles the same agents: it
+creates no further one and opens no held role agent. If one of them cannot be created,
 the call says which, leaves the others as they are, and a repeat completes the
 set.
 

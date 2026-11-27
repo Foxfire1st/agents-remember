@@ -249,7 +249,8 @@ class FirstMessageMatrixTests(FirstMessageMatrixBase):
                 )
                 answer = start_leaf_set(self.config, call, environment=manager.environment())
                 self.assertTrue(answer["ok"], answer)
-                for role in sorted(LEAF_ROLES):
+                # An ordinary leaf's set: its Worker, Reviewer and Curator.
+                for role in sorted(answer["seats"]):
                     request = RoleDispatchRequest.model_validate(
                         {
                             "role": role,

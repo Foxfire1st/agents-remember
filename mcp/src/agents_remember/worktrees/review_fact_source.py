@@ -46,6 +46,9 @@ UNRECORDED_HANDOVER = "the round was recorded before hand-overs were stored with
 NO_PASS_SENTENCE = (
     "No passed memory review is recorded for this leaf, so the revisions it wrote stay proposed."
 )
+# A consolidation task's closeout without a pass adds this: the revisions it only read keep their
+# state, so the pass consolidated nothing.
+NOTHING_CONSOLIDATED_SENTENCE = "Nothing was consolidated."
 
 
 def _clock_now() -> str:

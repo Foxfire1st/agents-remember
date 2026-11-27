@@ -161,6 +161,11 @@
     ],
     "message-handover-row-coherence-msg-4fd2173c49": [
       {
+        "source": "roles/consolidator.md",
+        "fragment": "",
+        "wording": "row: coherence/msg"
+      },
+      {
         "source": "roles/curator.md",
         "fragment": "",
         "wording": "row: coherence/msg"
@@ -237,6 +242,11 @@
       }
     ],
     "sync-and-repairs-row-exceptions-sync-b514d0c6a5": [
+      {
+        "source": "roles/consolidator.md",
+        "fragment": "synchronize-the-leaf",
+        "wording": "row: exceptions/sync"
+      },
       {
         "source": "roles/curator.md",
         "fragment": "synchronize-the-leaf",

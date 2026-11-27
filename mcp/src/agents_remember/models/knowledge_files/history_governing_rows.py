@@ -29,7 +29,7 @@ def changed_record_row_violation(
     files -- is the ``changed`` row of that change (or the ``deleted`` row that retires it). A
     later ``no_impact``, ``moved`` or ``extended`` row would replace that judgment and hide the
     change, so it is refused at the routes. The writer's own form of the rule is
-    :func:`~agents_remember.models.knowledge_files.history.invariant_revision_violation`, against
+    :func:`~agents_remember.models.knowledge_files.history_writer_checks.invariant_revision_violation`, against
     its base.
     """
 

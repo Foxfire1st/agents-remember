@@ -140,6 +140,7 @@ def test_moved_piece_pointers_reach_each_required_compile_and_reject_removal() -
         "worker",
         "curator",
         "reviewer",
+        "consolidator",
         "investigator",
         "bootstrap",
     }

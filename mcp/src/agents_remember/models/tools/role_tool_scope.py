@@ -4,7 +4,7 @@ A role-launched ``agents-remember-task`` server advertises and dispatches only t
 the role it was started for: least privilege over one static table, and a stable tool order
 across turns so the prompt cache of a harness holds. Every entry is a subsequence of
 :data:`agents_remember.models.tools.public_roster.PUBLIC_TOOLS`, in that roster's exact
-order; the union of the eight role entries is the whole public roster, so no tool is unreachable
+order; the union of the nine role entries is the whole public roster, so no tool is unreachable
 and none appears twice in an entry.
 
 The table lives in ``models`` because the advertised roster is wire vocabulary: the server
@@ -136,6 +136,26 @@ ROLE_TOOL_ALLOWLISTS: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
             "memory_carryover_plan",
             "memory_carryover_apply",
             "worktree_status",
+            "task_doc",
+            "curator_coherence",
+            "role_message",
+            "knowledge_read",
+            "knowledge_diff",
+            "knowledge_integrity_check",
+            "knowledge_write",
+        ),
+        # The Consolidator reads as a Worker does and writes memory as a Curator does: it
+        # changes no code, so the Curator's anchor, index and carry-over repairs after a code
+        # change are not its tools; knowledge_write carries every record and card entry it may
+        # change, knowledge_diff and knowledge_integrity_check check that change before its
+        # hand-over, and curator_coherence publishes its own task's coherence record.
+        "consolidator": (
+            "server_info",
+            "context_packet",
+            "read_ar_files",
+            "memory_quality_check",
+            "worktree_status",
+            "worktree_sync",
             "task_doc",
             "curator_coherence",
             "role_message",

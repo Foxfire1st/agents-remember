@@ -73,8 +73,8 @@ from agents_remember.kernel.coordination_context.models import StorageSettings
 from agents_remember.kernel.memory_ignore import ignore_briefs
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.server import create_server
-from agents_remember.mcp.tools import knowledge as _knowledge
 from agents_remember.mcp.tools.knowledge import ReadToolRequest
+from agents_remember.mcp.tools.knowledge_views import record_views as _knowledge
 from agents_remember.memory.conversion.base import GitBaseConverter
 from agents_remember.memory.knowledge_index import directory_snapshot
 from agents_remember.memory.knowledge_index.build import IndexedRecord, ParsedTree

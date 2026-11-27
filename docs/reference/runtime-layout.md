@@ -175,7 +175,7 @@ depends on its role.
 
 | Role agent | Scratch folder | Report folder |
 | --- | --- | --- |
-| Worker, Reviewer or Curator of a task | `<enclosure>/scratch/<role>/<request-id>/` | `<enclosure>/role-reports/<role>/<request-id>/` |
+| Worker, Consolidator, Reviewer or Curator of a task | `<enclosure>/scratch/<role>/<request-id>/` | `<enclosure>/role-reports/<role>/<request-id>/` |
 | every other role agent | `<workspace-root>/.agents-remember/role-executions/<request-id>/scratch/` | `<workspace-root>/.agents-remember/role-executions/<request-id>/role-reports/` |
 
 The install prepares the second row: it creates `<workspace-root>/.agents-remember/role-executions/`

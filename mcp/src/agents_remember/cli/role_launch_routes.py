@@ -31,6 +31,7 @@ from agents_remember.application.role_launch_context import (
 )
 from agents_remember.cli import role_launch_progress
 from agents_remember.cli.investigator_receipts import investigator_start_capacity
+from agents_remember.cli.leaf_set_seats import OPEN_AT_ONCE_SEATS, set_seat_roles
 from agents_remember.cli.paseo_bridge import (
     PaseoBridgeFailure,
     require_bridge_runtime,
@@ -713,11 +714,6 @@ def _receipt_lock() -> Iterator[None]:
         _DISPATCH_LOCK.release()
 
 
-# The seats one set call prepares, in start order: the Worker opens at once, the
-# Reviewer and the Curator are held until their first message (MIK-R100 rules 1/2).
-SET_SEAT_ROLES: tuple[str, ...] = ("worker", "reviewer", "curator")
-
-
 def seat_request_id(set_request_id: uuid.UUID, role: str) -> uuid.UUID:
     """The deterministic seat request id of one set: a repeat reconciles the same agent."""
 
@@ -732,21 +728,22 @@ def dispatch_leaf_set(
     reviewer_opening: str | None = None,
     lock_wait_seconds: float = 60.0,
 ) -> dict[str, Any]:
-    """Start a leaf's Worker, Reviewer and Curator in one call (MIK-R100 rule 1).
+    """Start a leaf's seats in one call (MIK-R100 rule 1), as its task document names them.
 
-    The three have the calling Manager as their parent and the same leaf as their
-    selection. The Worker opens at once; the Reviewer opens at once with its handover
-    and the carried first message when one is given (rule 3), else held like the
-    Curator (rule 2). If one seat cannot be created the call names it, leaves the
+    The seats have the calling Manager as their parent and the same leaf as their
+    selection. The Worker or the Consolidator opens at once; the Reviewer opens at once
+    with its handover and the carried first message when one is given (rule 3), else held
+    like the Curator (rule 2). If one seat cannot be created the call names it, leaves the
     others as they are, and a repeat with the same set request id completes the set.
     """
 
     _require_paseo_runtime(config)
+    seat_roles = set_seat_roles(config.coordination_root, call)
     _acquire_dispatch_lock(lock_wait_seconds)
     try:
         seats = {
             role: _start_set_seat(config, call, role, started_by, reviewer_opening)
-            for role in SET_SEAT_ROLES
+            for role in seat_roles
         }
     finally:
         _DISPATCH_LOCK.release()
@@ -756,7 +753,7 @@ def dispatch_leaf_set(
         "ok": ok,
         "status": "completed" if ok else "partial",
         "detail": (
-            "The set prepared the leaf's Worker, Reviewer and Curator as siblings."
+            f"The set prepared the leaf's {', '.join(seat_roles)} as siblings."
             if ok
             else f"The set left {', '.join(failed)} without an agent; the other seats stand. "
             "Repeat the call with the same set request id to complete the set."
@@ -768,7 +765,7 @@ def dispatch_leaf_set(
             if ok
             else {
                 "nextAction": "Repeat role_start_set with the same request_id and leaf; "
-                "seats that have an agent reconcile it and create no fourth."
+                "seats that have an agent reconcile it and create no new one."
             }
         ),
     }
@@ -822,7 +819,7 @@ def _start_set_seat(
             "hasTurn": False,
             "detail": f"The seat request is not valid: {error}",
         }
-    opens_at_once = role == "worker" or (role == "reviewer" and bool(reviewer_opening))
+    opens_at_once = role in OPEN_AT_ONCE_SEATS or (role == "reviewer" and bool(reviewer_opening))
     try:
         response = _start_execution(
             config,

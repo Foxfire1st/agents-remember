@@ -124,10 +124,10 @@ mode the start takes when you choose none, with that same source; its hover text
 
 | Control | Accessible name | What it offers | When it shows |
 | --- | --- | --- | --- |
-| Role | "Role" | "Architect", "Investigator", "Orchestrator", "Manager", "Worker", "Reviewer", "Curator". The launcher opens on "Architect". | Always. |
-| Sprint | "AR sprint" | The sprint documents, and "No sprint" for a master that no sprint commands. | For Orchestrator, Manager, Worker, Reviewer and Curator. |
-| Master | "AR master" | The masters of the chosen sprint, or, while "No sprint" is chosen, the masters that no sprint commands; "Select master…", or "No linked masters". | For Manager, Worker, Reviewer and Curator. |
-| Task | "AR task" | The tasks of the chosen master; "Select task…", or "No leaf tasks". | For Worker, Reviewer and Curator, after a master is chosen. |
+| Role | "Role" | "Architect", "Investigator", "Orchestrator", "Manager", "Worker", "Consolidator", "Reviewer", "Curator". The launcher opens on "Architect". | Always. |
+| Sprint | "AR sprint" | The sprint documents, and "No sprint" for a master that no sprint commands. | For Orchestrator, Manager, Worker, Consolidator, Reviewer and Curator. |
+| Master | "AR master" | The masters of the chosen sprint, or, while "No sprint" is chosen, the masters that no sprint commands; "Select master…", or "No linked masters". | For Manager, Worker, Consolidator, Reviewer and Curator. |
+| Task | "AR task" | The tasks of the chosen master; "Select task…", or "No leaf tasks". | For Worker, Consolidator, Reviewer and Curator, after a master is chosen. |
 | Agent | "Role agent override" | First "<agent> · default" or "Role default", the role's default harness; then every harness that the host knows. | Always. |
 | Model | "Role model override" | First "<model> · default", "Role default" or "Agent default"; then the models of the selected harness. | Always. |
 | Effort | "Role effort override" | First "<effort> · default", "Model default" or "Role default"; then the efforts of the selected model. | While the selected model offers efforts. |
@@ -138,7 +138,7 @@ mode the start takes when you choose none, with that same source; its hover text
 
 Some texts of the dashboard say "leaf" for a [task](concepts.md#task), for example "No leaf tasks".
 
-The launcher offers seven roles. Bootstrap is not among them. [Roles](roles.md) describes each
+The launcher offers eight roles. Bootstrap is not among them. [Roles](roles.md) describes each
 role and the document it works on.
 
 The model selector can show a placeholder in place of a choice: "Pick an agent first", "Agent
@@ -185,7 +185,7 @@ unreported", and the other chips begin with "Base · ".
 "Start" is off while the selection is incomplete, while the model list is loading and no saved
 list is available, while a start runs, and while the failure line names a problem with a choice.
 With the model list available, an otherwise eligible start can proceed while the shown model's
-options are loading. For Worker, Reviewer and Curator, "Start" is also off while an agent already
+options are loading. For Worker, Consolidator, Reviewer and Curator, "Start" is also off while an agent already
 holds the role for the selected task and while "Retry" is offered.
 
 #### Where the choices come from
@@ -486,6 +486,7 @@ Under the buttons stand "Objective" and "Non-goals". The blocks follow in this o
 | --- | --- |
 | "Steps" | "N of M done" and one line per major step: its id, its title, one of "done", "current", "blocked", "next", "pending" or "skipped", and its sub-steps. |
 | "Review" | "round N", how many findings are open, the first open findings under "Open findings", and the link "all N findings". The line "granted by" shows the field `developerApproval` of the task document's review state when the document holds it. An approval that `begin_review` records stands in the field `approval`, which the block does not show. |
+| "Consolidation" | On a consolidation task (one whose document names a `consolidationList`): the outcome counts (kept, corrected, merged, retired, unresolved and open), the listed families and rules, the first subjects under "Subjects" with each subject's outcome badge, and the link "all N subjects". When the task's memory was not read, the block reads "N listed · outcomes not known yet" with the notice "the task's memory was not read: the ids stand as listed and no outcome is known" and labels open rows "listed". |
 | "Requirements", "Design", "Acceptance" | The texts of the task document. |
 | "Proposed code" | The code examples of the task document. |
 | "Decisions" | As on a master. |
@@ -543,7 +544,7 @@ bound to this document. It offers only the roles that fit:
 | None | Architect, Investigator |
 | A sprint | Orchestrator, Investigator |
 | A master | Manager, Investigator |
-| A task | Worker, Reviewer, Curator |
+| A task | Worker, Reviewer, Curator; for a consolidation task, Consolidator and Reviewer |
 
 The chat of a sprint stays the chat of its Orchestrator and the chat of a master that of its
 Manager; an Investigator is never the chat of a document.

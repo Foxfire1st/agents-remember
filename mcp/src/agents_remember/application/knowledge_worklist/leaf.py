@@ -46,6 +46,7 @@ from agents_remember.application.knowledge_worklist.compute import (
     git_failure,
     incomplete_worklist,
 )
+from agents_remember.application.knowledge_worklist.consolidation import Listing, listing_from
 from agents_remember.application.knowledge_worklist.knowledge import (
     KnowledgeSide,
     KnowledgeSideUnreadable,
@@ -109,6 +110,7 @@ __all__ = [
     "CapturedBase",
     "ExplicitSides",
     "LeafWorklistRecompute",
+    "leaf_consolidation_list",
     "leaf_expected_effects",
     "leaf_gate_applies",
     "leaf_maintenance_scope",
@@ -181,6 +183,14 @@ def leaf_expected_effects(contract: WorktreeContract) -> tuple[Declaration, ...]
 
     found = strict_leaf_doc(contract.task_root, contract.leaf_id or contract.task_name)
     return None if found is None else declarations_from(found[1].expectedKnowledgeEffects)
+
+
+def leaf_consolidation_list(contract: WorktreeContract) -> Listing | None:
+    """The leaf task document's ``consolidationList``, read like its declared effects (fail
+    closed: an unreadable document raises :class:`LeafDocumentUnresolved`)."""
+
+    found = strict_leaf_doc(contract.task_root, contract.leaf_id or contract.task_name)
+    return None if found is None else listing_from(found[1].consolidationList)
 
 
 def _git(repository: Path, *args: str) -> str | None:
@@ -373,6 +383,7 @@ def worklist_for_sides(sides: ExplicitSides) -> dict[str, Any] | None:
             expected_effects=sides.expected_effects,
             coverage=resolved.coverage,
             coordination_root=sides.coordination_root,
+            consolidation=sides.consolidation,
         )
     )
 
@@ -464,6 +475,7 @@ def _leaf_document(
     try:
         expected_effects = leaf_expected_effects(contract)
         maintenance_scope = leaf_maintenance_scope(contract)
+        consolidation = leaf_consolidation_list(contract)
     except LeafDocumentUnresolved as error:
         return incomplete_worklist(
             Incomplete("leaf task document", str(error)), owner=owner, pairing=None
@@ -485,6 +497,7 @@ def _leaf_document(
             expected_effects=expected_effects,
             coordination_root=contract.coordination_root,
             held_base_tree=None if base is None else base.read_tree,
+            consolidation=consolidation,
         ),
     )
 

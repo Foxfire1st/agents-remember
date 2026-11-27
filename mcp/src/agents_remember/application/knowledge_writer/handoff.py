@@ -22,7 +22,7 @@ Every ``target`` becomes a realization entry. An entry that authors no invariant
 there, and a ``status`` that names a record's state is refused (:mod:`.typed_state`).
 
 **History** rows are ``{subject, disposition, reason, items?, covers?, effect?, because?,
-examined?, considered?, ref?}``. The writer mints the row ID, fills the invariant's, family's or
+examined?, considered?, ref?, testsRun?, testsNotRun?, noProofRecorded?}``. The writer mints the row ID, fills the invariant's, family's or
 record's own revision and each examined member's revision, fills an onboarding row's ``sources``
 from the code candidate, and writes each covered entry's ``before`` and ``after`` anchor.
 A changed family row requires its authored effect; other family dispositions refuse that field.
@@ -37,8 +37,6 @@ the document's own shape and collects every problem, so one refusal names them a
 
 from __future__ import annotations
 
-import json
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Final
@@ -48,7 +46,15 @@ from agents_remember.application.curator_realization_authoring import (
     realization_refusal,
 )
 from agents_remember.application.curator_scope import CuratorScope, read_curator_scope
+from agents_remember.application.knowledge_writer.handoff_test_names import (
+    CASE_PROOF,
+    TEST_ID,
+    TestFileMention,
+    TestReference,
+    tests_named_in,
+)
 from agents_remember.application.knowledge_writer.row_items import read_row_items
+from agents_remember.application.knowledge_writer.row_tests import TEST_KEYS, read_row_tests
 from agents_remember.application.knowledge_writer.rule_titles import (
     read_title,
     record_title_problems,
@@ -74,30 +80,12 @@ _ROW_KEYS: Final = frozenset(
         "ref",
         "repoint",
         "deferralIds",
+        *TEST_KEYS,
     }
 )
 # The architect's ruling (L21 review, finding 6): the template's ``incidental`` has no spelling in the
 # file format and is written as ``support``.
 ROLE_SPELLINGS: Final = {"incidental": "support"}
-_CASE_PATH = r"[\w./@+-]+\.(?:test|spec)\.(?:[cm]?[jt]s|[jt]sx)"
-_CASE_PROOF = re.compile(rf"(?P<path>{_CASE_PATH})::(?P<name>[^\r\n]+)")
-_CASE_EVIDENCE = re.compile(rf'(?P<path>{_CASE_PATH})::(?P<title>"(?:\\.|[^"\\])*?")')
-_TEST_ID = re.compile(r"(?P<path>[\w./@+-]+\.py)::(?P<name>[A-Za-z_][\w]*(?:::[A-Za-z_][\w]*)*)")
-# MIK-R28 rule 2's "path plus symbol": the pytest selection ``<path> -k <name>`` where the ``-k``
-# expression is one bare identifier (optionally quoted). An expression (``a and not b``) names no one
-# test, so it is not read as one.
-_SELECTED_TEST = re.compile(
-    r"(?P<path>[\w./@+-]+\.py)\s+-k\s+(?P<quote>['\"]?)(?P<name>[A-Za-z_]\w*)(?P=quote)"
-    r"(?=$|[\s,;:.)\]`'\"])(?!\s+(?:and|or|not)\b)"
-)
-# A test module named without a test in it: a ``test_*.py`` or ``*_test.py`` file (pytest's module
-# pattern), not followed by ``::``. It names no resolvable test, so it is reported rather than
-# silently dropped (MIK-R28 rule 2). Helper modules (``conftest.py``, ``*_test_support.py``, any
-# other module under ``tests/``) hold no tests and are never reported.
-_TEST_FILE = re.compile(
-    r"(?<![\w./@+-])(?P<path>(?:[\w.@+-]+/)*(?:test_[\w.@+-]*|[\w.@+-]*_test)\.py)"
-    r"(?![\w./@+-]|::)"
-)
 
 
 @dataclass(frozen=True)
@@ -151,19 +139,6 @@ class RepointRequest:
 
 
 @dataclass(frozen=True)
-class TestReference:
-    """A test named as ``path::name`` (``path::Class::method`` is the symbol ``Class.method``)."""
-
-    path: str
-    name: str
-
-    @property
-    def spelling(self) -> str:
-        name = self.name.replace(".", "::") if self.path.endswith(".py") else self.name
-        return f"{self.path}::{name}"
-
-
-@dataclass(frozen=True)
 class TestRangeReference:
     """A test case named by the lines it occupies, for a case no ``path::name`` reaches.
 
@@ -178,48 +153,6 @@ class TestRangeReference:
     @property
     def spelling(self) -> str:
         return f"{self.path}::{self.locator.describe()}"
-
-
-@dataclass(frozen=True)
-class TestFileMention:
-    """A test file the evidence names without naming a test in it: no proof can be prepared."""
-
-    path: str
-
-    @property
-    def spelling(self) -> str:
-        return self.path
-
-
-def tests_named_in(evidence: Sequence[str]) -> tuple[TestReference | TestFileMention, ...]:
-    """Every test ``evidence`` names, in order of appearance, once each (MIK-R28 rule 2).
-
-    A test is named as a test ID ``path::name`` (``path::Class::method`` is ``Class.method``) or as a
-    path plus symbol, the pytest selection ``path -k name``. A test file named with neither is a
-    :class:`TestFileMention`, so the report can say the evidence names no resolvable test. Reading
-    resolves nothing: whether a named test exists at C is the writer's to establish.
-    """
-
-    found: list[tuple[int, int, TestReference | TestFileMention]] = []
-    for position, text in enumerate(evidence):
-        for match in _CASE_EVIDENCE.finditer(text):
-            try:
-                title = json.loads(match["title"])
-            except ValueError:
-                continue
-            found.append((position, match.start(), TestReference(match["path"], title)))
-        for pattern in (_TEST_ID, _SELECTED_TEST):
-            for match in pattern.finditer(text):
-                reference = TestReference(match["path"], match["name"].replace("::", "."))
-                found.append((position, match.start(), reference))
-    # A file some evidence string names a test in is named, wherever else it is mentioned bare.
-    named = {item.path for _, _, item in found}
-    for position, text in enumerate(evidence):
-        for match in _TEST_FILE.finditer(text):
-            if match["path"] not in named:
-                found.append((position, match.start(), TestFileMention(match["path"])))
-    ordered = [item for _, _, item in sorted(found, key=lambda one: (one[0], one[1]))]
-    return tuple(dict.fromkeys(ordered))
 
 
 @dataclass(frozen=True)
@@ -316,6 +249,8 @@ class RowRequest:
     """The fired links a ``still_rejected`` row re-points, where the code they name now lives."""
     deferral_ids: list[str] | None = None
     """Deferral IDs (``DFR-...``) referenced by a dependent record history row."""
+    tests: Mapping[str, Any] = field(default_factory=dict)
+    """A rule's or family's row's ``testsRun``, ``testsNotRun`` and ``noProofRecorded``."""
 
 
 @dataclass(frozen=True)
@@ -551,10 +486,10 @@ def _range_test_reference(path: str, locator: Any) -> TestRangeReference | str:
 def _written_test_reference(value: str) -> TestReference | str:
     """A test written as ``path::name`` or as a pytest test ID."""
 
-    case = _CASE_PROOF.fullmatch(value.strip())
+    case = CASE_PROOF.fullmatch(value.strip())
     if case is not None:
         return TestReference(case["path"], case["name"])
-    match = _TEST_ID.fullmatch(value.strip())
+    match = TEST_ID.fullmatch(value.strip())
     if match is not None:
         return TestReference(match["path"], match["name"].replace("::", "."))
     return _not_a_test_reference(value)
@@ -908,7 +843,10 @@ def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:
         else:
             deferral_ids = list(deferral_ids_raw)
     items, refusals = read_row_items(raw.get("items"))
-    problems.extend(Problem(f"{where} ({subject})", refusal) for refusal in refusals)
+    tests, test_refusals = read_row_tests(raw)
+    problems.extend(
+        Problem(f"{where} ({subject})", refusal) for refusal in (*refusals, *test_refusals)
+    )
     return RowRequest(
         position=position,
         subject=subject,
@@ -924,4 +862,5 @@ def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:
         ref=raw["ref"] if isinstance(raw.get("ref"), Mapping) else None,
         repoint=_repoints(raw.get("repoint"), f"{where} ({subject})", problems),
         deferral_ids=deferral_ids,
+        tests=tests,
     )

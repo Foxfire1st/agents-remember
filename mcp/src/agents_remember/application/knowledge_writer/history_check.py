@@ -39,14 +39,16 @@ from agents_remember.models.knowledge_files.history import (
     FamilyRow,
     HistoryFile,
     InvariantRow,
-    invariant_revision_violation,
     is_closed_history,
+)
+from agents_remember.models.knowledge_files.history_items import invalid_history_items
+from agents_remember.models.knowledge_files.history_writer_checks import (
+    invariant_revision_violation,
     reanchor_mismatches,
     sidecar_entry_anchors,
     stale_examined_members,
     unknown_subjects,
 )
-from agents_remember.models.knowledge_files.history_items import invalid_history_items
 from agents_remember.models.knowledge_files.shapes import Anchor
 from agents_remember.models.knowledge_files.sidecars import ProofEntry, RealizationEntry
 

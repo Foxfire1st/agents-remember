@@ -16,8 +16,10 @@ from agents_remember.models.knowledge_files.history import (
     HistoryFile,
     InvariantRow,
     frozen_history_violation,
-    invariant_revision_violation,
     merged_leaf_history,
+)
+from agents_remember.models.knowledge_files.history_writer_checks import (
+    invariant_revision_violation,
     stale_examined_members,
 )
 from agents_remember.models.knowledge_files.records import FamilyRecord, InvariantRecord

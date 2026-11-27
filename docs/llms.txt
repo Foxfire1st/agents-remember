@@ -32,7 +32,8 @@ this file uses.
 - **Knowledge record.** A JSON file under `knowledge/` that holds one shared truth with a stable ID,
   for example an invariant, a family or a decision.
 - **Role agent.** A chat of a harness that the host runs in one role for one assignment. The roles
-  are Architect, Investigator, Orchestrator, Manager, Worker, Reviewer, Curator and Bootstrap.
+  are Architect, Investigator, Orchestrator, Manager, Worker, Consolidator, Reviewer, Curator and
+  Bootstrap.
 - **Task.** The unit that one Worker builds. A task belongs to a master, and a sprint groups
   masters. Tools, fields and refusals call a task a `leaf`. A task is built in an enclosure: a
   folder that holds a code worktree and a memory worktree.
@@ -114,7 +115,7 @@ Docker is not needed.
   start it, its ports, and what to do after a new version of the package.
 - [The Dashboard](dashboard.md): the tabs, the role launcher, the task list, the task document,
   the review page and the tray.
-- [Roles and role agents](roles.md): the eight roles, who starts whom, what a role agent
+- [Roles and role agents](roles.md): the nine roles, who starts whom, what a role agent
   receives at its start and how role agents send messages.
 - [Workflows](workflows.md): how a request becomes a task and how a task lands.
 - [Architecture](architecture.md): the package, the programs, and the files and folders of

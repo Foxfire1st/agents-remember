@@ -60,7 +60,11 @@ DETAIL_INDEX_ENTRIES = {
     AUTHORING: ("Cards/style", "sentences", {"curator"}),
     CARD: ("Cards/style", "cards", {"curator"}),
     WRITER: ("Knowledge/CLI", "cli", {"worker", "curator"}),
-    PUBLICATION: ("Write/route", "pub", {"curator"}),
+    PUBLICATION: (
+        {"curator": "Write/route", "consolidator": "Write/families"},
+        "pub",
+        {"curator", "consolidator"},
+    ),
     AUTHORED_HISTORY: ("Cards/style", "prose", {"curator"}),
     CHANGE_ROUTING: ("Write/route", "route", {"curator"}),
     EXCEPTIONS: ("Exceptions/sync", "exceptions", {"curator"}),
@@ -290,7 +294,8 @@ def test_step_details_reach_actual_files_at_actions_over_the_complete_matrix(
             )
             if name in details:
                 assert details[name].step.strip()
-                _assert_index_detail_pointer(rendered, trigger, label, name)
+                row_trigger = trigger[delivery.role] if isinstance(trigger, dict) else trigger
+                _assert_index_detail_pointer(rendered, row_trigger, label, name)
                 assert details[name].content == (LIFECYCLE / name).read_bytes()
         if delivery.role == "curator":
             report = tmp_path / delivery.role / delivery.operation / "request.md"

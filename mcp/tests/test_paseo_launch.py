@@ -78,7 +78,7 @@ ROLE_REFS: dict[str, dict[str, TaskDocumentRef]] = {
             "masterDocumentRef": MASTER_REF,
             "taskDocumentRef": LEAF_REF,
         }
-        for role in ("worker", "reviewer", "curator")
+        for role in ("worker", "reviewer", "curator", "consolidator")
     },
 }
 ROLE_DEFAULTS = ({"agent": "codex", "model": "gpt-a", "effort": "low"}, ("codex", "eve"))

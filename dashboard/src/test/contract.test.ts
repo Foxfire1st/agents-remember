@@ -319,6 +319,13 @@ const VOCABULARIES: Record<
   'projection.tasks[].summary.steps[].substeps[].disposition.recordedVia': ['task_doc.skip_step'],
   'projection.tasks[].summary.executionNature': ['organizational', 'atomic'],
   'projection.tasks[].summary.form': ['sprint', 'master', 'task'],
+  'projection.tasks[].summary.consolidation.rows[].kind': ['family', 'rule'],
+  'projection.tasks[].summary.consolidation.rows[].outcome': [
+    'stands',
+    'corrected',
+    'unresolved',
+    'open',
+  ],
   'projection.tasks[].summary.executionGraphView.nodes[].kind': ['lump', 'segment'],
   'projection.tasks[].summary.executionGraphView.nodes[].frontierState': [
     'landed',

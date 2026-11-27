@@ -1,6 +1,6 @@
 # Read governing documentation and preserve decisions
 
-Curators read this topic before explaining an assigned contract or recording a governing decision. It describes selecting and inspecting governing documentation, durable decisions, task-only decisions and rejected alternatives.
+Curators and Consolidators read this topic before explaining an assigned contract or recording a governing decision. It describes selecting and inspecting governing documentation, durable decisions, task-only decisions and rejected alternatives.
 
 ## Read governing documentation
 

@@ -55,6 +55,7 @@ ROLE_ORDER = (
     "worker",
     "curator",
     "reviewer",
+    "consolidator",
     "investigator",
     "bootstrap",
 )
@@ -62,9 +63,8 @@ ROLE_ORDER = (
 #: The retired machine-readable block. Knobs are settings, not role-file content.
 MACHINE_SECTION = "## Knobs, Tool Surface, And Dispatch Authority"
 
-# The nine frozen operations: the architecture's eight, plus the one deliberate extension
-# (`bootstrap`) authored with the bootstrap role and tested in
-# test_role_capsule_admission.py.
+# The ten frozen operations: the architecture's eight, plus the two deliberate extensions
+# (`bootstrap` and `consolidation`) tested in test_role_capsule_admission.py.
 OPERATION_KEYS = (
     "orientation",
     "planning",
@@ -75,6 +75,7 @@ OPERATION_KEYS = (
     "authorized-closeout",
     "recovery",
     "bootstrap",
+    "consolidation",
 )
 
 BACKTICKED_PATH = re.compile(r"`([^`\n]+)`")

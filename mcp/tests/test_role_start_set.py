@@ -16,11 +16,13 @@ from agents_remember.application.agent_binding import launch_server_exclusion
 from agents_remember.cli.paseo_role_tools import start_leaf_set
 from agents_remember.cli.role_launch_receipts import _read_receipt, _receipt_path
 from agents_remember.cli.role_launch_routes import seat_request_id
-from agents_remember.models.role_agents import RoleStartSetCall
+from agents_remember.models.role_agents import RoleStartSetCall, SeatLaunchOverride
 from agents_remember.models.role_launcher import RoleSelection
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import bound_for
 from agents_remember.serving.paseo.paseo_plugin_files import read_role_agents, role_agents_path
+from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from test_paseo_launch import LEAF_REF, MASTER_REF, SPRINT_REF
 from test_paseo_role_tools import OTHER_MASTER, RoleToolsTestCase, binding, selection_of
 
@@ -239,6 +241,80 @@ class SetStartTests(RoleToolsTestCase):
         )
 
         self.assertEqual((refused["ok"], refused["status"]), (False, "refused"))
+        self.assertEqual(self.runtime.launch_calls(), [])
+        self.assertEqual(self.runtime.agents, {})
+
+    def make_consolidation_task(self) -> None:
+        """The leaf's document names the list of a pass before any seat starts."""
+
+        listed = TaskDocument.model_validate(
+            {
+                **self.leaf.document.model_dump(mode="json", by_alias=True, exclude_none=True),
+                "consolidationList": {"families": ["FAM-0BVSZB"], "rules": ["INV-KYKYPR"]},
+            }
+        )
+        self.leaf = ResolvedTaskDocument(ref=self.leaf.ref, path=self.leaf.path, document=listed)
+        write_task_doc(self.leaf.path.parent, listed)
+
+    def test_a_consolidation_set_opens_its_consolidator_and_holds_its_reviewer(self) -> None:
+        """A consolidation task's set is its Consolidator and its Reviewer, and no Curator.
+
+        The Consolidator opens at once as a Worker does; the Reviewer is held and opens with
+        the first message it is sent, here the Consolidator's hand-over.
+        """
+
+        self.make_consolidation_task()
+        _, result = self.manager_set()
+
+        self.assertEqual((result["ok"], result["status"]), (True, "completed"))
+        self.assertEqual(list(result["seats"]), ["consolidator", "reviewer"])
+        consolidator, reviewer = result["seats"]["consolidator"], result["seats"]["reviewer"]
+        self.assertEqual(
+            (consolidator["status"], consolidator["opened"], consolidator["held"]),
+            ("running", True, False),
+        )
+        self.assertEqual(
+            (reviewer["status"], reviewer["opened"], reviewer["held"]), ("held", False, True)
+        )
+        self.assertEqual(len(self.runtime.agents), 2)
+        self.assertEqual(self.received(reviewer["agentId"]), [])
+
+        seat = binding("consolidator", agent_id=consolidator["agentId"])
+        opened = self.message(seat, agent_id=reviewer["agentId"], text="Review the pass.")
+
+        self.assertEqual((opened["ok"], opened["status"]), (True, "accepted"))
+        self.assertTrue(opened["openedHeldSeat"])
+        self.assertNotEqual(self.receipt_for("reviewer")["status"], "held")
+
+    def test_a_set_that_names_a_seat_outside_the_leafs_set_is_refused_with_no_effects(
+        self,
+    ) -> None:
+        """A set holds a Worker or a Consolidator, never both; the document decides which."""
+
+        choice = SeatLaunchOverride(model="gpt-a")
+        manager = binding("manager")
+        ordinary = start_leaf_set(
+            self.config,
+            set_call(uuid.uuid4(), consolidator=choice),
+            environment=manager.environment(),
+        )
+        self.make_consolidation_task()
+        mixed = start_leaf_set(
+            self.config,
+            set_call(uuid.uuid4(), worker=choice, replaces={"curator": "agent"}),
+            environment=manager.environment(),
+        )
+
+        for answer, named in ((ordinary, "consolidator"), (mixed, "curator, worker")):
+            with self.subTest(named=named):
+                self.refusal(answer, "launch-refused")
+                self.assertIn(
+                    f"The call names {named}, which this set does not start", answer["detail"]
+                )
+                self.assertIn("never both", answer["detail"])
+                self.assertIn("Call role_start_set again", answer["nextAction"])
+        self.assertIn("consolidationList with task_doc", ordinary["nextAction"])
+        self.assertIn("only for consolidator and reviewer", mixed["nextAction"])
         self.assertEqual(self.runtime.launch_calls(), [])
         self.assertEqual(self.runtime.agents, {})
 

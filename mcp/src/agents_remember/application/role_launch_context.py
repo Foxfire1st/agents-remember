@@ -51,6 +51,7 @@ PARENTLESS_START_SELECTIONS: dict[str, tuple[bool | None, bool | None, bool | No
     "orchestrator": (True, False, False),
     "manager": (None, True, False),
     "worker": (None, True, True),
+    "consolidator": (None, True, True),
     "reviewer": (None, True, True),
     "curator": (None, True, True),
 }

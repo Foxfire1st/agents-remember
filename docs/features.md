@@ -253,14 +253,18 @@ they do not write or merge this index.
 ## Role agents and the host
 
 Work on a code repository is done by role agents. A role agent is a chat of a harness that runs in
-one of eight roles: Architect, Investigator, Orchestrator, Manager, Worker, Reviewer, Curator or
-Bootstrap. [Roles and role agents](roles.md) describes each role.
+one of nine roles: Architect, Investigator, Orchestrator, Manager, Worker, Consolidator, Reviewer,
+Curator or Bootstrap. [Roles and role agents](roles.md) describes each role.
 
 - The user talks with the **Architect**. The Architect writes the requirement packets and the
   task documents and delegates the work.
 - A **Manager** coordinates one master. It starts a **Worker** to build a task, a **Reviewer** when
   the Worker freezes its change, and a **Curator** after the code review has passed.
-- The Worker writes code. Only the Curator writes memory. The Manager performs closeout and landing.
+- On your request, a master of its own runs consolidation tasks: a **Consolidator** reads the
+  rules and families its task lists again against the code, and a **Reviewer** reviews that work.
+- The Worker writes code. The Curator writes memory for ordinary tasks, and the Consolidator writes
+  memory corrections, consolidation history and coherence records for consolidation tasks (through
+  `knowledge_write` and `curator_coherence`). The Manager performs closeout and landing.
 - An **Orchestrator** coordinates a sprint when two or more masters are worked on at the same time,
   or when the user asks for one. The Architect starts it, or the user from the role launcher.
 - A question for the user travels up through the starting agents and arrives in the
@@ -523,7 +527,7 @@ and checks around it exist to keep stale or speculative content out of that memo
 - [Getting started](getting-started.md): the setup in your own workspace.
 - [Install](install/README.md): registration of the tool server in each harness.
 - [The dashboard](dashboard.md): the four tabs.
-- [Roles and role agents](roles.md): the eight roles.
+- [Roles and role agents](roles.md): the nine roles.
 - [The host](host.md): checking, stopping and provisioning the host.
 - [Workflows](workflows.md): a task from planning to landing.
 - [The review page and the explainer](guides/review-page-and-explainer.md): reviewing a change set.

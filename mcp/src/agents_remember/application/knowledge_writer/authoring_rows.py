@@ -56,6 +56,15 @@ from agents_remember.application.knowledge_writer.revision_stamps import (
     closed_history_message,
     new_history_document,
 )
+from agents_remember.application.knowledge_writer.row_reason_evidence import (
+    with_carried_evidence,
+)
+from agents_remember.application.knowledge_writer.row_tests import (
+    consolidation_subjects_of,
+    misplaced_tests_refusal,
+    missing_rule_tests_refusal,
+    with_consolidation_subjects,
+)
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.models.knowledge.effect import EffectLabel
 from agents_remember.models.knowledge_files import canonical_text
@@ -113,27 +122,6 @@ def _first_error(error: ValidationError) -> str:
     )
 
 
-_EVIDENCE_MARKER: Final = " Evidence ("
-
-
-def _carried_evidence_segments(reason: str) -> list[str]:
-    """Previously appended foreign-evidence segments of a stored row reason (MIK-R53 rule 8).
-
-    :meth:`HistoryRowAuthoring._reason_with_evidence` is the sole producer of ``" Evidence ("``
-    segments, so scanning for the marker recovers every segment a prior run appended
-    byte-exact -- including a trailing empty one, where an accepted reason ends in the bare
-    marker and the split form would drop that suffix on a later reason-only rewrite.
-    """
-
-    segments: list[str] = []
-    start = 0
-    while (found := reason.find(_EVIDENCE_MARKER, start)) >= 0:
-        end = reason.find(_EVIDENCE_MARKER, found + len(_EVIDENCE_MARKER))
-        segments.append(reason[found:] if end < 0 else reason[found:end])
-        start = found + len(_EVIDENCE_MARKER)
-    return segments
-
-
 class HistoryRowAuthoring:
     """The history-row and cover methods of one authoring operation."""
 
@@ -187,7 +175,9 @@ class HistoryRowAuthoring:
         written: list[dict[str, Any]] = []
         for request in requests:
             row = self._row(request, rows)
-            if row is not None:
+            if row is not None and (refused := misplaced_tests_refusal(row, request.tests)):
+                self.problem(f"history[{request.position}]", refused)
+            elif row is not None:
                 rows[row["subject"]] = row
                 self.rows.append(RowOutcome(row["id"], row["subject"], row["disposition"], path))
                 written.append(row)
@@ -196,6 +186,7 @@ class HistoryRowAuthoring:
         latest = self.state.document(path)
         document = deep_copy(latest) if latest else new_history_document(self.owner, attempt)
         document["rows"] = list(rows.values())
+        with_consolidation_subjects(document, self._consolidation_subjects)
         self._fill_items(document, written)
         self.state.put(path, document)
 
@@ -233,6 +224,12 @@ class HistoryRowAuthoring:
             if history.row_about(subject) is not None:
                 answered.setdefault(subject, set()).add(item)
         return answered
+
+    @cached_property
+    def _consolidation_subjects(self) -> tuple[str, ...]:
+        """The records the pass's list reached; empty unless this is a consolidation task."""
+
+        return consolidation_subjects_of(self.worklist_items)
 
     def _row(self, request: RowRequest, rows: Mapping[str, Any]) -> dict[str, Any] | None:
         where = f"history[{request.position}]"
@@ -374,6 +371,7 @@ class HistoryRowAuthoring:
         if request.deferral_ids is not None:
             self.problem(where, "'deferralIds' applies only to a dependent record row")
             return None
+        row.update(request.tests)
         if found[1] == "invariant":
             return self._invariant_row(request, row, found[2], where)
         if found[1] == "family":
@@ -1016,12 +1014,7 @@ class HistoryRowAuthoring:
         never duplicated.
         """
 
-        if carry:
-            for segment in _carried_evidence_segments(carry):
-                if segment not in reason or (
-                    segment == _EVIDENCE_MARKER and not reason.endswith(segment)
-                ):
-                    reason = f"{reason}{segment}"
+        reason = with_carried_evidence(reason, carry)
         pending = self._foreign_evidence.pop(subject, [])
         for handoff_entry, evidence in pending:
             segment = f" Evidence ({handoff_entry}): {'; '.join(evidence)}"
@@ -1050,6 +1043,10 @@ class HistoryRowAuthoring:
             row["effect"] = request.effect
         if request.because:
             row["because"] = [self.resolve(one, where) for one in request.because]
+        untested = missing_rule_tests_refusal(row, bool(self._consolidation_subjects))
+        if untested is not None:
+            self.problem(where, untested)
+            return None
         try:
             InvariantRow.model_validate(row)
         except ValidationError as error:

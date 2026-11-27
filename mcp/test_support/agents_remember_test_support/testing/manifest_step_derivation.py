@@ -56,6 +56,7 @@ ROLE_NAMES = (
     "Worker",
     "Curator",
     "Reviewer",
+    "Consolidator",
     "Investigator",
     "Bootstrap",
 )

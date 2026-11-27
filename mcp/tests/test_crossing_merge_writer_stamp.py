@@ -220,6 +220,7 @@ def _consolidator_keep_history(owner: str, record_id: str, revision: int) -> byt
             }
         ],
         "review": _review_fact(owner, handed_over_by="consolidator"),
+        "consolidationSubjects": [record_id],
     }
     raw = (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
     parse_history_document(f"knowledge/history/{owner}.json", raw.decode("utf-8"))

@@ -90,8 +90,9 @@ ALL_OPERATIONS = (
     "authorized-closeout",
     "recovery",
     "bootstrap",
+    "consolidation",
 )
-#: The eight frozen roles. Spelled here rather than imported so the fixture can
+#: The nine frozen roles. Spelled here rather than imported so the fixture can
 #: disagree with the code under test instead of moving with it.
 ALL_ROLES = (
     "architect",
@@ -100,6 +101,7 @@ ALL_ROLES = (
     "worker",
     "curator",
     "reviewer",
+    "consolidator",
     "investigator",
     "bootstrap",
 )
@@ -111,6 +113,7 @@ ROLE_ALTITUDES = {
     "worker": "leaf",
     "curator": "leaf",
     "reviewer": "leaf",
+    "consolidator": "leaf",
     "investigator": "leaf",
     "bootstrap": "free-agent",
 }
@@ -137,6 +140,7 @@ OPERATIONS_BY_ROLE = {
     "worker": ("orientation", "implementation", "recovery"),
     "curator": ("orientation", "curation", "recovery"),
     "reviewer": ("orientation", "review"),
+    "consolidator": ("orientation", "consolidation", "recovery"),
     "investigator": ("orientation", "recovery"),
     "bootstrap": ("orientation", "bootstrap", "recovery"),
 }

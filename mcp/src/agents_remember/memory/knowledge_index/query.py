@@ -36,11 +36,12 @@ import json
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import apsw
 
 from agents_remember.memory.knowledge.connection import open_read_only_database
+from agents_remember.memory.knowledge_index.consolidation_outcomes import OUTCOME_COLUMNS, Outcome
 from agents_remember.memory.knowledge_index.fts import search_fts
 from agents_remember.memory.knowledge_index.projection import INDEX_REPOSITORY_ID, RETIRED_STATUS
 from agents_remember.memory.knowledge_index.record_standing import (
@@ -453,10 +454,11 @@ class KnowledgeIndex:
                 writer=None if role is None else (str(role), str(harness), str(model)),
                 seat=None if seat is None else str(seat),
                 reviewed=bool(reviewed),
+                consolidation=_outcome(consolidation),
             )
-            for record, revision, role, harness, model, seat, reviewed in self._rows(
+            for record, revision, role, harness, model, seat, reviewed, consolidation in self._rows(
                 "SELECT record, revision, writer_role, writer_harness, writer_model, seat, "
-                "reviewed FROM ix_revision"
+                "reviewed, consolidation FROM ix_revision"
             )
         )
         live = {
@@ -671,3 +673,9 @@ def _split(entries: Sequence[Entry]) -> EntriesAtPath:
         realizations=tuple(e for e in entries if e.kind == "realization"),
         proofs=tuple(e for e in entries if e.kind == "proof"),
     )
+
+
+def _outcome(value: object) -> Outcome | None:
+    """A stored consolidation outcome; anything else the build never writes reads as none."""
+
+    return cast(Outcome, value) if value in OUTCOME_COLUMNS else None

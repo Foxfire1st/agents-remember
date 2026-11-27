@@ -9,6 +9,7 @@ from agents_remember.application.role_launch_context import (
     RoleLaunchContext,
 )
 from agents_remember.cli.paseo_bridge import daemon_configuration
+from agents_remember.cli.seat_variant_rows import seat_launch_knobs
 from agents_remember.errors import PaseoRuntimeFailure
 from agents_remember.kernel._agentic_settings_core import EXTRA_ARGS_HARNESSES
 from agents_remember.kernel.agentic_settings import (
@@ -17,7 +18,6 @@ from agents_remember.kernel.agentic_settings import (
     load_agentic_settings,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.role_identity import ROLE_LEVELS
 from agents_remember.serving.paseo.paseo_daemon_config import (
     host_provider_extra_args,
     provider_extra_args,
@@ -32,7 +32,7 @@ def role_defaults(
     settings = load_agentic_settings(
         config.coordination_root, repo_root=scope.path if scope else None
     )
-    knobs = settings.resolved_role_knobs(context.role, ROLE_LEVELS[context.role])
+    knobs = seat_launch_knobs(settings, context)
     step = knobs.step_up
     return {
         "agent": knobs.harness or settings.spawn_harness,

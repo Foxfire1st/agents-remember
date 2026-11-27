@@ -139,6 +139,7 @@ MESSAGE_HANDOVER_ACTIONS = {
     "worker": "[msg](",
     "reviewer": "[msg](",
     "curator": "[msg](",
+    "consolidator": "[msg](",
     "investigator": "[msgs](",
 }
 # One refused-write pointer per first message: the shared every-role paragraph
@@ -154,6 +155,7 @@ SERVED_REFUSED_WRITE = (
 ROLES = (
     "architect",
     "bootstrap",
+    "consolidator",
     "curator",
     "manager",
     "orchestrator",
@@ -236,6 +238,12 @@ AUTONOMY_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
         "one curator writer": (
             "One Curator writer lane (no helper writers); own placement, admission, "
             "meaning, checks and handover.",
+        ),
+    },
+    "consolidator": {
+        **_SHARED_AUTONOMY_CLAUSES,
+        "one consolidator writer": (
+            "One writer lane (self; no helper writers; helpers hold no seat).",
         ),
     },
     "manager": dict(_SHARED_AUTONOMY_CLAUSES),
