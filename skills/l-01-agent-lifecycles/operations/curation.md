@@ -11,6 +11,8 @@ Before first/resumed knowledge foundation, read [foundation](../reference/curato
 
 Verify writer outputs resolve in `workspace.memoryRoot`. Read `worktree_status`; require readable worklist before ingest; read scoped `knowledge_read` + full `knowledge_diff` before semantic changes.
 
+Record staleness known at task intake as the task’s curation work.
+
 1. Reconcile intent/code; verify card sentences vs code.
 2. Ingest invariants in scope; update families only with justification + re-examined guarantee.
 3. Route notes to file/route/entity or Operational-Notes (edit entities for real changes only).

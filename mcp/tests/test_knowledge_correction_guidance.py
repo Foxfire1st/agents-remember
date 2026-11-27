@@ -344,9 +344,13 @@ def test_curator_guidance_names_one_run_rows_proofs_and_link_recovery() -> None:
 
 
 def test_planning_declares_only_packet_named_recorded_effects_before_implementation() -> None:
-    for relative in ("roles/architect.md", "operations/planning.md"):
+    expected = (
+        ("roles/architect.md", "pre-build"),
+        ("operations/planning.md", "before implementation"),
+    )
+    for relative, timing in expected:
         text = " ".join((ROOT / relative).read_text(encoding="utf-8").split())
-        for marker in ("expectedKnowledgeEffects", "before implementation", "(else none)"):
+        for marker in ("expectedKnowledgeEffects", timing, "(else none)"):
             assert marker in text, (relative, marker)
 
 
