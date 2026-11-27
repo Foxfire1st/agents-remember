@@ -426,6 +426,122 @@ describe('the rail hands the column its leaf (rule 1)', () => {
       vi.useRealTimers();
     }
   });
+
+  it('never steers hidden explainer frame during > 8 s mid-build identity, then sends exactly one ar.open on live without leaving Operations', async () => {
+    const frameOrigin = 'https://host.example';
+    const capabilities = [
+      'open-agent',
+      'ping',
+      'page',
+      'shown-on-display',
+      'navigated',
+      'on-chat',
+      'load-failed',
+      'pick',
+    ];
+    const leafStatePath = '/api/explainer/repo/master/LEAF/state';
+    const midBuild = {
+      seat: null,
+      generation: 1,
+      agentId: 'a-exp',
+      workspace: '/path',
+      building: { state: 'building', step: 'Copy the code snapshot, read-only' },
+      retiredAt: null,
+      binding: null,
+      staleParts: [],
+    };
+    const live = explainerState({
+      seat: 'live',
+      agentId: 'a-exp',
+      workspaceId: 'wks-paseo',
+      generation: 1,
+    });
+
+    dashboardStore.getState().applySnapshot(projection({ tasks: [chatSprint, chatMaster, chatLeaf] }));
+    window.history.replaceState(null, '', '/#review?repo=repo&master=master&leaf=LEAF&history=live');
+
+    let isLive = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (address: string) => {
+        const url = new URL(String(address), 'http://dashboard.test');
+        if (url.pathname === '/api/role-launch/frame') {
+          return new Response(
+            JSON.stringify({
+              available: true,
+              frameBaseUrl: frameOrigin,
+              serverId: 's',
+              projectsWorkspaceId: 'wks_projects',
+            }),
+            { headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (url.pathname === leafStatePath) {
+          return new Response(JSON.stringify(isLive ? live : midBuild), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({}), { headers: { 'Content-Type': 'application/json' } });
+      }),
+    );
+
+    vi.useFakeTimers();
+    const flush = async (ms = 0) => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    };
+
+    const view = render(<CockpitShell initialView="operations" />);
+    try {
+      await flush();
+      fireEvent.click(view.getByTestId('review-chat-toggle'));
+      await flush();
+
+      expect(view.getByRole('radio', { name: 'Operations' }).getAttribute('aria-checked')).toBe('true');
+      expect(view.getByTestId('explainer-column').dataset.phase).toBe('building');
+      expect(view.getByTestId('explainer-frame-holder').getAttribute('aria-hidden')).toBe('true');
+
+      const frame = view.container.querySelector<HTMLIFrameElement>("iframe[title='Role chats']")!;
+      expect(frame).not.toBeNull();
+      const posts = vi.fn();
+      frame.contentWindow!.postMessage = posts as unknown as Window['postMessage'];
+      const openCalls = () =>
+        posts.mock.calls.filter(([message]) => (message as { type?: string }).type === 'ar.open');
+
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            data: { source: 'ar-plugin', type: 'ready', capabilities },
+            origin: frameOrigin,
+            source: frame.contentWindow,
+          }),
+        );
+      });
+
+      // > 8 s of mid-build polling with non-null agentId/workspace: zero ar.open while hidden.
+      for (let sec = 0; sec < 10; sec += 1) {
+        await flush(1_000);
+      }
+      expect(openCalls()).toEqual([]);
+      expect(view.queryByTestId('paseo-frame-agent-problem')).toBeNull();
+
+      // Transition to live: exactly one ar.open on the same iframe without leaving Operations.
+      isLive = true;
+      await flush(1_000);
+      expect(view.getByTestId('explainer-column').dataset.phase).toBe('live');
+      expect(view.getByTestId('explainer-frame-holder').getAttribute('aria-hidden')).toBeNull();
+      expect(openCalls()).toEqual([
+        [{ type: 'ar.open', agentId: 'a-exp', workspaceId: 'wks-paseo' }, frameOrigin],
+      ]);
+      expect(view.container.querySelector("iframe[title='Role chats']")).toBe(frame);
+      expect(view.getByTestId('paseo-frame').getAttribute('data-generation')).toBe('1');
+      expect(view.getByRole('radio', { name: 'Operations' }).getAttribute('aria-checked')).toBe('true');
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('the pane shows the explainer column for a review leaf (rule 1)', () => {

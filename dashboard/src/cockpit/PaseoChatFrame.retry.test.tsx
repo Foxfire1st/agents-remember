@@ -1,4 +1,4 @@
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PaseoChatFrame } from './PaseoChatFrame';
@@ -354,5 +354,122 @@ describe('PaseoChatFrame transient open retries', () => {
     posts.mockClear();
     control.display('explainer:repo/master/L181', WORKER);
     expect(posts).not.toHaveBeenCalled();
+  });
+
+  it('re-sends ar.open without reload from problem Retry when ready, and reloads when unavailable', async () => {
+    const fetchMock = stubBackend([AVAILABLE]);
+    const { container, getByTestId, queryByTestId } = render(
+      <PaseoChatFrame active scope="explainer:repo/master/L62" target={WORKER} page="document" />,
+    );
+    await settle();
+    const frame = frameElement(container);
+    const posts = watchPosts(frame);
+    const openCalls = () =>
+      posts.mock.calls.filter(([message]) => (message as { type?: string }).type === 'ar.open');
+
+    deliver(frame, plugin({ type: 'ready' }));
+    deliver(frame, plugin({ type: 'error', code: 'agent-not-found', agentId: WORKER.agentId }));
+    for (const delay of PASEO_TRANSIENT_OPEN_RETRY_DELAYS_MS) {
+      await settle(delay);
+      deliver(frame, plugin({ type: 'error', code: 'agent-not-found', agentId: WORKER.agentId }));
+    }
+    const exhaustedCount = 1 + PASEO_TRANSIENT_OPEN_RETRY_DELAYS_MS.length;
+    expect(openCalls()).toHaveLength(exhaustedCount);
+
+    // Retry on paseo-frame-agent-problem while ready re-sends ar.open without reloading.
+    const problem = getByTestId('paseo-frame-agent-problem');
+    fireEvent.click(within(problem).getByRole('button', { name: 'Retry' }));
+    expect(queryByTestId('paseo-frame-agent-problem')).toBeNull();
+    expect(openCalls()).toHaveLength(exhaustedCount + 1);
+    expect(frameElement(container)).toBe(frame);
+    expect(getByTestId('paseo-frame').getAttribute('data-generation')).toBe('1');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Exhaust retries again, then verify a late ready also recovers an unshown target.
+    deliver(frame, plugin({ type: 'error', code: 'agent-not-found', agentId: WORKER.agentId }));
+    for (const delay of PASEO_TRANSIENT_OPEN_RETRY_DELAYS_MS) {
+      await settle(delay);
+      deliver(frame, plugin({ type: 'error', code: 'agent-not-found', agentId: WORKER.agentId }));
+    }
+    expect(getByTestId('paseo-frame-agent-problem').textContent).toContain('gone');
+    deliver(frame, plugin({ type: 'ready' }));
+    expect(queryByTestId('paseo-frame-agent-problem')).toBeNull();
+    expect(openCalls()).toHaveLength(exhaustedCount * 2 + 1);
+    expect(getByTestId('paseo-frame').getAttribute('data-generation')).toBe('1');
+
+    // When control becomes unavailable, Retry on paseo-frame-agent-problem reloads the frame.
+    await settle(PASEO_CONTROL_TIMEOUT_MS * 2);
+    expect(getByTestId('paseo-frame').getAttribute('data-control')).toBe('unavailable');
+    fireEvent.click(
+      within(getByTestId('paseo-frame-agent-problem')).getByRole('button', { name: 'Retry' }),
+    );
+    await settle();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(frameElement(container)).not.toBe(frame);
+    expect(getByTestId('paseo-frame').getAttribute('data-generation')).toBe('2');
+  });
+
+  it('re-syncs an unshown target without reloading when active flips false to true, and stays quiet once shown', async () => {
+    stubBackend([AVAILABLE]);
+    const { container, getByTestId, rerender } = render(
+      <PaseoChatFrame
+        active={false}
+        preload
+        scope="explainer:repo/master/L62"
+        target={WORKER}
+        page="document"
+      />,
+    );
+    await settle();
+    const frame = frameElement(container);
+    const posts = watchPosts(frame);
+    const openCalls = () =>
+      posts.mock.calls.filter(([message]) => (message as { type?: string }).type === 'ar.open');
+
+    // Ready arrives while hidden; open fails and exhausts retries before the pane becomes visible.
+    deliver(frame, plugin({ type: 'ready' }));
+    deliver(frame, plugin({ type: 'error', code: 'agent-not-found', agentId: WORKER.agentId }));
+    for (const delay of PASEO_TRANSIENT_OPEN_RETRY_DELAYS_MS) {
+      await settle(delay);
+      deliver(frame, plugin({ type: 'error', code: 'agent-not-found', agentId: WORKER.agentId }));
+    }
+    const beforeReveal = openCalls().length;
+
+    // Flipping active false -> true triggers a non-reloading ar.open re-sync.
+    rerender(
+      <PaseoChatFrame
+        active
+        preload
+        scope="explainer:repo/master/L62"
+        target={WORKER}
+        page="document"
+      />,
+    );
+    expect(openCalls()).toHaveLength(beforeReveal + 1);
+    expect(frameElement(container)).toBe(frame);
+    expect(getByTestId('paseo-frame').getAttribute('data-generation')).toBe('1');
+
+    // Once shown, hiding and showing again sends no duplicate ar.open.
+    deliver(frame, plugin({ type: 'shown', agentId: WORKER.agentId }));
+    rerender(
+      <PaseoChatFrame
+        active={false}
+        preload
+        scope="explainer:repo/master/L62"
+        target={WORKER}
+        page="document"
+      />,
+    );
+    rerender(
+      <PaseoChatFrame
+        active
+        preload
+        scope="explainer:repo/master/L62"
+        target={WORKER}
+        page="document"
+      />,
+    );
+    expect(openCalls()).toHaveLength(beforeReveal + 1);
+    expect(getByTestId('paseo-frame').getAttribute('data-generation')).toBe('1');
   });
 });

@@ -9,6 +9,7 @@ import {
   parseFrameDescriptor,
   requestWaitText,
   UNAVAILABLE_HEADLINE,
+  unavailableWaitText,
   type AvailablePaseoFrame,
   type PaseoAgentTarget,
   type PaseoFrameDescriptor,
@@ -166,9 +167,29 @@ interface PaseoChatFrameProps {
   onAvailability?: (available: boolean) => void;
 }
 
-const NOTHING_SHOWN: PaseoFrameShowing = { shown: null, refused: null, landed: null, request: null };
+const NOTHING_SHOWN: PaseoFrameShowing = { shown: null, refused: null, landed: null, request: null, urlOnly: false };
 
-function useFrameController({ scope, target, page }: PaseoChatFrameProps) {
+interface DisplayKey {
+  scope: string;
+  agentId: string | undefined;
+  workspaceId: string | undefined;
+}
+
+function sameDisplayKey(prev: DisplayKey | null, next: DisplayKey): boolean {
+  return (
+    prev !== null &&
+    prev.scope === next.scope &&
+    prev.agentId === next.agentId &&
+    prev.workspaceId === next.workspaceId
+  );
+}
+
+function normalizeTarget(agentId: string | undefined, workspaceId: string | undefined): PaseoAgentTarget | null {
+  if (!agentId) return null;
+  return workspaceId ? { agentId, workspaceId } : { agentId };
+}
+
+function useFrameController({ active, scope, target, page }: PaseoChatFrameProps) {
   const [frame, setFrame] = useState<PaseoFrameView | null>(null);
   const [control, setControl] = useState<PaseoControlState>("waiting");
   const [agentProblem, setAgentProblem] = useState<string | null>(null);
@@ -189,14 +210,21 @@ function useFrameController({ scope, target, page }: PaseoChatFrameProps) {
   );
   const agentId = target?.agentId;
   const workspaceId = target?.workspaceId;
+  const prevDisplay = useRef<DisplayKey | null>(null);
+  const wasActive = useRef(active);
   // Before the browser paints the change: the request is out with the click, and the line the
-  // pane shows meanwhile is the request's own from the first frame on.
+  // pane shows meanwhile is the request's own from the first frame on. When a hidden pane reveals
+  // with an unshown target, re-sync without reloading.
   useLayoutEffect(() => {
-    controller.display(
-      scope,
-      agentId ? { agentId, ...(workspaceId ? { workspaceId } : {}) } : null,
-    );
-  }, [controller, scope, agentId, workspaceId]);
+    const key: DisplayKey = { scope, agentId, workspaceId };
+    const displayChanged = !sameDisplayKey(prevDisplay.current, key);
+    prevDisplay.current = key;
+    const revealed = !wasActive.current && active;
+    wasActive.current = active;
+    const nextTarget = normalizeTarget(agentId, workspaceId);
+    const steered = displayChanged && controller.display(scope, nextTarget);
+    if (revealed && nextTarget && !steered) controller.resyncIfUnshown();
+  }, [controller, active, scope, agentId, workspaceId]);
   useEffect(() => {
     const onMessage = (event: MessageEvent) => controller.receive(event);
     window.addEventListener("message", onMessage);
@@ -210,7 +238,7 @@ function useFrameController({ scope, target, page }: PaseoChatFrameProps) {
     control,
     agentProblem,
     pluginNotice,
-    wait: frameWait(showing, agentId, page),
+    wait: frameWait(showing, agentId, page, control),
     frameRef,
     controller,
   };
@@ -225,21 +253,36 @@ interface FrameWait {
 
 const IN_REACH: FrameWait = { line: null, held: false, late: false };
 
-/**
- * The frame is in reach when the application is on the selection's agent: it confirmed the
- * agent as shown, it said it is on the agent's chat while the conversation still loads (the
- * line then stays until the chat is shown), or its document was loaded on the agent's address,
- * which holds no earlier chat. Until then the earlier chat stays visible and takes no input.
- * An agent the frame refused is named by its own notice; on a document page the earlier chat
- * stays out of reach under it.
- */
-function frameWait(showing: PaseoFrameShowing, agentId: string | undefined, page: PaseoChatFrameProps["page"]): FrameWait {
-  if (!agentId || showing.shown === agentId) return IN_REACH;
-  const landed = showing.landed === agentId;
-  if (showing.refused === agentId) return { line: null, held: page === "document" && !landed, late: false };
+function unconfirmedWait(
+  showing: PaseoFrameShowing,
+  agentId: string,
+  landed: boolean,
+  control: PaseoControlState,
+): FrameWait {
+  if (control === "unavailable" && !showing.urlOnly) {
+    return { line: unavailableWaitText(), held: !landed, late: true };
+  }
   const request = showing.request?.agentId === agentId ? showing.request : null;
   if (landed && !request) return IN_REACH;
   return requestWait(request, landed);
+}
+
+/**
+ * The frame is in reach when the application confirmed the agent as shown, or when a plug-in
+ * that explicitly lacks `open-agent` loaded the agent's URL. When control is unavailable without
+ * that explicit URL-only report, `?open=agent:<id>` may be stripped on empty storage, so `landed`
+ * stays under a waiting notice with Retry while a late `ready` can still open the chat.
+ */
+function frameWait(
+  showing: PaseoFrameShowing,
+  agentId: string | undefined,
+  page: PaseoChatFrameProps["page"],
+  control: PaseoControlState,
+): FrameWait {
+  if (!agentId || showing.shown === agentId) return IN_REACH;
+  const landed = showing.landed === agentId;
+  if (showing.refused === agentId) return { line: null, held: page === "document" && !landed, late: false };
+  return unconfirmedWait(showing, agentId, landed, control);
 }
 
 /** The wait for an agent that is asked for: its line, and whether input is let through already. */
@@ -304,7 +347,9 @@ export function PaseoChatFrame(props: PaseoChatFrameProps) {
       pluginNotice={state.pluginNotice}
       scope={props.scope}
       wait={wait}
+      onFrameLoad={() => state.controller.onFrameLoad()}
       onRetry={retry}
+      onRetryAgent={() => state.controller.retryOpen()}
     />
   );
 }
@@ -329,7 +374,9 @@ interface EmbeddedFrameProps {
   /** The launcher selection this frame is steered for; a change means another execution shows. */
   scope: string;
   wait: FrameWait;
+  onFrameLoad: () => void;
   onRetry: () => void;
+  onRetryAgent: () => void;
 }
 
 function EmbeddedFrame(props: EmbeddedFrameProps) {
@@ -365,6 +412,7 @@ function EmbeddedFrame(props: EmbeddedFrameProps) {
           ref={frameRef}
           title="Role chats"
           src={frame.src}
+          onLoad={props.onFrameLoad}
           referrerPolicy="origin"
           allow={
             "clipboard-read " + available.frameOrigin + "; clipboard-write " + available.frameOrigin
@@ -401,6 +449,7 @@ function FrameNotices({
   agentProblem,
   pluginNotice,
   onRetry,
+  onRetryAgent,
 }: EmbeddedFrameProps) {
   return (
     <>
@@ -414,7 +463,14 @@ function FrameNotices({
       ) : null}
       {agentProblem ? (
         <div role="status" className={frameNotice} data-testid="paseo-frame-agent-problem">
-          {agentProblem}
+          <span>{agentProblem}</span>
+          <button
+            type="button"
+            className={frameButton}
+            onClick={control === "ready" ? onRetryAgent : onRetry}
+          >
+            Retry
+          </button>
         </div>
       ) : null}
       {pluginNotice ? (

@@ -3,7 +3,7 @@
 // adds and removes references, names the fixed target, and leaves the placeholder on Cancel; the
 // build names each step and keeps his request when it fails; Retire names what ends and what stays;
 // a Send to an archived explainer opens the form; and nothing here starts a model turn.
-import { act, cleanup, fireEvent, render, waitFor, type RenderResult } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor, within, type RenderResult } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { frameTrayStore, type ComposerEdge } from '../cockpit/frameTrayChannel';
@@ -607,6 +607,114 @@ describe('on Send (rule 4)', () => {
       vi.useRealTimers();
     }
   });
+
+  it('sends zero ar.open while building with mid-build identity for > 8 s, then sends exactly one ar.open on live', async () => {
+    const frameOrigin = 'https://host.example';
+    const capabilities = [
+      'open-agent',
+      'ping',
+      'page',
+      'shown-on-display',
+      'navigated',
+      'on-chat',
+      'load-failed',
+      'pick',
+    ];
+    // Real backend mid-build payload: generation=1, agentId, workspace path, building.state='building'.
+    const midBuild = {
+      seat: null,
+      generation: 1,
+      agentId: 'a-exp',
+      workspace: '/path/to/explainer-workspace',
+      building: { state: 'building', step: 'Copy the code snapshot, read-only' },
+      retiredAt: null,
+      binding: null,
+      staleParts: [],
+    };
+    const live = explainerState({
+      seat: 'live',
+      agentId: 'a-exp',
+      workspaceId: 'wks-paseo',
+      generation: 1,
+    });
+    let isLive = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (address: string) => {
+        const url = new URL(String(address), 'http://dashboard.test');
+        if (url.pathname === '/api/role-launch/frame') {
+          return new Response(
+            JSON.stringify({
+              available: true,
+              frameBaseUrl: frameOrigin,
+              serverId: 's',
+              projectsWorkspaceId: 'wks_projects',
+            }),
+            { headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (url.pathname === STATE) {
+          return new Response(JSON.stringify(isLive ? live : midBuild), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({}), { headers: { 'Content-Type': 'application/json' } });
+      }),
+    );
+
+    vi.useFakeTimers();
+    const flush = async (ms = 0) => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    };
+
+    let panel: RenderResult | null = null;
+    try {
+      panel = render(<ExplainerColumn address={ADDRESS} task={TASK} active preload />);
+      await flush();
+      expect(panel.getByTestId('explainer-column').dataset.phase).toBe('building');
+      expect(panel.getByTestId('explainer-frame-holder').getAttribute('aria-hidden')).toBe('true');
+
+      const frame = panel.container.querySelector('iframe')!;
+      expect(frame).not.toBeNull();
+      const posts = vi.fn();
+      frame.contentWindow!.postMessage = posts as unknown as Window['postMessage'];
+      const openCalls = () =>
+        posts.mock.calls.filter(([message]) => (message as { type?: string }).type === 'ar.open');
+
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            data: { source: 'ar-plugin', type: 'ready', capabilities },
+            origin: frameOrigin,
+            source: frame.contentWindow,
+          }),
+        );
+      });
+
+      // Poll across > 8 s while phase === 'building': zero ar.open messages while hidden.
+      for (let sec = 0; sec < 10; sec += 1) {
+        await flush(1_000);
+      }
+      expect(openCalls()).toEqual([]);
+      expect(panel.queryByTestId('paseo-frame-agent-problem')).toBeNull();
+
+      // Build completes -> seat transitions to live: exactly one ar.open, same iframe, generation 1.
+      isLive = true;
+      await flush(1_000);
+      expect(panel.getByTestId('explainer-column').dataset.phase).toBe('live');
+      expect(panel.getByTestId('explainer-frame-holder').getAttribute('aria-hidden')).toBeNull();
+      expect(openCalls()).toEqual([
+        [{ type: 'ar.open', agentId: 'a-exp', workspaceId: 'wks-paseo' }, frameOrigin],
+      ]);
+      expect(panel.container.querySelector('iframe')).toBe(frame);
+      expect(panel.getByTestId('paseo-frame').getAttribute('data-generation')).toBe('1');
+    } finally {
+      panel?.unmount();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('later requests (rule 5)', () => {
@@ -792,6 +900,45 @@ describe('a Send aimed at an archived explainer (rule 3)', () => {
       const dock = await panel.findByTestId('tray-column-dock');
       expect(dock.getAttribute('data-dock')).toBe('above-composer');
       expect(trayStore.getState().targets).toEqual([run.target]);
+      // INV-S3NMAZ guard: showing paseo-frame-agent-problem with Retry leaves the tray placement intact.
+      if (run.phase === 'live') {
+        const frame = panel.container.querySelector('iframe')!;
+        frame.contentWindow!.postMessage = vi.fn() as unknown as Window['postMessage'];
+        act(() => {
+          window.dispatchEvent(
+            new MessageEvent('message', {
+              data: {
+                source: 'ar-plugin',
+                type: 'ready',
+                capabilities: ['open-agent', 'ping', 'page', 'shown-on-display', 'navigated', 'on-chat', 'load-failed', 'pick'],
+              },
+              origin: 'https://host.example',
+              source: frame.contentWindow,
+            }),
+          );
+          window.dispatchEvent(
+            new MessageEvent('message', {
+              data: { source: 'ar-plugin', type: 'composer', top: 680, height: 120, frameHeight: 800 },
+              origin: 'https://host.example',
+              source: frame.contentWindow,
+            }),
+          );
+          window.dispatchEvent(
+            new MessageEvent('message', {
+              data: { source: 'ar-plugin', type: 'error', code: 'agent-archived', agentId: 'a-exp' },
+              origin: 'https://host.example',
+              source: frame.contentWindow,
+            }),
+          );
+        });
+        const problem = await panel.findByTestId('paseo-frame-agent-problem');
+        const retryBtn = within(problem).getByRole('button', { name: 'Retry' });
+        expect(dock.contains(retryBtn)).toBe(false);
+        expect(dock.getAttribute('data-dock')).toBe('above-composer');
+        // INV-M71W78 guard: clicking Retry on an archived notice posts no build/dispatch.
+        fireEvent.click(retryBtn);
+        expect(vi.mocked(fetch).mock.calls.some(([, init]) => (init?.method ?? 'GET') === 'POST')).toBe(false);
+      }
       panel.unmount();
     }
     vi.restoreAllMocks();

@@ -290,6 +290,8 @@ export interface PaseoFrameShowing {
   /** The agent whose address the frame's document was loaded on: no earlier chat is in it. */
   landed: string | null;
   request: PaseoOpenRequest | null;
+  /** True only when the plug-in explicitly reported that it lacks `open-agent` capability. */
+  urlOnly: boolean;
 }
 
 const WAITED_FOR: Record<PaseoOpenRequest["waitsFor"], string> = {
@@ -304,6 +306,14 @@ export function requestWaitText(request: PaseoOpenRequest | null): string {
   return request?.late
     ? "Still waiting for " + what + ": it is slow, not gone. Retry loads the chat anew."
     : "Waiting for " + what + "…";
+}
+
+/**
+ * The one line when control is unavailable and the host has not confirmed the wanted chat
+ * (for example when Paseo strips `?open=agent:<id>` on empty storage).
+ */
+export function unavailableWaitText(): string {
+  return "Waiting for this chat to be confirmed while control is unavailable. Retry reloads the frame.";
 }
 
 function parseNavigationMessage(message: Record<string, unknown>): PaseoPluginMessage | null {
@@ -406,12 +416,15 @@ function parentErrorMessage(message: Record<string, unknown>): PaseoPluginMessag
   };
 }
 
-/** What the pane says when the frame never shows the agent it was asked for. When the frame
- * already names the agent's page no second load runs, and the sentence says exactly that. */
-export function agentTimeoutText(agentId: string, fallbackLoaded: boolean): string {
-  return fallbackLoaded
-    ? `The embedded chat did not show this execution's agent "${agentId}" in time, so it loaded the agent's page instead. Retry asks the application again.`
-    : `The embedded chat did not show this execution's agent "${agentId}" in time; the frame already shows the agent's page. Retry asks the application again.`;
+/**
+ * What the pane says when the frame never becomes ready for the wanted agent. Cold-load and
+ * readiness timeouts keep the in-flight frame open instead of reloading it, and the sentence
+ * states truthfully whether the loaded URL already named the agent or kept the frame open.
+ */
+export function agentTimeoutText(agentId: string, outcome: "already-named" | "kept-open"): string {
+  return outcome === "already-named"
+    ? `The embedded chat did not show this execution's agent "${agentId}" in time; the frame already shows the agent's page. Retry asks the application again.`
+    : `The embedded chat did not become ready for this execution's agent "${agentId}" in time; the frame was kept open for a late answer. Retry reloads the frame.`;
 }
 
 /** What the pane says after the one load that follows a ping the application did not answer. */

@@ -1,13 +1,14 @@
 // A change of the selection never unloads the chat. A late answer is waited for, the
 // frame loads again only when the application answers nothing at all, and an older plug-in is
 // named and still switches.
-import { act, cleanup, render, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { installBridge, type BridgeClient } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/bridge";
+import { isDocumentPage } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/sidebar";
 import { DASHBOARD, emptyHierarchyClient, newTab, pageLoad } from "../test/paseoPluginPage";
 import { PaseoChatFrame } from "./PaseoChatFrame";
-import { PASEO_CONTROL_TIMEOUT_MS, PASEO_UNAVAILABLE_QUIET_MS } from "./paseoFrameControl";
+import { PASEO_COLD_LOAD_CAP_MS, PASEO_CONTROL_TIMEOUT_MS, PASEO_UNAVAILABLE_QUIET_MS } from "./paseoFrameControl";
 
 const FRAME_ORIGIN = "http://127.0.0.1:6820";
 const COMMAND = "agents-remember paseo provision --config /home/u/.config/agents-remember/settings.json";
@@ -180,12 +181,14 @@ describe("a change of the selection while the host is slow", () => {
     reloaded.says({ type: "shown", agentId: OTHER.agentId });
     expect(loads()).toBe("2");
 
-    // The same road with a loaded document that stays silent: its deadline asks by a ping,
-    // and only that ping's silence loads the held selection, once.
+    // The same road with a loaded document that stays silent: onLoad anchors the readiness
+    // deadline -> ping -> unavailable without destroying generation 3, while late ready still
+    // delivers the held selection by message.
     show("leaf", WORKER);
     await settle(PASEO_CONTROL_TIMEOUT_MS * 2);
     expect(loads()).toBe("3");
     const silent = mountedFrame(container);
+    fireEvent.load(silent.frame);
     show("other", OTHER);
     await settle(PASEO_CONTROL_TIMEOUT_MS - 2);
     expect(silent.posts).not.toHaveBeenCalled();
@@ -194,21 +197,29 @@ describe("a change of the selection while the host is slow", () => {
     await settle(PASEO_CONTROL_TIMEOUT_MS - 1);
     expect(loads()).toBe("3");
     await settle(1);
-    expect(loads()).toBe("4");
-    expect(container.querySelector("iframe")?.getAttribute("src")).toContain("open=agent:" + OTHER.agentId);
+    expect(loads()).toBe("3");
+    expect(getByTestId("paseo-frame-control-banner")).not.toBeNull();
+    expect(getByTestId("paseo-frame-waiting")).not.toBeNull();
     await settle(PASEO_CONTROL_TIMEOUT_MS * 4);
-    expect(loads()).toBe("4");
+    expect(loads()).toBe("3");
+
+    // A late ready after the timeout clears the stale problem and opens OTHER without reloading.
+    silent.says({ type: "ready", capabilities: CURRENT });
+    expect(silent.posts).toHaveBeenLastCalledWith(...openOf(OTHER));
+    expect(loads()).toBe("3");
   });
 });
 
 describe("a load whose ready report does not come", () => {
   /** A document page for the Worker, mounted, with nothing said by the application yet. */
-  async function mountedSilent() {
+  async function mountedSilent(fireLoad = true) {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => AVAILABLE }) as Response));
     const view = render(<PaseoChatFrame active scope="leaf" target={WORKER} page="document" />);
     await settle();
+    const mounted = mountedFrame(view.container);
+    if (fireLoad) fireEvent.load(mounted.frame);
     const loads = () => view.getByTestId("paseo-frame").getAttribute("data-generation");
-    return { ...view, ...mountedFrame(view.container), loads };
+    return { ...view, ...mounted, loads };
   }
 
   it.each([
@@ -235,19 +246,76 @@ describe("a load whose ready report does not come", () => {
     expect(loads()).toBe("1");
   });
 
-  it("counts the channel as unavailable only when that ping stays unanswered too, and then loads nothing more", async () => {
-    const { frame, posts, loads, getByTestId, queryByTestId, container } = await mountedSilent();
+  it("counts the channel as unavailable only when that ping stays unanswered too, keeps waiting with Retry, and accepts a late ready", async () => {
+    const { frame, posts, says, loads, getByTestId, queryByTestId, container } = await mountedSilent();
     await settle(PASEO_CONTROL_TIMEOUT_MS * 2 - 1);
     expect(queryByTestId("paseo-frame-control-banner")).toBeNull();
     await settle(1);
     expect(getByTestId("paseo-frame-control-banner")).not.toBeNull();
-    // The frame was loaded on the agent's address: nothing is loaded again, and nothing runs on.
+    // When control is unavailable without an explicit URL-only plug-in, landed === agentId
+    // without confirmed shown stays under a waiting notice + Retry, not silent IN_REACH.
+    const waiting = getByTestId("paseo-frame-waiting");
+    expect(within(waiting).getByRole("button", { name: "Retry" })).not.toBeNull();
     expect(getByTestId("paseo-frame-agent-problem").textContent).toContain("already shows the agent's page");
     await settle(PASEO_CONTROL_TIMEOUT_MS * 20);
     expect(container.querySelector("iframe")).toBe(frame);
     expect(loads()).toBe("1");
     expect(posts.mock.calls).toEqual([PING]);
     expect(vi.getTimerCount()).toBe(0);
+
+    // Late ready clears stale problem, sends ar.page for document mode, and opens WORKER by message.
+    says({ type: "ready", capabilities: CURRENT });
+    expect(queryByTestId("paseo-frame-agent-problem")).toBeNull();
+    expect(posts).toHaveBeenCalledWith({ type: "ar.page", page: "document" }, FRAME_ORIGIN);
+    expect(posts).toHaveBeenLastCalledWith(...openOf(WORKER));
+    says({ type: "shown", agentId: WORKER.agentId });
+    expect(queryByTestId("paseo-frame-waiting")).toBeNull();
+    expect(loads()).toBe("1");
+  });
+
+  it("survives bootstrapEmbed's 14-20+ s double-load without pinging or reloading before the second onLoad settles", async () => {
+    const { frame, posts, says, loads, getByTestId, queryByTestId, container } = await mountedSilent(false);
+    // Load #1 finishes at 7 s; bootstrapEmbed calls location.replace and load #2 finishes at 15 s.
+    await settle(7_000);
+    fireEvent.load(frame);
+    await settle(8_000);
+    fireEvent.load(frame);
+    // 22 s after initial mount (7 s after load #2): still waiting cleanly, zero pings, zero reloads.
+    await settle(7_000);
+    expect(posts).not.toHaveBeenCalled();
+    expect(queryByTestId("paseo-frame-control-banner")).toBeNull();
+    expect(loads()).toBe("1");
+
+    // Plugin reports ready at 22 s: flips ready, restores ar.page=document, opens WORKER once.
+    says({ type: "ready", capabilities: CURRENT });
+    expect(getByTestId("paseo-frame").getAttribute("data-control")).toBe("ready");
+    expect(posts).toHaveBeenCalledWith({ type: "ar.page", page: "document" }, FRAME_ORIGIN);
+    expect(posts).toHaveBeenLastCalledWith(...openOf(WORKER));
+    expect(container.querySelector("iframe")).toBe(frame);
+    expect(loads()).toBe("1");
+  });
+
+  it("settles to unavailable at the 45 s cold-load cap without reloading when onLoad never arrives", async () => {
+    const { frame, posts, says, loads, getByTestId, queryByTestId, container } = await mountedSilent(false);
+    expect(PASEO_COLD_LOAD_CAP_MS).toBe(45_000);
+    await settle(PASEO_COLD_LOAD_CAP_MS - 1);
+    expect(getByTestId("paseo-frame").getAttribute("data-control")).toBe("waiting");
+    expect(queryByTestId("paseo-frame-control-banner")).toBeNull();
+    await settle(1);
+    expect(getByTestId("paseo-frame").getAttribute("data-control")).toBe("unavailable");
+    expect(getByTestId("paseo-frame-control-banner")).not.toBeNull();
+    expect(within(getByTestId("paseo-frame-waiting")).getByRole("button", { name: "Retry" })).not.toBeNull();
+    expect(container.querySelector("iframe")).toBe(frame);
+    expect(loads()).toBe("1");
+    expect(posts).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+
+    // Late pong still recovers readiness without reloading.
+    says({ type: "pong", capabilities: CURRENT });
+    expect(getByTestId("paseo-frame").getAttribute("data-control")).toBe("ready");
+    expect(queryByTestId("paseo-frame-agent-problem")).toBeNull();
+    expect(posts).toHaveBeenLastCalledWith(...openOf(WORKER));
+    expect(loads()).toBe("1");
   });
 });
 
@@ -322,7 +390,7 @@ describe("a plug-in that is older than the dashboard", () => {
   });
 
   it("is named when it cannot show a chat on request, and each chat is then loaded by its address", async () => {
-    const { posts, show, loads, getByTestId } = await shownOnManager(["ping", "page"]);
+    const { posts, show, loads, getByTestId, queryByTestId } = await shownOnManager(["ping", "page"]);
     const notice = getByTestId("paseo-frame-plugin-notice").textContent ?? "";
     expect(notice).toContain("cannot show a chat on request");
     expect(notice).toContain(COMMAND);
@@ -334,10 +402,42 @@ describe("a plug-in that is older than the dashboard", () => {
     await settle(PASEO_UNAVAILABLE_QUIET_MS);
     expect(Number(loads())).toBe(before + 1);
     expect(getByTestId("paseo-frame").querySelector("iframe")?.getAttribute("src")).toBe(WORKER_URL);
+    // Explicit lack of open-agent keeps URL-landed chats IN_REACH (no waiting notice).
+    expect(queryByTestId("paseo-frame-waiting")).toBeNull();
   });
 });
 
 describe("what the plug-in sends a dashboard", () => {
+  it("restores document-page behaviour via ready-path ar.page when Paseo strips ?arPage=document", async () => {
+    const catalog = emptyHierarchyClient();
+    const client: BridgeClient = {
+      ...catalog,
+      openScreen: () => {},
+      paseo: {
+        ...catalog.paseo,
+        agents: { ...catalog.paseo.agents, ref: () => ({ archivedAt: null, workspaceId: "wks_leaf", refresh: async () => ({}) }) },
+        workspaces: { ...catalog.paseo.workspaces, ref: () => ({ refresh: async () => ({}) }) },
+      },
+    };
+    const load = pageLoad(newTab());
+    // Simulate Paseo stripping ?open=agent:...&arPage=document on initial load.
+    expect(new URL(load.page.location.href).search).toBe("");
+    const stop = installBridge(client, load.page, DASHBOARD);
+    try {
+      await settle();
+      expect(isDocumentPage(load.page)).toBe(false);
+      expect(document.getElementById("ar-document-sidebar")).toBeNull();
+
+      // Dashboard ready-path message restores document-page mode and sidebar hiding.
+      load.receive({ type: "ar.page", page: "document" });
+      await settle();
+      expect(isDocumentPage(load.page)).toBe(true);
+      expect(document.getElementById("ar-document-sidebar")).not.toBeNull();
+    } finally {
+      stop();
+    }
+  });
+
   it("tells that it asked the application to navigate only to a dashboard that said it reads that", async () => {
     const catalog = emptyHierarchyClient();
     const client: BridgeClient = {

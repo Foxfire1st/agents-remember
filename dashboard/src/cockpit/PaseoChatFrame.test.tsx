@@ -1,10 +1,11 @@
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { taskEntry, taskSummary } from '../test/fixtures/wire';
 import { RoleChatsPane } from './RoleChats';
 import { PaseoChatFrame } from './PaseoChatFrame';
 import {
+  PASEO_COLD_LOAD_CAP_MS,
   PASEO_CONTROL_TIMEOUT_MS,
   PASEO_UNAVAILABLE_QUIET_MS,
 } from './paseoFrameControl';
@@ -455,9 +456,10 @@ describe('control channel unavailable', () => {
       <PaseoChatFrame active scope="s" target={null} />,
     );
     await settle();
-    // No ready report within the deadline: the application is asked by a ping, and only that
-    // ping's silence for another deadline makes the channel unavailable.
-    const asked = watchPosts(frameElement(container));
+    // Readiness deadline is anchored to iframe onLoad: ping at +10 s, unavailable at +20 s.
+    const initialFrame = frameElement(container);
+    const asked = watchPosts(initialFrame);
+    fireEvent.load(initialFrame);
     await settle(PASEO_CONTROL_TIMEOUT_MS);
     expect(asked.mock.calls).toEqual([[{ type: 'ar.ping' }, FRAME_ORIGIN]]);
     await settle(PASEO_CONTROL_TIMEOUT_MS - 1);
@@ -482,22 +484,27 @@ describe('control channel unavailable', () => {
     expect(frameElement(container)).not.toBe(before);
     expect(getByTestId('paseo-frame-control-banner')).not.toBeNull();
 
-    // The frame's URL already names the agent: the silence after its load does not load it again.
+    // The frame's URL already names the agent: silence after its load keeps the frame open
+    // under a bounded waiting notice with Retry (not silent IN_REACH).
     const loaded = frameElement(container);
+    fireEvent.load(loaded);
     await settle(PASEO_CONTROL_TIMEOUT_MS * 3);
     expect(frameElement(container)).toBe(loaded);
+    const waiting = getByTestId('paseo-frame-waiting');
+    expect(within(waiting).getByRole('button', { name: 'Retry' })).not.toBeNull();
 
-    // A late ready report ends the state without reloading the frame. The agent is then asked
-    // for by message, because only that answer tells whether it still exists.
+    // A late ready report clears the stale timeout notice and asks for the agent by message.
     const latePosts = watchPosts(loaded);
     deliver(loaded, plugin({ type: 'ready' }));
     expect(queryByTestId('paseo-frame-control-banner')).toBeNull();
+    expect(queryByTestId('paseo-frame-agent-problem')).toBeNull();
     expect(latePosts).toHaveBeenCalledTimes(1);
     expect(latePosts).toHaveBeenCalledWith(
       { type: 'ar.open', agentId: WORKER.agentId },
       FRAME_ORIGIN,
     );
     deliver(loaded, plugin({ type: 'shown', agentId: WORKER.agentId }));
+    expect(queryByTestId('paseo-frame-waiting')).toBeNull();
     expect(frameElement(container)).toBe(loaded);
 
     await settle(PASEO_CONTROL_TIMEOUT_MS);
@@ -507,7 +514,7 @@ describe('control channel unavailable', () => {
 
   it("falls back to the agent's URL when the application answers nothing at all, and Retry reloads the frame", async () => {
     const fetchMock = stubBackend([AVAILABLE]);
-    const { container, getByRole, getByTestId, queryByTestId } = render(
+    const { container, getByTestId, queryByTestId } = render(
       <PaseoChatFrame active scope="worker" target={WORKER} />,
     );
     await settle();
@@ -526,7 +533,9 @@ describe('control channel unavailable', () => {
     expect(getByTestId('paseo-frame-control-banner')).not.toBeNull();
     expect(frameElement(container).getAttribute('src')).toBe(WORKER_URL);
 
-    fireEvent.click(getByRole('button', { name: 'Retry' }));
+    fireEvent.click(
+      within(getByTestId('paseo-frame-control-banner')).getByRole('button', { name: 'Retry' }),
+    );
     await settle();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const reloaded = frameElement(container);
@@ -550,19 +559,27 @@ describe('control channel unavailable', () => {
 
   it('after Retry without the channel, the frame that names the agent is not loaded a second time', async () => {
     stubBackend([AVAILABLE]);
-    const { container, getByRole, getByTestId } = render(
+    const { container, getByTestId } = render(
       <PaseoChatFrame active scope="worker" target={WORKER} />,
     );
     await settle();
+    fireEvent.load(frameElement(container));
     await settle(PASEO_CONTROL_TIMEOUT_MS * 2);
-    expect(frameElement(container).getAttribute('src')).toBe(WORKER_URL);
+    // Initial cold timeout keeps generation 1 open rather than destroying it.
+    expect(frameElement(container).getAttribute('src')).toBe(PROJECTS_URL);
+    expect(getByTestId('paseo-frame').getAttribute('data-generation')).toBe('1');
 
-    fireEvent.click(getByRole('button', { name: 'Retry' }));
+    fireEvent.click(
+      within(getByTestId('paseo-frame-control-banner')).getByRole('button', { name: 'Retry' }),
+    );
     await settle();
     const reloaded = frameElement(container);
+    expect(reloaded.getAttribute('src')).toBe(WORKER_URL);
+    fireEvent.load(reloaded);
     await settle(PASEO_CONTROL_TIMEOUT_MS * 2);
     expect(getByTestId('paseo-frame-control-banner')).not.toBeNull();
     expect(frameElement(container)).toBe(reloaded);
+    expect(getByTestId('paseo-frame').getAttribute('data-generation')).toBe('2');
   });
 });
 
@@ -650,7 +667,7 @@ describe('document page: chat of the selected task', () => {
 
   it('names the missing agent after the deadline and loads its page once', async () => {
     stubBackend([AVAILABLE]);
-    const { container, getByRole, getByTestId, queryByTestId, rerender } = render(
+    const { container, getByTestId, queryByTestId, rerender } = render(
       <PaseoChatFrame active scope="leaf" target={WORKER} page="document" />,
     );
     await settle();
@@ -683,7 +700,9 @@ describe('document page: chat of the selected task', () => {
     expect(posts).toHaveBeenCalledTimes(3);
 
     // Retry reloads the frame on the agent's page; selecting another execution clears the problem.
-    fireEvent.click(getByRole('button', { name: 'Retry' }));
+    fireEvent.click(
+      within(getByTestId('paseo-frame-control-banner')).getByRole('button', { name: 'Retry' }),
+    );
     await settle();
     expect(frameElement(container)).not.toBe(frame);
     rerender(<PaseoChatFrame active scope="master" target={ARCHITECT} page="document" />);
@@ -697,11 +716,12 @@ describe('document page: chat of the selected task', () => {
     );
     await settle();
     const frame = frameElement(container);
+    fireEvent.load(frame);
     expect(queryByTestId('paseo-frame-agent-problem')).toBeNull();
 
     // No ready report ever comes, and no answer to the ping at the deadline: the silence
-    // names the selected agent, truthfully saying the frame already shows its page, without
-    // loading it again.
+    // names the selected agent, keeps the frame open without reloading, and keeps a waiting
+    // notice with Retry instead of silent IN_REACH.
     await settle(PASEO_CONTROL_TIMEOUT_MS);
     expect(queryByTestId('paseo-frame-agent-problem')).toBeNull();
     await settle(PASEO_CONTROL_TIMEOUT_MS);
@@ -710,6 +730,7 @@ describe('document page: chat of the selected task', () => {
       "already shows the agent's page",
     );
     expect(getByTestId('paseo-frame-control-banner')).not.toBeNull();
+    expect(getByTestId('paseo-frame-waiting')).not.toBeNull();
     expect(frameElement(container)).toBe(frame);
     expect(frame.getAttribute('src')).toBe(WORKER_URL + '&arPage=document');
   });
@@ -720,6 +741,7 @@ describe('document page: chat of the selected task', () => {
       <PaseoChatFrame active scope="s" target={null} page="document" />,
     );
     await settle();
+    fireEvent.load(frameElement(container));
     expect(queryByTestId('paseo-frame-agent-problem')).toBeNull();
 
     await settle(PASEO_CONTROL_TIMEOUT_MS * 2);
@@ -728,28 +750,40 @@ describe('document page: chat of the selected task', () => {
     expect(frameElement(container).getAttribute('src')).toBe(PROJECTS_URL + '?arPage=document');
   });
 
-  it("loads the selected agent's page once when the channel never becomes ready", async () => {
+  it('keeps the in-flight frame open on cold timeout without reloading, and accepts a late ready', async () => {
     stubBackend([AVAILABLE]);
-    const { container, getByTestId } = render(
+    const { container, getByTestId, queryByTestId } = render(
       <PaseoChatFrame active scope="worker" target={WORKER} />,
     );
     await settle();
-    // A Chats page starts on the Projects workspace, which names no agent.
-    expect(frameElement(container).getAttribute('src')).toBe(PROJECTS_URL);
+    const frame = frameElement(container);
+    expect(frame.getAttribute('src')).toBe(PROJECTS_URL);
 
-    // Readiness never arrives for the selected worker, and the ping at the deadline stays
-    // unanswered: that silence names it and loads its page exactly once, saying so.
-    await settle(PASEO_CONTROL_TIMEOUT_MS);
-    expect(frameElement(container).getAttribute('src')).toBe(PROJECTS_URL);
-    await settle(PASEO_CONTROL_TIMEOUT_MS);
+    // Without onLoad, the outer cold-load cap bounds waiting without destroying generation 1.
+    await settle(PASEO_COLD_LOAD_CAP_MS - 1);
+    expect(queryByTestId('paseo-frame-control-banner')).toBeNull();
+    await settle(1);
+    expect(getByTestId('paseo-frame-control-banner')).not.toBeNull();
     expect(getByTestId('paseo-frame-agent-problem').textContent).toContain(WORKER.agentId);
-    expect(getByTestId('paseo-frame-agent-problem').textContent).toContain(
-      "loaded the agent's page instead",
-    );
-    const loaded = frameElement(container);
-    expect(loaded.getAttribute('src')).toBe(WORKER_URL);
-    await settle(PASEO_CONTROL_TIMEOUT_MS * 4);
-    expect(frameElement(container)).toBe(loaded);
+    expect(getByTestId('paseo-frame-agent-problem').textContent).toContain('kept open');
+    expect(frameElement(container)).toBe(frame);
+    expect(getByTestId('paseo-frame').getAttribute('data-generation')).toBe('1');
+    expect(vi.getTimerCount()).toBe(0);
+
+    // Wrong-origin / wrong-source messages remain rejected (INV-1PVR72), while a late trusted
+    // ready clears the stale timeout problem and steers via ar.open without reloading.
+    const posts = watchPosts(frame);
+    deliver(frame, plugin({ type: 'ready' }), { origin: 'http://evil.test' });
+    deliver(frame, plugin({ type: 'ready' }), { source: window });
+    expect(getByTestId('paseo-frame').getAttribute('data-control')).toBe('unavailable');
+    expect(posts).not.toHaveBeenCalled();
+
+    deliver(frame, plugin({ type: 'ready' }));
+    expect(getByTestId('paseo-frame').getAttribute('data-control')).toBe('ready');
+    expect(queryByTestId('paseo-frame-agent-problem')).toBeNull();
+    expect(posts).toHaveBeenCalledWith({ type: 'ar.open', agentId: WORKER.agentId }, FRAME_ORIGIN);
+    expect(frameElement(container)).toBe(frame);
+    expect(getByTestId('paseo-frame').getAttribute('data-generation')).toBe('1');
   });
 });
 

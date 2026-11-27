@@ -19,11 +19,17 @@ import {
 import { clearFrameTray, frameTrayReady, receiveFrameTray, setFrameChat, type FrameTrayLink } from "./frameTrayChannel";
 
 /**
- * How long the embedded application has to report ready after a load, how long a request to
- * show an agent may stay unanswered before the application is asked whether it is there, and
- * how long that ping may stay unanswered.
+ * How long the embedded application has to report ready after an iframe load event, how long a
+ * request to show an agent may stay unanswered before the application is pinged, and how long
+ * that ping may stay unanswered.
  */
 export const PASEO_CONTROL_TIMEOUT_MS = 10_000;
+
+/**
+ * Bounded outer cap from `load()` when iframe `onLoad` never arrives (or reloads loop), so a
+ * genuinely unreachable host still settles to `"unavailable"` without destroying the frame.
+ */
+export const PASEO_COLD_LOAD_CAP_MS = 45_000;
 
 /**
  * How long a not-ready selection waits for a superseding one before it counts as the latest.
@@ -98,6 +104,7 @@ export class PaseoFrameControl {
   private loading = false;
   private abilities: PluginAbilities = null;
   private deadline: number | null = null;
+  private coldLoadTimer: number | null = null;
   private scope: string | null = null;
   private seenAgent: string | null = null;
   private selectedAgentIds = new Set<string>();
@@ -132,9 +139,11 @@ export class PaseoFrameControl {
    */
   start(available: AvailablePaseoFrame, afterRetry: boolean, preload = false): void {
     this.available = available;
+    this.abilities = null;
     this.settled = null;
     this.shown = null;
     this.refused = null;
+    this.clearColdLoadCap();
     this.closeRequest();
     this.clearSettle();
     this.clearRetry(true);
@@ -149,9 +158,11 @@ export class PaseoFrameControl {
   stop(): void {
     this.linkTray(null);
     this.clearDeadline();
+    this.clearColdLoadCap();
     this.clearSettle();
     this.clearRetry(true);
     this.available = null;
+    this.abilities = null;
     this.pending = null;
     this.loading = false;
     this.selectedAgentIds.clear();
@@ -163,14 +174,9 @@ export class PaseoFrameControl {
    * agent is a new request: the execution is briefly absent while launch options reload, and
    * that must not navigate the frame again.
    *
-   * While the control channel is ready the switch goes out at once by message. While a load's
-   * ready report is awaited the switch is held for that report. While the channel is
-   * unavailable the switch re-arms the trailing settle window: only its expiry brings the
-   * latest selection forward, so a burst of any turn pattern loads exactly its latest and
-   * never an intermediate. The ready report, Retry, host return, or a new deadline preempts
-   * the window.
+   * Returns `true` when this call actively steered or queued a changed target.
    */
-  display(scope: string, target: PaseoAgentTarget | null): void {
+  display(scope: string, target: PaseoAgentTarget | null): boolean {
     if (this.scope !== scope) {
       this.scope = scope;
       this.seenAgent = null;
@@ -180,12 +186,12 @@ export class PaseoFrameControl {
     }
     if (!target) {
       this.clearRetry(true);
-      return;
+      return false;
     }
     const sameTarget =
       this.seenAgent === target.agentId &&
       (this.wanted?.workspaceId ?? undefined) === (target.workspaceId ?? undefined);
-    if (sameTarget) return;
+    if (sameTarget) return false;
     this.clearRetry(true);
     this.seenAgent = target.agentId;
     this.wanted = target;
@@ -197,10 +203,42 @@ export class PaseoFrameControl {
     this.publish();
     if (this.control !== "unavailable" || this.loading) {
       this.sync();
-      return;
+      return true;
     }
     this.clearSettle();
     this.settleTimer = window.setTimeout(() => this.onSettle(), PASEO_UNAVAILABLE_QUIET_MS);
+    return true;
+  }
+
+  /**
+   * The iframe fired `load`: arm (or reset) the post-load readiness window. First-visit
+   * bootstrap reloads call `location.replace`, firing a second `load` before the bridge starts,
+   * so resetting here keeps slow cold loads from timing out early.
+   */
+  onFrameLoad(): void {
+    if (!this.available || !this.loading) return;
+    this.awaitReady();
+  }
+
+  /** Re-send `ar.open` without reloading when a hidden pane reveals with an unshown target. */
+  resyncIfUnshown(): void {
+    this.reopenUnshown();
+  }
+
+  /** Explicit Retry on a ready frame: clear refusal/retry state and re-send `ar.open` without reload. */
+  retryOpen(): void {
+    this.pane.setAgentProblem(null);
+    this.reopenUnshown();
+  }
+
+  private reopenUnshown(): void {
+    if (!this.available || this.control !== "ready" || !this.wanted || this.shown === this.wanted.agentId) return;
+    this.clearRetry(true);
+    this.settled = null;
+    this.refused = null;
+    this.seenAgent = this.wanted.agentId;
+    this.pane.setAgentProblem(null);
+    this.ask(this.wanted);
   }
 
   /** The settle window expired with no superseding display: the latest selection loads now. */
@@ -280,24 +318,23 @@ export class PaseoFrameControl {
   private onReady(capabilities: PluginAbilities): void {
     this.loading = false;
     this.clearDeadline();
+    this.clearColdLoadCap();
     this.clearSettle();
     const hadTransientRetry = this.retryTimer !== null;
-    this.clearRetry(!hadTransientRetry);
+    const wasReady = this.control === "ready";
+    this.clearRetry(!hadTransientRetry && !wasReady);
     this.closeRequest();
     this.abilities = capabilities;
+    this.pane.setAgentProblem(null);
     this.pane.setPluginNotice(pluginNoticeText(capabilities, this.available!.provisionCommand));
     if (!pluginOpensAgents(capabilities)) {
       this.linkTray(null);
+      this.publish();
       this.setControl("unavailable");
       this.sync();
       return;
     }
-    if (
-      hadTransientRetry &&
-      this.wanted &&
-      this.settled === this.wanted.agentId &&
-      this.shown !== this.wanted.agentId
-    ) {
+    if (this.wanted && this.shown !== this.wanted.agentId) {
       this.settled = null;
       this.refused = null;
       this.seenAgent = this.wanted.agentId;
@@ -306,6 +343,7 @@ export class PaseoFrameControl {
     if (capabilities) this.post({ type: "ar.hello", capabilities: DASHBOARD_ABILITIES });
     if (this.pane.page === "document") this.post({ type: "ar.page", page: "document" });
     this.linkTray(capabilities);
+    this.publish();
     this.sync();
   }
 
@@ -477,12 +515,14 @@ export class PaseoFrameControl {
     const { available } = this;
     if (!available) return;
     this.loaded = wanted?.agentId ?? null;
+    this.loading = true;
+    this.clearDeadline();
+    this.armColdLoadCap();
     this.pane.setFrame((current) => ({
       src: paseoFrameUrl(available, wanted) + (this.pane.page === "document" ? (paseoFrameUrl(available, wanted).includes("?") ? "&" : "?") + "arPage=document" : ""),
       generation: (current?.generation ?? 0) + 1,
     }));
     this.publish();
-    this.awaitReady();
   }
 
   /**
@@ -494,24 +534,38 @@ export class PaseoFrameControl {
   }
 
   /**
-   * After a load the application has the deadline to report ready. Then it is asked by a ping
-   * whether it is there, and its pong is taken as the ready report. Only when that ping stays
-   * unanswered for another deadline is the control channel unavailable.
+   * After an iframe `load` event, wait one deadline for `ready`, then send `ar.ping` and wait
+   * one more deadline before settling `"unavailable"` without destroying the in-flight frame.
    */
   private awaitReady(): void {
-    this.loading = true;
     this.arm(() => {
       this.post({ type: "ar.ping" });
-      this.arm(() => {
-        this.loading = false;
-        // The silence names the selected target truthfully, saying whether the fallback below
-        // loads its page or the frame already names it. It wins over any coalescing burst: it
-        // clears it first, so the one fallback stays bounded.
-        const target = this.unansweredTarget();
-        if (target) this.pane.setAgentProblem(agentTimeoutText(target.agentId, this.loaded !== target.agentId));
-        this.fallBack();
-      });
+      this.arm(() => this.onLoadTimeout());
     });
+  }
+
+  private armColdLoadCap(): void {
+    this.clearColdLoadCap();
+    this.coldLoadTimer = window.setTimeout(() => {
+      this.coldLoadTimer = null;
+      this.onLoadTimeout();
+    }, PASEO_COLD_LOAD_CAP_MS);
+  }
+
+  private clearColdLoadCap(): void {
+    if (this.coldLoadTimer === null) return;
+    window.clearTimeout(this.coldLoadTimer);
+    this.coldLoadTimer = null;
+  }
+
+  private onLoadTimeout(): void {
+    const target = this.unansweredTarget();
+    if (target) {
+      this.pane.setAgentProblem(
+        agentTimeoutText(target.agentId, this.loaded === target.agentId ? "already-named" : "kept-open"),
+      );
+    }
+    this.settleUnavailable(false);
   }
 
   /**
@@ -527,17 +581,20 @@ export class PaseoFrameControl {
     this.arm(() => {
       const agentId = this.pending;
       if (agentId) this.pane.setAgentProblem(agentSilentText(agentId, this.loaded !== agentId));
-      this.fallBack();
+      this.settleUnavailable(true);
     });
   }
 
-  private fallBack(): void {
+  private settleUnavailable(reloadWanted: boolean): void {
     if (this.pending && this.seenAgent === this.pending) this.seenAgent = null;
+    this.loading = false;
+    this.clearDeadline();
+    this.clearColdLoadCap();
     this.clearSettle();
     this.clearRetry(true);
     this.closeRequest();
     this.setControl("unavailable");
-    this.sync();
+    if (reloadWanted) this.sync();
   }
 
   private closeRequest(): void {
@@ -566,6 +623,7 @@ export class PaseoFrameControl {
       refused: this.refused,
       landed: this.loaded,
       request: this.openRequest(),
+      urlOnly: this.abilities !== null && !pluginOpensAgents(this.abilities),
     });
   }
 

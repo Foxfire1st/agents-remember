@@ -143,7 +143,7 @@ function resolveDocumentFrameProps(
       active: props.active && explainerColumn.showFrame,
       preload: Boolean(props.preload || preload),
       scope: `explainer:${address.repository}/${address.master}/${address.leaf}`,
-      target: explainerColumn.frameTarget,
+      target: explainerColumn.showFrame ? explainerColumn.frameTarget : null,
       holding: null,
     };
   }
