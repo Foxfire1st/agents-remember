@@ -40,7 +40,9 @@ def test_leaf_roles_receive_exact_sibling_addresses_without_agent_ids(handovers)
                 if sibling != role
             },
         }
-        assert json.dumps(seats, ensure_ascii=False, separators=(",", ":")) in prompt
+        inline_seats = {"roles": roles}
+        assert json.dumps(inline_seats, ensure_ascii=False, separators=(",", ":")) in prompt
+        assert "roleMessageArguments" not in prompt
         for sibling, arguments in seats["roleMessageArguments"].items():
             resolved = resolve_role_launch_context(
                 handovers.config, RoleSelection.model_validate(arguments)
