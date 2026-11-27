@@ -97,7 +97,7 @@ def _register_orientation_tools(
         refresh: Any = _REMOVED_ARGUMENT,
         task_context: TaskScopedReaderContext | None = None,
     ) -> dict[str, Any]:
-        """Name up to 20 paths: compact rows give path, existence, cardStatus, and brief path with saved freshness; fuller rows may give rule text. Open saved briefs before edits (records may lack briefs; open source/cards yourself). Covering writes renew missing or older briefs when supported, else report briefsProblem and leave the brief unchanged. Leaf calls pass task_context (worktreeScope, sourceRoot, memoryRoot). Docs: docs/reference/mcp-tools.md."""
+        """Name up to 20 paths: compact rows give path, existence, cardStatus, and brief path with saved freshness; fuller rows may give rule text. Open saved briefs before edits (records may lack briefs; open source/cards yourself). Covering writes renew missing or older briefs when supported, else report briefsProblem and leave the brief unchanged. Leaf calls pass task_context (task_document_ref, contract_path). Docs: docs/reference/mcp-tools.md."""
         return tools.read_ar_files_payload(
             config,
             repo_id,

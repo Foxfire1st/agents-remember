@@ -120,8 +120,10 @@ describe('launcher bar and the host catalog', () => {
     ];
     const { getByRole, getByLabelText, getByTestId, findByTestId, queryByTestId } = renderLauncher();
     const start = getByRole('button', { name: 'Start role' }) as HTMLButtonElement;
-    await waitFor(() => expect(start.disabled).toBe(false));
-    expect(getByTestId('role-service-tier').textContent).toBe('Speed: Fast');
+    await waitFor(() => {
+      expect(start.disabled).toBe(false);
+      expect(getByTestId('role-service-tier').textContent).toBe('Speed: Fast');
+    });
     expect(getByTestId('role-service-tier').getAttribute('title')).toContain('default agent');
     fireEvent.change(getByLabelText('Role model override'), { target: { value: 'gpt-b' } });
     expect((await findByTestId('role-choice-problem')).textContent).toContain(

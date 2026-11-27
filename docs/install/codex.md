@@ -76,8 +76,10 @@ The keys of Agents Remember stand in two files. The user settings file is
 reference](../reference/settings-json.md) shows the two commands that open and close it. The
 settings file is `~/.config/agents-remember/agents-remember-settings.json`.
 
-- **A new Codex role seat starts with every tool on its own `agents-remember-task` server approved.**
-  Resumed or reloaded seats keep their startup grant, and tools added by later builds require
+- **A new Codex role seat starts with its role's allowlist on its own `agents-remember-task`
+  server approved.** The bound `agents-remember-task` server advertises only that role's canonical
+  allowlist (`ROLE_TOOL_ALLOWLISTS[role]`), and Codex's startup grant preapproves that exact ordered
+  list. Resumed or reloaded seats keep their startup grant, and tools added by later builds require
   replacing the seat.
   - Checked in the Paseo 0.16.2 source for which grant the host restores on resume or reload.
     In one sandbox startup in `auto-review`, the Codex seat completed a `task_doc` write through
@@ -129,10 +131,11 @@ settings file is `~/.config/agents-remember/agents-remember-settings.json`.
 - **A role agent also carries the tools of the tool server that you registered under the name
   `agents-remember`.** This holds when the configuration of Codex that the agent reads,
   `config.toml` in the folder that `CODEX_HOME` names for the agent or else `~/.codex/config.toml`,
-  registers that tool server. The role agent then has the tools of Agents Remember twice, under
-  `agents-remember-task` and under `agents-remember`. The whole result of `role_start`, in the
-  file that `log` names, says `"secondCopyLoaded": true` for every start on Codex, also when no
-  such registration exists.
+  registers that tool server. The bound `agents-remember-task` server serves only the seat's
+  role-scoped tool list (`ROLE_TOOL_ALLOWLISTS[role]`), while the user-registered `agents-remember`
+  server loads the full unbound tool roster, so the seat's role tools appear on both servers. The
+  whole result of `role_start`, in the file that `log` names, says `"secondCopyLoaded": true` for
+  every start on Codex, also when no such registration exists.
   - Setting: none. The host offers no setting that keeps one tool server out of one start on
     Codex. A role agent's instructions name the tool server `agents-remember-task` for every tool
     call.

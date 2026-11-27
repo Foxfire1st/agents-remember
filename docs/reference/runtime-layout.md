@@ -50,6 +50,7 @@ More folders appear when the product is used:
 | `<coordination-root>/controlplane/` | state that the product keeps between calls, among them `attention-notices.json` and the folder `lifecycle-enclosures/` | the product's own processes |
 | `<coordination-root>/temp/tool-reports/<tool>/` | the full result of a tool call as one JSON file | the tool |
 | `<coordination-root>/notes/reports/paseo-native-executions/` | the receipts of role starts that belong to no task, for example those of the Bootstrap role agent | `role_start`; `runtime_install` with `reconcile_shared_held_stores=true` writes waiting messages into closed seats' receipts |
+| `<coordination-root>/.cache/skill-corpus/` | durable content-addressed copy (`<sha256>/l-01-agent-lifecycles/`) materialized atomically when the package runs from a non-filesystem archive; filesystem wheel and editable installs serve `runtime/skills/l-01-agent-lifecycles/` directly without copying | role-launch preparation |
 | `<coordination-root>/benchmarks/` | the benchmark material; see [Benchmarks](#benchmarks) | `runtime_install` with `include_benchmarks=true` |
 
 ### Server binding records
@@ -177,7 +178,10 @@ depends on its role.
 | every other role agent | `<workspace-root>/.agents-remember/role-executions/<request-id>/scratch/` | `<workspace-root>/.agents-remember/role-executions/<request-id>/role-reports/` |
 
 The install prepares the second row: it creates `<workspace-root>/.agents-remember/role-executions/`
-and keeps the folder out of Git with the line in `<workspace-root>/.gitignore`.
+and keeps the folder out of Git with the line in `<workspace-root>/.gitignore`. Inside each role
+agent's report folder, `role-launch/` stores `.handover.txt`, `.handover.json`, the nested
+`<stem>.details/<source_path>` folder of frozen step-detail files, and optional
+`.opening-message.md` / `.held-batch-<sha256>.md` offload sidecars.
 
 Some work cannot stand inside an enclosure, for example the
 [sandbox of the whole product](https://github.com/Foxfire1st/agents-remember/blob/main/CONTRIBUTING.md#a-sandbox-of-the-whole-product),

@@ -26,7 +26,7 @@ The folder `skills/` holds one skill.
 
 | Skill | Purpose |
 | --- | --- |
-| `l-01-agent-lifecycles` | The instructions of the role agents. It holds one role file for each of the eight roles (`architect`, `investigator`, `orchestrator`, `manager`, `worker`, `reviewer`, `curator`, `bootstrap`), nine operation files (each holds the instructions for one kind of work, for example planning, review or closeout), the instructions for a chat without a role, the report templates and the review criteria. The folders `roles/`, `operations/`, `templates/` and `criteria/` of the skill hold the role files, the operation files, the templates and the review criteria; the review criteria are the catalogs by which the Reviewer judges a change. A role agent on the host (Paseo) receives one role file and one operation; see [Role capsules](role-capsules.md). [Roles and role agents](../roles.md) describes the roles and how a chat without a role starts work. |
+| `l-01-agent-lifecycles` | The instructions of the role agents, organized for three-tier progressive disclosure. It holds shared core rules under `core/` (including the role-filtered `core/every-role.md`), one role file for each of the eight roles (`architect`, `investigator`, `orchestrator`, `manager`, `worker`, `reviewer`, `curator`, `bootstrap`) under `roles/`, nine operation files under `operations/` (each holding the instructions for one kind of work, for example planning, review or closeout), Tier-2 reference procedures and refusal guides under `reference/`, report and handoff templates under `templates/`, and review criteria under `criteria/` (the catalogs by which the Reviewer judges a change), plus the instructions for a chat without a role. A role agent on the host (Paseo) receives a Tier-1 compiled capsule (role-filtered shared rules, one role file, and one operation) and reads Tier-2 detail and reference files on demand; see [Role capsules](role-capsules.md). [Roles and role agents](../roles.md) describes the roles and how a chat without a role starts work. |
 
 ## Setup And Repository Preparation
 
@@ -54,6 +54,14 @@ a harness reads with the MCP method `resources/read`. The origin names the publi
 server's is `agents-remember/skills`, so the file `SKILL.md` of the shipped skill is
 `skill://agents-remember/skills/l-01-agent-lifecycles/SKILL.md`. Two MCP servers that serve one
 skill name keep distinct addresses through their origins.
+
+For launched role agents, `## Launch Context` publishes a `Link roots:` line whose `skill="..."`
+root points to a durable on-disk copy of `l-01-agent-lifecycles` (directly to the package's
+`runtime/skills/l-01-agent-lifecycles/` on filesystem installs, or to an atomically materialized
+content-addressed copy under `<coordination-root>/.cache/skill-corpus/<sha256>/l-01-agent-lifecycles/`
+when running from a non-filesystem archive). Core MCP refusal payloads across six refusal families
+also emit Poka-Yoke `See skill://agents-remember/skills/l-01-agent-lifecycles/...#<anchor>.`
+pointers so a role agent can open the exact recovery procedure on demand.
 
 For the first-run path, a chat without a role needs one tool call — `role_start(role="bootstrap",
 request_id=<uuid>)` — and no skill read at all: the launched Bootstrap role agent receives its

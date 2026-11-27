@@ -1,12 +1,22 @@
 # Role capsules, handovers and messages
 
-A role capsule is the instruction text that a role agent receives at its start. It holds the text
-of the role, the text of one operation that fits the assignment, and the rules that hold for every
-role. An operation is an operation file of the skill `l-01-agent-lifecycles`: the instructions for
-one kind of work, for example planning, a review or a closeout. The first message of a role agent
-carries the capsule together with the [handover](../concepts.md#handover). The handover names the
-assignment: the selected task documents, the working folders, the report folder and the parent.
-[Roles and role agents](../roles.md) describes the roles.
+A role capsule is the instruction text that a role agent receives at its start. Instructions follow
+a three-tier progressive-disclosure model:
+
+1. **Tier 1 (compiled Turn-1 capsule):** the role-filtered rules from `core/every-role.md`, the
+   text of the role, and the text of one operation that fits the assignment (for example planning,
+   a review or a closeout). This static prefix comes first so prompt caching holds across turns.
+2. **Tier 2 (on-demand reference manuals and templates):** step-detail reference files frozen beside
+   the report and the rest of the skill corpus, reached through short `detail/` and `skill/` links
+   whose base directories appear on the `Link roots:` line of `## Launch Context`.
+3. **Tier 3 (Poka-Yoke refusal pointers):** when a core MCP tool refuses a call, the refusal payload
+   appends `See skill://agents-remember/skills/l-01-agent-lifecycles/...#<anchor>.` so the role
+   agent can open the exact recovery procedure on demand.
+
+The first message of a role agent carries the Tier-1 capsule together with a slimmed wire
+projection of the [handover](../concepts.md#handover) (deduplicated reader arguments, the active
+bound task document, and compact workspace/parent/leaf-seat fields). The complete handover object
+stands in `.handover.json`. [Roles and role agents](../roles.md) describes the roles.
 
 The tool server serves the skill as MCP resources from the package. See
 [Skills](skills.md) for the source tree and the generated copy.
@@ -18,15 +28,21 @@ instructions again as plain files on any harness. The files lie in the folder `r
 the role agent's report folder; [Where a role agent's files lie](../roles.md#where-a-role-agents-files-lie)
 names the report folder of each role:
 
-| File ending | Content |
+| File or folder | Content |
 | --- | --- |
-| `.handover.txt` | the text of the first message: the capsule and a short form of the handover |
-| `.handover.json` | the complete handover |
-| `.detail-<sha256>.md` | one file for each detail text: a reference file of the skill that a step of the instructions tells the role agent to read, copied whole |
+| `.handover.txt` | the text of the first message: the static Tier-1 capsule, `## Launch Context` (with `Link roots:` and the slimmed inline wire projection), and any bounded opening appendix |
+| `.handover.json` | the complete handover object (including fields omitted from the slimmed wire projection) |
+| `<stem>.details/<source_path>` | nested folder of write-once frozen copies of the skill's step-detail reference files that the capsule links under `detail/` (older launches wrote flat `.detail-<sha256>.md` files beside the report) |
+| `.opening-message.md` | write-once sidecar written when a direct opening message exceeds `orchestration.roleMessageLimit` (default 1,000 characters); the first message carries a truncated preview and an `Opening message file:` pointer line |
+| `.held-batch-<sha256>.md` | write-once sidecar written when a held seat's opening message batch exceeds `orchestration.roleMessageLimit`; the opening turn carries a truncated preview and a `Held opening messages file:` pointer line |
+| `.step-up.json` | takeover material attached when a launch carries step-up context |
 
-The first message opens with one line that names the two handover files and the SHA-256 of the
-text file. The answer of `role_start` names the text file in `handoverArtifactPath`, the JSON file
-in `handoverFilePath` and the role agent's report file in `reportPath`.
+The first message ends with a trailing `AR handover artifacts:` line naming the `.handover.txt` and
+`.handover.json` files and their SHA-256 digests, keeping the static capsule prefix cacheable.
+Inside `## Launch Context`, `Link roots:` names the durable skill root (`skill="..."`) and, when
+detail files were written, the nested detail directory (`detail="..."`). The answer of `role_start`
+names the text file in `handoverArtifactPath` and the JSON file in `handoverFilePath`; the whole
+result in `log` also names the role agent's report file in `reportPath`.
 
 ## Held starts and held messages
 
@@ -46,9 +62,12 @@ procedure is
 [Message handover](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/reference/message-handover.md).
 It tells the sender to say in `text` what it asks for and to name the files, to put the full text
 in `body` and the files in `attach`, and to send once more a message refused with
-`recipient-busy`; it also says where filed messages lie. The role capsule names the procedure at
-the step of the role that it applies to. The instructions of Bootstrap hold no message-handover
-duty and no pointer to that procedure.
+`recipient-busy`; it also says where filed messages lie. `role_message` refusals
+(`recipient-busy`, `message-too-long`, `message-file-failed`, and `recipient-archived`) append a
+`See skill://agents-remember/skills/l-01-agent-lifecycles/reference/message-handover.md#<anchor>.`
+pointer to `nextAction`, while ordinary `held` answers carry no refusal pointer. The role capsule
+names the procedure at the step of the role that it applies to. The instructions of Bootstrap hold
+no message-handover duty and no pointer to that procedure.
 
 A role agent's chat text is not a message. A role agent sends its results, and what it waits for,
 with `role_message` to the role agent that waits, except that a Manager waiting on a working child

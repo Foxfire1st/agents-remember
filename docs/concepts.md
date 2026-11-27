@@ -621,16 +621,22 @@ and may choose another harness, model or effort than the role settings name.
 
 ### Role capsule
 
-A role capsule is the instruction text that a role agent receives with its first message: the text
-of its role, the text of one operation that fits the assignment, and the rules that hold for every
-role. Agents Remember compiles it from the files of the skill; the
+A role capsule is the Tier-1 instruction text that a role agent receives as the cacheable static
+prefix of its first message: role-filtered shared rules from `core/every-role.md`, the text of its
+role, and the text of one operation that fits the assignment. Agents Remember compiles it from the
+files of the skill under three-tier progressive disclosure, resolving Tier-2 detail and reference
+files through `Link roots:` (nested `<stem>.details/` snapshots and the durable skill corpus) and
+attaching Tier-3 Poka-Yoke `skill://` recovery pointers to core MCP refusal payloads; the
 [role-capsule reference](reference/role-capsules.md) describes it.
 
 ### Handover
 
 A handover is the record of one role agent's assignment: the selected task documents, the working
-folders, the report folder and the parent. The tool `role_start` writes it as a JSON file and
-names that file in `handoverFilePath`; the first message of the role agent carries a short form.
+folders, the report folder and the parent. The tool `role_start` writes the complete object as a
+`.handover.json` file (named in `handoverFilePath`), carries a slimmed inline wire projection in
+the first message, offloads opening appendices over `orchestration.roleMessageLimit` (default 1,000
+characters) to `.opening-message.md` or `.held-batch-<sha256>.md`, and ends the first message
+with a trailing `AR handover artifacts:` locator line naming `.handover.txt` and `.handover.json`.
 
 ### Hand-off
 

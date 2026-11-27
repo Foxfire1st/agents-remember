@@ -213,30 +213,39 @@ that a helper runs on the model of its role agent unless you name another.
 
 ## What a role agent receives at its start
 
-The first message of a role agent holds its instructions and its handover:
+The first message of a role agent holds its Tier-1 instructions and a slimmed projection of its
+handover:
 
-- The instructions are the role capsule: the text of the role, the text of one operation, and the
-  rules that hold for every role. [Role capsules](reference/role-capsules.md) describes it.
+- The instructions are the role capsule, compiled under three-tier progressive disclosure: the
+  role-filtered shared rules from `core/every-role.md`, the text of the role, and the text of one
+  operation, placed first as a static cacheable prefix. Short `detail/` and `skill/` links resolve
+  through the `Link roots:` line in `## Launch Context`, and core MCP refusals append on-demand
+  `skill://` recovery pointers. [Role capsules](reference/role-capsules.md) describes it.
 - The handover names the assignment: the selected task documents, the working folders, the report
   folder, the parent, and how to reach the other role agents of the task. The first message
-  carries a short form of it.
+  carries a slimmed inline wire projection (deduplicated reader arguments, the active bound
+  document, and compact fields); the complete handover object stands in `.handover.json`.
 
-The product stores this message before it sends the start. Three kinds of files lie in the folder
+The product stores this message before it sends the start. Launch files lie in the folder
 `role-launch` of the role agent's report folder. For a role agent of a task, each name begins with
 the id of the task, the role and the request id of the start. The request id is the UUID that
 names one start, the argument `request_id` of `role_start`; a repeated call with the same request
 id reaches the same role agent.
 
-| File ending | Content |
+| File or folder | Content |
 | --- | --- |
 | `.handover.txt` | the text of the first message |
-| `.handover.json` | the complete handover |
-| `.detail-<sha256>.md` | one file for each detail text: a reference file of the skill that a step of the instructions tells the role agent to read, copied whole |
+| `.handover.json` | the complete handover object |
+| `<stem>.details/<source_path>` | nested folder of write-once frozen copies of the skill's step-detail reference files linked under `detail/` (older launches wrote flat `.detail-<sha256>.md` files) |
+| `.opening-message.md` | write-once sidecar when a direct opening message exceeds `orchestration.roleMessageLimit` (default 1,000 characters), with a truncated preview and pointer line inline |
+| `.held-batch-<sha256>.md` | write-once sidecar when a held seat's opening message batch exceeds `orchestration.roleMessageLimit`, with a truncated preview and pointer line inline |
+| `.step-up.json` | takeover material when a launch carries step-up context |
 
-The first message opens with one line that gives the paths of the two handover files and the
-SHA-256 of the text file. The line tells the role agent to read the files again whenever its
-assignment has left its context. The answer of `role_start` names the report path and both
-handover files.
+The first message ends with a trailing `AR handover artifacts:` line that gives the paths and
+SHA-256 digests of `.handover.txt` and `.handover.json`, keeping the static prefix cacheable. The
+line tells the role agent to read the files again whenever its assignment has left its context.
+The answer of `role_start` names both handover files (`handoverArtifactPath`, `handoverFilePath`),
+and the whole result in `log` also names `reportPath`.
 
 ## Where a role agent's files lie
 
@@ -300,8 +309,10 @@ The argument `text` holds at most 1,000 characters. The key
 [`orchestration.roleMessageLimit`](reference/settings-json.md#orchestrationrolemessagelimit) of
 the settings changes this number. Only the text counts: the line that names the sender and the
 line that names the message file do not. A longer `text` is refused with `message-too-long`, and
-nothing is delivered. The refusal names the length of the text and the limit. It tells the sender
-what to do: send a shorter `text`, and put the full part into `body` or `attach`.
+nothing is delivered. The refusal names the length of the text and the limit, tells the sender to
+send a shorter `text` and put the full part into `body` or `attach`, and appends a
+`See skill://agents-remember/skills/l-01-agent-lifecycles/reference/message-handover.md#send-a-message-that-names-the-files.`
+pointer to `nextAction`.
 
 The product files each message in the message folder of the narrowest task that sender and
 recipient share. Two role agents of one task share `notes/messages/<task-slug>/` in the folder of
@@ -332,7 +343,9 @@ A message to a recipient in a turn enters the running turn where the host can st
 recipient's harness. Where the host replaced the running turn to take the message, the answer
 carries `taken` with the value `replaced` and a warning.
 
-One recipient holds at most twenty messages. A further message is refused with `recipient-busy`.
+One recipient holds at most twenty messages. A further message is refused with `recipient-busy`,
+and its `nextAction` appends
+`See skill://agents-remember/skills/l-01-agent-lifecycles/reference/message-handover.md#handle-a-full-store-refusal.`.
 
 ### Waiting for the answer
 
@@ -428,8 +441,13 @@ status `waiting for subagents` or `waiting for background`.
 ## Close a role agent
 
 - Use [`retire_child`](tool-details.md#retire_child) to close any other role agent within the caller's
-  scope. Open child seats must be retired first.
-- A message to an archived role agent is refused.
+  scope. Open child seats must be retired first. Scope, active-turn (`agent-in-turn`), and
+  open-children refusals append a
+  `See skill://agents-remember/skills/l-01-agent-lifecycles/reference/coordination/shared/seat-recovery.md#retire-child-scope-and-active-turns.`
+  pointer to `detail`.
+- A message to an archived role agent is refused with `recipient-archived` and appends a
+  `See skill://agents-remember/skills/l-01-agent-lifecycles/reference/message-handover.md#find-filed-messages-and-receipts.`
+  pointer to `nextAction`.
 - When a leaf is finalized, cleaned up or abandoned, the product archives its leaf role agents.
 - When the developer archives an agent in Paseo, AR records its retirement on the next host-state
   refresh. The AR dashboard offers "Revive" for closed role agents. See [Dashboard](dashboard.md).

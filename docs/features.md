@@ -272,6 +272,15 @@ version and starts it. The tool `role_start` starts a role agent, and so does th
 each other messages with the tool `role_message`. The user settings
 file names the harness, the model and the effort of each role.
 
+Each role start compiles a three-tier progressive-disclosure
+[role capsule](reference/role-capsules.md): a cacheable static Tier-1 prefix (role-filtered shared
+rules from `core/every-role.md`, the role file, and one operation) followed by dynamic
+`## Launch Context` (compact `Link roots:` for `skill/` and nested `<stem>.details/` snapshots, a
+slimmed handover JSON projection, and a trailing `AR handover artifacts:` locator line). Opening
+messages or held opening batches above `orchestration.roleMessageLimit` (default 1,000 characters)
+are offloaded to write-once `.opening-message.md` or `.held-batch-<sha256>.md` sidecars with a
+bounded inline preview.
+
 The host runs on Linux x86_64, WSL2 included. On another platform the tool server and the dashboard
 run, and no role agent can be started. [The host](host.md) tells how to check, stop and provision
 the host, and [Harnesses and role settings](reference/harnesses.md) tells which harnesses it can
@@ -369,7 +378,14 @@ boundary between them is the trust boundary:
   and a carryover refuse a blank note.
 
 The tool server answers a call that carries an argument the tool does not declare as if the
-argument were absent. It bounds the size of every
+argument were absent. A role-launched `agents-remember-task` server narrows advertised and
+dispatched tools to that role's static allowlist in `PUBLIC_TOOLS` order (an unbound server serves
+the full public roster) and fails closed to `server_info` alone when an agent binding is malformed
+or unreadable. Every registered tool's JSON Schema is losslessly compacted on the wire (stripping
+schema-level `title`, `default: null`, and top-level `$defs` model descriptions while preserving
+runtime validation), short tool descriptions stay within 500 characters, and six core refusal
+families append Poka-Yoke `See skill://agents-remember/skills/l-01-agent-lifecycles/...#<anchor>.`
+recovery pointers to their refusal payloads. It bounds the size of every
 answer: 1,500 tokens by default, and at most 4,000 for some tools, among them `server_info`,
 `knowledge_read` and `role_message`. An answer holds the
 outcome, what the caller needs for its next step and, when the result is larger, the field `log`:

@@ -154,7 +154,7 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         dry_run: bool = False,
         sync_source: SyncSource | None = None,
     ) -> dict[str, Any]:
-        """Pull the official line into a live worktree (or default branch with sync_source='repository-default', keeping base pair); validates adopted memory before moving refs and marks changed reviews pre-sync. States: synced, already-current, would-sync, sync-active, sync-resolution-required, memory-sync-choice-required, blocked. Docs: docs/reference/mcp-tools.md."""
+        """Pull the official line into a live worktree (or default branch with sync_source='repository-default', keeping base pair); validates adopted memory before moving refs and marks changed reviews pre-sync. Merges memory only here; raw git merge is an unsupported hand edit. States: synced, already-current, would-sync, sync-active, sync-resolution-required, memory-sync-choice-required, blocked. Docs: docs/reference/mcp-tools.md."""
         return tools.worktree_sync_payload(
             config,
             contract_path,
