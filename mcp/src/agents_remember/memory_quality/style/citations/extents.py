@@ -40,7 +40,7 @@ class Extent:
 
 @dataclass
 class _DefinitionCache:
-    values: dict[tuple[str, str | None, tuple[str, ...]], dict[str, list[Extent]]] = field(
+    values: dict[tuple[str, str | None, str, tuple[str, ...]], dict[str, list[Extent]]] = field(
         default_factory=dict
     )
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -52,8 +52,12 @@ _definitions_in_call: ContextVar[_DefinitionCache | None] = ContextVar(
 
 
 @contextmanager
-def definition_scope() -> Iterator[None]:
+def definition_scope(language_set: grammars.LanguageSet | None = None) -> Iterator[None]:
     """Join a nested operation, or own definitions until this call finishes."""
+    if language_set is not None:
+        with grammars.language_set_scope(language_set), definition_scope():
+            yield
+        return
     if _definitions_in_call.get() is not None:
         yield
         return
@@ -81,7 +85,10 @@ def definitions(path: str, lines: Sequence[str]) -> dict[str, list[Extent]]:
     cache = _definitions_in_call.get()
     if cache is None:
         return _definitions(path, lines)
-    key = (path, grammars.grammar_of(path), tuple(lines))
+    grammar = grammars.grammar_of(path)
+    provider = grammars.active_language_set().provider_for(grammar) if grammar is not None else None
+    version = "" if provider is None else provider.version
+    key = (path, grammar, version, tuple(lines))
     # A request's copied ContextVars share this table across its worker threads.
     # Serialize a miss so concurrent anchors still parse their input exactly once.
     with cache.lock:
@@ -122,27 +129,40 @@ def uncertain_lean_scope(name: str, bound: Mapping[str, Sequence[Extent]]) -> bo
 
 
 def qualified_spans(
-    name: str, bound: dict[str, list[Extent]], *, grammar: str | None = None
+    name: str, bound: Mapping[str, Sequence[Extent]], *, grammar: str | None = None
 ) -> tuple[tuple[int, int], ...]:
     """The distinct extents binding ``name`` in one file's :func:`definitions`.
 
     Lean names resolve through the exact keys supplied by the scanner.
     For other languages, ``Holder.method`` names the ``method`` inside a ``Holder``, so a same-named
     method of another class in the file does not make the name ambiguous. A symbol anchor names one
-    construct only when exactly one span comes back; the curator writer (MIK-R12) and the
-    conversion (MIK-R24) both bind symbols through this one rule.
+    construct only when exactly one span comes back; the curator writer (MIK-R12), the recorded
+    anchor reader, and the conversion (MIK-R24) all bind symbols through this one rule.
     """
     if grammar == grammars.LEAN and uncertain_lean_scope(name, bound):
         return ()
     if name in bound:
-        spans = tuple((extent.start, extent.end) for extent in bound[name])
-        return (
-            spans
-            if any(extent.test_case for extent in bound[name])
-            else tuple(dict.fromkeys(spans))
-        )
-    if grammar == grammars.LEAN:
+        return _direct_spans(bound[name])
+    if _uses_exact_bindings(grammar):
         return ()
+    return _enclosed_qualified_spans(name, bound)
+
+
+def _direct_spans(entries: Sequence[Extent]) -> tuple[tuple[int, int], ...]:
+    spans = tuple((extent.start, extent.end) for extent in entries)
+    return spans if any(extent.test_case for extent in entries) else tuple(dict.fromkeys(spans))
+
+
+def _uses_exact_bindings(grammar: str | None) -> bool:
+    if grammar == grammars.LEAN:
+        return True
+    provider = grammars.active_language_set().provider_for(grammar) if grammar is not None else None
+    return provider is not None and provider.uses_exact_bindings
+
+
+def _enclosed_qualified_spans(
+    name: str, bound: Mapping[str, Sequence[Extent]]
+) -> tuple[tuple[int, int], ...]:
     parts = [part for part in name.split(".") if part]
     if not parts or any(part not in bound for part in parts):
         return ()

@@ -13,6 +13,9 @@ from agents_remember.install.runtime import (
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
+from agents_remember.memory_quality.style.citations.language_scanner import (
+    warm_repository_languages,
+)
 from agents_remember.models.core import RunningServerPayload
 from agents_remember.serving.daemon import ensure_running_dashboard, plan_running_dashboard
 from agents_remember.serving.paseo.paseo_install import install_host
@@ -77,4 +80,10 @@ def run_runtime_install(
         result["ok"] = result["ok"] and shared_stores["state"] != "blocked"
     if repository := config.repositories.get("agents-remember"):
         result["checkoutEnvironments"] = inspect_checkout_environments(repository.path)
+    if config.repositories:
+        result["languages"] = {
+            repo_id: warm_repository_languages(repo.path, dry_run=request.dry_run).to_payload()
+            for repo_id, repo in sorted(config.repositories.items())
+            if repo.path.is_dir()
+        }
     return result

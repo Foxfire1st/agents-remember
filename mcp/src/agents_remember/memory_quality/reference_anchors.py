@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from agents_remember.memory_quality.knowledge_validator.parsed import SidecarFile
     from agents_remember.memory_quality.knowledge_validator.trees import CodeTree, KnowledgeTree
 from agents_remember.memory_quality.reference_state import git_blob_id, located, refreshed_anchor
+from agents_remember.memory_quality.style.citations import grammars
 from agents_remember.models.knowledge_files.anchor_content import (
     blob_lines,
     content_identity,
@@ -201,10 +202,26 @@ def observe(
             _PATH_ABSENT_REASON,
         )
     actual = git_blob_id(data)
-    found = located(path, data, locator)
-    actual_content = content_identity(found) if found is not None else None
-    if actual_content == recorded_content:
-        if actual == recorded:
+    repo_root = getattr(source, "root", None) or getattr(source, "repository", None)
+    with grammars.repository_language_set_scope(repo_root if isinstance(repo_root, Path) else None):
+        found = located(path, data, locator)
+        actual_content = content_identity(found) if found is not None else None
+        if actual_content == recorded_content:
+            if actual == recorded:
+                return AnchorObservation(
+                    sidecar,
+                    field,
+                    kind,
+                    path,
+                    render_locator(locator),
+                    recorded,
+                    actual,
+                    recorded_content,
+                    actual_content,
+                    CURRENT,
+                    REPAIR_NONE,
+                    "names the paired tree's blob and its recorded content",
+                )
             return AnchorObservation(
                 sidecar,
                 field,
@@ -215,27 +232,13 @@ def observe(
                 actual,
                 recorded_content,
                 actual_content,
-                CURRENT,
-                REPAIR_NONE,
-                "names the paired tree's blob and its recorded content",
+                STALE_BLOB,
+                REPAIR_BLOB,
+                "the located bytes are the recorded content; re-record the blob",
             )
-        return AnchorObservation(
-            sidecar,
-            field,
-            kind,
-            path,
-            render_locator(locator),
-            recorded,
-            actual,
-            recorded_content,
-            actual_content,
-            STALE_BLOB,
-            REPAIR_BLOB,
-            "the located bytes are the recorded content; re-record the blob",
+        refreshed = refreshed_anchor(
+            path, {"blob": recorded, "content": recorded_content, "locator": locator}, data
         )
-    refreshed = refreshed_anchor(
-        path, {"blob": recorded, "content": recorded_content, "locator": locator}, data
-    )
     if refreshed is not None:
         moved = refreshed["locator"]
         return AnchorObservation(

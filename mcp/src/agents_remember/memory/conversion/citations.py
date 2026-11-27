@@ -34,7 +34,7 @@ from typing import Any, Final
 
 from agents_remember.memory.conversion.cards import CitationRow
 from agents_remember.memory.conversion.code_objects import CodeObjects
-from agents_remember.memory_quality.style.citations import model
+from agents_remember.memory_quality.style.citations import grammars, model
 
 _REASON: Final = "_reason"
 _TEST_DIRECTORIES: Final = frozenset({"tests", "test", "__tests__", "e2e"})
@@ -162,6 +162,16 @@ def _source_targets(
 def row_reference(row: CitationRow, context: RowContext, tally: TargetTally) -> dict[str, Any]:
     """Return the reference ``{targets, note?}`` for one real citation row."""
 
+    scope_root = (
+        context.objects.repository if context.objects.reader is model.CitationReader.LIVE else None
+    )
+    with grammars.repository_language_set_scope(scope_root):
+        return _row_reference_in_scope(row, context, tally)
+
+
+def _row_reference_in_scope(
+    row: CitationRow, context: RowContext, tally: TargetTally
+) -> dict[str, Any]:
     symbols = _symbol_targets(row, context)
     targets: list[dict[str, Any]] = [target for _, _, target in symbols]
     targets.extend(_source_targets(row, context, symbols, tally))

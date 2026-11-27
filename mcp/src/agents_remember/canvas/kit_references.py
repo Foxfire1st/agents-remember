@@ -19,7 +19,6 @@ from functools import cache
 from html.parser import HTMLParser
 from pathlib import Path
 
-import tree_sitter_javascript
 from tree_sitter import Language, Node, Parser
 
 from agents_remember.canvas.kit import (
@@ -29,6 +28,7 @@ from agents_remember.canvas.kit import (
     kit_assets,
     kit_files,
 )
+from agents_remember.memory_quality.style.citations import grammars
 
 __all__ = [
     "KitCarryResult",
@@ -75,7 +75,7 @@ class KitCarryResult:
 
 @cache
 def _js_language() -> Language:
-    return Language(tree_sitter_javascript.language())
+    return grammars.language("javascript")
 
 
 def is_ignored_reference(reference: str) -> bool:

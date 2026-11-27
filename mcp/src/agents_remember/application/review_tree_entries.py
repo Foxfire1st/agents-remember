@@ -510,13 +510,14 @@ def _excerpt(trees: CodeTrees, blob: str, start: int, end: int) -> dict[str, Any
 def _resolve(
     trees: CodeTrees, path: str, locator: Mapping[str, Any], recorded_blob: str, blob: str
 ) -> Resolved | None:
-    key = observation_key(blob, path, locator, recorded_blob)
-    remembered = PLACEMENTS.get(key)
-    if remembered is not None:
-        return remembered[0]
-    resolved = trees.resolve(path, locator, recorded_blob, blob)
-    PLACEMENTS.put(key, resolved)
-    return resolved
+    with grammars.repository_language_set_scope(trees.repository):
+        key = observation_key(blob, path, locator, recorded_blob)
+        remembered = PLACEMENTS.get(key)
+        if remembered is not None:
+            return remembered[0]
+        resolved = trees.resolve(path, locator, recorded_blob, blob)
+        PLACEMENTS.put(key, resolved)
+        return resolved
 
 
 def _unsupported(
@@ -529,8 +530,9 @@ def _unsupported(
     kind = locator.get("kind")
     if kind not in ("symbol", "line_range", "file"):
         return {"state": "unresolved", "reason": f"the locator kind {kind!r} is unsupported"}
-    if kind == "symbol" and grammars.grammar_of(path) is None:
-        return {"state": "unresolved", "reason": "no shipped grammar reads this file's symbols"}
+    with grammars.repository_language_set_scope(trees.repository):
+        if kind == "symbol" and grammars.grammar_of(path) is None:
+            return {"state": "unresolved", "reason": "no shipped grammar reads this file's symbols"}
     if kind == "line_range" and blob != recorded_blob and not trees.has_blob(recorded_blob):
         return {
             "state": "unavailable",

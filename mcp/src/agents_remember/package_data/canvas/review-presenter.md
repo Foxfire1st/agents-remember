@@ -28,8 +28,10 @@ Explain what this task set out to do and how it got there. Write all six interme
    packets it names, `reference/README.md`, the reports `inputs/reports.md` names,
    `starters/README.md` with its working starters, and `exemplar/` (the bar a page is measured
    against). For each report you use, record its path and SHA-256 in `stages/01-reading.md`; that
-   digest is report provenance, not a claim-map base. Read the touched invariants with their facets,
-   and the bound memory's `system/design-guidelines.md` with every file it names. Summarize what
+   digest is report provenance, not a claim-map base. Use `knowledge_read` (`impact`, `search`,
+   `records`) on `trees/memory` paired with `trees/code` to read touched invariants, families, and
+   their facets without leaving the bound trees or treating today's checkout as evidence, and read
+   the bound memory's `system/design-guidelines.md` with every file it names. Summarize what
    each source says.
 2. **Choose the changes.** From the binding's change set, choose the files and changes that matter
    most for the requirement. Write `stages/02-changes.md`: each chosen file and change with its

@@ -8,7 +8,8 @@ The Reviewer writes the report or checks and owns its helper’s contribution. W
 
 1. Cover **two axes**: planned-vs-planned (does this change collide with another master/leaf, present or
    future?) and planned-vs-past (does it regress something already landed?).
-2. Evidence-first: cite the route indexes and the files opened from
+2. Evidence-first: cite the route indexes, `knowledge_read` (`view="impact"` with `files`/`folder`,
+   plus `view="records"` for full rule text), and the brief/card pointers and files opened from
    `read_ar_files` results that support each finding.
 3. State limits per finding — what the evidence does **not** prove.
 4. This is a report, not a decision: it feeds the Orchestrator's
@@ -42,7 +43,8 @@ The Reviewer writes the report or checks and owns its helper’s contribution. W
 
 ## Evidence Inventory
 - Route indexes read:
-- Identifiers and card paths returned by `read_ar_files`, and the files opened with native file tools:
+- Rules, families, siblings, and standing dependents returned by `knowledge_read` (`view="impact"` over `files`/`folder`, plus `view="records"` for verbatim text):
+- Brief/card pointers returned by `read_ar_files`, and the source, test, brief, or card files opened with native file tools:
 
 ## Actions for the spawning agent's main loop
 - <the one or two things the orchestrator/reviewer must act on> — no mutation performed here.

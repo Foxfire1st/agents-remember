@@ -2,7 +2,7 @@
 
 The Reviewer uses this catalog to examine the sprint plan before it reaches the developer's drawing board.
 
-Use the retained read-only naming tools: `read_ar_files`, `knowledge_read` and `knowledge_diff`. Re-derive mechanical claims through the tools, then open the named files with the harness's file tools.
+Use the retained read-only knowledge tools: `read_ar_files`, `knowledge_read` (`impact`, `search`, `records`, `dependent`) and `knowledge_diff`. Re-derive mechanical claims through the tools, read full record text with `knowledge_read` (`view="records"`), and reserve native file opens for source code, tests, briefs, cards, and documents not carried in `records`/`impact`.
 
 Before starting a baseline or fix-verification, read the [shared catalog review rules](code-seam.md#shared-catalog-review-rules). They define standing checks, baseline exploration, fixed-list verification and criterion promotion, demotion and automation. Fix-verification retains only the sealed evidence needed for outstanding plan-issue identifiers, subject to that section's sanctioned routes for adding findings after sealing.
 
@@ -22,7 +22,7 @@ Independently recompute pairwise intersections of the plan's per-leaf touch surf
 
 Challenge every atomic classification and high or critical priority judgment. Partial exposure must be demonstrably invalid or unsafe; size alone is insufficient.
 
-Re-derive at least the high-blast-radius entries: name the implicated dependents through `read_ar_files` and open them natively, and spot-check a sample of the low and medium entries.
+Re-derive at least the high-blast-radius entries: inspect implicated rules, families, and dependents through `knowledge_read` (`impact`/`records`/`dependent`) alongside `read_ar_files`, open source code and standing documents not carried in `records` natively, and spot-check a sample of the low and medium entries.
 
 Report a finding when a register entry cannot be re-derived or its classification omits the combined impact on instruction propagation, migration or user-visible behavior. The register determines downstream loop tiers, so an understated impact can cause too little review. A priority row also needs a benefit and urgency rationale, affected dependents, evidence, author and confidence.
 

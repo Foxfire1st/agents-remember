@@ -9,7 +9,7 @@ Before first/resumed knowledge foundation, read [foundation](../reference/curato
 <!-- ar:roles curator -->
 ## Workflow
 
-Verify writer outputs resolve in `workspace.memoryRoot`. Read `worktree_status`; require readable worklist before ingest; read scoped `knowledge_read` + full `knowledge_diff` before semantic changes.
+Verify writer outputs resolve in `workspace.memoryRoot`. Read `worktree_status`; require readable worklist before ingest; read scoped `knowledge_read` + full `knowledge_diff` before semantic changes. Use `knowledge_read` impact/search/records.
 
 Record staleness known at task intake as the task’s curation work.
 
@@ -30,7 +30,7 @@ Curator runs no Git writes, edits no code/gate/lifecycle/contract/closeout state
 Curation is evidence, not a gate. On `checklistStatus=coherence-required`, run `curator_coherence` `prepare`->`publish` (1/candidate or empty)->`validate` before closeout; never re-validate post-closeout trees.
 
 <!-- ar:roles curator -->
-Keep partial/refused handovers partial. Send memory candidate to Reviewer via `role_message` (sibling role, leaf refs, whole IDs); record coherence pre-end. Send evidenced code concerns to Worker+Reviewer; repair no code, author no false knowledge.
+Keep partial/refused handovers partial. Send memory candidate to Reviewer via `role_message` (sibling role, leaf refs, whole IDs); coherence pre-end. Send evidenced code concerns to Worker+Reviewer; repair no code, author no false knowledge.
 
 <!-- ar:roles all -->
 Manager notices: delivery/seat, authority, beyond-limit passes, disputed findings, reserved sync steps; sync memory conflicts -> Curator; cross-leaf needs named dependency.

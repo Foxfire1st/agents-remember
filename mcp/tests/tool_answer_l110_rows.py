@@ -463,6 +463,7 @@ INIT_ROW_FIELDS = frozenset(
         "layoutMarker",
         "git",
         "knowledge",
+        "languages",
     }
 )
 INIT_ROW_USES = {
@@ -476,6 +477,7 @@ INIT_ROW_USES = {
     "layoutMarker": "read whether the layout marker was created or already there",
     "git": "read the git initialization outcome",
     "knowledge": "read where the knowledge foundation lives and what is there now",
+    "languages": "read which repository languages were detected and pre-warmed in AR_LANGUAGE_CACHE",
 }
 INIT_ROW_BOUND = 800
 INIT_PRODUCTION_PATHS = ("preview", "applied")

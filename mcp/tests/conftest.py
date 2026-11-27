@@ -32,6 +32,15 @@ from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 _ENVIRONMENT_LEASE = activate_current_pytest_environment(
     candidate_test_process(REPOSITORY_ROOT), os.environ
 )
+_HOST_LANGUAGE_CACHE = os.environ.get("AR_LANGUAGE_CACHE") or str(
+    (
+        Path(os.environ["XDG_STATE_HOME"]).expanduser()
+        if os.environ.get("XDG_STATE_HOME")
+        else Path.home() / ".local" / "state"
+    )
+    / "agents-remember"
+    / "grammars"
+)
 _TEMPORARY = tempfile.TemporaryDirectory(prefix="ar-pytest-", dir="/tmp")
 _ISOLATED_ROOT = Path(_TEMPORARY.name)
 _ISOLATED_ENVIRONMENT = mock.patch.dict(
@@ -41,6 +50,7 @@ _ISOLATED_ENVIRONMENT = mock.patch.dict(
         "XDG_CONFIG_HOME": str(_ISOLATED_ROOT / "config"),
         "XDG_DATA_HOME": str(_ISOLATED_ROOT / "data"),
         "XDG_CACHE_HOME": str(_ISOLATED_ROOT / "cache"),
+        "AR_LANGUAGE_CACHE": _HOST_LANGUAGE_CACHE,
         "CODEX_HOME": str(_ISOLATED_ROOT / "codex"),
         "TMUX_TMPDIR": str(_ISOLATED_ROOT / "tmux"),
         "GIT_CONFIG_GLOBAL": os.devnull,

@@ -181,6 +181,14 @@ main() {
     echo "[python-runtime] removed replaced venv at $backup after successful recreation"
   fi
   echo "[python-runtime] canonical MCP venv ready at $venv"
+
+  # Run grammar pre-warm strictly outside the venv transaction so a missing
+  # wheel, offline host, or unwritable cache never discards a valid venv.
+  if [ -x "$venv/bin/agents-remember" ]; then
+    if ! "$venv/bin/agents-remember" languages warm --repo "$repo_root"; then
+      echo "[python-runtime] warning: language grammar pre-warm did not complete; grammars will warm lazily on demand" >&2
+    fi
+  fi
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

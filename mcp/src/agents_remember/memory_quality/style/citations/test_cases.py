@@ -19,6 +19,7 @@ identifier before the case's own call.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from pathlib import PurePosixPath
 
 from tree_sitter import Node
@@ -259,7 +260,7 @@ def case_names(node: Node) -> tuple[str, ...]:
     return titles_at(node)
 
 
-def refusal(nodes: list[Node], path: str, name: str) -> str:
+def refusal(nodes: Sequence[Node], path: str, name: str) -> str:
     """Why an unsupported test call cannot name a symbol proof, and how it is proved instead."""
 
     for node in nodes:

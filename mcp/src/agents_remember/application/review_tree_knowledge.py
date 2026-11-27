@@ -113,6 +113,7 @@ from agents_remember.kernel.reviewer_worklist_process import (
     WorklistProcessError,
 )
 from agents_remember.memory.knowledge_index import is_indexed_path
+from agents_remember.memory_quality.style.citations import grammars
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH, REFERENCE_MAX_LENGTH
 from agents_remember.models.knowledge.item_verdict import ItemVerdict
 from agents_remember.models.knowledge.review import ReviewRefusal, ReviewRefusalCode
@@ -385,7 +386,10 @@ class _Beside:
 
     def _compute(self, contract: WorktreeContract, trees: ReviewTrees) -> None:
         try:
-            restore_review_memos(contract.coordination_root, process_serving_build().source_digest)
+            with grammars.repository_language_set_scope(getattr(contract, "code_worktree", None)):
+                restore_review_memos(
+                    contract.coordination_root, process_serving_build().source_digest
+                )
             for name, part in (
                 ("inventory", tree_entry_inventory),
                 ("currentness", side_currentness),

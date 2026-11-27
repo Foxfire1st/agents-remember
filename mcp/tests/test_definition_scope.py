@@ -35,7 +35,7 @@ def test_distinct_path_content_and_grammar_each_have_one_parse(
             assert "VALUE" in extents.definitions("two.py", lines)
             assert "VALUE" in extents.definitions("one.py", ["VALUE = 2"])
         with monkeypatch.context() as patch:
-            patch.setattr(grammars, "grammar_of", lambda _path: grammars.JAVASCRIPT)
+            patch.setattr(grammars, "grammar_of", lambda _path: "javascript")
             assert extents.definitions("one.py", lines) == {}
     assert len(calls) == 4
 

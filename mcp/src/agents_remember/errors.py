@@ -376,13 +376,14 @@ class TokenizerVocabularyError(AgentsRememberError):
 
 
 class GrammarUnavailableError(AgentsRememberError):
-    """A language the citation check declares it parses has no grammar to parse it with.
+    """A language the citation check declares it parses has no usable grammar to parse it with.
 
     Raised instead of falling back to occurrence matching or to a second parser. The
     check's whole value is telling a DEFINITION from a MENTION, and a run that quietly
     lost that for one language would report the same "ok" over a scope nobody stated.
-    The grammars are ordinary wheels pinned in ``mcp/pyproject.toml``; nothing about the
-    parse path reaches the network, so this means an incomplete install.
+    Catalog grammars are lazily downloaded and verified into ``AR_LANGUAGE_CACHE`` from
+    the bundled catalog lock, and custom grammars are loaded from local paths; this error
+    names the download, hash, ABI, or local-path cause and the cache/retry path.
     """
 
 

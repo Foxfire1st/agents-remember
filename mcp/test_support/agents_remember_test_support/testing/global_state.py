@@ -307,14 +307,35 @@ PROCESS_MUTABLE_STATES = (
     ),
     _row(
         "memory_quality.style.citations.grammars",
-        "language",
-        "Forget loaded grammar memoization between test modules.",
+        "_process_typescript_anchor_identifier",
+        "Forget process-owned TypeScript anchor memoization between test modules.",
         _clear_cache,
     ),
     _row(
-        "memory_quality.style.citations.grammars",
-        "_process_typescript_anchor_identifier",
-        "Forget process-owned TypeScript anchor memoization between test modules.",
+        "memory_quality.style.citations.language_cache",
+        "_CUSTOM_DLL_HANDLES",
+        "Forget cached custom shared-library handles between test modules.",
+    ),
+    _row(
+        "memory_quality.style.citations.language_cache",
+        "_LOADED_LANGUAGES",
+        "Forget loaded cached grammar instances between test modules.",
+    ),
+    _row(
+        "memory_quality.style.citations.language_catalog",
+        "load_language_catalog",
+        "Forget memoized language catalog lock between test modules.",
+        _clear_cache,
+    ),
+    _row(
+        "memory_quality.style.citations.language_scanner",
+        "_REPO_LANGUAGE_SETS",
+        "Forget cached repository language sets between test modules.",
+    ),
+    _row(
+        "memory_quality.style.citations.tags_engine",
+        "compile_query",
+        "Forget compiled tree-sitter query memoization between test modules.",
         _clear_cache,
     ),
     _row(

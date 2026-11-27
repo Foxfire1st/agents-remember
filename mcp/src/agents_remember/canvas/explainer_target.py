@@ -477,7 +477,8 @@ class ExplainerTargetReads:
         if kind == "file":
             return content_identity(data), (1, max(line_count(data), 1))
         if kind == "symbol":
-            return _resolve_symbol_in_blob(path, data, str(locator.get("name") or ""))
+            with grammars.repository_language_set_scope(repository):
+                return _resolve_symbol_in_blob(path, data, str(locator.get("name") or ""))
         if kind == "line_range":
             return self._resolve_line_range_in_code(repository, data, blob_id, anchor, locator)
         return None, None

@@ -179,27 +179,28 @@ def check_references(
     in ``unreadableSidecars`` and excluded from every count.
     """
 
-    files = _WorkingFiles(code_root)
-    states: Counter[str] = Counter()
-    reports: list[dict[str, Any]] = []
-    unreadable: list[str] = []
-    sidecars_read = 0
-    for relative, document in _sidecars(memory_root, unreadable, only):
-        if not document.get("references"):
-            continue
-        try:
-            observed = [
-                (field_name, anchor, anchor_state(anchor["path"], anchor, files))
-                for field_name, _, anchor in _anchor_targets(document)
-            ]
-        except _MALFORMED:
-            unreadable.append(relative)
-            continue
-        sidecars_read += 1
-        for field_name, anchor, state in observed:
-            states[state.split(":")[0]] += 1
-            if state != "current":
-                reports.append(_reference_report(relative, field_name, anchor, state))
+    with grammars.repository_language_set_scope(code_root):
+        files = _WorkingFiles(code_root)
+        states: Counter[str] = Counter()
+        reports: list[dict[str, Any]] = []
+        unreadable: list[str] = []
+        sidecars_read = 0
+        for relative, document in _sidecars(memory_root, unreadable, only):
+            if not document.get("references"):
+                continue
+            try:
+                observed = [
+                    (field_name, anchor, anchor_state(anchor["path"], anchor, files))
+                    for field_name, _, anchor in _anchor_targets(document)
+                ]
+            except _MALFORMED:
+                unreadable.append(relative)
+                continue
+            sidecars_read += 1
+            for field_name, anchor, state in observed:
+                states[state.split(":")[0]] += 1
+                if state != "current":
+                    reports.append(_reference_report(relative, field_name, anchor, state))
     return {
         "ok": True,
         "check": STALE_REFERENCE_CHECK,
@@ -314,23 +315,24 @@ def fix_references(
     """
 
     excluded = set(exclude)
-    files = _WorkingFiles(code_root)
-    rewritten: list[str] = []
-    unreadable: list[str] = []
-    refreshed = 0
-    for relative, document in _sidecars(memory_root, unreadable, only):
-        if relative in excluded:
-            continue
-        try:
-            count = _refresh_document(document, files)
-        except _MALFORMED:
-            unreadable.append(relative)
-            continue
-        if count:
-            refreshed += count
-            rewritten.append(relative)
-            if not dry_run:
-                (memory_root / relative).write_text(canonical_text(document), encoding="utf-8")
+    with grammars.repository_language_set_scope(code_root):
+        files = _WorkingFiles(code_root)
+        rewritten: list[str] = []
+        unreadable: list[str] = []
+        refreshed = 0
+        for relative, document in _sidecars(memory_root, unreadable, only):
+            if relative in excluded:
+                continue
+            try:
+                count = _refresh_document(document, files)
+            except _MALFORMED:
+                unreadable.append(relative)
+                continue
+            if count:
+                refreshed += count
+                rewritten.append(relative)
+                if not dry_run:
+                    (memory_root / relative).write_text(canonical_text(document), encoding="utf-8")
     return {
         "ok": not unreadable,
         "status": "converted",

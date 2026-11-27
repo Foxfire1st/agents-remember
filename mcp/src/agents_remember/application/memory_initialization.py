@@ -18,6 +18,9 @@ from agents_remember.application.published_intent import (
 from agents_remember.kernel.memory_init import initialize_memory
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge_index import KnowledgeIndex
+from agents_remember.memory_quality.style.citations.language_scanner import (
+    warm_repository_languages,
+)
 from agents_remember.models.knowledge_files.records import RECORD_MODELS
 from agents_remember.worktrees.cutover_lock import LEGACY_FORMAT_CODE, legacy_format_refusal
 from agents_remember.worktrees.knowledge_validation import PairedCode
@@ -67,7 +70,23 @@ def memory_init_tool(
         if problem is not None:
             result["briefsProblem"] = problem
     result["knowledge"] = _knowledge_foundation_state(config, repo_id)
+    if result.get("ok") and repo_id in config.repositories:
+        result["languages"] = _warm_repo_languages_summary(
+            config.repositories[repo_id].path, dry_run=dry_run
+        )
     return result
+
+
+def _warm_repo_languages_summary(code_root: Path, *, dry_run: bool) -> dict[str, Any]:
+    report = warm_repository_languages(code_root, dry_run=dry_run)
+    summary: dict[str, Any] = {
+        "detected": list(report.scan.detected),
+        "warmed": list(report.warmed),
+        "alreadyCached": list(report.already_cached),
+    }
+    if report.failed:
+        summary["failed"] = dict(report.failed)
+    return summary
 
 
 def _refresh_initialized_memory(

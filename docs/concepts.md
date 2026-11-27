@@ -415,16 +415,19 @@ belongs to no task: `agents-remember knowledge-bootstrap` makes one, and its jud
 An agent that holds a source file finds its card at the mirrored path under `onboarding/`. No
 search, ranking or index stands between the file and its card.
 
-Two tools name the memory that belongs to source files. `read_ar_files` names, for up to 20 paths,
-the governing card and the knowledge records of each path. `knowledge_read` names the invariants
-and families attributed to one source file. `read_ar_files` also carries, per file, the short answer of its [brief](#brief): the rules recorded at
+Two tools read the memory that belongs to source files. `read_ar_files` names, for up to 20 paths,
+the governing card and the knowledge records of each path. `knowledge_read` queries converted
+memory across 11 views (`impact`, `search`, `records`, `dependent`, `source_context`, `invariant`,
+`family`, `record`, `weakness`, `writers`, and `consolidation_proposal`), auto-pairing the code
+tree from `repo_id`, `contractPath`, or `memoryRoot`. `read_ar_files` also carries, per file, the short answer of its [brief](#brief): the rules recorded at
 the file with their text. As the answer nears its size bound, the further paths get their counts
 and the path of their brief. If those rows would pass the bound too, every path gets a compact
 row instead: its path and, where applicable, whether it exists, its card's status and the path
 of its brief, marked when that brief is missing or older. The brief holds the full story.
-`knowledge_read` returns names and locations only; the agent opens the named files itself. An agent
-that knows a concept but no file searches the code and
-the cards as text first. The skill holds the
+`knowledge_read` returns text-bearing rows in `impact` and `search`, verbatim full record text for
+up to 25 IDs in `records`, and structured locations or reports in the other views; native file
+opens are reserved for source code, tests, briefs, and cards. An agent that knows a concept but no
+file queries `knowledge_read` (`view="search"`) or searches the code and the cards as text first. The skill holds the
 [knowledge-use guidance](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/reference/knowledge/use.md).
 
 ### Drift check

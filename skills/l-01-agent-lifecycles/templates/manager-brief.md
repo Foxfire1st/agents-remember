@@ -51,6 +51,15 @@ Before recovering a moved-source start, read [Recovery](../operations/recovery.m
 
 ## Start defaults
 
+### Knowledge reads
+
+Use `knowledge_read` on `agents-remember-task` (see [commands](../reference/knowledge/commands.md#choose-a-knowledge-tool)) with `memoryRoot` and `contractPath` (or `repo_id`):
+
+- `view="impact"` (`files`/`folder`): inspect leaf scope, affected families, and cross-leaf overlap.
+- `view="search"` (`query`, optional `kinds`): look up prior Manager/Architect rulings, terms, and related records.
+- `view="records"` (`recordIds`, up to 25): read verbatim requirement, decision, or invariant text without opening JSON files.
+- `view="dependent"` (`staleOnly=true, compact=true`): triage closeout dependent status (triage only; Curator/Consolidator own full-row evidence receipts and repairs, and `writers`/`consolidation_proposal` remain specialist surfaces).
+
 ### Check dependencies
 
 Before starting or integrating a leaf, read [the Manager’s dependency check](../roles/manager.md#start-leaf-agents-and-preserve-their-work) for prerequisite packets and leaf-stage start authority.
