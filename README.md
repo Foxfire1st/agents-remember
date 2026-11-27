@@ -191,7 +191,7 @@ is on the branch `main`.
 
 ## Status
 
-The version of the package in this repository is `3.0.8`. It requires Python 3.14.
+The version of the package in this repository is `3.1.1`. It requires Python 3.14.
 
 Agents Remember is under active development. The contracts of the stability promise below change
 only with a major version. Everything else may change between versions, so read the notes of a
