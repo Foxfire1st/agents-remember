@@ -39,6 +39,10 @@ from agents_remember.worktrees.integration.integration_topology_collisions impor
 from agents_remember.worktrees.integration.integration_topology_repair import (
     current_surfaces_for_publication,
 )
+from agents_remember.worktrees.integration.standalone_pr_landing import (
+    is_pr_landed_standalone_candidate,
+    pr_landed_standalone_blockers,
+)
 from agents_remember.worktrees.modules.git import (
     branch_exists,
     current_branch,
@@ -228,6 +232,23 @@ def require_terminal_worktree(contract: WorktreeContract, *, operation: str) -> 
             raise RuntimeError(f"{operation} refused: protected parent ref cannot be retired")
 
 
+def standalone_master_status(contract: WorktreeContract) -> str | None:
+    """Return the master's status when integration authority proves no sprint commands it."""
+
+    if contract.kind != "series":
+        return None
+    try:
+        authority = _master_authority(_scope(contract))
+    except RuntimeError:
+        return None
+    if authority.sprint_ref is not None:
+        return None
+    try:
+        return authority.topology.resolve(authority.master_ref).document.status
+    except TaskDocumentRefError:
+        return None
+
+
 def _require_series_task_terminal(
     authority: _MasterAuthority,
     contract: WorktreeContract,
@@ -251,10 +272,16 @@ def _require_series_task_terminal(
     status = master.document.status
     if operation == "worktree_cleanup":
         if status != "Completed":
-            raise RuntimeError(
-                "worktree_cleanup refused: atomic master task must be Completed before its "
-                "integration branch can retire"
+            admitted = (
+                authority.sprint_ref is None
+                and is_pr_landed_standalone_candidate(contract)
+                and not pr_landed_standalone_blockers(contract, master_status=status)
             )
+            if not admitted:
+                raise RuntimeError(
+                    "worktree_cleanup refused: atomic master task must be Completed before its "
+                    "integration branch can retire"
+                )
         return
     if status not in {"Completed", "abandoned"}:
         raise RuntimeError(

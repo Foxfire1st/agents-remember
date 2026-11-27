@@ -6230,7 +6230,7 @@
         "reference/coordination/architect/process-decisions.md": 376,
         "reference/coordination/shared/child-questions.md": 349,
         "reference/coordination/shared/closeout-recovery.md": 683,
-        "reference/coordination/shared/master-state.md": 326,
+        "reference/coordination/shared/master-state.md": 451,
         "reference/coordination/shared/requirement-design.md": 637,
         "reference/coordination/shared/seat-recovery.md": 485,
         "reference/coordination/shared/third-rejected-round.md": 253,
@@ -6478,8 +6478,8 @@
         "sha256": "f41e7003afce037ed3c8421555aee57235605f0c38526291b181555113ed2d38"
       },
       "skills/l-01-agent-lifecycles/reference/coordination/shared/master-state.md": {
-        "size_words": 326,
-        "sha256": "c8942707b725852eaee6ec1567ef0bf689971f19e56c8c475b88193608995252"
+        "size_words": 451,
+        "sha256": "3677fee92b7b02dac56adf143fff31b15109b9ff5fab1088709ac85a437f0c0a"
       },
       "skills/l-01-agent-lifecycles/reference/coordination/shared/requirement-design.md": {
         "size_words": 637,
@@ -6750,7 +6750,7 @@
       "reference/coordination/architect/process-decisions.md": "sha256:56a1a3bf911404bafb08b64993c0b163be940d9b1199ed40878fb0a375b087b5",
       "reference/coordination/shared/child-questions.md": "sha256:c830497d927f8713c19780acced74ba7f32d0f0fabce19356f579191ee32e8e9",
       "reference/coordination/shared/closeout-recovery.md": "sha256:f41e7003afce037ed3c8421555aee57235605f0c38526291b181555113ed2d38",
-      "reference/coordination/shared/master-state.md": "sha256:c8942707b725852eaee6ec1567ef0bf689971f19e56c8c475b88193608995252",
+      "reference/coordination/shared/master-state.md": "sha256:3677fee92b7b02dac56adf143fff31b15109b9ff5fab1088709ac85a437f0c0a",
       "reference/coordination/shared/requirement-design.md": "sha256:f2d88180a31916cd671ba62e58b720ea92071c993d321b4aacc8c9e63fc7a46a",
       "reference/coordination/shared/seat-recovery.md": "sha256:258f3e354e16b32f25f5b3da25b80b83fbad51229c307eca4a165ac5449a7f5c",
       "reference/coordination/shared/third-rejected-round.md": "sha256:f304cbbd3f0a635da3f3124db3744aa1e8beb4118f5c66d37cf9a91bb472c082",

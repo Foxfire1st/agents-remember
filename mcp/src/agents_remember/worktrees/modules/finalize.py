@@ -10,8 +10,15 @@ from agents_remember.worktrees.activation.atomic_series_activation_terminal impo
     with_terminal_atomic_series_release,
 )
 from agents_remember.worktrees.disabled_memory import is_disabled_contract, opt_out_refusal_result
+from agents_remember.worktrees.integration.integration_branch_authority import (
+    standalone_master_status,
+)
 from agents_remember.worktrees.integration.lifecycle.outside_scratch_reconcile import (
     with_outside_scratch_reconcile,
+)
+from agents_remember.worktrees.integration.standalone_pr_landing import (
+    is_pr_landed_standalone_candidate,
+    pr_landed_standalone_blockers,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import cleanup_result
@@ -289,6 +296,10 @@ def _identity_payload(contract: WorktreeContract) -> dict[str, str]:
 
 
 def _readiness(contract: WorktreeContract) -> list[str]:
+    if is_pr_landed_standalone_candidate(contract):
+        master_status = standalone_master_status(contract)
+        if master_status is not None:
+            return pr_landed_standalone_blockers(contract, master_status=master_status)
     blockers: list[str] = []
     if contract.closeout_status != "completed":
         blockers.append("closeout-not-complete")

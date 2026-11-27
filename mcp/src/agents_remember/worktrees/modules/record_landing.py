@@ -43,6 +43,11 @@ from agents_remember.worktrees.disabled_memory import (
     opt_out_detail_for_contract,
     opt_out_refusal_result,
 )
+from agents_remember.worktrees.integration.standalone_pr_landing import (
+    CONTRACT_ABANDONED_CODE,
+    PR_STRATEGY,
+    abandoned_contract_reason,
+)
 from agents_remember.worktrees.knowledge_gate import (
     GateProbeError,
     closed_out_memory,
@@ -77,10 +82,6 @@ from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
     load_contract,
 )
-
-# The route label recorded in the contract's ``integration.strategy`` cell, so the cell says which
-# route actually landed the work. ``worktree_integrate`` writes its own strategy there instead.
-PR_STRATEGY = "pr"
 
 
 def _landing_targets(contract: WorktreeContract) -> tuple[str, ...]:
@@ -607,6 +608,14 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if is_disabled_contract(contract):
         # A contract that carries the removed mode never records a landing (MIK-R50 R4a).
         return opt_out_refusal_result(contract, "worktree_record_landing")
+    abandoned_reason = abandoned_contract_reason(contract)
+    if abandoned_reason is not None:
+        return state_refusal_result(
+            contract,
+            state="refused",
+            code=CONTRACT_ABANDONED_CODE,
+            error=abandoned_reason,
+        )
     payload = _identity_payload(contract)
     # A checkpointed contract has already recorded a landing, so it is "already recorded" too --
     # and it must be, because the full-record path below writes ``completed`` plus

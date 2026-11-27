@@ -804,6 +804,7 @@ integration = [
   "mcp/tests/test_sprint_archive_custody.py",
   "mcp/tests/test_sprint_archive_enclosures.py",
   "mcp/tests/test_sprint_archive_phases.py",
+  "mcp/tests/test_standalone_master_pr_finalize.py",
   "mcp/tests/test_standalone_master_retirement.py",
   "mcp/tests/test_task_doc_structural_publication_l2.py",
   "mcp/tests/test_task_document_master.py",
