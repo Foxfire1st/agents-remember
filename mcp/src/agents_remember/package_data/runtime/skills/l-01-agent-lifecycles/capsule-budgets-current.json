@@ -6209,9 +6209,9 @@
         "curator/orientation": 645,
         "curator/curation": 412,
         "curator/recovery": 370,
-        "reviewer/orientation": 627,
-        "reviewer/review": 471,
-        "reviewer/recovery": 380,
+        "reviewer/orientation": 629,
+        "reviewer/review": 473,
+        "reviewer/recovery": 382,
         "consolidator/orientation": 689,
         "consolidator/recovery": 442,
         "consolidator/consolidation": 466,
@@ -6663,8 +6663,8 @@
         "sha256": "029daa3fe482995e53143dab52252d33e33ca1212f7d2fb2255b49ffcdc57472"
       },
       "skills/l-01-agent-lifecycles/roles/reviewer.md": {
-        "size_words": 302,
-        "sha256": "5c1c4fe02e88a332a58dd03af15b7ac52e1623d2d640a0a363097325d0f7644f"
+        "size_words": 304,
+        "sha256": "748304b5926c3af0a979708ea0ba032d5a4de8621a72f28ebf75f927174154b1"
       },
       "skills/l-01-agent-lifecycles/roles/worker.md": {
         "size_words": 172,
@@ -6810,7 +6810,7 @@
       "roles/investigator.md": "sha256:1f992757e0d459bd02e64fea8039662c7bd5c020fb31fb63dc4de67bc294dd7c",
       "roles/manager.md": "sha256:4906637dc8b8d711150c022c222cabc97776fe4f200b2081225b680b5269e87e",
       "roles/orchestrator.md": "sha256:029daa3fe482995e53143dab52252d33e33ca1212f7d2fb2255b49ffcdc57472",
-      "roles/reviewer.md": "sha256:5c1c4fe02e88a332a58dd03af15b7ac52e1623d2d640a0a363097325d0f7644f",
+      "roles/reviewer.md": "sha256:748304b5926c3af0a979708ea0ba032d5a4de8621a72f28ebf75f927174154b1",
       "roles/worker.md": "sha256:c9c4f01e52cac7cb674750b8a37019a8d8a0cf39df493f05fba2af9f8896d2c0",
       "templates/turn-report.md": "sha256:d410272dce68cea910aa06ac9c9f6788f8dc4c63231306ee1c4211ef68a40b86"
     }

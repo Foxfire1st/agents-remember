@@ -376,6 +376,12 @@ class TrialSetupTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
+        hermes_home = patch.dict(os.environ, {"HERMES_HOME": str(self.root / "source-home")})
+        hermes_home.start()
+        self.addCleanup(hermes_home.stop)
+        auxiliary = patch("agent_evals.trial_setup.resolve_hermes_auxiliary", return_value=[])
+        auxiliary.start()
+        self.addCleanup(auxiliary.stop)
         self.case = case_bundle(self.root / "case")
         self.candidate = self.root / "candidate"
         python = self.candidate / "mcp/.venv/bin/python"
@@ -753,6 +759,10 @@ class TrialSetupTests(unittest.TestCase):
         self.assertTrue(trial.scratch_root.is_dir())
         self.assertTrue(trial.scratch_root.is_relative_to(trial.project_root / "reports"))
         receipt = read_object(trial.fixture.root / "native-binding.json")
+        self.assertEqual(
+            receipt["providerIsolation"]["credentialBorrowing"]["sourceHome"],
+            str((self.root / "source-home").resolve()),
+        )
         self.assertEqual(receipt["hermesRuntime"], receipt["providerIsolation"]["runtime"])
         self.assertEqual(
             receipt["hermesRuntime"]["environment"],

@@ -300,6 +300,7 @@ class ArchiveAttempt:
                 state == "owed"
                 or agent_id == receipt.get("pendingArchiveAgentId")
                 or _leaf_is_closing(receipt)
+                or pending_creation
             ):
                 self._preview_debt(path, receipt, agent_id, pending_creation=pending_creation)
 

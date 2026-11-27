@@ -15,6 +15,7 @@ import pytest
 import test_role_instruction_wording_handover as wording
 from agents_remember.cli import (
     role_held_messages,
+    role_held_opening,
     role_instruction_details,
     role_launch_preparation,
     role_launch_receipts,
@@ -353,7 +354,7 @@ def test_held_opening_refuses_changed_details_and_preserves_waiting_messages(
         calls.append(args[1])
         raise _HostBoundaryReached
 
-    monkeypatch.setattr(role_held_messages, "run_launch_call", fake_host)
+    monkeypatch.setattr(role_held_opening, "run_launch_call", fake_host)
     with pytest.raises(_HostBoundaryReached):
         role_held_messages._open_held_seat(batch)
     assert len(calls) == 1
