@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -49,9 +50,9 @@ from agents_remember.cli.paseo_bridge import (
     PaseoBridgeFailure,
     bridge_call,
 )
-from agents_remember.cli.paseo_launch import LaunchExecutionPolicy, run_launch_call
 from agents_remember.cli.paseo_status import read_agent
-from agents_remember.cli.role_activity import publish_receipt_role_agent, resume_role_agent
+from agents_remember.cli.role_activity import resume_role_agent
+from agents_remember.cli.role_deferred_held import is_deferred_held_receipt
 from agents_remember.cli.role_held_store import (
     HeldSeatClosed,
     HeldSeatRef,
@@ -68,21 +69,12 @@ from agents_remember.cli.role_held_store import (
 from agents_remember.cli.role_held_store import (
     refresh_waiting_count as _refresh_store_waiting_count,
 )
-from agents_remember.cli.role_launch_confirmation import (
-    apply_held_open_confirmation,
-    held_open_outcome_extras,
-    held_seat_lost_settlement,
-    is_held_seat_lost,
-)
+from agents_remember.cli.role_launch_confirmation import apply_held_open_confirmation
 from agents_remember.cli.role_launch_receipts import (
-    _leaf_before_create,
     _leaf_is_closing,
     _read_receipt,
-    _refuse_closing_launch,
-    _restore_launch_handover,
     _write_receipt,
 )
-from agents_remember.cli.role_opening_offload import prepare_held_opening_batch
 from agents_remember.controlplane.held_store_discovery import (
     EXECUTIONS_DIRECTORY,
     receipt_roots,
@@ -119,9 +111,7 @@ from agents_remember.controlplane.held_store_layout import (
     waiting_total,
     withdraw_message,
 )
-from agents_remember.kernel.agentic_settings import AgenticSettingsError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.serving.projections.host_activity import agent_in_turn
 
 # The store's own names are re-exported here on purpose: this module was their home, and its
@@ -257,6 +247,11 @@ def drain_held(
     except _DrainPause as paused:
         return paused.outcome
     except HeldSeatClosed as error:
+        if error.reason == "closed":
+            fresh = _read_receipt(receipt_path)
+            if fresh is not None and _leaf_is_closing(fresh):
+                with suppress(HeldSeatClosed, OSError):
+                    settle_held_store(held_seat_ref(receipt_path, fresh))
         return _closed_drain(error)
 
 
@@ -355,6 +350,8 @@ def _check_drain_readiness(batch: _DrainBatch) -> None:
 
     pause_for_provider_limit(batch)
     _pause_unfinished_start(batch, batch.receipt)
+    if is_deferred_held_receipt(batch.receipt):
+        return
     reading = read_agent(batch.config, batch.agent_id)
     if not reading.reachable:
         _release_claim(batch.ref, batch.claim)
@@ -464,100 +461,9 @@ def _confirmed(batch: _DrainBatch) -> list[dict[str, Any]]:
 def _open_held_seat(batch: _DrainBatch) -> dict[str, Any]:
     """Give a held seat its handover and its waiting messages in one turn (rule 4)."""
 
-    messages = _confirmed(batch)
+    from agents_remember.cli.role_held_opening import open_held_seat  # noqa: PLC0415
 
-    launch_call = batch.receipt.get("replayRequest")
-    opening = batch.receipt.get("heldOpeningPrompt")
-    if not isinstance(launch_call, dict) or not isinstance(opening, str) or not opening:
-        _release_claim(batch.ref, batch.claim)
-        return {
-            "outcome": "cannot-open",
-            "detail": "The held seat kept no launch call or opening handover.",
-        }
-    try:
-        with open_held_store(batch.ref):
-            _restore_launch_handover(batch.path, batch.receipt, launch_call)
-    except HeldSeatClosed:
-        raise
-    except ValueError as error:
-        _release_claim(batch.ref, batch.claim)
-        return {"outcome": "cannot-open", "detail": str(error)}
-    try:
-        bounded_batch = prepare_held_opening_batch(
-            batch.config, batch.receipt, combined_text(messages)
-        )
-    except (AgenticSettingsError, OSError, ValueError) as error:
-        _release_claim(batch.ref, batch.claim)
-        return {"outcome": "open-failed", "detail": f"The held seat stays held: {error}"}
-    from agents_remember.cli.product_start_message import (  # noqa: PLC0415 - sends through the role tools, which import this module
-        held_seat_opening,
-    )
-
-    # A held Reviewer or Curator gets the product's start message as it opens.
-    product = held_seat_opening(batch.config, batch.path, batch.receipt)
-    opening_text = "\n\n".join(filter(None, (opening, product, bounded_batch)))
-    call = {
-        **launch_call,
-        "agent": {**(launch_call.get("agent") or {}), "prompt": opening_text},
-    }
-    publish_receipt_role_agent(batch.config, batch.receipt)
-    policy = LaunchExecutionPolicy(
-        mode="open-held",
-        on_retry_agent=lambda agent_id: publish_receipt_role_agent(
-            batch.config, {**batch.receipt, "agentId": agent_id}
-        ),
-    )
-    if batch.receipt.get("role") in LEAF_ROLES:
-        outcome = run_launch_call(
-            batch.config,
-            call,
-            before_create=lambda: _leaf_before_create(batch.path, batch.receipt, opening_held=True),
-            execution=policy,
-        )
-        current = _read_receipt(batch.path)
-        if current is not None and _leaf_is_closing(current):
-            _refuse_closing_launch(
-                batch.config,
-                batch.path,
-                batch.receipt,
-                creation_returned=outcome.kind == "created" or outcome.lost_agent_id is not None,
-            )
-            raise HeldSeatClosed(batch.agent_id, "closed")
-        if outcome.kind != "no-answer":
-            with open_held_store(batch.ref) as transaction:
-                transaction.receipt.pop("heldOpenPending", None)
-                _write_receipt(batch.path, transaction.receipt)
-    else:
-        outcome = run_launch_call(batch.config, call, execution=policy)
-    if outcome.kind == "created":
-        _stage_batch_ends(batch, messages, _END_DELIVERED)
-        removed = _remove_ids(batch.ref, {row["id"] for row in messages}, batch.claim)
-        return {
-            "outcome": "opened",
-            "detail": "The held seat opened with its handover and its waiting messages in one turn.",
-            "ended": removed,
-            "how": _END_DELIVERED,
-            "execution": outcome.execution,
-            "applied": outcome.applied,
-            **held_open_outcome_extras(outcome),
-        }
-    if is_held_seat_lost(outcome):
-        detail, updates, remove_fields, extras = held_seat_lost_settlement(outcome)
-        ended = _end_batch(
-            batch, "rejected", receipt_updates=updates, remove_receipt_fields=remove_fields
-        )
-        return {
-            "outcome": "seat-lost",
-            "detail": detail,
-            "ended": ended,
-            "how": _END_NOT_DELIVERED,
-            **extras,
-        }
-    _release_claim(batch.ref, batch.claim)
-    return {
-        "outcome": "open-failed",
-        "detail": f"The held seat stays held: {outcome.message}",
-    }
+    return open_held_seat(batch)
 
 
 def _part_text_bytes(part: list[dict[str, Any]]) -> int:
@@ -1065,7 +971,10 @@ def _receipt_agent(receipt: dict[str, Any]) -> str | None:
 
     execution = receipt.get("execution")
     agent_id = execution.get("agentId") if isinstance(execution, dict) else None
-    return agent_id if isinstance(agent_id, str) and agent_id else None
+    if isinstance(agent_id, str) and agent_id:
+        return agent_id
+    minted = receipt.get("agentId")
+    return minted if isinstance(minted, str) and minted else None
 
 
 def _receipt_needs_drain(receipt: dict[str, Any] | None) -> bool:

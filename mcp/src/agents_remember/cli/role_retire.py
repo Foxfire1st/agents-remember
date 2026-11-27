@@ -17,8 +17,11 @@ from agents_remember.application.role_capsules.refusal_references import with_re
 from agents_remember.application.seat_retirement_scope import retirement_scope_refusal
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.cli.paseo_status import AgentReading, read_agent
-from agents_remember.cli.role_held_store import held_seat_ref, settle_held_store
-from agents_remember.cli.role_launch_receipts import read_enumerated_receipt
+from agents_remember.cli.role_held_store import held_seat_ref, receipt_is_closed, settle_held_store
+from agents_remember.cli.role_launch_receipts import (
+    is_deferred_held_receipt,
+    read_enumerated_receipt,
+)
 from agents_remember.cli.role_retirement_receipt import (
     Retirement,
     clear_retirement,
@@ -173,8 +176,10 @@ def _archive_retiree(
     request: RetireChildRequest,
 ) -> dict[str, Any]:
     _require_no_open_children(config, seat)
-    reading = _read_host(config, seat, seat.agent_id)
-    _require_interruptible(config, seat, reading, request)
+    deferred_held = is_deferred_held_receipt(seat.receipt)
+    reading = None if deferred_held else _read_host(config, seat, seat.agent_id)
+    if reading is not None:
+        _require_interruptible(config, seat, reading, request)
     caller_name = f"{caller.role} agent {caller.agent_id}"
     intent = Retirement(
         caller_name, caller.agent_id, request.reason, f"Retired by {caller_name}: {request.reason}"
@@ -189,7 +194,7 @@ def _archive_retiree(
         return _already_retired(seat, held.receipt)
     if held.state != "held":
         return _retirement_changed(seat, held.state)
-    if reading.found and not reading.archived:
+    if reading is not None and reading.found and not reading.archived:
         _archive_on_host(config, seat, intent)
     return _finish_retirement(seat, intent, held.receipt)
 
@@ -313,6 +318,10 @@ def _require_no_open_children(config: McpRuntimeConfig, seat: _RetireSeat) -> No
         if not isinstance(agent_id, str) or agent_id in checked:
             continue
         checked.add(agent_id)
+        if is_deferred_held_receipt(child):
+            if not receipt_is_closed(child):
+                open_children.append({"agentId": agent_id, "selection": child["selection"]})
+            continue
         reading = _read_host(config, seat, agent_id)
         if reading.found and not reading.archived:
             open_children.append({"agentId": agent_id, "selection": child["selection"]})

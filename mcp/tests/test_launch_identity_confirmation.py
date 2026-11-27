@@ -21,7 +21,12 @@ from agents_remember.cli.paseo_role_tools import send_role_message, start_leaf_s
 from agents_remember.cli.role_launch_confirmation import confirm_seat_binding
 from agents_remember.cli.role_launch_receipts import _read_receipt, _receipt_path
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.role_agents import RoleMessageCall, RoleStartSetCall
+from agents_remember.models.role_agents import (
+    RoleMessageCall,
+    RoleMessageResponse,
+    RoleStartSetCall,
+    SeatLaunchOverride,
+)
 from agents_remember.models.role_launcher import RoleSelection
 from agents_remember.serving import server_bindings
 from agents_remember.serving.paseo.paseo_plugin_files import read_role_agents
@@ -481,16 +486,27 @@ class TestHeldSeatReconfirmation(RoleToolsTestCase):
             environment=manager.environment(),
         )
         reviewer_id = started["seats"]["reviewer"]["agentId"]
-        self.assertEqual(confirmed_ids.count(reviewer_id), 1)
-        self.assertEqual(self.receipt_for("reviewer")["bindingConfirmation"]["status"], "confirmed")
+        self.assertEqual(confirmed_ids.count(reviewer_id), 0)
+        self.assertIs(self.receipt_for("reviewer")["hostAgentExists"], False)
+        self.assertNotIn(reviewer_id, self.runtime.agents)
+        self.assertNotIn("bindingConfirmation", self.receipt_for("reviewer"))
 
         self.runtime.calls.clear()
         opened = self.message(manager, agent_id=reviewer_id, text="Review plan.")
+        receipt = self.receipt_for("reviewer")
         self.assertEqual((opened["ok"], opened["openedHeldSeat"]), (True, True))
-        self.assertEqual(confirmed_ids.count(reviewer_id), 2)
+        self.assertEqual(opened["recipientAgentId"], reviewer_id)
+        self.assertEqual(opened["bindingConfirmation"], receipt["bindingConfirmation"])
+        self.assertIs(opened["bindingConfirmation"]["retried"], False)
+        validated = RoleMessageResponse.model_validate(opened)
+        self.assertEqual(validated.recipientAgentId, reviewer_id)
+        self.assertEqual(validated.bindingConfirmation, receipt["bindingConfirmation"])
+        self.assertEqual(confirmed_ids.count(reviewer_id), 1)
         creates = [p for cmd, p in self.runtime.calls if cmd == "agent-create"]
-        self.assertEqual(len(creates), 1)
-        self.assertIs(creates[0]["skipToolServerWait"], True)
+        self.assertEqual(len(creates), 2)
+        self.assertNotIn("prompt", creates[0])
+        self.assertIn("prompt", creates[1])
+        self.assertIs(creates[1]["skipToolServerWait"], True)
 
     def test_held_seat_open_retries_once_when_existing_server_is_gone(self) -> None:
         manager = binding("manager")
@@ -501,13 +517,30 @@ class TestHeldSeatReconfirmation(RoleToolsTestCase):
         )
         old_id = started["seats"]["reviewer"]["agentId"]
         req_id = self.receipt_for("reviewer")["requestId"]
-        (bindings_directory(self.config) / f"fake-{old_id}.json").unlink()
+        real_confirm = role_launch_confirmation.confirm_seat_binding
+
+        def fail_first_attempt(config: McpRuntimeConfig, agent_id: str, request_id: str, **kw: Any):
+            if agent_id == old_id:
+                (bindings_directory(self.config) / f"fake-{old_id}.json").unlink(missing_ok=True)
+            return real_confirm(config, agent_id, request_id, **kw)
+
+        self.replace(role_launch_confirmation, "confirm_seat_binding", fail_first_attempt)
 
         opened = self.message(manager, agent_id=old_id, text="Review plan.")
         self.assertEqual((opened["ok"], opened["openedHeldSeat"]), (True, True))
         receipt = self.receipt_for("reviewer")
         new_id = receipt["agentId"]
         self.assertNotEqual(new_id, old_id)
+        self.assertEqual(opened["recipientAgentId"], new_id)
+        self.assertEqual(opened["bindingConfirmation"], receipt["bindingConfirmation"])
+        self.assertIs(opened["bindingConfirmation"]["retried"], True)
+        self.assertEqual(opened["bindingConfirmation"]["archivedAgentIds"], [old_id])
+        self.assertEqual(
+            opened["bindingConfirmation"]["priorFailureReason"], "binding-not-registered"
+        )
+        validated = RoleMessageResponse.model_validate(opened)
+        self.assertEqual(validated.recipientAgentId, new_id)
+        self.assertEqual(validated.bindingConfirmation, receipt["bindingConfirmation"])
         self.assertEqual((receipt["requestId"], receipt["execution"]["agentId"]), (req_id, new_id))
         self.assertEqual(receipt["toolServer"]["environment"][AGENT_ID_VARIABLE], new_id)
         self.assertIsNotNone(self.runtime.agents[old_id]["archivedAt"])
@@ -515,6 +548,35 @@ class TestHeldSeatReconfirmation(RoleToolsTestCase):
         self.assertEqual(receipt["bindingConfirmation"]["archivedAgentIds"], [old_id])
         assert self.config.paseo_runtime is not None
         self.assertIn(new_id, read_role_agents(self.config.paseo_runtime.home))
+
+    def test_held_seat_open_skipped_confirmation_carries_record_and_live_agent(self) -> None:
+        self.replace(self.runtime, "_catalog", return_value=CLAUDE_CATALOG)
+        manager = binding("manager")
+        started = start_leaf_set(
+            self.config,
+            RoleStartSetCall(
+                request_id=uuid.uuid4(),
+                reviewer=SeatLaunchOverride(agent="claude", model="sonnet"),
+                **selection_of("worker"),
+            ),
+            environment=manager.environment(),
+        )
+        reviewer_id = started["seats"]["reviewer"]["agentId"]
+
+        opened = self.message(manager, agent_id=reviewer_id, text="Review plan.")
+        receipt = self.receipt_for("reviewer")
+        expected = {
+            "status": "skipped",
+            "reason": "provider-starts-server-after-create",
+            "provider": "claude",
+        }
+        self.assertEqual((opened["ok"], opened["openedHeldSeat"]), (True, True))
+        self.assertEqual(opened["recipientAgentId"], reviewer_id)
+        self.assertEqual(opened["bindingConfirmation"], expected)
+        self.assertEqual(receipt["bindingConfirmation"], expected)
+        validated = RoleMessageResponse.model_validate(opened)
+        self.assertEqual(validated.recipientAgentId, reviewer_id)
+        self.assertEqual(validated.bindingConfirmation, expected)
 
     def test_held_seat_open_double_failure_archives_both_and_leaves_zero_live_seats(self) -> None:
         manager = binding("manager")
@@ -524,11 +586,16 @@ class TestHeldSeatReconfirmation(RoleToolsTestCase):
             environment=manager.environment(),
         )
         old_id = started["seats"]["reviewer"]["agentId"]
-        (bindings_directory(self.config) / f"fake-{old_id}.json").unlink()
         self.runtime.write_server_bindings = False
 
         answer = self.message(manager, agent_id=old_id, text="Review plan.")
         self.assertEqual(answer["status"], "held")
+        self.assertEqual(answer["heldReason"], "seat-lost")
+        self.assertEqual(answer["recipientAgentId"], old_id)
+        self.assertNotIn("bindingConfirmation", answer)
+        validated = RoleMessageResponse.model_validate(answer)
+        self.assertEqual(validated.status, "held")
+        self.assertIsNone(validated.bindingConfirmation)
         receipt = self.receipt_for("reviewer")
         self.assertEqual((receipt["status"], receipt["hostAgentExists"]), ("rejected", False))
         confirmation = receipt["bindingConfirmation"]
@@ -610,7 +677,6 @@ class TestRule5SenderIdentityFromBinding(RoleToolsTestCase):
         worker_id = started["seats"]["worker"]["agentId"]
         reviewer_id = started["seats"]["reviewer"]["agentId"]
         self.runtime.agents[worker_id]["status"] = "idle"
-        self.runtime.agents[reviewer_id]["status"] = "idle"
 
         reply = send_role_message(
             self.config,

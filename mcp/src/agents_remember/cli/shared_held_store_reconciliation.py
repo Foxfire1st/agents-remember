@@ -16,6 +16,7 @@ from agents_remember.cli.role_held_store import (
     receipt_is_closed,
     reconcile_held_store,
 )
+from agents_remember.cli.role_launch_receipts import is_deferred_held_receipt
 from agents_remember.controlplane.held_store_layout import product_held_dir
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -124,6 +125,12 @@ def _reconcile_agent(
         )
         return {"agentId": agent_id, "state": "preserved", "reason": reason}
     path, receipt = owners[0]
+    if not receipt_is_closed(receipt) and is_deferred_held_receipt(receipt):
+        return {
+            "agentId": agent_id,
+            "state": "preserved",
+            "reason": "The held seat has not opened yet.",
+        }
     try:
         ref = held_seat_ref(path, receipt)
         host_state = None if receipt_is_closed(receipt) else _host_closure(config, agent_id)

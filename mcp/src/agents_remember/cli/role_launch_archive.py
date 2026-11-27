@@ -29,6 +29,7 @@ from agents_remember.cli.role_launch_receipts import (
     _read_receipt,
     _same_request_receipt,
     _write_receipt,
+    is_deferred_held_receipt,
     read_enumerated_receipt,
 )
 from agents_remember.cli.role_retirement_receipt import Retirement, settle_retirement
@@ -91,6 +92,15 @@ def _pending_creation(receipt: dict[str, Any]) -> bool:
     )
 
 
+def _is_uncreated_deferred_held(receipt: dict[str, Any], agent_id: str) -> bool:
+    """Whether ``agent_id`` belongs to a deferred held seat that never entered host creation."""
+    return (
+        agent_id == receipt.get("agentId")
+        and is_deferred_held_receipt(receipt)
+        and not _pending_creation(receipt)
+    )
+
+
 def _archive_agent(config: McpRuntimeConfig, agent_id: str, deadline: float) -> dict[str, Any]:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
@@ -123,14 +133,47 @@ def _confirmed_archive(reading: AgentReading) -> dict[str, Any] | None:
     return None
 
 
+def _settle_refused_targets(
+    config: McpRuntimeConfig,
+    current: dict[str, Any],
+    saved_outcomes: dict[str, Any],
+    targets: list[str],
+    *,
+    pending: bool,
+) -> dict[str, dict[str, Any]]:
+    """Archive each target of a refused closing start, skipping uncreated deferred held seats."""
+    settled: dict[str, dict[str, Any]] = {}
+    deadline = time.monotonic() + ARCHIVE_BUDGET_SECONDS
+    for target in targets:
+        prior = saved_outcomes.get(target, {})
+        if prior.get("state") == "archived":
+            outcome = prior
+        elif (
+            target == current["agentId"]
+            and _is_uncreated_deferred_held(current, target)
+            and not pending
+        ):
+            outcome = {
+                "state": "gone",
+                "reason": "The deferred held seat was never created on the host.",
+            }
+        else:
+            outcome = _archive_agent(config, target, deadline)
+            if pending and outcome["state"] == "gone":
+                outcome = _pending_archive("An entered leaf creation is still unconfirmed.")
+        settled[target] = outcome
+    return settled
+
+
 def refuse_retired_start(
     config: McpRuntimeConfig,
     path: Path,
     receipt: dict[str, Any],
     *,
     creation_returned: bool,
+    retried_agent_id: str | None = None,
 ) -> dict[str, Any]:
-    """Refuse the saved start, settling only its own minted target on the same receipt."""
+    """Refuse the saved start, settling its own minted target and any retried agent ID."""
     with exclusive_file_lock(path, "role execution receipt"):
         current = _same_request_receipt(path, receipt)
         if not _leaf_is_closing(current):
@@ -144,26 +187,31 @@ def refuse_retired_start(
         archive.update(startRefused=True, creationPending=pending)
         current["leafArchive"] = archive
         _write_receipt(path, current, archive_update=True)
-        prior = archive.get("outcomes", {}).get(current["agentId"], {})
-    if prior.get("state") == "archived":
-        outcome = prior
-    else:
-        outcome = _archive_agent(
-            config, current["agentId"], time.monotonic() + ARCHIVE_BUDGET_SECONDS
-        )
-        if pending and outcome["state"] == "gone":
-            outcome = _pending_archive("An entered leaf creation is still unconfirmed.")
+        saved_outcomes = dict(archive.get("outcomes", {}))
+    targets = [current["agentId"]]
+    if (
+        isinstance(retried_agent_id, str)
+        and retried_agent_id
+        and retried_agent_id != current["agentId"]
+    ):
+        targets.append(retried_agent_id)
+    settled_outcomes = _settle_refused_targets(
+        config, current, saved_outcomes, targets, pending=pending
+    )
     with exclusive_file_lock(path, "role execution receipt"):
         current = _same_request_receipt(path, receipt)
         archive = dict(current["leafArchive"])
         outcomes = dict(archive.get("outcomes", {}))
-        if outcomes.get(current["agentId"], {}).get("state") != "archived":
-            outcomes[current["agentId"]] = {**outcome, "at": _now_iso()}
+        for target, outcome in settled_outcomes.items():
+            if outcomes.get(target, {}).get("state") != "archived":
+                outcomes[target] = {**outcome, "at": _now_iso()}
         archive.update(outcomes=outcomes, startRefused=True)
         current["leafArchive"] = archive
-        own_owed = outcomes[current["agentId"]]["state"] == "owed"
-        if outcomes[current["agentId"]]["state"] in {"archived", "gone"}:
-            current["hostAgentExists"] = outcomes[current["agentId"]]["state"] == "archived"
+        own_owed = any(outcomes[target]["state"] == "owed" for target in targets)
+        if not own_owed:
+            current["hostAgentExists"] = any(
+                outcomes[target]["state"] == "archived" for target in targets
+            )
         # Keep the saved call for a same-ID reconciliation of archive uncertainty, never creation.
         current.update(
             status="unknown" if own_owed else "rejected",
@@ -242,7 +290,11 @@ class ArchiveAttempt:
         for agent_id in targets:
             state = outcomes.get(agent_id, {}).get("state")
             pending_creation = agent_id == receipt["agentId"] and _pending_creation(receipt)
-            if state == "archived" or (state == "gone" and not pending_creation):
+            if (
+                state == "archived"
+                or (state == "gone" and not pending_creation)
+                or _is_uncreated_deferred_held(receipt, agent_id)
+            ):
                 continue
             if (
                 state == "owed"
@@ -340,6 +392,16 @@ class ArchiveAttempt:
             self._record_retired_target(path, receipt, agent_id)
             key = "alreadyArchived" if prior["state"] == "archived" else "gone"
             self.report[key].append(row)
+            return debt_head
+        if _is_uncreated_deferred_held(receipt, agent_id):
+            outcome = {
+                "state": "gone",
+                "reason": "The deferred held seat was never created on the host.",
+            }
+            outcomes[agent_id] = {**outcome, "at": _now_iso()}
+            self._save(path, receipt, outcomes, pending=debt_head)
+            self._record_retired_target(path, receipt, agent_id)
+            self.report["gone"].append({**row, **outcome})
             return debt_head
         self._save(path, receipt, outcomes, pending=debt_head or agent_id)
         outcome = self._archive(agent_id)

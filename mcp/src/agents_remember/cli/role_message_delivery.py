@@ -31,7 +31,7 @@ from agents_remember.cli.investigator_receipts import (
     open_investigator_receipts,
 )
 from agents_remember.cli.paseo_status import read_agent
-from agents_remember.cli.role_held_store import HeldSeatRef, open_held_store
+from agents_remember.cli.role_held_store import HeldSeatRef, open_held_store, receipt_is_closed
 from agents_remember.cli.role_launch_preparation import (
     ROLE_START_TOOL,
 )
@@ -39,6 +39,7 @@ from agents_remember.cli.role_launch_receipts import (
     _read_receipt,
     _receipt_path,
     _taskless_execution_receipts,
+    is_deferred_held_receipt,
 )
 from agents_remember.cli.role_message_files import (
     MessageContent,
@@ -335,6 +336,25 @@ def _readable_receipt(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def _candidate_state(config: McpRuntimeConfig, receipt: dict[str, Any]) -> tuple[str, str] | None:
+    """Classify one receipt candidate as ``('live' | 'archived', agent_id)`` or ``None``."""
+    agent_id = receipt.get("agentId")
+    if not isinstance(agent_id, str) or not agent_id:
+        return None
+    if isinstance(receipt.get("retiredBy"), dict):
+        return ("archived", agent_id)
+    if is_deferred_held_receipt(receipt):
+        return ("archived" if receipt_is_closed(receipt) else "live", agent_id)
+    reading = read_agent(config, agent_id)
+    if not reading.reachable:
+        raise _host_unreachable(str(reading.unreachable_reason))
+    if reading.found and reading.archived:
+        return ("archived", agent_id)
+    if reading.found:
+        return ("live", agent_id)
+    return None
+
+
 def _live_agents(
     config: McpRuntimeConfig, receipts: list[dict[str, Any]], *, first_only: bool
 ) -> tuple[list[_Recipient], str | None]:
@@ -347,21 +367,16 @@ def _live_agents(
     live: list[_Recipient] = []
     archived: str | None = None
     for receipt in receipts:
-        agent_id = receipt.get("agentId")
-        if not isinstance(agent_id, str) or not agent_id:
+        state = _candidate_state(config, receipt)
+        if state is None:
             continue
-        if isinstance(receipt.get("retiredBy"), dict):
+        kind, agent_id = state
+        if kind == "archived":
             archived = archived or agent_id
             continue
-        reading = read_agent(config, agent_id)
-        if not reading.reachable:
-            raise _host_unreachable(str(reading.unreachable_reason))
-        if reading.found and reading.archived:
-            archived = archived or agent_id
-        elif reading.found:
-            live.append(_Recipient(agent_id, receipt))
-            if first_only:
-                break
+        live.append(_Recipient(agent_id, receipt))
+        if first_only:
+            break
     return live, archived
 
 

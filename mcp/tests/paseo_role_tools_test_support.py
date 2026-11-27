@@ -205,7 +205,7 @@ class RoleToolsTestCase(StatusTestCase):
         return request, self.receipt(request)["agentId"]
 
     def received(self, agent_id: str) -> list[str]:
-        return [text for _id, text in self.runtime.agents[agent_id].get("received", [])]
+        return [text for _id, text in self.runtime.agents.get(agent_id, {}).get("received", [])]
 
     def refusal(self, result: dict[str, Any], name: str) -> dict[str, Any]:
         self.assertEqual(

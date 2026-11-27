@@ -874,17 +874,18 @@ def _start_set_seat(
         "agentId": agent_id if isinstance(agent_id, str) else None,
         "held": held,
         "opened": isinstance(agent_id, str) and not held,
-        "hasTurn": _seat_has_turn(config, agent_id),
+        "hasTurn": False if held else _seat_has_turn(config, agent_id),
         "detail": str(answer.get("detail") or ""),
     }
 
 
 def _answer_agent_id(answer: dict[str, Any]) -> str | None:
-    """The agent a public execution answer names, top level or under execution."""
+    """The agent a public execution answer names, top level, holder, or under execution."""
 
-    agent_id = answer.get("agentId")
-    if isinstance(agent_id, str) and agent_id:
-        return agent_id
+    for key in ("agentId", "holderAgentId"):
+        agent_id = answer.get(key)
+        if isinstance(agent_id, str) and agent_id:
+            return agent_id
     execution = answer.get("execution")
     if isinstance(execution, dict):
         agent_id = execution.get("agentId")

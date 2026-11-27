@@ -108,7 +108,7 @@ class FakeRuntime:
         if failure is not None and not after_effect:
             raise failure
         reply = getattr(self, "_" + command.replace("-", "_"))(payload)
-        if command == "agent-create":
+        if command == "agent-create" and not reply.get("existing"):
             self._record_fake_binding(config, payload)
         elif command == "agent-archive":
             self._remove_fake_binding(str(payload.get("agentId") or ""))

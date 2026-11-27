@@ -35,6 +35,7 @@ from agents_remember.cli.role_launch_receipts import (
     _request_digest,
     _same_request_receipt,
     _write_receipt,
+    is_deferred_held_receipt,
 )
 from agents_remember.cli.role_retirement_receipt import (
     Retirement,
@@ -201,6 +202,8 @@ def _reconcile_leaf_occupancy(
     the host being unreachable, never as free.
     """
 
+    if is_deferred_held_receipt(current):
+        return _reconcile_deferred_held_leaf(config, path, current, replacement)
     holder = _recorded_agent_id(current)
     if holder is None:
         if str(current.get("status")) in {"starting", "unknown"}:
@@ -256,6 +259,56 @@ def _reconcile_leaf_occupancy(
         _require_step_up_idle(config, reading, holder, replacement)
         _require_holder_interruptible(config, reading, holder, replacement.interrupt_turn)
         _reserve_leaf_predecessor(path, current, caller, replacement)
+        return None
+    owner = current.get("parentAgentId")
+    started = f"agent {owner}" if isinstance(owner, str) and owner else "the launcher"
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"This leaf seat is held by agent {holder}, started by {started}. A start with "
+            f"the holder's own request id ({current.get('requestId')}) reconciles it; a new "
+            "request id is refused while the holder is not archived. To replace the holder, "
+            "start again with replacesAgentId naming it; a start by hand from the launcher "
+            "follows the same rule and offers the replacing start on this line."
+        ),
+    )
+
+
+def _reconcile_deferred_held_leaf(
+    config: McpRuntimeConfig,
+    path: Path,
+    current: dict[str, Any],
+    replacement: _Replacement,
+) -> None:
+    """Apply Rule 9 occupancy to a held leaf seat whose host agent does not yet exist."""
+    if isinstance(current.get("retiredBy"), dict) or _leaf_is_closing(current):
+        _archive_receipt(path, current)
+        return None
+    holder = str(current["agentId"])
+    replaces_agent_id = replacement.replaces_agent_id
+    if replaces_agent_id is not None:
+        if replaces_agent_id != holder:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Agent {replaces_agent_id} holds no seat of this leaf selection; "
+                    f"its holder is agent {holder}. Nothing was archived. Start again "
+                    "with the holder's agent id, or without a replacement."
+                ),
+            )
+        caller = _replacement_caller(config, current, holder, replacement)
+        with exclusive_file_lock(path, "role execution receipt"):
+            intent = _replacement_intent(caller, replacement)
+            update = hold_retirement(path, current, intent)
+            current = _replacement_receipt(update)
+            if update.state == "held" and "replaceAuthorizedAt" not in current:
+                current["replaceAuthorizedBy"] = caller
+                current["replaceAuthorizedAt"] = current["retireIntent"]["at"]
+                _write_receipt(path, current)
+            settled = settle_retirement(path, current, intent)
+            if settled.state in {"recorded", "already-retired"}:
+                current = settled.receipt
+            _archive_receipt(path, current)
         return None
     owner = current.get("parentAgentId")
     started = f"agent {owner}" if isinstance(owner, str) and owner else "the launcher"

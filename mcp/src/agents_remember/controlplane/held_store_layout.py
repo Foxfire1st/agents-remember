@@ -612,12 +612,16 @@ def sender_terminal_lines(
 
 def _store_endpoints(receipt: dict[str, Any]) -> tuple[str, str] | None:
     """The (folder, agent) owning one receipt's held-message store, if named."""
-
-    workspace = receipt.get("workspace")
-    execution = receipt.get("execution")
+    workspace, execution = receipt.get("workspace"), receipt.get("execution")
     folder = workspace.get("path") if isinstance(workspace, dict) else None
     agent_id = execution.get("agentId") if isinstance(execution, dict) else None
-    if not isinstance(folder, str) or not folder or not isinstance(agent_id, str):
+    if (
+        not (isinstance(agent_id, str) and agent_id)
+        and receipt.get("status") == "held"
+        and receipt.get("hostAgentExists") is False
+    ):
+        agent_id = receipt.get("agentId")
+    if not (isinstance(folder, str) and folder and isinstance(agent_id, str) and agent_id):
         return None
     try:
         store_path_for(folder, agent_id)
@@ -668,24 +672,17 @@ def _read_store_counts(
 
 
 def recount_waiting(receipt: dict[str, Any]) -> None:
-    workspace = receipt.get("workspace")
-    execution = receipt.get("execution")
-    folder = workspace.get("path") if isinstance(workspace, dict) else None
-    agent_id = execution.get("agentId") if isinstance(execution, dict) else None
-    if not isinstance(folder, str) or not isinstance(agent_id, str):
+    endpoints = _store_endpoints(receipt)
+    if endpoints is None:
         receipt["heldWaiting"] = 0
         return
+    folder, agent_id = endpoints
     if not Path(folder).is_dir():
         # A removed working folder holds nothing; counting never recreates it.
         receipt["heldWaiting"] = 0
         return
     try:
-        path = store_path_for(folder, agent_id)
-    except ValueError:
-        receipt["heldWaiting"] = 0
-        return
-    try:
-        store = _read_store_file(path, agent_id)
+        store = _read_store_file(store_path_for(folder, agent_id), agent_id)
     except ValueError as error:
         # The count is left as it stands rather than published as zero: a store that
         # cannot be read is not a store that holds nothing (MIK-R171 rule 5).
