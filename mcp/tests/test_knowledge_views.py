@@ -16,7 +16,9 @@ with the canonical database. The projection writer's cases left with it.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, cast
 
 import pytest
@@ -372,6 +374,7 @@ def _knowledge_tool_server(root: Path) -> FastMCP:
     class _RegistrationConfig:
         workspace_root = root / "workspace"
         coordination_root = root / "coordination"
+        repositories: Mapping[str, Any] = MappingProxyType({})
 
     server = FastMCP("knowledge-refusal-probe")
     register_knowledge_tools(server, cast(McpRuntimeConfig, _RegistrationConfig()))

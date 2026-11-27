@@ -336,7 +336,12 @@ role agents.
 The hover text of "rate limited" has one line per affected agent: "<role> · <agent id> · <source>
 · <account> · <window> · resets <time>". The limit and its end come from the usage report of the
 host for that agent: <source> and <account> are the names that report gives its source and the
-account, and <window> names the used-up usage window whose reset ends the limit. The counts of
+account, and <window> names the used-up usage window whose reset ends the limit. Paseo's usage
+report remains the only source that creates a limit; a falsely reported exhausted window may be
+suppressed until its reset automatically when a mapped bound seat proves a live turn started
+strictly after the limit was recorded, or explicitly via `agents-remember provider-limits
+suppress` (and restored with `unsuppress`), updating the displayed deadline to any remaining
+unsuppressed window or clearing the rate-limited state when none remain. The counts of
 the top bar count a rate-limited task as paused.
 
 The hover text of "waiting" has one line per waiting agent: the role, the agent id, what it
@@ -732,16 +737,18 @@ The field "Your message with these picks" takes the message. The button "to: <na
 "Send the tray to", the list of live chats, each named by role and task. The send button reads
 "Send to <role · task>" or "Send".
 
-One send composes one message from the picks, their notes and the text, and delivers it to each
-chosen chat. The tray then reports "Delivered to …", "Held for …" or "Refused by …". For a chat
-whose agent reached the usage limit of its model provider the line reads "Held for <chat>: rate
-limited: <time left>, until <time>.", and the minimised tray says "held · rate limited: <time
-left> for <chat>". After a refusal the picks and the text stay in the tray.
+One send needs only the recipient's address and non-empty text or picks; whether the current page
+names a repository is optional context and never blocks a send. It composes one message from the
+picks, their notes and the text, and delivers it to each chosen chat. The tray then reports
+"Delivered to …", "Held for …" or "Refused by …". For a chat whose agent reached the usage limit of
+its model provider the line reads "Held for <chat>: rate limited: <time left>, until <time>.", and
+the minimised tray says "held · rate limited: <time left> for <chat>". After a refusal the picks
+and the text stay in the tray.
 
 The product files every send as a message file under
 `<coordination-root>/notes/reports/developer-messages/<repository>/<task>/`. The file of a
 refused delivery has a name that ends in `.undelivered.md`. The files for a chat without a task
-stand under `<coordination-root>/notes/reports/developer-messages/<repository>/taskless/<agent id>/`.
+stand under `<coordination-root>/notes/reports/developer-messages/taskless/<agent id>/`.
 
 ### The foot of the tray
 

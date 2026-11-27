@@ -279,6 +279,8 @@ class RoleMessageResponse(ToolResponse):
     waitingTotal: int | None = None
     recentTerminal: list[dict[str, Any]] | None = None
     openedHeldSeat: bool | None = None
+    # L58-R3: launch-confirmation record of a held-seat opening, carried from the drain.
+    bindingConfirmation: dict[str, Any] | None = None
     withdrawnHeldMessageId: str | None = None
 
 

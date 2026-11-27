@@ -785,8 +785,13 @@ message with `withdraw_held_message_id`, and its answer reports the withdrawal i
 - `provider-limit`: the usage limit of the recipient's
   [model provider](../concepts.md#model-provider) holds it. The answer carries `limitedUntil`
   with the recorded reset time. While a limit is active, the dashboard rechecks the usage report
-  every five minutes. If the host reports an early reset, the next eligible drain sends the
-  held messages in order.
+  every five minutes. If the host reports an early reset, or a falsely reported exhausted window
+  `(reportId, windowId, resetsAt)` is suppressed until its `resetsAt` — either automatically when
+  a mapped bound seat executes an AR MCP tool call during a live turn (`host-activity.json`
+  `in-turn` or `permission` with `eventAt > recordedAt`) or via `agents-remember provider-limits
+  suppress` (reversible with `unsuppress`) — and no other unsuppressed exhausted window remains
+  for the seat's reports, the next eligible drain sends the held messages in order. Any other
+  exhausted account-wide window continues to hold the seat until its own reset.
 
 Code `recipient-busy` is refused outright only when the recipient already holds twenty messages;
 that refusal names two ways on: wait for a delivery, or withdraw a waiting message. Every other

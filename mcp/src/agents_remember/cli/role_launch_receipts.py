@@ -39,6 +39,24 @@ from agents_remember.cli.paseo_launch import (
     run_launch_call,
 )
 from agents_remember.cli.role_activity import publish_receipt_role_agent
+from agents_remember.cli.role_deferred_held import (
+    apply_leaf_closing as _apply_leaf_closing,
+)
+from agents_remember.cli.role_deferred_held import (
+    apply_leaf_holder as _apply_leaf_holder_fields,
+)
+from agents_remember.cli.role_deferred_held import (
+    defer_held_launch as _defer_held_launch,
+)
+from agents_remember.cli.role_deferred_held import (
+    is_deferred_held_receipt as is_deferred_held_receipt,  # noqa: PLC0414 - receipt caller surface
+)
+from agents_remember.cli.role_deferred_held import (
+    public_instruction_fields as _public_instruction_fields,
+)
+from agents_remember.cli.role_deferred_held import (
+    retried_outcome_agent_id as _retried_outcome_agent_id,
+)
 from agents_remember.cli.role_handover_restore import HandoverFileRefusal, restore_launch_files
 from agents_remember.cli.role_held_store import (
     HeldSeatClosed,
@@ -47,7 +65,6 @@ from agents_remember.cli.role_held_store import (
     settle_held_store,
 )
 from agents_remember.cli.role_instruction_details import validate_instruction_detail_artifacts
-from agents_remember.cli.role_instructions import instruction_metadata, launch_choice_metadata
 from agents_remember.cli.role_launch_choices import (
     observe_launch_choices as _observe_launch_choices,
 )
@@ -106,6 +123,7 @@ __all__ = [
     "_create_receipt",
     "_now_iso",
     "_read_receipt",
+    "is_deferred_held_receipt",
     "read_enumerated_receipt",
 ]
 
@@ -179,7 +197,6 @@ def _run_prepared_launch(
     predecessor = current.get("predecessorReports")
     if isinstance(predecessor, dict):
         collect_execution_reports(predecessor)
-    publish_receipt_role_agent(config, current)
     # Liveness depends on receipts; import its boundary guard only for execution.
     from agents_remember.cli.role_launch_liveness import (  # noqa: PLC0415
         require_step_up_archive_idle,
@@ -187,6 +204,12 @@ def _run_prepared_launch(
 
     require_step_up_archive_idle(config, current, launch_call)
     prior = _predecessor_held_ref(path, current, launch_call)
+    agent_call = launch_call.get("agent")
+    if current.get("heldSeat") is True and (
+        not isinstance(agent_call, dict) or "prompt" not in agent_call
+    ):
+        return _defer_held_launch(config, path, current, launch_call, prior)
+    publish_receipt_role_agent(config, current)
     policy = LaunchExecutionPolicy(
         on_retry_agent=lambda agent_id: publish_receipt_role_agent(
             config, {**current, "agentId": agent_id}
@@ -218,7 +241,11 @@ def _run_prepared_launch(
             current["hostAgentExists"] = True
             _write_receipt(path, current)
     return _refuse_closing_launch(
-        config, path, current, creation_returned=outcome.kind == "created"
+        config,
+        path,
+        current,
+        creation_returned=outcome.kind == "created",
+        retried_agent_id=_retried_outcome_agent_id(outcome, current),
     )
 
 
@@ -285,11 +312,18 @@ def _refuse_closing_launch(
     receipt: dict[str, Any],
     *,
     creation_returned: bool = False,
+    retried_agent_id: str | None = None,
 ) -> JSONResponse:
     # Archival already depends on receipts; resolve that owner only on the retired-start route.
     from agents_remember.cli.role_launch_archive import refuse_retired_start  # noqa: PLC0415
 
-    refused = refuse_retired_start(config, path, receipt, creation_returned=creation_returned)
+    refused = refuse_retired_start(
+        config,
+        path,
+        receipt,
+        creation_returned=creation_returned,
+        retried_agent_id=retried_agent_id,
+    )
     return JSONResponse(_public_execution(refused), status_code=409)
 
 
@@ -754,43 +788,8 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
 
 
 def _apply_leaf_holder(public: dict[str, Any], receipt: dict[str, Any], status: Any) -> None:
-    """Name the leaf seat's holder while it holds the seat (MIK-R100 rule 9).
-
-    The launcher shows the holder and offers the replacing start.
-    """
-
-    holder = _replaced_agent_id(receipt)
-    if holder is not None and status not in {
-        "completed",
-        "failed",
-        "stopped",
-        "rejected",
-        "interrupted",
-    }:
-        public["holderAgentId"] = holder
-
-
-def _apply_leaf_closing(public: dict[str, Any], receipt: dict[str, Any]) -> None:
-    """Unsettled archive status also prevents a different request moving an in-flight receipt."""
-
-    own = receipt["leafArchive"].get("outcomes", {}).get(receipt.get("agentId"), {})
-    if own.get("state") in {"archived", "gone"}:
-        public["status"] = "rejected"
-    public.update(startRefused=True, canStart=False, canRevive=False, canRetry=False)
-    public.pop("retryPayload", None)
-
-
-def _public_instruction_fields(public: dict[str, Any]) -> dict[str, Any]:
-    if isinstance(public.get("choices"), dict):
-        public["choices"] = launch_choice_metadata(public["choices"])
-    if isinstance(public.get("sessionOptions"), dict):
-        public["sessionOptions"] = {
-            **public["sessionOptions"],
-            "choices": launch_choice_metadata(public["sessionOptions"].get("choices", {})),
-        }
-    if isinstance(public.get("instructionComposition"), dict):
-        public["instructionComposition"] = instruction_metadata(public["instructionComposition"])
-    return public
+    """Name the leaf seat's holder while it holds the seat (MIK-R100 rule 9)."""
+    _apply_leaf_holder_fields(public, receipt, status, _replaced_agent_id(receipt))
 
 
 def _write_receipt(

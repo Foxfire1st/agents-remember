@@ -118,7 +118,10 @@ from agents_remember.models.knowledge.view import (
     ViewRefusal,
     ViewRequest,
 )
-from agents_remember.models.tools.tool_answer import TOOL_ANSWER_LIST_MAX, bound_for
+from agents_remember.models.tools.tool_answer import (
+    TOOL_ANSWER_EXCEPTION_MAX_TOKENS,
+    TOOL_ANSWER_LIST_MAX,
+)
 
 __all__ = [
     "DEFAULT_ORDERING",
@@ -643,9 +646,13 @@ def _delivered_measure(
 
 
 def _delivered_bound() -> int:
-    """The token bound the delivered naming answer is cut against."""
+    """The token bound the delivered naming answer is cut against.
 
-    return bound_for("knowledge_read")
+    Legacy tree-view pages stay on the 4,000-token exception ceiling while
+    batch ``records`` responses use the 5,000-token ``knowledge_read`` envelope.
+    """
+
+    return TOOL_ANSWER_EXCEPTION_MAX_TOKENS
 
 
 def _view_response(

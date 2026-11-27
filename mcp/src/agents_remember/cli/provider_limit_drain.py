@@ -29,6 +29,7 @@ from agents_remember.cli.role_held_messages import (
     store_path_for,
 )
 from agents_remember.cli.role_held_store import open_held_store
+from agents_remember.cli.role_launch_receipts import is_deferred_held_receipt
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.observer.host_activity import (
     HOST_ACTIVITY_FILE,
@@ -48,6 +49,9 @@ def pause_for_provider_limit(batch: _DrainBatch) -> None:
     keeps them waiting for the provider reset without another read for that stamp.
     """
 
+    # L58-R3/R7: a reserved seat has no host agent or usage report yet and is never resolved absent.
+    if is_deferred_held_receipt(batch.receipt):
+        return
     limit = provider_limit_hold(batch.config, batch.agent_id)
     if limit is None:
         return

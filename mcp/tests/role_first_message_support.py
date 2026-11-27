@@ -61,7 +61,7 @@ from agents_remember.kernel.primitives import checkout_coordination
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.role_identity import canonical_role
-from agents_remember.models.role_launcher import LauncherRole, RoleDispatchRequest
+from agents_remember.models.role_launcher import LauncherRole, RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.services import bind_worktree_services, reset_worktree_services
@@ -623,6 +623,13 @@ class FirstMessageMatrixBase(unittest.TestCase):
         agent = execution.get("agentId")
         if isinstance(agent, str) and agent in self.runtime.agents:
             self.runtime.agents[agent]["archivedAt"] = "2026-10-21T10:30:00.000Z"
+        elif receipt.get("status") == "held" and receipt.get("hostAgentExists") is False:
+            selection = receipt.get("selection")
+            if isinstance(selection, dict):
+                path = role_launch_routes._receipt_path(
+                    self.config, RoleSelection.model_validate(selection)
+                )
+                path.unlink(missing_ok=True)
 
     def start(self, role: str, harness: str, **extra: Any) -> tuple[Any, dict[str, Any]]:
         request = self.request(role, harness, **extra)

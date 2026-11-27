@@ -657,22 +657,36 @@ async function createAgent({ api, daemon, deadline }, input) {
       `Agent ${agentId} is absent from the Paseo runtime.`
     )
   }
+  let includeParent = true
+  if (request.parentAgentId && request.allowMissingParent) {
+    const parentAgent = await findAgent(api, daemon, request.parentAgentId)
+    if (!parentAgent || nonEmpty(parentAgent.archivedAt)) {
+      includeParent = false
+    }
+  }
   let created
   try {
-    created = await request.create(api, daemon, deadline)
+    created = await request.create(api, daemon, deadline, includeParent)
   } catch (error) {
     // The runtime answered with an error. Whether an agent exists under the id decides what that
     // means: it exists (a repeat that lost its creation record), or the runtime refused the
     // creation.
     if (daemon.getConnectionState().status !== 'connected') throw error
     const after = await findAgent(api, daemon, agentId)
-    if (!after) throw error
-    await sendFirstMessage(api, daemon, after, request)
-    return {
-      serverId,
-      existing: true,
-      agent: projectAgent(after),
-      creationError: text(error?.message ?? error)
+    if (!after) {
+      if (includeParent && request.parentAgentId && request.allowMissingParent) {
+        created = await request.create(api, daemon, deadline, false)
+      } else {
+        throw error
+      }
+    } else {
+      await sendFirstMessage(api, daemon, after, request)
+      return {
+        serverId,
+        existing: true,
+        agent: projectAgent(after),
+        creationError: text(error?.message ?? error)
+      }
     }
   }
   if (created?.id !== agentId) {
@@ -753,6 +767,10 @@ function agentCreation(input, agentId) {
   const shared = { agentId, idempotencyKey, labels: requiredLabels(input) }
   const title = requiredText(input, 'title')
   const parentAgentId = optionalText(input, 'parentAgentId')
+  const allowMissingParent = input.allowMissingParent === true
+  if (input.allowMissingParent !== undefined && typeof input.allowMissingParent !== 'boolean') {
+    throw failure('invalid_bridge_payload', 'allowMissingParent must be a boolean when provided.')
+  }
   const systemPrompt = optionalText(input, 'systemPrompt')
   const toolPolicy = input.toolPolicy
   if (toolPolicy !== undefined && (!toolPolicy || !Array.isArray(toolPolicy.preapproved) ||
@@ -861,10 +879,13 @@ function agentCreation(input, agentId) {
     firstMessageId: `${idempotencyKey}${FIRST_MESSAGE_SUFFIX}`,
     hasToolServers: appliedServers !== null && Object.keys(appliedServers).length > 0,
     skipToolServerWait,
+    parentAgentId,
+    allowMissingParent,
     kept,
     // The agent is created without a message; `sendFirstMessage` sends `prompt` afterwards.
-    async create(api, daemon, deadline = Date.now() + DEFAULT_DEADLINE_MS) {
+    async create(api, daemon, deadline = Date.now() + DEFAULT_DEADLINE_MS, includeParent = true) {
       const workspace = api.workspaces.ref(workspaceId)
+      const effectiveParent = includeParent ? parentAgentId : undefined
       let cwd
       let applied = kept
       if (featureValues) {
@@ -879,7 +900,7 @@ function agentCreation(input, agentId) {
           ...shared,
           config: { provider: `${provider}/${model}`, ...applied, ...(providerOptions ? { options: providerOptions } : {}) },
           title,
-          ...(parentAgentId ? { parent: parentAgentId } : {})
+          ...(effectiveParent ? { parent: effectiveParent } : {})
         })
         return handle.current()
       }
@@ -889,7 +910,7 @@ function agentCreation(input, agentId) {
         ...shared,
         config: { provider, cwd, title, ...applied, ...(providerOptions ? { providerOptions } : {}) },
         workspaceId,
-        ...(parentAgentId ? { callerAgentId: parentAgentId } : {})
+        ...(effectiveParent ? { callerAgentId: effectiveParent } : {})
       })
     }
   }

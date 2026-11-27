@@ -222,7 +222,7 @@ function ExplainerFrame({
         active={active && shown}
         preload={preload}
         scope={`explainer:${address.repository}/${address.master}/${address.leaf}`}
-        target={target}
+        target={shown ? target : null}
         page="document"
       />
     </div>
@@ -269,7 +269,7 @@ export function ExplainerColumn(props: ExplainerColumnProps) {
       <ExplainerColumnChrome column={column} task={task} />
       <ExplainerFrame
         address={address}
-        target={column.frameTarget}
+        target={column.showFrame ? column.frameTarget : null}
         active={props.active}
         preload={preload}
         shown={column.showFrame}

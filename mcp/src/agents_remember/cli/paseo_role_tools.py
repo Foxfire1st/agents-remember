@@ -84,6 +84,10 @@ from agents_remember.cli.paseo_role_start import (
 from agents_remember.cli.paseo_role_wait import SentMessage, wait_for_turn
 from agents_remember.cli.provider_limit_hold import PROVIDER_LIMIT_REASON, provider_limit_hold
 from agents_remember.cli.role_activity import resume_role_agent
+from agents_remember.cli.role_deferred_held import (
+    is_deferred_held_receipt,
+    opened_held_seat_answer,
+)
 from agents_remember.cli.role_held_messages import (
     MAX_HELD_PER_RECIPIENT,
     HeldMessage,
@@ -405,13 +409,15 @@ def _deliver_or_hold(send: _MessageSend) -> dict[str, Any]:
     located = send.located
     if isinstance(send.recipient.receipt.get("retiredBy"), dict):
         raise _archived(send.recipient.agent_id)
-    # A provider limit holds a message until reset even if the recipient is idle.
-    limit = provider_limit_hold(send.config, send.recipient.agent_id)
+    # L58-R7: a reserved seat has no host agent or usage report yet; skip pre-open limit holds.
+    limit = (
+        None
+        if is_deferred_held_receipt(send.recipient.receipt)
+        else provider_limit_hold(send.config, send.recipient.agent_id)
+    )
     if limit is not None:
         return _hold_for_seat(
-            send,
-            reason=PROVIDER_LIMIT_REASON,
-            limited_until=str(limit["limitedUntil"]),
+            send, reason=PROVIDER_LIMIT_REASON, limited_until=str(limit["limitedUntil"])
         )
     if located is not None and located[1].get("status") == "held":
         return _hold_for_seat(send, reason="held-seat-unopened")
@@ -647,15 +653,7 @@ def _held_then_delivered(
 
     line = sender_line(send.sender)
     if drain.get("outcome") == "opened":
-        result: dict[str, Any] = {
-            "ok": True,
-            "status": "accepted",
-            "detail": str(drain.get("detail") or "The held seat opened."),
-            "recipientAgentId": send.recipient.agent_id,
-            "senderLine": line,
-            "taken": "started",
-            "openedHeldSeat": True,
-        }
+        result = opened_held_seat_answer(drain, send.recipient.agent_id, line)
     else:
         delivery = _trigger_delivery(drain, taken)
         taken_word = delivery.get("taken")

@@ -3,15 +3,17 @@
 Every send from the developer's tray is filed before it reaches the host (rule 9, decision 7):
 one file per target under ``<coordination>/notes/reports/developer-messages/<repository>/<task>/``,
 where ``<task>`` is the id of the task document the target serves, or under
-``…/<repository>/taskless/<agent id>/`` for a target without a task (decision 57; the repository
-is the one the dashboard page names, L89 W30). The file is written whole or not at all
+``…/taskless/<agent id>/`` for a target without a task (so every message and pick file for a
+Projects-scoped seat lives in one folder regardless of the page's repository). The file is written
+whole or not at all
 (``role_message_files.store_message_file``: a staged write, fsync and one atomic link). Its head
 names the sender ``developer``, the recipient's role, agent id and task, the message id and the
 time; a refused delivery keeps it under a name ending in ``.undelivered.md``. Image and text
 picks are saved beside it under their SHA-256, and the message names each such file.
 
-A message file's name ends with its message id, so the product finds it by that id with two
-bounded patterns (:func:`read_developer_message`); MIK-R189 reads tray messages from there.
+A message file's name ends with its message id, so the product finds it by that id with bounded
+patterns covering taskful folders, unified ``taskless/<agent id>/`` folders, and legacy
+``<repository>/taskless/<agent id>/`` folders (:func:`read_developer_message`).
 
 The sent-picks log (rule 10) is one JSON-lines file per recipient,
 ``…/developer-messages/sent/<agent id>.jsonl``: per filed send its time, target, pick ids,
@@ -86,12 +88,17 @@ def messages_root(config: _CoordinationRooted) -> Path:
 
 
 def target_folder(
-    config: _CoordinationRooted, repository: str, task_id: str | None, agent_id: str
+    config: _CoordinationRooted,
+    repository: str | None,
+    task_id: str | None,
+    agent_id: str,
 ) -> Path:
-    """The folder of one target's developer messages (rule 9, decisions 7 and 57)."""
+    """The folder of one target's developer messages: ``<repo>/<task>/`` or ``taskless/<agent>/``."""
 
-    root = messages_root(config) / _safe(repository)
-    return root / _safe(task_id) if task_id else root / TASKLESS_DIRECTORY / _safe(agent_id)
+    root = messages_root(config)
+    if repository and task_id:
+        return root / _safe(repository) / _safe(task_id)
+    return root / TASKLESS_DIRECTORY / _safe(agent_id)
 
 
 def message_stem(when: datetime, role: str, agent_id: str, message_id: str) -> str:
@@ -216,7 +223,11 @@ def _filed(
     root = messages_root(config)
     if not re.fullmatch(r"[0-9a-f-]{36}", message_id) or not root.is_dir():
         return ()
-    patterns = (f"*/*/*_{message_id}*.md", f"*/{TASKLESS_DIRECTORY}/*/*_{message_id}*.md")
+    patterns = (
+        f"*/*/*_{message_id}*.md",
+        f"{TASKLESS_DIRECTORY}/*/*_{message_id}*.md",
+        f"*/{TASKLESS_DIRECTORY}/*/*_{message_id}*.md",
+    )
     found: list[FiledDeveloperMessage] = []
     for path in sorted({path for pattern in patterns for path in root.glob(pattern)}):
         try:

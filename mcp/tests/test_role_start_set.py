@@ -68,12 +68,13 @@ class SetStartTests(RoleToolsTestCase):
                 self.assertFalse(seat["hasTurn"])
         agent_ids = {seat["agentId"] for seat in (worker, reviewer, curator)}
         self.assertEqual(len(agent_ids), 3)
-        self.assertEqual(set(self.runtime.agents), agent_ids)
-        # The held seats exist on the host with no turn taken.
-        for seat in (reviewer, curator):
-            agent = self.runtime.agents[seat["agentId"]]
-            self.assertIsNone(agent["archivedAt"])
-            self.assertEqual(agent.get("received", []), [])
+        # Only the opened Worker exists on the host; held seats defer host creation until open.
+        self.assertEqual(set(self.runtime.agents), {worker["agentId"]})
+        for role_name, seat in (("reviewer", reviewer), ("curator", curator)):
+            receipt = self.receipt_for(role_name)
+            self.assertIs(receipt["hostAgentExists"], False)
+            self.assertEqual(receipt["execution"], {})
+            self.assertNotIn(seat["agentId"], self.runtime.agents)
 
     def test_a_repeat_reconciles_the_same_three_agents(self) -> None:
         manager = binding("manager")
@@ -92,7 +93,7 @@ class SetStartTests(RoleToolsTestCase):
             role: again["seats"][role]["agentId"] for role in ("worker", "reviewer", "curator")
         }
         self.assertEqual(after, before)
-        self.assertEqual(len(self.runtime.agents), 3)
+        self.assertEqual(len(self.runtime.agents), 1)
         self.assertEqual(
             {role: again["seats"][role]["status"] for role in before},
             {"worker": "running", "reviewer": "held", "curator": "held"},
@@ -114,7 +115,7 @@ class SetStartTests(RoleToolsTestCase):
         self.assertIsNone(seats["worker"]["agentId"])
         self.assertTrue(seats["reviewer"]["agentId"])
         self.assertTrue(seats["curator"]["agentId"])
-        self.assertEqual(len(self.runtime.agents), 2)
+        self.assertEqual(len(self.runtime.agents), 0)
         self.assertIn("Repeat role_start_set with the same request_id", partial["nextAction"])
 
         completed = start_leaf_set(
@@ -128,7 +129,7 @@ class SetStartTests(RoleToolsTestCase):
         self.assertEqual(len(agent_ids), 3)
         # No fourth agent: the repeat completed the failed seat, and the held
         # seats never opened in between.
-        self.assertEqual(len(self.runtime.agents), 3)
+        self.assertEqual(len(self.runtime.agents), 1)
         self.assertTrue(completed["seats"]["reviewer"]["held"])
         self.assertTrue(completed["seats"]["curator"]["held"])
         self.assertEqual(self.received(completed["seats"]["reviewer"]["agentId"]), [])
@@ -156,15 +157,15 @@ class SetStartTests(RoleToolsTestCase):
         assert runtime is not None
         self.assertEqual(
             set(read_role_agents(runtime.home)),
-            {seat["agentId"] for seat in result["seats"].values()},
+            {result["seats"]["worker"]["agentId"]},
         )
-        # A held receipt made by a previous build has no published identity. Its opener
-        # must establish it before the same agent-create path can start the first turn.
+        # A held receipt has no published identity until it opens. Its opener
+        # must establish it before the agent-create path can start the first turn.
         role_agents_path(runtime.home).unlink()
         observed = []
 
         def observe(command, payload):
-            if command == "agent-create":
+            if command == "agent-create" and "prompt" in payload:
                 observed.append(read_role_agents(runtime.home)[payload["agentId"]])
 
         self.runtime.observer = observe
@@ -211,7 +212,7 @@ class SetStartTests(RoleToolsTestCase):
         )
 
         self.assertEqual(loaded(again), {"worker": True, "reviewer": False, "curator": True})
-        self.assertEqual(len(self.runtime.agents), 3)
+        self.assertEqual(len(self.runtime.agents), 1)
         self.assertLessEqual(count_response_tokens(again), bound_for("role_start_set"))
 
     def test_an_architect_set_is_refused_with_no_effects(self) -> None:

@@ -38,6 +38,7 @@ from agents_remember.cli import (
     memory_briefs,
     memory_citations,
     paseo_runtime,
+    provider_limit_hold,
     removed_stores,
     tool_log_stats,
     upgrade_user_settings,
@@ -197,6 +198,12 @@ def _register_runtime_commands(sub: argparse._SubParsersAction) -> None:
     )
     paseo_runtime.add_arguments(paseo)
     paseo.set_defaults(func=paseo_runtime.run)
+    limits = sub.add_parser(
+        "provider-limits",
+        help="Inspect, suppress, or unsuppress active provider-limit windows.",
+    )
+    provider_limit_hold.add_arguments(limits)
+    limits.set_defaults(func=provider_limit_hold.run)
     stats = sub.add_parser(
         "tool-log-stats",
         help="Print per-tool answer sizes from a tool-call log folder (read-only).",

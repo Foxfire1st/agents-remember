@@ -126,13 +126,14 @@ class ReviewerCriterionDeliveryTests(FirstMessageMatrixBase):
         reviewer = self._role_receipt("reviewer")
         reviewer_id = started["seats"]["reviewer"]["agentId"]
         self.assertEqual(reviewer["agentId"], reviewer_id)
-        self.assertEqual(reviewer["execution"]["agentId"], reviewer_id)
+        self.assertIs(reviewer["hostAgentExists"], False)
+        self.assertEqual(reviewer["execution"], {})
         self.assertEqual(reviewer["replayRequest"]["agent"]["agentId"], reviewer_id)
         self.assertEqual(reviewer["parentAgentId"], binding.agent_id)
         self.assertEqual(reviewer["requestId"], started["seats"]["reviewer"]["requestId"])
         self.assertEqual(
             set(self.runtime.agents),
-            {binding.agent_id, *(s["agentId"] for s in started["seats"].values())},
+            {binding.agent_id, started["seats"]["worker"]["agentId"]},
         )
         opening = reviewer["heldOpeningPrompt"]
         self.assertIn(

@@ -27,6 +27,10 @@ from typing import Any
 
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import ConfigError, McpRuntimeConfig
+from agents_remember.observer.host_activity import (
+    HOST_ACTIVITY_FILE,
+    read_host_activity_publication,
+)
 from agents_remember.observer.provider_limits import (
     EMPTY_PROVIDER_LIMITS,
     PROVIDER_LIMITS_FILE,
@@ -39,6 +43,27 @@ from agents_remember.observer.provider_limits import (
     read_provider_limits,
 )
 from agents_remember.serving.paseo.paseo_plugin_files import AR_HOME_DIRECTORY, read_role_agents
+from agents_remember.serving.paseo.provider_limit_suppressions import (
+    PROVIDER_LIMIT_SUPPRESSIONS_SCHEMA,
+    ProviderLimitCommandResult,
+    ProviderLimitSuppressions,
+    SuppressedLimitWindow,
+    SuppressionSelector,
+    auto_suppression_candidates,
+    build_status_payload,
+    merge_suppressions,
+    missing_suppression_refusal,
+    partition_suppressions_for_unsuppress,
+    project_reports_with_suppressions,
+    provider_limit_suppressions_path,
+    prune_sidecar,
+    read_provider_limit_suppressions,
+    select_operator_suppressions,
+    suppress_success_result,
+    unsuppress_success_result,
+    update_sidecar_for_usage_reads,
+    validate_selector,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +71,12 @@ logger = logging.getLogger(__name__)
 _EXHAUSTED_USED_PCT = 100.0
 _USAGE_READ_PERIOD = timedelta(minutes=5)
 _LIMIT_RESUME_GRACE = timedelta(seconds=60)
+
+
+def provider_limits_path_for_home(home: Path) -> Path:
+    """Where ``provider-limits.json`` lives inside one Paseo home."""
+
+    return home / AR_HOME_DIRECTORY / PROVIDER_LIMITS_FILE
 
 
 def provider_limits_path(config: McpRuntimeConfig) -> Path | None:
@@ -61,7 +92,7 @@ def provider_limits_path(config: McpRuntimeConfig) -> Path | None:
         return None
     if runtime is None:
         return None
-    return runtime.home / AR_HOME_DIRECTORY / PROVIDER_LIMITS_FILE
+    return provider_limits_path_for_home(runtime.home)
 
 
 def _text(value: object) -> str:
@@ -209,19 +240,64 @@ def judge_read(entries: object, now: datetime) -> dict[str, ProviderLimitReport 
     return judged
 
 
-def _write_limits(path: Path, limits: ProviderLimits) -> None:
-    """Replace the whole file atomically while the caller holds the writer lock."""
+def _write_bytes_atomic(path: Path, data: bytes) -> None:
+    """Replace one file atomically while the caller holds the writer lock."""
 
-    body = limits.model_dump(by_alias=True, mode="json")
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(body, stream, ensure_ascii=False, indent=2)
-            stream.write("\n")
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
         os.replace(temporary, path)
     except BaseException:
         with suppress(OSError):
             os.unlink(temporary)
+        raise
+
+
+def _write_json_atomic(path: Path, body: dict[str, Any]) -> None:
+    """Replace one JSON file atomically while the caller holds the writer lock."""
+
+    payload = (json.dumps(body, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    _write_bytes_atomic(path, payload)
+
+
+def _write_limits(path: Path, limits: ProviderLimits) -> None:
+    """Replace ``provider-limits.json`` atomically while the caller holds the writer lock."""
+
+    _write_json_atomic(path, limits.model_dump(by_alias=True, mode="json"))
+
+
+def _write_suppressions(path: Path, sidecar: ProviderLimitSuppressions) -> None:
+    """Replace ``provider-limit-suppressions.json`` atomically under ``provider-limits.lock``."""
+
+    _write_json_atomic(path, sidecar.model_dump(by_alias=True, mode="json", exclude_none=True))
+
+
+def _commit_pair_locked(
+    path: Path,
+    sidecar_path: Path,
+    updated_sidecar: ProviderLimitSuppressions | None,
+    limits: ProviderLimits | None,
+) -> None:
+    """Write sidecar and limits atomically, rolling back sidecar if the limits write fails."""
+
+    if updated_sidecar is None:
+        if limits is not None:
+            _write_limits(path, limits)
+        return
+    prior_sidecar = sidecar_path.read_bytes() if sidecar_path.exists() else None
+    _write_suppressions(sidecar_path, updated_sidecar)
+    if limits is None:
+        return
+    try:
+        _write_limits(path, limits)
+    except BaseException:
+        with suppress(OSError):
+            if prior_sidecar is None:
+                sidecar_path.unlink(missing_ok=True)
+            else:
+                _write_bytes_atomic(sidecar_path, prior_sidecar)
         raise
 
 
@@ -233,45 +309,60 @@ def claim_due_reports(
     path = provider_limits_path(config)
     if path is None:
         return EMPTY_PROVIDER_LIMITS, ()
+    sidecar_path = provider_limit_suppressions_path(path)
     current = read_provider_limits(path)
-    proposed, _ = _periodic_update(path, current, now or datetime.now(UTC))
-    if proposed is current:
+    sidecar = read_provider_limit_suppressions(sidecar_path)
+    proposed, proposed_sidecar, _ = _periodic_update(
+        path, current, sidecar, now or datetime.now(UTC)
+    )
+    if proposed is current and proposed_sidecar is sidecar:
         return current, ()
     with exclusive_file_lock(path.with_suffix(".lock"), "provider limits"):
         current = read_provider_limits(path)
-        updated, due = _periodic_update(path, current, now or datetime.now(UTC))
-        if updated is not current:
-            _write_limits(path, updated)
+        sidecar = read_provider_limit_suppressions(sidecar_path)
+        updated, updated_sidecar, due = _periodic_update(
+            path, current, sidecar, now or datetime.now(UTC)
+        )
+        _commit_pair_locked(
+            path,
+            sidecar_path,
+            updated_sidecar if updated_sidecar is not sidecar else None,
+            updated if updated is not current else None,
+        )
         return updated, due
 
 
 def _periodic_update(
-    path: Path, current: ProviderLimits, now: datetime
-) -> tuple[ProviderLimits, tuple[str, ...]]:
-    reports = _live_reports(current.reports, now)
+    path: Path,
+    current: ProviderLimits,
+    sidecar: ProviderLimitSuppressions,
+    now: datetime,
+) -> tuple[ProviderLimits, ProviderLimitSuppressions, tuple[str, ...]]:
+    reports = project_reports_with_suppressions(current.reports, sidecar, now)
+    pruned_sidecar = prune_sidecar(sidecar, reports, now)
     cutoff = now - _USAGE_READ_PERIOD
     due = tuple(
         report_id
         for report_id, fact in reports.items()
         if max(fact.observedAt, fact.lastReadAttemptAt or fact.observedAt) <= cutoff
     )
-    reports_changed = bool(due) or len(reports) != len(current.reports)
+    reports_changed = bool(due) or reports != current.reports
     if not reports_changed and not current.clearedSeats:
-        return current, ()
+        return current, pruned_sidecar, ()
     records = read_role_agents(path.parent.parent)
-    markers = _kept_clear_markers(current, records, now)
-    if not reports_changed and len(markers) == len(current.clearedSeats):
-        return current, ()
     for report_id in due:
         reports[report_id] = reports[report_id].model_copy(update={"lastReadAttemptAt": now})
-    return current.model_copy(
+    updated = current.model_copy(
         update={
             "reports": reports,
             "agents": _updated_agents(current, {}, records),
-            "clearedSeats": markers,
             "updatedAt": now,
         }
-    ), due
+    )
+    markers = _updated_clear_markers(current, updated, records, now)
+    if not reports_changed and len(markers) == len(current.clearedSeats):
+        return current, pruned_sidecar, ()
+    return updated.model_copy(update={"clearedSeats": markers}), pruned_sidecar, due
 
 
 def record_usage_reads(
@@ -291,11 +382,15 @@ def record_usage_reads(
     with exclusive_file_lock(path.with_suffix(".lock"), "provider limits"):
         moment = now or datetime.now(UTC)
         current = read_provider_limits(path)
+        sidecar_path = provider_limit_suppressions_path(path)
+        sidecar = read_provider_limit_suppressions(sidecar_path)
         records = read_role_agents(path.parent.parent)
-        reports = _updated_reports(current, reads, failed_refreshes or {}, moment)
+        raw_reports, judged_ids = _updated_reports(current, reads, failed_refreshes or {}, moment)
+        reports = project_reports_with_suppressions(raw_reports, sidecar, moment)
+        updated_sidecar = update_sidecar_for_usage_reads(sidecar, reports, judged_ids, moment)
         limits = ProviderLimits(
             schema=PROVIDER_LIMITS_SCHEMA,
-            reports=_live_reports(reports, moment),
+            reports=reports,
             agents=_updated_agents(current, reads, records, preserved_reports),
             clearedSeats=current.clearedSeats,
             updatedAt=moment,
@@ -303,7 +398,12 @@ def record_usage_reads(
         limits = limits.model_copy(
             update={"clearedSeats": _updated_clear_markers(current, limits, records, moment)}
         )
-        _write_limits(path, limits)
+        _commit_pair_locked(
+            path,
+            sidecar_path,
+            updated_sidecar if updated_sidecar is not sidecar else None,
+            limits,
+        )
         return limits
 
 
@@ -312,8 +412,9 @@ def _updated_reports(
     reads: dict[str, object],
     failed_refreshes: Mapping[str, AbstractSet[str]],
     now: datetime,
-) -> dict[str, ProviderLimitReport]:
+) -> tuple[dict[str, ProviderLimitReport], frozenset[str]]:
     reports = dict(current.reports)
+    judged_ids: set[str] = set()
     for agent_id, entries in reads.items():
         failed = failed_refreshes.get(agent_id, ())
         for report_id, fact in judge_read(entries, now).items():
@@ -321,11 +422,13 @@ def _updated_reports(
                 continue
             if fact is None:
                 reports.pop(report_id, None)
+                judged_ids.discard(report_id)
             else:
                 old = reports.get(report_id)
                 attempt = old.lastReadAttemptAt if old is not None and old.until > now else None
                 reports[report_id] = fact.model_copy(update={"lastReadAttemptAt": attempt})
-    return reports
+                judged_ids.add(report_id)
+    return reports, frozenset(judged_ids)
 
 
 def _live_reports(
@@ -401,3 +504,163 @@ def _named_reports(reads: dict[str, object], agent_id: str) -> tuple[str, ...]:
         if report_id and report_id not in named:
             named.append(report_id)
     return tuple(named)
+
+
+def _proven_active_turn_started_at(activity_path: Path, agent_id: str) -> datetime | None:
+    """Return ``turnStartedAt`` only when a complete publication proves an active turn."""
+
+    publication = read_host_activity_publication(activity_path)
+    if publication is None or not publication.complete:
+        return None
+    activity = publication.agents.get(agent_id)
+    if activity is None or activity.state not in {"in-turn", "permission"}:
+        return None
+    return activity.eventAt
+
+
+def _read_auto_suppression_state(
+    path: Path, agent_id: str, now: datetime
+) -> tuple[ProviderLimits, ProviderLimitSuppressions, tuple[SuppressedLimitWindow, ...]] | None:
+    current = read_provider_limits(path)
+    if not current.reports or agent_id not in current.agents:
+        return None
+    turn_started_at = _proven_active_turn_started_at(path.with_name(HOST_ACTIVITY_FILE), agent_id)
+    if turn_started_at is None:
+        return None
+    sidecar = read_provider_limit_suppressions(provider_limit_suppressions_path(path))
+    candidates = auto_suppression_candidates(current, sidecar, agent_id, turn_started_at, now)
+    if not candidates:
+        return None
+    return current, sidecar, candidates
+
+
+def _apply_suppressions_locked(
+    path: Path,
+    current: ProviderLimits,
+    sidecar: ProviderLimitSuppressions,
+    additions: tuple[SuppressedLimitWindow, ...],
+    *,
+    now: datetime,
+) -> ProviderLimits:
+    """Merge suppressions, project ``provider-limits.json``, and write both atomically."""
+
+    sidecar_path = provider_limit_suppressions_path(path)
+    records = read_role_agents(path.parent.parent)
+    merged_sidecar = merge_suppressions(sidecar, additions, now)
+    projected_reports = project_reports_with_suppressions(current.reports, merged_sidecar, now)
+    final_sidecar = prune_sidecar(merged_sidecar, projected_reports, now)
+    updated = ProviderLimits(
+        schema=PROVIDER_LIMITS_SCHEMA,
+        reports=projected_reports,
+        agents=current.agents,
+        clearedSeats=current.clearedSeats,
+        updatedAt=now,
+    )
+    updated = updated.model_copy(
+        update={"clearedSeats": _updated_clear_markers(current, updated, records, now)}
+    )
+    _commit_pair_locked(path, sidecar_path, final_sidecar, updated)
+    return updated
+
+
+def suppress_provider_limits_for_live_tool_call(
+    config: McpRuntimeConfig,
+    agent_id: str,
+    *,
+    now: datetime | None = None,
+) -> ProviderLimits | None:
+    """Auto-suppress mapped live windows when a bound seat proves a post-limit active turn.
+
+    Pre-checks lock-free so calls with no qualifying live limit take no lock and write nothing.
+    Fails closed on missing/incomplete/idle ``host-activity.json``, on ``eventAt <= recordedAt``,
+    and on legacy records whose ``recordedAt`` is absent.
+    """
+
+    path = provider_limits_path(config)
+    if path is None or not path.is_file():
+        return None
+    if _read_auto_suppression_state(path, agent_id, now or datetime.now(UTC)) is None:
+        return None
+    with exclusive_file_lock(path.with_suffix(".lock"), "provider limits"):
+        moment = now or datetime.now(UTC)
+        state = _read_auto_suppression_state(path, agent_id, moment)
+        if state is None:
+            return None
+        current, sidecar, candidates = state
+        return _apply_suppressions_locked(path, current, sidecar, candidates, now=moment)
+
+
+def provider_limits_status(
+    limits_path: Path, *, now: datetime | None = None
+) -> ProviderLimitCommandResult:
+    """Inspect live reports and active suppressions without mutating disk."""
+
+    moment = now or datetime.now(UTC)
+    sidecar_path = provider_limit_suppressions_path(limits_path)
+    return ProviderLimitCommandResult(
+        exit_code=0,
+        payload=build_status_payload(
+            read_provider_limits(limits_path),
+            read_provider_limit_suppressions(sidecar_path),
+            limits_path,
+            sidecar_path,
+            moment,
+        ),
+    )
+
+
+def suppress_provider_limit_windows(
+    limits_path: Path,
+    selector: SuppressionSelector,
+    *,
+    now: datetime | None = None,
+) -> ProviderLimitCommandResult:
+    """Operator override: suppress live exhausted window(s) under ``provider-limits.lock``."""
+
+    invalid = validate_selector(selector)
+    if invalid is not None:
+        return invalid
+    limits_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with exclusive_file_lock(limits_path.with_suffix(".lock"), "provider limits"):
+        moment = now or datetime.now(UTC)
+        current = read_provider_limits(limits_path)
+        sidecar = read_provider_limit_suppressions(provider_limit_suppressions_path(limits_path))
+        selected = select_operator_suppressions(current, sidecar, selector, moment)
+        if isinstance(selected, ProviderLimitCommandResult):
+            return selected
+        updated = _apply_suppressions_locked(limits_path, current, sidecar, selected, now=moment)
+        return suppress_success_result(selected, current, updated)
+
+
+def unsuppress_provider_limit_windows(
+    limits_path: Path,
+    selector: SuppressionSelector,
+    *,
+    now: datetime | None = None,
+) -> ProviderLimitCommandResult:
+    """Operator override: remove active suppression(s) so later reads judge the window normally."""
+
+    invalid = validate_selector(selector)
+    if invalid is not None:
+        return invalid
+    limits_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with exclusive_file_lock(limits_path.with_suffix(".lock"), "provider limits"):
+        moment = now or datetime.now(UTC)
+        sidecar_path = provider_limit_suppressions_path(limits_path)
+        current = read_provider_limits(limits_path)
+        sidecar = read_provider_limit_suppressions(sidecar_path)
+        removed, kept = partition_suppressions_for_unsuppress(current, sidecar, selector, moment)
+        if not removed:
+            return missing_suppression_refusal(selector)
+        next_sidecar = prune_sidecar(
+            ProviderLimitSuppressions(
+                schema=PROVIDER_LIMIT_SUPPRESSIONS_SCHEMA,
+                recordedWindows=sidecar.recordedWindows,
+                suppressedWindows=kept,
+                updatedAt=moment,
+            ),
+            current.reports,
+            moment,
+        )
+        _write_suppressions(sidecar_path, next_sidecar)
+        return unsuppress_success_result(removed, next_sidecar)

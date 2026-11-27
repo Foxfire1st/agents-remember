@@ -272,7 +272,9 @@ class ProductStartMessageTests(RoleToolsTestCase):
 
         self.assertTrue(opened["openedHeldSeat"])
         self.assertEqual([request.moment for request in self.composed], ["curator-start"])
-        prompt = next(p for c, p in self.runtime.calls if c == "agent-create")["prompt"]
+        prompt = next(p for c, p in self.runtime.calls if c == "agent-create" and "prompt" in p)[
+            "prompt"
+        ]
         self.assertLess(prompt.index(PRODUCT_LINE), prompt.index("Curate the plan."))
         self.assertIn(f"{PRODUCT_LINE}\nCurator start, your list of work for {LEAF}.", prompt)
 
@@ -501,9 +503,11 @@ class ProductStartMessageRouteTests(RoleToolsTestCase):
         opened = self.message(manager, agent_id=curator["agentId"], text="Curate the plan.")
 
         self.assertTrue(opened["openedHeldSeat"], opened)
-        prompt = next(payload for call, payload in self.runtime.calls if call == "agent-create")[
-            "prompt"
-        ]
+        prompt = next(
+            payload
+            for call, payload in self.runtime.calls
+            if call == "agent-create" and "prompt" in payload
+        )["prompt"]
         self.assertIn(file.as_posix(), prompt)
         self.assertLess(prompt.index(file.as_posix()), prompt.index("Curate the plan."))
         self.assertIn("Brewing always returns a full cup.", file.read_text(encoding="utf-8"))

@@ -491,7 +491,9 @@ function findSelectedRow(
 function computeFrameTarget(
   selectedRow: ExplainerMenuRow | null,
   state: ExplainerState | null,
+  showFrame: boolean,
 ): { agentId: string; workspaceId: string } | null {
+  if (!showFrame) return null;
   if (selectedRow) {
     return {
       agentId: selectedRow.agentId,
@@ -621,8 +623,8 @@ export function useExplainerColumn(
   const rows = useMenuRows(target, task, state, selectedAgentId, options);
   const phase = phaseOf(read, form !== null);
   const selectedRow = findSelectedRow(rows, selectedAgentId, state?.agentId ?? null);
-  const frameTarget = computeFrameTarget(selectedRow, state);
   const showFrame = Boolean(selectedRow) || phase === 'live' || phase === 'closed';
+  const frameTarget = computeFrameTarget(selectedRow, state, showFrame);
   useShownExplainerChat(computeShownChat(target, task, active, selectedRow, state));
   return {
     read,

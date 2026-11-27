@@ -145,19 +145,20 @@ describe('Send', () => {
     expect(store.getState().outcome?.results[0].delivery).toMatchObject({ state: 'refused', reason: 'unreachable' });
   });
 
-  it('sends without a repository when none can be named, and keeps the server\'s refusal by name', async () => {
+  it('sends without a repository to a taskless Projects Architect and succeeds cleanly', async () => {
     const images = memoryImages();
     const store = createTrayStore(trayDeps(images));
     store.getState().add(passage);
     store.getState().setTargets(['agent-projects-architect']);
-    const detail = 'The message names no repository, and this server has 2: name one.';
-    const { fetcher, bodies } = fakeFetch({ 'agent-projects-architect': { state: 'refused', reason: 'unknown-repository', detail } });
+    const messageFile = '/coord/notes/reports/developer-messages/taskless/agent-projects-architect/m.md';
+    const { fetcher, bodies } = fakeFetch({ 'agent-projects-architect': { state: 'delivered', messageFile } });
     expect(await sendTray(store, sendDeps(fetcher, images, null))).toBe(true);
     expect(bodies).toHaveLength(1);
     expect('repository' in bodies[0].body).toBe(false);
     expect(bodies[0].body).toMatchObject({ text: '', picks: [{ kind: 'text', text: 'No, not forever.' }] });
-    expect(store.getState().outcome?.results[0].delivery).toMatchObject({ state: 'refused', reason: 'unknown-repository', detail });
-    expect(store.getState().picks).toHaveLength(1);
+    expect(store.getState().outcome?.results[0].delivery).toMatchObject({ state: 'delivered', messageFile });
+    expect(store.getState().picks).toEqual([]);
+    expect(store.getState().targets).toEqual([]);
   });
 
   it('names an answer without a delivery body by its status and the server\'s detail text', async () => {

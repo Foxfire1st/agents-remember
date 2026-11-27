@@ -14,7 +14,6 @@ import subprocess
 import tempfile
 import unittest
 import uuid
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -45,7 +44,7 @@ from agents_remember.cli.role_held_messages import (
 )
 from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA
 from agents_remember.cli.role_message_files import MessageFileError
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge_index import text_uuid
 from agents_remember.serving.app import create_app
 from agents_remember.serving.paseo.provider_limits import provider_limits_path
@@ -278,26 +277,8 @@ class DeveloperSendTests(RoleToolsTestCase):
         _request, architect = self.started("architect", status="idle")
         picks = (
             self.reference_pick("review-block", note="explain"),
-            {
-                "id": "pick-text",
-                "kind": "text",
-                "title": "A passage",
-                "note": "",
-                "text": "the copied words",
-                "provenance": {
-                    "source": "chat",
-                    "agentId": worker,
-                    "messageId": "m-1",
-                    "messageTime": "14:05",
-                },
-            },
-            {
-                "id": "pick-image",
-                "kind": "image",
-                "title": "Screenshot",
-                "note": "is this a bug?",
-                "image": {"mimeType": "image/png", "data": base64.b64encode(PNG).decode()},
-            },
+            text_pick(agentId=worker, messageId="m-1", messageTime="14:05"),
+            {**image_pick(), "note": "is this a bug?"},
         )
         answers = {agent: self.send(agent, *picks) for agent in (worker, architect)}
 
@@ -305,9 +286,9 @@ class DeveloperSendTests(RoleToolsTestCase):
             [answer["state"] for answer in answers.values()], ["delivered", "delivered"]
         )
         first, second = self.sends()
-        messages = self.config.coordination_root / "notes" / "reports" / "developer-messages" / REPO
+        messages = self.config.coordination_root / "notes" / "reports" / "developer-messages"
         for payload, agent, folder, opening in (
-            (first, worker, messages / "01_LEAF", "From developer · 01_LEAF"),
+            (first, worker, messages / REPO / "01_LEAF", "From developer · 01_LEAF"),
             (second, architect, messages / "taskless" / architect, "From developer"),
         ):
             with self.subTest(target=opening):
@@ -657,38 +638,6 @@ class DeveloperSendTests(RoleToolsTestCase):
             answer = TestClient(app).post(f"/api/role-chats/{worker}/message", json=body).json()
             self.assertEqual(answer["state"], "delivered")
             self.assertIn(f"    {opened} invariantRevisionId={revision}", self.sends()[-1]["text"])
-
-    def test_a_send_without_a_repository_takes_the_servers_one_repository(self) -> None:
-        """P-T3: a page that names no repository can still send to a seat without a task."""
-
-        _request, architect = self.started("architect", status="idle")
-        _request, worker = self.started("worker", status="idle")
-        body = {"messageId": str(uuid.uuid4()), "text": "from the Chats page", "picks": []}
-        answer = self.client.post(f"/api/role-chats/{architect}/message", json=body)
-        self.assertEqual((answer.status_code, answer.json()["state"]), (200, "delivered"))
-        folder = self.config.coordination_root / "notes" / "reports" / "developer-messages"
-        self.assertEqual(
-            Path(answer.json()["messageFile"]).parent, folder / REPO / "taskless" / architect
-        )
-        two = replace(
-            self.config,
-            repositories={
-                **self.config.repositories,
-                "other": RepositoryScope(repo_id="other", path=self.root / "other"),
-            },
-        )
-        app = FastAPI()
-        register_developer_chat_routes(app, two)
-        client = TestClient(app)
-        for target, expected in (
-            (architect, ("refused", "unknown-repository")),
-            (worker, ("delivered", None)),
-        ):
-            with self.subTest(target=target):
-                body = {"messageId": str(uuid.uuid4()), "text": "which one?", "picks": []}
-                answer = client.post(f"/api/role-chats/{target}/message", json=body).json()
-                self.assertEqual((answer["state"], answer.get("reason")), expected)
-        self.assertEqual(len(self.sends()), 2)
 
     def test_a_body_over_its_bound_is_refused_by_name_before_it_is_parsed(self) -> None:
         """P-T4: an oversized body is refused before it is read whole or parsed as JSON."""

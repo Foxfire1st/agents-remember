@@ -22,7 +22,7 @@ another production module calls with any path passes both. Rule 8 and one run-ti
 4. *Read-only and attach.* Each named exception that opens an existing file opens it read-only. No
    statement starts with ``ATTACH`` followed by ``DATABASE``, a parameter, a quoted literal, a
    parenthesis or a function call before ``AS``, or one bare word before ``AS`` and a name.
-5. *Writers.* Only the index builder's two modules hold a statement that starts, directly or behind
+5. *Writers.* Only the index builder's three modules hold a statement that starts, directly or behind
    a ``WITH`` clause, with ``INSERT [OR ...] INTO``, ``REPLACE INTO``, ``DELETE FROM`` or
    ``UPDATE [OR ...] <table> SET`` (the table bare, quoted, bracketed, schema-qualified, aliased or
    ``INDEXED BY``), or that starts with ``VACUUM ... INTO``, ``DROP TABLE``,
@@ -167,6 +167,7 @@ NAMES_ALLOWED = {
 _OTHER_STORES = ("memory_quality/style/citations/",)
 _ROW_WRITERS = {
     "memory/knowledge_index/build.py",
+    "memory/knowledge_index/fts.py",
     "memory/knowledge_index/projection.py",
 }
 _REVIEW = "a reviewer read of the dataset file of each side of a comparison"

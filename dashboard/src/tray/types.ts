@@ -85,7 +85,7 @@ export interface TrayWirePick {
 // The body of one `POST /api/role-chats/{agentId}/message`: one per target.
 export interface TrayMessageBody {
   messageId: string;
-  repository: string;
+  repository?: string;
   text: string;
   picks: TrayWirePick[];
 }

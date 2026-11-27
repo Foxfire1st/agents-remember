@@ -12,16 +12,28 @@ it is a defect, not a variant.
 
 from __future__ import annotations
 
+import argparse
+import json
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.kernel.primitives.control_vocabulary import (
     PROVIDER_LIMIT_REASON,
 )
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.paseo_runtime_settings import (
+    PaseoRuntimeNotConfigured,
+    require_paseo_runtime,
+)
+from agents_remember.kernel.primitives.runtime_config import (
+    ConfigError,
+    McpRuntimeConfig,
+    load_paseo_runtime_settings,
+)
+from agents_remember.kernel.primitives.user_settings_location import user_settings_path
 from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.observer.provider_limits import (
     ProviderLimits,
@@ -29,7 +41,18 @@ from agents_remember.observer.provider_limits import (
     read_provider_limits,
 )
 from agents_remember.serving.paseo.paseo_plugin_files import read_role_agents
-from agents_remember.serving.paseo.provider_limits import provider_limits_path, record_usage_reads
+from agents_remember.serving.paseo.provider_limit_suppressions import (
+    ProviderLimitCommandResult,
+    SuppressionSelector,
+)
+from agents_remember.serving.paseo.provider_limits import (
+    provider_limits_path,
+    provider_limits_path_for_home,
+    provider_limits_status,
+    record_usage_reads,
+    suppress_provider_limit_windows,
+    unsuppress_provider_limit_windows,
+)
 from agents_remember.serving.projections.host_activity import UsageReadBatch
 
 logger = logging.getLogger(__name__)
@@ -182,3 +205,140 @@ def _log_usage_failures(failed: list[str]) -> None:
         logger.warning(
             "provider usage read failed: %s", "; ".join(failed)[:_FAILED_READ_LINE_LIMIT]
         )
+
+
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register ``provider-limits status|suppress|unsuppress`` CLI arguments."""
+
+    config_help = (
+        "Absolute path of the active MCP settings file that holds the paseoRuntime host block."
+    )
+    parser.add_argument("--config", dest="parent_config", default=None, help=config_help)
+    sub = parser.add_subparsers(dest="provider_limits_command", required=True)
+
+    status_cmd = sub.add_parser(
+        "status",
+        help="List every live provider-limit report (with recordedAt, windows, mapped seats) and active suppression.",
+    )
+    status_cmd.add_argument("--config", dest="sub_config", default=None, help=config_help)
+
+    suppress_cmd = sub.add_parser(
+        "suppress",
+        help="Suppress a live exhausted window until its resetsAt by --report [--window] or --agent.",
+    )
+    suppress_cmd.add_argument("--config", dest="sub_config", default=None, help=config_help)
+    suppress_cmd.add_argument("--report", default=None, help="Live report id to suppress.")
+    suppress_cmd.add_argument(
+        "--window",
+        default=None,
+        help="Live window id on --report (required when a report has multiple live windows).",
+    )
+    suppress_cmd.add_argument(
+        "--agent",
+        default=None,
+        help="Seat agent id whose mapped live exhausted windows should be suppressed.",
+    )
+
+    unsuppress_cmd = sub.add_parser(
+        "unsuppress",
+        help="Remove an active window suppression by --report [--window] or --agent.",
+    )
+    unsuppress_cmd.add_argument("--config", dest="sub_config", default=None, help=config_help)
+    unsuppress_cmd.add_argument("--report", default=None, help="Report id to unsuppress.")
+    unsuppress_cmd.add_argument("--window", default=None, help="Optional window id to unsuppress.")
+    unsuppress_cmd.add_argument(
+        "--agent",
+        default=None,
+        help="Seat agent id whose mapped or attributed suppressions should be removed.",
+    )
+
+
+def _resolve_cli_limits_path(config_path: str | None) -> Path | ProviderLimitCommandResult:
+    if not config_path:
+        return ProviderLimitCommandResult(
+            exit_code=2,
+            payload={
+                "ok": False,
+                "error": {"code": "config_required", "message": "--config is required."},
+            },
+        )
+    try:
+        loaded = load_paseo_runtime_settings(config_path)
+        settings = require_paseo_runtime(loaded, source=str(user_settings_path()))
+    except PaseoRuntimeNotConfigured as error:
+        return ProviderLimitCommandResult(
+            exit_code=2,
+            payload={"ok": False, "error": {"code": error.code, "message": str(error)}},
+        )
+    except ConfigError as error:
+        return ProviderLimitCommandResult(
+            exit_code=2,
+            payload={"ok": False, "error": {"code": "settings_invalid", "message": str(error)}},
+        )
+    except OSError as error:
+        return ProviderLimitCommandResult(
+            exit_code=2,
+            payload={
+                "ok": False,
+                "error": {
+                    "code": "settings_unreadable",
+                    "message": f"cannot read {config_path}: {error}",
+                },
+            },
+        )
+    except (ValueError, RecursionError) as error:
+        problem = f"{type(error).__name__}: {error}"
+        return ProviderLimitCommandResult(
+            exit_code=2,
+            payload={
+                "ok": False,
+                "error": {
+                    "code": "settings_invalid",
+                    "message": f"cannot parse {config_path}: {problem}",
+                },
+            },
+        )
+    return provider_limits_path_for_home(settings.home)
+
+
+def run(args: argparse.Namespace) -> int:
+    """Execute ``agents-remember provider-limits <status|suppress|unsuppress>`` and print JSON."""
+
+    config_path = getattr(args, "sub_config", None) or getattr(args, "parent_config", None)
+    resolved = _resolve_cli_limits_path(config_path)
+    if isinstance(resolved, ProviderLimitCommandResult):
+        print(json.dumps(resolved.payload, indent=2))
+        return resolved.exit_code
+    action = str(args.provider_limits_command)
+    try:
+        if action == "status":
+            result = provider_limits_status(resolved)
+        else:
+            selector = SuppressionSelector(
+                report_id=getattr(args, "report", None),
+                window_id=getattr(args, "window", None),
+                agent_id=getattr(args, "agent", None),
+            )
+            result = (
+                suppress_provider_limit_windows(resolved, selector)
+                if action == "suppress"
+                else unsuppress_provider_limit_windows(resolved, selector)
+            )
+    except OSError as error:
+        result = ProviderLimitCommandResult(
+            exit_code=1,
+            payload={"ok": False, "error": {"code": "filesystem_error", "message": str(error)}},
+        )
+    except Exception as error:
+        result = ProviderLimitCommandResult(
+            exit_code=1,
+            payload={
+                "ok": False,
+                "error": {
+                    "code": "unexpected_error",
+                    "message": f"{type(error).__name__}: {error}",
+                },
+            },
+        )
+    print(json.dumps(result.payload, indent=2))
+    return result.exit_code
