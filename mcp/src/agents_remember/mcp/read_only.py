@@ -1,16 +1,13 @@
-"""The one list of read-only marks for every registered tool (MIK-R109 rule 7).
+"""The one list of read-only marks for every registered tool.
 
 Every registered tool that writes nothing in the repositories, the
 worktrees, the task's record and the host carries ``readOnlyHint: true``;
 every other registered tool carries ``readOnlyHint: false``. The marks come
 from this list, for the tools of every registration module, and
-:func:`apply_read_only_marks` is the place where the registration applies
-them: :func:`create_server` runs it after the registrars, so the advertised
-``annotations`` always match this file. A tool in neither part breaks server
-creation with ``UnknownReadOnlyMark`` -- a new tool arrives with its mark,
-never without one. (Rule 7 lands the marks for the tools registered at this
-task's tip; L110-L112 keep their own tools' part complete, and the sweep
-test holds the list to that.)
+:func:`read_only_annotations` builds the registration-time ``ToolAnnotations``
+that :class:`~agents_remember.mcp.server.AgentsRememberMCP` passes to
+``MCPServer.add_tool``. A tool in neither part breaks server creation with
+``UnknownReadOnlyMark`` -- a new tool arrives with its mark, never without one.
 
 ``knowledge_diff`` is a read with ``readOnlyHint: false``: with no
 ``afterRevision`` it captures the working tree as a Git tree, which writes
@@ -26,9 +23,6 @@ the advertised capability including the option, so it states the write.
 
 from __future__ import annotations
 
-from typing import Any
-
-from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 __all__ = [
@@ -37,7 +31,7 @@ __all__ = [
     "MUTATING_TOOLS",
     "READ_ONLY_TOOLS",
     "UnknownReadOnlyMark",
-    "apply_read_only_marks",
+    "read_only_annotations",
     "read_only_hint",
 ]
 
@@ -153,16 +147,12 @@ def read_only_hint(tool_name: str) -> bool:
     )
 
 
-def apply_read_only_marks(server: FastMCP) -> None:
-    """Carry this list onto one registered server's advertised annotations.
+def read_only_annotations(tool_name: str) -> ToolAnnotations:
+    """Build the registration-time ``ToolAnnotations`` for one registered tool.
 
-    Runs after the registrars: every advertised tool gets exactly the mark
-    this list states for it, and an advertised tool the list does not name
-    breaks server creation instead of shipping unmarked.
+    Replaces any registration-site hints with the central read-only mark so
+    every advertised tool carries the exact annotation this table declares, and
+    an unlisted tool breaks server creation instead of shipping unmarked.
     """
 
-    tools: dict[str, Any] = server._tool_manager._tools
-    for name in sorted(tools):
-        tools[name].annotations = ToolAnnotations.model_validate(
-            {"readOnlyHint": read_only_hint(name)}
-        )
+    return ToolAnnotations(read_only_hint=read_only_hint(tool_name))

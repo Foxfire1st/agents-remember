@@ -31,8 +31,6 @@ from agents_remember.models.tools.tool_response import finalize_tool_response
 from pydantic import ValidationError
 from tool_entry_point_world import EntryPointWorld, _ToolCallTimeout, classify, refusal_marks
 
-from mcp import types
-
 
 class EntryPointCoverageTests(unittest.TestCase):
     """The swept population is derived, so a new tool cannot arrive unswept."""
@@ -68,17 +66,14 @@ class ChokePointControlTests(unittest.TestCase):
     def test_a_tool_that_never_answers_fails_by_name_and_closes_its_handler(self) -> None:
         handler_closed: list[bool] = []
 
-        async def no_response(request):
+        async def no_response(_name: str, _arguments: dict[str, Any], _context: Any = None) -> Any:
             try:
                 await anyio.sleep_forever()
             finally:
                 handler_closed.append(True)
 
         with (
-            mock.patch.dict(
-                self.world.server._mcp_server.request_handlers,
-                {types.CallToolRequest: no_response},
-            ),
+            mock.patch.object(self.world.server, "call_tool", no_response),
             mock.patch("tool_entry_point_world.TOOL_RESPONSE_WAIT_SECONDS", 3),
             self.assertRaisesRegex(
                 _ToolCallTimeout, "'server_info' tool response did not finish within 3 seconds"

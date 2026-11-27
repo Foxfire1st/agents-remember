@@ -5,7 +5,7 @@ The shipped tool (``mcp/src/agents_remember/mcp/registration/core.py``) and the 
 leaf's ``task_context``; ``include_providers`` is gone along with search providers.  Advice that still tells a reader to pass the removed flag
 therefore names an invalid invocation of a shipped tool.
 
-These tests derive the admitted parameter set from the real advertised schema -- one FastMCP
+These tests derive the admitted parameter set from the real advertised schema -- one MCPServer
 server built from ``TOOL_REGISTRARS``, the same way the other tool-schema cases do -- and then
 require every ``context_packet(...)`` call written in a live carrier to name only those
 parameters.  The carrier inventory is the shipped instruction and declaration surface: the root
@@ -28,7 +28,7 @@ from typing import Any
 from agents_remember.application.context_packet import ContextPacketRequest
 from agents_remember.mcp.registration import TOOL_REGISTRARS
 from agents_remember_test_support.testing.curation_doctrine import GENERATED_SKILL_COPIES
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -78,12 +78,12 @@ class CarrierCall:
 def _advertised_parameters() -> frozenset[str]:
     """The parameter names the shipped MCP server advertises for ``context_packet``."""
 
-    server: Any = FastMCP("l192-f06-schema")
+    server: Any = MCPServer("l192-f06-schema")
     for register_tools in TOOL_REGISTRARS:
         register_tools(server, None)  # type: ignore[arg-type]
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     assert TOOL_NAME in tools, sorted(tools)
-    schema = dict(tools[TOOL_NAME].inputSchema or {})
+    schema = dict(tools[TOOL_NAME].input_schema or {})
     properties = dict(schema.get("properties", {}))
     assert properties, schema
     return frozenset(properties)

@@ -14,7 +14,7 @@ from unittest import mock
 
 import anyio
 
-from mcp import types
+from mcp import Client, types
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
@@ -27,7 +27,6 @@ from agents_remember.mcp.server import create_server
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.services import reset_worktree_services
-from mcp.shared.memory import create_connected_server_and_client_session
 from test_worktree_support import open_external_contract_fixture
 
 PROTOCOL_WAIT_SECONDS = 60
@@ -88,8 +87,7 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.config = load_config(self.settings)
-        # The product factory pairs the process-wide request union with its server dispatcher.
-        # A bare FastMCP drops tools/list after another test installs the extended union.
+        # Exercise the product factory's full server construction path.
         self.server = create_server(self.config)
 
     def tearDown(self) -> None:
@@ -171,13 +169,11 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
         created: list[Path] = []
 
         async def exercise_protocol() -> None:
-            async with create_connected_server_and_client_session(
-                self.server._mcp_server
-            ) as client:
+            async with Client(self.server, mode="legacy") as client:
                 tools = (await client.list_tools()).tools
                 by_name = {tool.name: tool for tool in tools}
                 for tool_name in ("context_packet", "read_ar_files"):
-                    schema = by_name[tool_name].inputSchema
+                    schema = by_name[tool_name].input_schema
                     self.assertEqual(
                         (
                             "task_context" in schema["properties"],
@@ -246,7 +242,7 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
                     },
                 )
                 self.assertTrue(
-                    wrong_repo.isError and "repo_id must match" in _tool_error_text(wrong_repo)
+                    wrong_repo.is_error and "repo_id must match" in _tool_error_text(wrong_repo)
                 )
 
                 wrong_contract_context = {
@@ -262,7 +258,7 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
                     },
                 )
                 self.assertTrue(
-                    wrong_contract.isError
+                    wrong_contract.is_error
                     and "canonical enclosure" in _tool_error_text(wrong_contract)
                 )
 
@@ -276,7 +272,7 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
                     },
                 )
                 self.assertTrue(
-                    missing_pair.isError and "contract_path" in _tool_error_text(missing_pair)
+                    missing_pair.is_error and "contract_path" in _tool_error_text(missing_pair)
                 )
 
         try:
@@ -295,16 +291,15 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
     def test_late_tool_list_response_times_out_and_closes_the_handler(self) -> None:
         handler_closed: list[bool] = []
 
-        async def late_tools(request):
+        async def late_tools() -> list[types.Tool]:
             try:
                 await anyio.sleep_forever()
             finally:
                 handler_closed.append(True)
+            return []
 
         async def exercise_late_response() -> None:
-            async with create_connected_server_and_client_session(
-                self.server._mcp_server
-            ) as client:
+            async with Client(self.server, mode="legacy") as client:
 
                 async def list_tools() -> None:
                     await client.list_tools()
@@ -316,10 +311,7 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
                 ):
                     await _await_protocol(list_tools, wait_seconds=3)
 
-        with mock.patch.dict(
-            self.server._mcp_server.request_handlers,
-            {types.ListToolsRequest: late_tools},
-        ):
+        with mock.patch.object(self.server, "list_tools", late_tools):
             _run_protocol(exercise_late_response)
         self.assertEqual(handler_closed, [True])
         self.test_registered_readers_use_call_local_admitted_leaf_context()
@@ -361,10 +353,10 @@ def _resolve_schema(root: dict[str, Any], schema: dict[str, Any]) -> dict[str, A
 
 
 def _structured(result: types.CallToolResult) -> dict[str, Any]:
-    if result.isError:
+    if result.is_error:
         raise AssertionError(_tool_error_text(result))
-    assert result.structuredContent is not None
-    return result.structuredContent
+    assert result.structured_content is not None
+    return result.structured_content
 
 
 def _tool_error_text(result) -> str:

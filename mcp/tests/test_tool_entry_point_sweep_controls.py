@@ -17,8 +17,6 @@ from agents_remember.models.tools.tool_response import finalize_tool_response
 from pydantic import ValidationError
 from tool_entry_point_sweep_support import EntryPointWorld, _ToolCallTimeout, classify
 
-from mcp import types
-
 
 class ChokePointControlTests(unittest.TestCase):
     """The control the sweep depends on: a bad payload must be caught, not described."""
@@ -36,17 +34,14 @@ class ChokePointControlTests(unittest.TestCase):
     ) -> None:
         handler_closed: list[bool] = []
 
-        async def no_response(request):
+        async def no_response(_name: str, _arguments: dict[str, Any], _context: Any = None) -> Any:
             try:
                 await anyio.sleep_forever()
             finally:
                 handler_closed.append(True)
 
         with (
-            mock.patch.dict(
-                self.world.server._mcp_server.request_handlers,
-                {types.CallToolRequest: no_response},
-            ),
+            mock.patch.object(self.world.server, "call_tool", no_response),
             mock.patch("tool_entry_point_sweep_support.TOOL_RESPONSE_WAIT_SECONDS", 3),
             self.assertRaisesRegex(
                 _ToolCallTimeout,

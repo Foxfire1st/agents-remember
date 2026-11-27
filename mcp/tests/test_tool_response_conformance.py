@@ -73,7 +73,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control
 )
 from agents_remember.worktrees.modules.finalize import FinalizeArgs, _finalized_result
 from agents_remember.worktrees.worktree_contract import WorktreeContract
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import ValidationError
 
 REPO = "agents-remember"
@@ -154,12 +154,12 @@ def choke_point_handlers(
 def advertised_description(tool_name: str) -> str:
     """The description a caller actually receives for one tool.
 
-    Read from the registered FastMCP surface rather than from the source constant, so this
+    Read from the registered MCPServer surface rather than from the source constant, so this
     asserts the published contract and not the module that happens to define it -- the same
     probe the T50 description pins use.
     """
 
-    server = FastMCP("tsip-l4-description-probe")
+    server = MCPServer("tsip-l4-description-probe")
     for register_tools in TOOL_REGISTRARS:
         register_tools(server, cast(McpRuntimeConfig, _RegistrationStub()))
     advertised = {
@@ -179,7 +179,7 @@ class _RegistrationStub:
 def advertised_tool_names() -> set[str]:
     """Every tool name the product actually registers, read from the registered surface.
 
-    The same probe :func:`advertised_description` uses: a real ``FastMCP`` server, every
+    The same probe :func:`advertised_description` uses: a real ``MCPServer`` server, every
     registrar in ``TOOL_REGISTRARS``, and the server's own listing. This is the **derived**
     population the roster assertions compare against, and it is derived from the registration
     modules rather than from ``PUBLIC_TOOLS`` -- so a tool that is registered but missing from
@@ -188,7 +188,7 @@ def advertised_tool_names() -> set[str]:
     72 with role tools retained and the two database-only tools removed.
     """
 
-    server = FastMCP("tsip-l10-roster-probe")
+    server = MCPServer("tsip-l10-roster-probe")
     for register_tools in TOOL_REGISTRARS:
         register_tools(server, cast(McpRuntimeConfig, _RegistrationStub()))
     return {tool.name for tool in asyncio.run(server.list_tools())}
@@ -305,7 +305,7 @@ class ToolResponseSurfaceTests(unittest.TestCase):
         Four populations, each derived rather than transcribed: the registry
         (``TOOL_RESPONSE_MODELS``), the adapter entries (the ``_tool_payload`` id literals
         in ``mcp/tools/``), the advertised roster (``PUBLIC_TOOLS``) and the **registered
-        surface** the product itself publishes (the live ``FastMCP`` listing). The two
+        surface** the product itself publishes (the live ``MCPServer`` listing). The two
         directions this leaf exists for are the first two assertions: registry minus adapter must be
         empty (a registered model nobody produces is a model nothing validates against) and
         adapter minus registry must be empty (a payload nobody declared). Both were non-empty on the

@@ -35,7 +35,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
 )
 from agents_remember.worktrees.worktree_contract import write_contract
 from lifecycle_enclosure_test_support import enclosure_contract
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 _RATIONALE = "L82 test: adopt the scratch pre-locator enclosure"
 _LEGACY_ARTIFACT = "integrate-operation.generation-1.json"
@@ -235,17 +235,17 @@ def test_real_run_with_approval_adopts_and_repeats(tmp_path: Path) -> None:
 
 
 def test_registration_names_the_documented_tool() -> None:
-    """Roster, response registry and live FastMCP surface all name the tool."""
+    """Roster, response registry and live MCPServer surface all name the tool."""
 
     assert "worktree_enclosure_adopt" in PUBLIC_TOOLS
     assert TOOL_RESPONSE_MODELS["worktree_enclosure_adopt"] is WorktreeEnclosureAdoptResponse
 
-    server = FastMCP("r82-adoption-registration-probe")
+    server = MCPServer("r82-adoption-registration-probe")
     register_worktree_tools(server, _StubConfig())  # type: ignore[arg-type]
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
 
     assert "worktree_enclosure_adopt" in tools
-    schema = tools["worktree_enclosure_adopt"].inputSchema
+    schema = tools["worktree_enclosure_adopt"].input_schema
     assert schema["type"] == "object"
     assert set(schema["required"]) == {
         "contract_path",

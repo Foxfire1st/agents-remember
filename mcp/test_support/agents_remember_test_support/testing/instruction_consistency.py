@@ -19,7 +19,7 @@ from agents_remember.cli.__main__ import build_parser
 from agents_remember.cli.leaf_enclosure_start import COMMAND as ENCLOSURE_COMMAND
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.registration import TOOL_REGISTRARS
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from agents_remember_test_support.testing.capsule_budget_d695 import load_current_budget_view
 
@@ -171,7 +171,7 @@ def load_registry(root: Path) -> Registry:
         workspace_root=root,
         transcript_root=root / "logs",
     )
-    server = FastMCP("instruction-consistency-registration")
+    server = MCPServer("instruction-consistency-registration")
     for register in TOOL_REGISTRARS:
         register(server, config)
     registered = asyncio.run(server.list_tools())
@@ -180,7 +180,7 @@ def load_registry(root: Path) -> Registry:
         frozenset(tool.name for tool in registered),
         frozenset(VALID_OPERATIONS),
         tuple(Surface(f"tool:{tool.name}", tool.description or "") for tool in registered),
-        frozenset(name for tool in registered for name in tool.inputSchema.get("properties", {})),
+        frozenset(name for tool in registered for name in tool.input_schema.get("properties", {})),
     )
 
 

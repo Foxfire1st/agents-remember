@@ -3,8 +3,9 @@
 from importlib import import_module
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
+from pydantic.json_schema import SkipJsonSchema
 
 from agents_remember.application.runtime.startup import mcp_serving_build_payload
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -18,32 +19,11 @@ from .lazy import tools
 def server_info_payload(
     config: McpRuntimeConfig, serving_build: ServingBuildPayload
 ) -> dict[str, Any]:
-    """Forward to the lazily loaded tool builder so discovery stays import-free (MIK-R204)."""
+    """Forward to the lazily loaded tool builder so discovery stays import-free."""
     return tools.server_info_payload(config, serving_build)
 
 
-def _scrub_removed_argument(server: FastMCP, tool_name: str, argument: str) -> None:
-    """Drop one receivable-but-removed argument from the advertised schema.
-
-    The argument stays in the signature so a call that supplies it reaches
-    the boundary refusal; it leaves the advertised ordinary contract so no
-    caller learns it (MIK-R109 rule 1). Mirrors the post-registration mark
-    application for read-only tools.
-    """
-
-    tools: dict[str, Any] = server._tool_manager._tools
-    tool = tools.get(tool_name)
-    if tool is None:
-        return
-    parameters = dict(tool.parameters)
-    properties = dict(parameters.get("properties", {}))
-    properties.pop(argument, None)
-    parameters["properties"] = properties
-    parameters["required"] = [name for name in parameters.get("required", []) if name != argument]
-    tool.parameters = parameters
-
-
-def register_core_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def register_core_tools(server: MCPServer, config: McpRuntimeConfig) -> None:
     """Register the core tools, split by what the caller is trying to find out."""
     serving_build = mcp_serving_build_payload()
     _register_identity_tools(server, config, serving_build)
@@ -52,13 +32,13 @@ def register_core_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
 
 
 def _register_identity_tools(
-    server: FastMCP, config: McpRuntimeConfig, serving_build: ServingBuildPayload
+    server: MCPServer, config: McpRuntimeConfig, serving_build: ServingBuildPayload
 ) -> None:
     """What this server is and how it was configured."""
 
     @server.tool(
         annotations=ToolAnnotations(
-            readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+            read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False
         )
     )
     def server_info() -> dict[str, Any]:
@@ -67,7 +47,7 @@ def _register_identity_tools(
 
 
 def _register_orientation_tools(
-    server: FastMCP, config: McpRuntimeConfig, serving_build_commit: str | None
+    server: MCPServer, config: McpRuntimeConfig, serving_build_commit: str | None
 ) -> None:
     """Read-only reads that orient a session in a repository before it changes anything."""
 
@@ -94,7 +74,8 @@ def _register_orientation_tools(
     def read_ar_files(
         repo_id: str,
         files: list[Any],
-        refresh: Any = _REMOVED_ARGUMENT,
+        # Keep refresh receivable for the boundary refusal while omitting it from inputSchema.
+        refresh: SkipJsonSchema[Any] = _REMOVED_ARGUMENT,
         task_context: TaskScopedReaderContext | None = None,
     ) -> dict[str, Any]:
         """Name up to 20 paths: compact rows give path, existence, cardStatus, and brief path with saved freshness; fuller rows may give rule text. Open saved briefs before edits (records may lack briefs; open source/cards yourself). Covering writes renew missing or older briefs when supported, else report briefsProblem and leave the brief unchanged. Leaf calls pass task_context (task_document_ref, contract_path). Docs: docs/reference/mcp-tools.md."""
@@ -106,10 +87,8 @@ def _register_orientation_tools(
             task_context=task_context,
         )
 
-    _scrub_removed_argument(server, "read_ar_files", "refresh")
 
-
-def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_installation_tools(server: MCPServer, config: McpRuntimeConfig) -> None:
     """Install or refresh what the coordinator runtime needs on disk."""
 
     @server.tool()

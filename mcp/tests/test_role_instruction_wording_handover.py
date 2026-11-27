@@ -54,7 +54,7 @@ from agents_remember.models.role_launcher import RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.tasks import TaskDocument
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from role_instruction_wording_support import (
     LAUNCHER_ROLES,
     LIFECYCLE,
@@ -677,7 +677,7 @@ class HandoverTextWordingTests(unittest.TestCase):
 class RoleToolDescriptionWordingTests(unittest.TestCase):
     def test_the_three_tool_descriptions_name_no_forbidden_host_string(self) -> None:
         async def descriptions() -> dict[str, str]:
-            server = FastMCP("role-tool-descriptions")
+            server = MCPServer("role-tool-descriptions")
             register_role_agent_tools(server, None)  # type: ignore[arg-type]
             return {tool.name: tool.description or "" for tool in await server.list_tools()}
 

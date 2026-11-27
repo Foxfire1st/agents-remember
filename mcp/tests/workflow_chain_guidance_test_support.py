@@ -28,7 +28,8 @@ from agents_remember.models.base import NextStep
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.worktrees.modules.guidance import lifecycle_guidance
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
-from mcp.shared.memory import create_connected_server_and_client_session
+
+from mcp import Client
 
 REPO = "repo-a"
 MASTER = "workflow-master"
@@ -370,7 +371,7 @@ class WorkflowWorld:
     # -- the production entry point ----------------------------------------------------------
 
     async def _call(self, name: str, args: dict[str, Any]):
-        async with create_connected_server_and_client_session(self.server._mcp_server) as client:
+        async with Client(self.server, mode="legacy") as client:
             return await client.call_tool(name, args)
 
     def call(self, name: str, args: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
@@ -380,12 +381,12 @@ class WorkflowWorld:
             result = anyio.run(self._call, name, args)
         except BaseException as exc:  # "did it raise" IS the arm under test
             return f"RAISED {type(exc).__name__}", None
-        if result.isError:
+        if result.is_error:
             text = "\n".join(
                 text for content in result.content if (text := getattr(content, "text", None))
             )
             return "RAISED ToolError", {"detail": text}
-        return "RETURNED", result.structuredContent
+        return "RETURNED", result.structured_content
 
     # -- the fixture --------------------------------------------------------------------------
 

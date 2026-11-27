@@ -3,7 +3,7 @@
 This is the family module ``registration/__init__.py``'s docstring describes: one
 ``register_knowledge_tools(server, config)`` that declares its family against the server it is
 handed, delegating to the payload builders in :mod:`agents_remember.mcp.tools.knowledge`. It is
-**appended** to ``TOOL_REGISTRARS``, never inserted: FastMCP publishes tools in registration order,
+**appended** to ``TOOL_REGISTRARS``, never inserted: MCPServer publishes tools in registration order,
 so every existing name keeps the position it was advertised at.
 
 Three operations: ``knowledge_read``, ``knowledge_diff`` and ``knowledge_integrity_check``.
@@ -27,7 +27,7 @@ label; ``knowledge_integrity_check`` returns the validator's report and a leaf's
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
@@ -65,7 +65,7 @@ def _worktree_relative_locations(config: McpRuntimeConfig, memory_root: str) -> 
     return root not in configured
 
 
-def register_knowledge_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def register_knowledge_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """Register the knowledge read, diff and integrity operations.
 
     The runtime configuration supplies two things to this family. The workspace root is the
@@ -81,7 +81,7 @@ def register_knowledge_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     _register_knowledge_write(server, config)
 
 
-def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_knowledge_read(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """The one read operation, over the three named views."""
 
     @server.tool()
@@ -148,7 +148,7 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         )
 
 
-def _register_knowledge_write(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_knowledge_write(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """The writer's mounted route: the same function the write commands run."""
 
     @server.tool()
@@ -181,7 +181,7 @@ def _register_knowledge_write(server: FastMCP, config: McpRuntimeConfig) -> None
         )
 
 
-def _register_knowledge_diff(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_knowledge_diff(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """The comparison operation, which infers no semantic label."""
 
     @server.tool()
@@ -205,7 +205,7 @@ def _register_knowledge_diff(server: FastMCP, config: McpRuntimeConfig) -> None:
         )
 
 
-def _register_knowledge_integrity_check(server: FastMCP) -> None:
+def _register_knowledge_integrity_check(server: MCPServer[Any]) -> None:
     """The validator's report and the leaf's worklist."""
 
     @server.tool()

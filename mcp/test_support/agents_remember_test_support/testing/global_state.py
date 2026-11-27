@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import subprocess
 import sys
 import threading
@@ -90,20 +89,6 @@ def _finish_quality_runs(module: ModuleType, attribute: str) -> None:
     wait_until(finished, "memory-quality module workers completed before reset")
     with module._lock:
         getattr(module, attribute).clear()
-
-
-def _reset_compact_content(module: ModuleType, attribute: str) -> None:
-    if getattr(module, attribute):
-        wrapper = module._fm._convert_to_content
-        module._fm._convert_to_content = inspect.getclosurevars(wrapper).nonlocals["_orig"]
-        setattr(module, attribute, False)
-
-
-def _reset_extension(module: ModuleType, attribute: str) -> None:
-    if getattr(module, attribute):
-        wrapper = module.ServerSession.__init__
-        module.ServerSession.__init__ = inspect.getclosurevars(wrapper).nonlocals["original"]
-        setattr(module, attribute, False)
 
 
 def _reset_sweep_cursor(module: ModuleType, attribute: str) -> None:
@@ -288,33 +273,6 @@ PROCESS_MUTABLE_STATES = (
         "kernel.primitives.runtime_config",
         "_LEGACY_GATE_DELEGATION_WARNED",
         "Every test module must observe its own legacy delegation warning.",
-    ),
-    _row(
-        "mcp.compact_content",
-        "_installed",
-        "Undo the installed converter together with its installation guard.",
-        _reset_compact_content,
-    ),
-    _row(
-        "mcp.registration.capsule_serving",
-        "_DECLARED",
-        "Forget declarations belonging to the module's own server objects.",
-    ),
-    _row(
-        "mcp.registration.capsule_serving",
-        "_REGISTERED",
-        "Forget registrations belonging to the module's own server objects.",
-    ),
-    _row(
-        "mcp.registration.skills_extension",
-        "_DISPATCH_INSTALLED",
-        "Forget dispatchers belonging to the module's own server objects.",
-    ),
-    _row(
-        "mcp.registration.skills_extension",
-        "_INSTALLED",
-        "Undo the session initializer together with its installation guard.",
-        _reset_extension,
     ),
     _row(
         "memory.conversion.base",

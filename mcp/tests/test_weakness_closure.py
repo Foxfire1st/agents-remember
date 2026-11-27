@@ -16,7 +16,7 @@ from agents_remember.memory.knowledge_index import KnowledgeIndexCache, director
 from agents_remember.memory_quality.knowledge_validator.parsed import parse_tree
 from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTree
 from knowledge_writer_test_support import World, canonical, commit_all, git, tree_bytes
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from test_mik_r118_r124_marks import (
     WRITER_LEAF,
     _registered_call,
@@ -31,7 +31,7 @@ _UNAVAILABLE = "The closing code commit is unavailable: "
 
 
 @pytest.fixture
-def case(tmp_path: Path) -> tuple[World, FastMCP]:
+def case(tmp_path: Path) -> tuple[World, MCPServer]:
     world = _writer_world(tmp_path)
     (world.task_root / "knowledge-worklist.json").write_text(
         json.dumps({"items": []}), encoding="utf-8"
@@ -41,15 +41,15 @@ def case(tmp_path: Path) -> tuple[World, FastMCP]:
     return world, server
 
 
-def _call(server: FastMCP, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+def _call(server: MCPServer, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     result = anyio.run(_registered_call, server, name, arguments)
-    assert not result.isError, result.content
-    assert result.structuredContent is not None, result.content
-    return result.structuredContent
+    assert not result.is_error, result.content
+    assert result.structured_content is not None, result.content
+    return result.structured_content
 
 
 def _submit(
-    world: World, server: FastMCP, records: list[dict[str, Any]], *, apply: bool = True
+    world: World, server: MCPServer, records: list[dict[str, Any]], *, apply: bool = True
 ) -> dict[str, Any]:
     return _call(
         server,
@@ -88,7 +88,7 @@ def _snapshot(world: World) -> tuple[Any, ...]:
     )
 
 
-def _read_closures(world: World, server: FastMCP) -> list[dict[str, Any]]:
+def _read_closures(world: World, server: MCPServer) -> list[dict[str, Any]]:
     before = _snapshot(world)
     arguments = {
         "memoryRoot": world.memory.as_posix(),
@@ -109,7 +109,7 @@ def _read_closures(world: World, server: FastMCP) -> list[dict[str, Any]]:
     return [weaknesses["rows"][0]["closed"], record["facet"]["closed"]]
 
 
-def _assert_closed(world: World, server: FastMCP, expected: dict[str, Any]) -> None:
+def _assert_closed(world: World, server: MCPServer, expected: dict[str, Any]) -> None:
     assert _read_closures(world, server) == [expected, expected]
 
 

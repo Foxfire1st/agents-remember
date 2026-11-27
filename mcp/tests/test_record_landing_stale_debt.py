@@ -46,10 +46,11 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
-from mcp.shared.memory import create_connected_server_and_client_session
 from mcp.types import TextContent
 from test_knowledge_closeout_gate import ADMITTED, anchor_at, commit, invariant, sidecar
 from test_record_landing import _commit_on, _fixture, _synced
+
+from mcp import Client
 
 STALE = "knowledge-stale-at-landing"
 HEADER = (
@@ -397,7 +398,7 @@ async def _record_tool(
 ) -> dict[str, object]:
     config = load_config(contract.code_repo_path.parent / "settings.json")
     server = create_server(config)
-    async with create_connected_server_and_client_session(server._mcp_server) as client:
+    async with Client(server, mode="legacy") as client:
         result = await client.call_tool(
             "worktree_record_landing",
             {
@@ -407,7 +408,7 @@ async def _record_tool(
                 "dry_run": dry_run,
             },
         )
-    assert result.isError is False, result
+    assert result.is_error is False, result
     text = next(block.text for block in result.content if isinstance(block, TextContent))
     return json.loads(text)
 

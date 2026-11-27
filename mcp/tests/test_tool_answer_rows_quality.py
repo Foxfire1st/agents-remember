@@ -208,14 +208,14 @@ class QualityProductionTests(unittest.TestCase):
             Path(git(memory, "rev-parse", "--git-path", "info/exclude")).write_text(
                 "overview.index.json\n"
             )
-            server = register_memory_tools.__globals__["FastMCP"]("quality-proof")
+            server = register_memory_tools.__globals__["MCPServer"]("quality-proof")
             register_memory_tools(server, scoped)
 
             def call(request):
                 arguments = {"request": request}
                 with tool_call_context(_TOOL, arguments, config=scoped):
                     result = asyncio.run(server.call_tool(_TOOL, arguments))
-                return result[1]
+                return result.structured_content
 
             with patch(
                 "agents_remember.worktrees.integration.configured_contract_authority.load_config",

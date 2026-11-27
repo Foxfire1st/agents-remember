@@ -23,7 +23,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.recorded_reads import record_read, recorded_reads
 from agents_remember.mcp.registration import role_agents
 from agents_remember.mcp.registration.memory import register_memory_tools
-from agents_remember.mcp.server import AgentsRememberMCP, _complete_fastmcp_settings
+from agents_remember.mcp.server import AgentsRememberMCP
 from agents_remember.models.role_agents import RoleStartCall, RoleStartSetCall
 from agents_remember.observer.tool_events import call_target_role
 from agents_remember.serving import heap_diag
@@ -34,11 +34,12 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
     LifecycleOperationStore,
 )
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
-from mcp.server.fastmcp.exceptions import ToolError
-from mcp.shared.memory import create_connected_server_and_client_session
-from mcp.types import ToolAnnotations
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult, ToolAnnotations
 from test_stored_operation_record_seat_fields import _integrate_record
 from test_tool_answer_rows_quality import _scoped_pair
+
+from mcp import Client
 
 
 class _ObservedWriteLock(asyncio.Lock):
@@ -55,7 +56,6 @@ class _ObservedWriteLock(asyncio.Lock):
 
 
 def _server() -> AgentsRememberMCP:
-    _complete_fastmcp_settings()
     return AgentsRememberMCP("dispatch test")
 
 
@@ -73,17 +73,17 @@ class DispatchConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             register_memory_tools(server, config)
             entered, release = threading.Event(), threading.Event()
 
-            @server.tool(annotations=ToolAnnotations(readOnlyHint=False))
+            @server.tool(annotations=ToolAnnotations(read_only_hint=False))
             def long_call() -> dict[str, Any]:
                 entered.set()
                 assert release.wait(HANG_GUARD_SECONDS), "the poll never released the long call"
                 return {"ok": True}
 
-            @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+            @server.tool(annotations=ToolAnnotations(read_only_hint=True))
             def read_call() -> dict[str, Any]:
                 return {"ok": True, "answer": "read"}
 
-            async with create_connected_server_and_client_session(server._mcp_server) as client:
+            async with Client(server, mode="legacy") as client:
                 started = time.perf_counter()
                 long = asyncio.create_task(client.call_tool("long_call", {}))
                 try:
@@ -109,8 +109,8 @@ class DispatchConcurrencyTests(unittest.IsolatedAsyncioTestCase):
                     )
                     read_seconds = time.perf_counter() - before
                     self.assertFalse(long.done(), "the poll waited for the long call")
-                    self.assertFalse(poll.isError)
-                    self.assertFalse(read.isError)
+                    self.assertFalse(poll.is_error)
+                    self.assertFalse(read.is_error)
                 finally:
                     release.set()
                     await long
@@ -126,7 +126,7 @@ class DispatchConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         local = contextvars.ContextVar("dispatch-test", default="missing")
         seen: list[tuple[str, str]] = []
 
-        @server.tool(annotations=ToolAnnotations(readOnlyHint=False))
+        @server.tool(annotations=ToolAnnotations(read_only_hint=False))
         def writer(label: str) -> dict[str, str]:
             call = current_tool_call()
             seen.append((local.get(), call.tool_name if call is not None else "missing"))
@@ -168,23 +168,23 @@ class DispatchConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         entered, release = threading.Event(), threading.Event()
         seen: list[bool] = []
 
-        @server.tool(annotations=ToolAnnotations(readOnlyHint=False))
+        @server.tool(annotations=ToolAnnotations(read_only_hint=False))
         def writer() -> dict[str, bool]:
             entered.set()
             assert release.wait(HANG_GUARD_SECONDS)
             return {"ok": True}
 
-        @server.tool(annotations=ToolAnnotations(readOnlyHint=False))
+        @server.tool(annotations=ToolAnnotations(read_only_hint=False))
         def citation_fix(dry_run: bool = False, mode: str = "sync") -> dict[str, bool]:
             seen.append(dry_run)
             return {"ok": True}
 
-        @server.tool(annotations=ToolAnnotations(readOnlyHint=False))
+        @server.tool(annotations=ToolAnnotations(read_only_hint=False))
         def knowledge_diff(afterRevision: str) -> dict[str, bool]:
             seen.append(False)  # This operation still writes its result report.
             return {"ok": True}
 
-        @server.tool(annotations=ToolAnnotations(readOnlyHint=False))
+        @server.tool(annotations=ToolAnnotations(read_only_hint=False))
         def context_packet(include_freshness: bool = False) -> dict[str, bool]:
             return {"ok": True}
 
@@ -228,7 +228,7 @@ class DispatchConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             together = threading.Barrier(2)
             cancellations = {label: threading.Event() for label in ("one", "two")}
 
-            @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+            @server.tool(annotations=ToolAnnotations(read_only_hint=True))
             def knowledge_read(label: str) -> dict[str, Any]:
                 together.wait(HANG_GUARD_SECONDS)
                 call = current_tool_call()
@@ -264,7 +264,10 @@ class DispatchConcurrencyTests(unittest.IsolatedAsyncioTestCase):
                         git_command.memo_git_object_lookups(),
                         git_command.cancellable_git_commands(cancellations[label]),
                     ):
-                        _, answer = await server.call_tool("knowledge_read", {"label": label})
+                        result = await server.call_tool("knowledge_read", {"label": label})
+                        assert isinstance(result, CallToolResult)
+                        assert result.structured_content is not None
+                        answer = result.structured_content
                         self.assertEqual(reads, {label: label})
                         self.assertEqual(
                             git_command._BLOB_READS.get(), {(label, label): label.encode()}
@@ -293,14 +296,14 @@ class DispatchConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         entered, release = asyncio.Event(), asyncio.Event()
         event_loop = asyncio.get_running_loop()
 
-        @server.tool(annotations=ToolAnnotations(readOnlyHint=False))
+        @server.tool(annotations=ToolAnnotations(read_only_hint=False))
         async def waiting_writer() -> dict[str, bool]:
             self.assertIs(asyncio.get_running_loop(), event_loop)
             entered.set()
             await release.wait()
             return {"ok": True}
 
-        @server.tool(annotations=ToolAnnotations(readOnlyHint=False))
+        @server.tool(annotations=ToolAnnotations(read_only_hint=False))
         async def answering_writer() -> dict[str, bool]:
             release.set()
             return {"ok": True}
@@ -346,8 +349,12 @@ class ToolCallTrimTests(unittest.IsolatedAsyncioTestCase):
             patch.object(heap_diag, "trim_malloc", side_effect=trim),
             patch("agents_remember.mcp.server._log_raised_tool_call") as log_error,
         ):
-            self.assertEqual((await server.call_tool("succeeds", {}))[1], {"ok": True})
-            self.assertEqual((await server.call_tool("refuses", {}))[1], {"ok": False})
+            succeeded = await server.call_tool("succeeds", {})
+            assert isinstance(succeeded, CallToolResult)
+            self.assertEqual(succeeded.structured_content, {"ok": True})
+            refused = await server.call_tool("refuses", {})
+            assert isinstance(refused, CallToolResult)
+            self.assertEqual(refused.structured_content, {"ok": False})
             with self.assertRaisesRegex(ToolError, "handler failed") as caught:
                 await server.call_tool("raises", {})
 
@@ -375,7 +382,9 @@ class ToolCallTrimTests(unittest.IsolatedAsyncioTestCase):
             patch("agents_remember.mcp.server._log_raised_tool_call") as log_error,
         ):
             with patch.dict(heap_diag._malloc_trim, unresolved):
-                self.assertEqual((await server.call_tool("succeeds", {}))[1], {"ok": True})
+                succeeded = await server.call_tool("succeeds", {})
+                assert isinstance(succeeded, CallToolResult)
+                self.assertEqual(succeeded.structured_content, {"ok": True})
             with (
                 patch.dict(heap_diag._malloc_trim, unresolved),
                 self.assertRaisesRegex(ToolError, "handler failed") as caught,
@@ -412,7 +421,8 @@ class ToolCallTrimTests(unittest.IsolatedAsyncioTestCase):
                 answer = await asyncio.wait_for(
                     server.call_tool("responds", {}), HANG_GUARD_SECONDS
                 )
-                self.assertEqual(answer[1], {"ok": True})
+                assert isinstance(answer, CallToolResult)
+                self.assertEqual(answer.structured_content, {"ok": True})
                 first.cancel()
                 await asyncio.sleep(0)
                 first.cancel()
@@ -496,7 +506,8 @@ def test_cancelled_role_start_drains_before_clearing_journal_and_trimming(
                 response = await asyncio.wait_for(
                     server.call_tool("responds", {}), HANG_GUARD_SECONDS
                 )
-                assert response[1] == {"ok": True}
+                assert isinstance(response, CallToolResult)
+                assert response.structured_content == {"ok": True}
                 assert trims == [(False, False, True)]
                 pending.cancel()
                 await asyncio.sleep(0)

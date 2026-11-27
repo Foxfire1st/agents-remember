@@ -74,10 +74,9 @@ def test_common_mcp_boundary_shares_sync_handler_context_and_discards_between_ca
 ) -> None:
     calls = count_parses(monkeypatch)
     monkeypatch.setattr(mcp_server.server_startup, "start_after_discovery", lambda _config: None)
-    mcp_server._complete_fastmcp_settings()
     server = mcp_server.AgentsRememberMCP("definition boundary test")
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     def locate() -> int:
         _locate_anchors_twice("nativeAnchorProbe")
         return twice()
@@ -103,10 +102,9 @@ def test_native_journal_reuse_owns_copies_and_reobserves_each_file_witness(
     warm = store.read()
     assert warm is not None
     monkeypatch.setattr(mcp_server.server_startup, "start_after_discovery", lambda _config: None)
-    mcp_server._complete_fastmcp_settings()
     server = mcp_server.AgentsRememberMCP("journal boundary test")
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     def observe(replace_journal: bool = False) -> int:
         first = store.read()
         assert first is not None and first.recordRevision == warm.recordRevision

@@ -8,9 +8,10 @@ import json
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from unittest.mock import patch
 
+import anyio
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
@@ -115,17 +116,19 @@ def test_probe_collects_inventory_in_the_identity_session():
 
         async def call_tool(self, name, arguments):
             calls.append((name, arguments))
-            return CallToolResult(content=[], structuredContent=info)
+            return CallToolResult(content=[], structured_content=info)
 
-        async def list_tools(self, *, cursor):
+        async def list_tools(self, params=None):
+            cursor = params.cursor if params is not None else None
             calls.append(("list_tools", cursor))
             return ListToolsResult(
                 tools=[
                     Tool(
-                        name="first" if cursor is None else "second", inputSchema={"type": "object"}
+                        name="first" if cursor is None else "second",
+                        input_schema={"type": "object"},
                     )
                 ],
-                nextCursor="page-2" if cursor is None else None,
+                next_cursor="page-2" if cursor is None else None,
             )
 
     with (
@@ -163,10 +166,10 @@ def test_probe_rejects_repeating_inventory_cursor():
             pass
 
         async def call_tool(self, *_args):
-            return CallToolResult(content=[], structuredContent={"servingBuild": {}})
+            return CallToolResult(content=[], structured_content={"servingBuild": {}})
 
         async def list_tools(self, **_kwargs):
-            return ListToolsResult(tools=[], nextCursor="same")
+            return ListToolsResult(tools=[], next_cursor="same")
 
     with (
         patch("agent_evals.adapters.stdio_probe.stdio_client", streams),
@@ -181,28 +184,29 @@ def test_probe_real_sdk_schema_cache_avoids_duplicate_discovery_and_still_valida
     monkeypatch, valid
 ):
     """Run installed SDK call/list methods against synthetic, model-free wire answers."""
-    sdk = ClientSession(cast(Any, None), cast(Any, None))
+    write_stream, read_stream = anyio.create_memory_object_stream[Any](0)
+    sdk = ClientSession(read_stream, write_stream)
     calls = []
 
     async def send_request(request, result_type, **_):
         if result_type is ListToolsResult:
-            cursor = request.root.params.cursor if request.root.params else None
+            cursor = request.params.cursor if request.params else None
             calls.append(("list_tools", cursor))
             return ListToolsResult(
                 tools=[
-                    Tool(name="other", inputSchema={})
+                    Tool(name="other", input_schema={})
                     if cursor is None
                     else Tool(
                         name="server_info",
-                        inputSchema={},
-                        outputSchema={"type": "object", "properties": {"ok": {"type": "boolean"}}},
+                        input_schema={},
+                        output_schema={"type": "object", "properties": {"ok": {"type": "boolean"}}},
                     )
                 ],
-                nextCursor="second" if cursor is None else None,
+                next_cursor="second" if cursor is None else None,
             )
-        assert result_type is CallToolResult
+        assert request.method == "tools/call"
         calls.append(("server_info", None))
-        return CallToolResult(content=[], structuredContent={"ok": True if valid else "wrong"})
+        return CallToolResult(content=[], structured_content={"ok": True if valid else "wrong"})
 
     async def initialize():
         pass
@@ -219,13 +223,17 @@ def test_probe_real_sdk_schema_cache_avoids_duplicate_discovery_and_still_valida
     monkeypatch.setattr(sdk, "initialize", initialize)
     monkeypatch.setattr(stdio_probe, "ClientSession", session)
     monkeypatch.setattr(stdio_probe, "stdio_client", streams)
-    if valid:
-        result = probe_tool_server({"command": "/fixture/python", "args": [], "env": {}})
-        assert result["evaluationToolInventory"]["sameInitializedSession"]
-    else:
-        with pytest.raises(RuntimeError, match="Invalid structured content"):
-            probe_tool_server({"command": "/fixture/python", "args": [], "env": {}})
-    assert calls == [("list_tools", None), ("list_tools", "second"), ("server_info", None)]
+    try:
+        if valid:
+            result = probe_tool_server({"command": "/fixture/python", "args": [], "env": {}})
+            assert result["evaluationToolInventory"]["sameInitializedSession"]
+        else:
+            with pytest.raises(RuntimeError, match="Invalid structured content"):
+                probe_tool_server({"command": "/fixture/python", "args": [], "env": {}})
+        assert calls == [("list_tools", None), ("list_tools", "second"), ("server_info", None)]
+    finally:
+        write_stream.close()
+        read_stream.close()
 
 
 def _timed_probe_boundary(monkeypatch, blocked=None, *, delay=0.0):
@@ -258,11 +266,12 @@ def _timed_probe_boundary(monkeypatch, blocked=None, *, delay=0.0):
 
         async def call_tool(self, *_):
             await step("server_info")
-            return CallToolResult(content=[], structuredContent={"servingBuild": {}})
+            return CallToolResult(content=[], structured_content={"servingBuild": {}})
 
-        async def list_tools(self, *, cursor):
+        async def list_tools(self, params=None):
+            cursor = params.cursor if params is not None else None
             await step(f"list_tools page {1 if cursor is None else 2}")
-            return ListToolsResult(tools=[], nextCursor="second" if cursor is None else None)
+            return ListToolsResult(tools=[], next_cursor="second" if cursor is None else None)
 
     monkeypatch.setattr(stdio_probe, "stdio_client", streams)
     monkeypatch.setattr(stdio_probe, "ClientSession", lambda *_: Session())

@@ -317,7 +317,7 @@ rank = 22
 path = "mcp/"
 present = true
 charter = """
-The MCP server adapter: tool registration, the FastMCP wiring, report shaping. It converts
+The MCP server adapter: tool registration, the MCPServer wiring, report shaping. It converts
 an application-layer result into a protocol response and does nothing else.
 
 Nothing below this rank may import it. That it is imported from below today is the single

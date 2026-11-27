@@ -23,9 +23,9 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest import mock
 
-import httpx
 import watchfiles.main
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, wait_until
 from fastapi.testclient import TestClient
@@ -231,7 +231,7 @@ class StateEtagTests(unittest.TestCase):
             )
         )
 
-    def _get_until(self, client: TestClient, *, etag: str, want_status: int) -> httpx.Response:
+    def _get_until(self, client: TestClient, *, etag: str, want_status: int) -> Any:
         """Poll /api/state with If-None-Match until the tick loop publishes ``want_status``."""
         deadline = time.monotonic() + HANG_GUARD_SECONDS
         while True:

@@ -47,6 +47,7 @@ from agents_remember.serving.paseo.provider_limit_suppressions import (
     provider_limit_suppressions_path,
     read_provider_limit_suppressions,
 )
+from mcp.types import CallToolResult
 from paseo_runtime_test_support import write_runtime_block
 
 NOW = datetime(2026, 11, 27, 10, 0, tzinfo=UTC)
@@ -667,8 +668,10 @@ def test_mcp_server_hook_runs_off_event_loop_suppresses_and_contains_io_errors(
     async def invoke() -> dict[str, Any]:
         nonlocal loop_thread_id
         loop_thread_id = threading.get_ident()
-        _, payload = await server.call_tool("server_info", {})
-        return payload
+        result = await server.call_tool("server_info", {})
+        assert isinstance(result, CallToolResult)
+        assert result.structured_content is not None
+        return result.structured_content
 
     payload = anyio.run(invoke)
     assert payload["ok"] is True
@@ -703,7 +706,10 @@ def test_mcp_server_unbound_and_malformed_bindings_snapshot_none_and_skip_hook(
         "suppress_provider_limits_for_live_tool_call",
         lambda _cfg, agent_id, **_kw: called.append(agent_id),
     )
-    _, payload = anyio.run(unbound.call_tool, "server_info", {})
+    result = anyio.run(unbound.call_tool, "server_info", {})
+    assert isinstance(result, CallToolResult)
+    assert result.structured_content is not None
+    payload = result.structured_content
     assert payload["ok"] is True
     assert called == []
 

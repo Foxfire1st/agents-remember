@@ -72,26 +72,8 @@ def _owned_binding(module: ModuleType, state: ProcessMutableState) -> Any:
 
 
 def _owned_plain(module: ModuleType, state: ProcessMutableState) -> Any:
-    value = True
-
-    def original() -> None:
-        pass
-
-    if state.reset is not None and state.reset.__name__ == "_reset_compact_content":
-        _orig = original
-
-        def wrapper() -> None:
-            _orig()
-
-        module.__dict__["_fm"] = SimpleNamespace(_convert_to_content=wrapper)
-    else:
-
-        def wrapper() -> None:
-            original()
-
-        module.__dict__["ServerSession"] = SimpleNamespace(__init__=wrapper)
-    module.__dict__["original_callable"] = original
-    return value
+    del module, state
+    return object()
 
 
 def _owned_watch(module: ModuleType, state: ProcessMutableState) -> Any:
@@ -139,18 +121,6 @@ def _assert_cleanup(
         previous[0].terminate.assert_called_once_with()
         previous[0].wait.assert_called_once()
         test.assertEqual(value, [])
-    elif action == "_reset_compact_content":
-        test.assertIs(value, False)
-        test.assertIs(
-            sys.modules[state.module]._fm._convert_to_content,
-            module.original_callable,
-        )
-    elif action == "_reset_extension":
-        test.assertIs(value, False)
-        test.assertIs(
-            sys.modules[state.module].ServerSession.__init__,
-            module.original_callable,
-        )
     elif action == "_reset_background_pool":
         previous.shutdown.assert_called_once_with(wait=True)
         test.assertIsNone(sys.modules[state.module]._BackgroundPool.executor)

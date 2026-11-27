@@ -122,8 +122,9 @@ from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from knowledge_index_test_support import write_document
 from knowledge_validator_test_support import encode, tree
 from knowledge_writer_test_support import BASE_FAMILY, BASE_INVARIANT, build_world, commit_all, git
-from mcp.shared.memory import create_connected_server_and_client_session
 from pydantic import ValidationError
+
+from mcp import Client
 
 ANCHOR = {
     "path": "cli/tool.py",
@@ -1812,7 +1813,7 @@ def _registered_server(world):
 
 
 async def _registered_call(server, name: str, arguments: dict[str, Any]):
-    async with create_connected_server_and_client_session(server._mcp_server) as client:
+    async with Client(server, mode="legacy") as client:
         return await client.call_tool(name, arguments)
 
 
@@ -1849,8 +1850,8 @@ def test_the_registered_writer_answers_a_planned_write_without_a_model_refusal(t
             "handoff": {"records": [], "history": []},
         },
     )
-    assert not result.isError, _call_message(result)
-    answer = result.structuredContent
+    assert not result.is_error, _call_message(result)
+    answer = result.structured_content
     assert answer is not None
     assert answer["ok"] is True, answer
     assert answer["state"] == "planned", answer

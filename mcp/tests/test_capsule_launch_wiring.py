@@ -40,7 +40,7 @@ from agents_remember.application.task_projection import parse_task_reference
 from agents_remember.errors import TaskProjectionSourceError
 from agents_remember.kernel.coordination_context.models import EnclosureSelector
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
-from agents_remember.mcp.registration.capsule_serving import register_capsule_and_skill_tools
+from agents_remember.mcp.registration.capsule_serving import build_skills_extension
 from agents_remember.models.role_capsules.types import CapsuleDigest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.launch_capsule import LaunchCapsuleMode, LaunchCapsuleRequest
@@ -48,7 +48,7 @@ from agents_remember.tasks import (
     TaskDocument,
     write_task_doc,
 )
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from test_worktree_support import write_current_task_lineage
 
 
@@ -151,7 +151,7 @@ def _scratch_world(tmp_path: Path) -> tuple[McpRuntimeConfig, Path]:
 
 
 def _tool_payload(result: object) -> dict[str, object]:
-    """The JSON body of a FastMCP ``call_tool`` result, whichever shape the SDK returns it in."""
+    """The JSON body of a MCPServer ``call_tool`` result, whichever shape the SDK returns it in."""
 
     if isinstance(result, dict):
         return cast(dict[str, object], result)
@@ -389,8 +389,7 @@ async def test_the_registered_capsule_operation_resolves_a_repository_through_it
     """
 
     tmp_path, config, _repo = world
-    server = FastMCP("l15-d13")
-    register_capsule_and_skill_tools(server, config)
+    server = MCPServer("l15-d13", extensions=[build_skills_extension()])
 
     tools = await server.list_tools()
     assert all(tool.name != "role_capsule_compile" for tool in tools), [tool.name for tool in tools]

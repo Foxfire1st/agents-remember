@@ -3,7 +3,7 @@
 from importlib import import_module
 from typing import Any, Literal
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.memory import (
@@ -15,14 +15,14 @@ from agents_remember.models.memory import (
 from .lazy import tools
 
 
-def register_memory_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def register_memory_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """Register the memory tools, split by what they do to the memory root."""
     _register_memory_health_tools(server, config)
     _register_memory_baseline_tools(server, config)
     _register_memory_carryover_tools(server, config)
 
 
-def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_memory_health_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """Read the memory root's health: drift, quality findings, route indexes.
 
     Each takes the same optional `contract_path` the worktree verbs take. Omitted, it means
@@ -105,7 +105,7 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         )
 
 
-def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_memory_baseline_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """Stand a memory root up and give it its first attributed baseline."""
 
     @server.tool()
@@ -149,7 +149,7 @@ def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -
         )
 
 
-def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_memory_carryover_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """Plan and apply landed onboarding into an ordinary recovery leaf."""
 
     @server.tool()

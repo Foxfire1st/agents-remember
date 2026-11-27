@@ -23,8 +23,8 @@ from agents_remember.benchmarks.runner_modules.models import (
 )
 from agents_remember.benchmarks.runner_modules.workspace import prepare_case
 from agents_remember.kernel.primitives.runtime_config import config_from_mapping
-from agents_remember.mcp.registration.capsule_serving import register_capsule_and_skill_tools
-from mcp.server.fastmcp import FastMCP
+from agents_remember.mcp.registration.capsule_serving import build_skills_extension
+from mcp.server.mcpserver import MCPServer
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 PROFILE = REPOSITORY_ROOT / "mcp/certification-profile-v1.json"
@@ -143,14 +143,13 @@ def test_benchmark_preparation_discovers_package_skills_without_installing_copie
     config = config_from_mapping(settings, settings_path)
     assert config.repositories["fixture"].path == memory / "repos/fixture"
     assert config.coordination_root == memory / "ar-coordination"
-    server = FastMCP("benchmark package resources")
-    register_capsule_and_skill_tools(server, config)
+    server = MCPServer("benchmark package resources", extensions=[build_skills_extension()])
 
     async def read_resources() -> None:
         listed = {str(resource.uri) for resource in await server.list_resources()}
         assert "skill://index.json" in listed
         index_contents = list(await server.read_resource("skill://index.json"))
-        index = json.loads(str(index_contents[0].content))
+        index = json.loads(str(getattr(index_contents[0], "content", "")))
         assert "l-01-agent-lifecycles" in {row["name"] for row in index["skills"]}
         for relative in (
             "l-01-agent-lifecycles/SKILL.md",
@@ -162,6 +161,6 @@ def test_benchmark_preparation_discovers_package_skills_without_installing_copie
             packaged = (
                 REPOSITORY_ROOT / "mcp/src/agents_remember/package_data/runtime/skills" / relative
             )
-            assert contents[0].content == packaged.read_text(encoding="utf-8")
+            assert getattr(contents[0], "content", None) == packaged.read_text(encoding="utf-8")
 
     asyncio.run(read_resources())

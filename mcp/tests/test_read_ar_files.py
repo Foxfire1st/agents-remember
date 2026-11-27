@@ -62,7 +62,7 @@ from agents_remember.models.read_files import NamedFile
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from knowledge_index_test_support import write_review_tree
 from knowledge_writer_test_support import CODE_FILE, build_world, canonical, commit_all
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from read_scope_test_support import (
     BATCH_PATH,
     build_read_scope_fixture,
@@ -1067,10 +1067,10 @@ class RegisteredNamingTests(unittest.TestCase):
                 )
 
     def test_removed_refresh_is_absent_from_the_advertised_schema(self) -> None:
-        server: Any = FastMCP("removed-argument-schema")
+        server: Any = MCPServer("removed-argument-schema")
         for register_tools in TOOL_REGISTRARS:
             register_tools(server, None)  # type: ignore[arg-type]
-        schemas = {tool.name: tool.inputSchema or {} for tool in asyncio.run(server.list_tools())}
+        schemas = {tool.name: tool.input_schema or {} for tool in asyncio.run(server.list_tools())}
         properties = schemas["read_ar_files"].get("properties", {})
         self.assertNotIn("refresh", properties, schemas["read_ar_files"])
         self.assertIn("files", properties, schemas["read_ar_files"])

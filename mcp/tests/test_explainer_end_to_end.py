@@ -36,7 +36,7 @@ from agents_remember_test_support.testing.review_git_trees import (
 )
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 pytestmark = pytest.mark.integration
 
@@ -120,7 +120,7 @@ def _world(tmp_path: Path) -> Any:
     return world
 
 
-def _tool_answer(server: FastMCP, tool: str, arguments: dict[str, Any]) -> Any:
+def _tool_answer(server: MCPServer, tool: str, arguments: dict[str, Any]) -> Any:
     """One mounted tool call, decoded to the JSON body the tool answered."""
 
     result = asyncio.run(server.call_tool(tool, dict(arguments)))
@@ -139,7 +139,7 @@ def _record_grade(world: Any, agent_id: str, binding_label: str) -> dict[str, An
     """Step 3 of the chain: the seat's own real tool server grades one bound block."""
 
     workspace = leaf_workspace(world.config, REPOSITORY, MASTER, LEAF)
-    server = FastMCP("review-explainer")
+    server = MCPServer("review-explainer")
     register_bound_explainer_tools(
         server,
         workspace=workspace,

@@ -52,7 +52,7 @@ from agents_remember.serving.paseo.paseo_plugin_files import read_role_agents
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from fastapi.responses import JSONResponse
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from paseo_role_tools_test_support import (
     ARCHIVED_AT,
     OTHER_SPRINT,
@@ -772,7 +772,7 @@ class RoleStartTests(RoleToolsTestCase):
             self.assertIn("nextAction says to call again with the same arguments", described)
 
     async def tool_descriptions(self) -> dict[str, str]:
-        server = FastMCP("role-tools-descriptions")
+        server = MCPServer("role-tools-descriptions")
         register_role_agent_tools(server, self.config)
         return {
             tool.name: " ".join(line.strip() for line in (tool.description or "").split("\n"))

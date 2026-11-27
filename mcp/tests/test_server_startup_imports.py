@@ -42,6 +42,7 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.models.tools.role_tool_scope import tools_for_role
 from agents_remember.serving.build_info import process_serving_build, runtime_source_digest
+from mcp.types import CallToolResult
 
 REPO = "agents-remember"
 TASK = "260928_import-guard"
@@ -472,17 +473,23 @@ def test_first_call_preserves_immutable_boot_identity_and_an_explainer_seat_call
         "agents_remember.serving.build_info.runtime_source_digest",
         lambda _root: "sha256:" + "f" * 64,
     )
-    _, first_info = anyio.run(server.call_tool, "server_info", {})
+    first_result = anyio.run(server.call_tool, "server_info", {})
+    assert isinstance(first_result, CallToolResult)
+    assert first_result.structured_content is not None
+    first_info = first_result.structured_content
     assert first_info["ok"] is True
     assert first_info["servingBuild"]["sourceDigest"] == boot_identity.sourceDigest
     assert first_info["servingBuild"]["bootedAt"] == boot_identity.bootedAt
 
     # Removed read_ar_files.refresh argument still reaches its boundary refusal on first call.
-    _, refresh_refusal = anyio.run(
+    refresh_result = anyio.run(
         server.call_tool,
         "read_ar_files",
         {"repo_id": REPO, "files": ["README.md"], "refresh": True},
     )
+    assert isinstance(refresh_result, CallToolResult)
+    assert refresh_result.structured_content is not None
+    refresh_refusal = refresh_result.structured_content
     assert refresh_refusal["state"] == "refused"
     assert refresh_refusal["refusalCode"] == "argument-removed"
 
@@ -494,6 +501,9 @@ def test_first_call_preserves_immutable_boot_identity_and_an_explainer_seat_call
     exp_tools = [tool.name for tool in anyio.run(exp_server.list_tools)]
     assert len(exp_tools) == EXPLAINER_TOOLS
     assert "server_info" in exp_tools and set(EXPLAINER_SURFACE) <= set(exp_tools)
-    _, exp_info = anyio.run(exp_server.call_tool, "server_info", {})
+    exp_result = anyio.run(exp_server.call_tool, "server_info", {})
+    assert isinstance(exp_result, CallToolResult)
+    assert exp_result.structured_content is not None
+    exp_info = exp_result.structured_content
     assert exp_info["ok"] is True
     assert root.is_dir()

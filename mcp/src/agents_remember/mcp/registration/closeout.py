@@ -3,7 +3,7 @@
 from importlib import import_module
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from agents_remember.application.worktree_tool_requests import (
     CloseoutApproval,
@@ -25,7 +25,7 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from .lazy import tools
 
 
-def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def register_closeout_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """Register landing tools through cohesive bounded registration groups."""
     _register_direct_landing_tools(server, config)
     _register_closeout_command_tools(server, config)
@@ -33,7 +33,7 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     _register_reclamation_command_tools(server, config)
 
 
-def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_direct_landing_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     @server.tool()
     def direct_landing(
         contract_path: str,
@@ -74,7 +74,7 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         return tools.direct_execution_grant_payload(config, task_document_ref, action)
 
 
-def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_closeout_command_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     @server.tool()
     def worktree_closeout_preview(
         *,
@@ -115,7 +115,7 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         )
 
 
-def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_integration_command_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     @server.tool()
     def worktree_integrate(
         *,
@@ -201,7 +201,7 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         )
 
 
-def _register_reclamation_command_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_reclamation_command_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     @server.tool()
     def worktree_cleanup(*, contract_path: str, dry_run: bool = False) -> dict[str, Any]:
         """After integration, archive lifecycle evidence and remove worktrees, merged branches, reports, and enclosure. States: cleanup-completed, already-clean, would-cleanup, blocked. Docs: docs/reference/mcp-tools.md."""

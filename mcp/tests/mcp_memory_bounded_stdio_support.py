@@ -220,8 +220,8 @@ def _bind_server(info: Payload, process: _ServerProcess, fixture: Fixture, sourc
 
 
 def _wire_payload(result: CallToolResult) -> Payload:
-    if result.structuredContent is not None:
-        return _object(result.structuredContent, "MCP structured result")
+    if result.structured_content is not None:
+        return _object(result.structured_content, "MCP structured result")
     (content,) = result.content
     assert isinstance(content, TextContent), "Expected a JSON MCP text result"
     return _object(json.loads(content.text), "MCP text result")
@@ -276,8 +276,8 @@ class _CallCapture:
             "memory_kib": _memory_kib(self.process),
             "cgroup": _cgroup_reading(self.process.cgroup),
         }
-        receipt = {"event": "call-end", **identity, **reading, "tool_error": result.isError}
-        if result.isError:
+        receipt = {"event": "call-end", **identity, **reading, "tool_error": result.is_error}
+        if result.is_error:
             detail = result.model_dump(mode="json", by_alias=True, exclude_none=True)
             self.emit({**receipt, "ok": False, "tool_error_result": detail})
             raise AssertionError(f"The native {tool} call returned an MCP tool error")
