@@ -163,9 +163,7 @@ export interface RoleDocumentScope {
   taskDocumentRef?: TaskDocumentRef;
 }
 
-export interface RoleOptionsScope extends RoleDocumentScope {
-  agentId?: string;
-}
+export type RoleOptionsScope = RoleDocumentScope;
 
 export interface RoleLauncherOptions {
   catalogDiscovery?: CatalogDiscoveryState;
@@ -416,10 +414,7 @@ export function roleDocumentScope(selection: RoleLaunchSelection): RoleDocumentS
 }
 
 export function roleOptionsScope(selection: RoleLaunchSelection): RoleOptionsScope {
-  return {
-    ...roleDocumentScope(selection),
-    ...(selection.agentOverride?.agentId ? { agentId: selection.agentOverride.agentId } : {}),
-  };
+  return roleDocumentScope(selection);
 }
 
 export function launchSelectionComplete(selection: RoleLaunchSelection): boolean {
@@ -451,7 +446,7 @@ export function sameRoleDocumentScope(left: RoleDocumentScope, right: RoleDocume
 }
 
 export function sameRoleOptionsScope(left: RoleOptionsScope, right: RoleOptionsScope): boolean {
-  return sameRoleDocumentScope(left, right) && left.agentId === right.agentId;
+  return sameRoleDocumentScope(left, right);
 }
 
 export function sameRoleLaunchSelection(

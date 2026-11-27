@@ -791,7 +791,14 @@ message with `withdraw_held_message_id`, and its answer reports the withdrawal i
   `in-turn` or `permission` with `eventAt > recordedAt`) or via `agents-remember provider-limits
   suppress` (reversible with `unsuppress`) — and no other unsuppressed exhausted window remains
   for the seat's reports, the next eligible drain sends the held messages in order. Any other
-  exhausted account-wide window continues to hold the seat until its own reset.
+  exhausted account-wide window continues to hold the seat until its own reset. When the end of
+  the limit is known, the dashboard schedules those holds at reset independently of its ordinary
+  receipt sweep. When the recipient is ready at reset, the queued messages are due in the order
+  taken: within about 30 seconds while up to about 300 recipients wait, and for a larger backlog
+  at the host's measured rate of about 11 recipients a second. The reset scheduler delivers with
+  16 workers. The dashboard's queue of receipts that hold messages keeps up to 512 recent receipts
+  for 24 hours; an older receipt is not named by the queue, and the store remains the authority,
+  so a later walk can still reach it.
 
 Code `recipient-busy` is refused outright only when the recipient already holds twenty messages;
 that refusal names two ways on: wait for a delivery, or withdraw a waiting message. Every other

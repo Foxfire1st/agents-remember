@@ -17,7 +17,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 
 from agents_remember.application.master_architect_record import (
@@ -114,6 +114,7 @@ from agents_remember.observer.acp_providers import (
     read_acp_providers,
 )
 from agents_remember.serving.paseo.paseo_daemon_config import provider_denied_tools
+from agents_remember.serving.read_disconnect import read_while_connected
 from agents_remember.tasks.document_refs import TaskDocumentRefError
 
 _DISPATCH_LOCK = threading.Lock()
@@ -182,8 +183,10 @@ def _bind_frame_endpoint(config: McpRuntimeConfig):
 
 
 def _bind_options_endpoint(config: McpRuntimeConfig):
-    def endpoint(request: RoleLauncherOptionsRequest) -> JSONResponse:
-        return alias_response(request, _role_launch_options_endpoint(config, request))
+    async def endpoint(http_request: Request, body: RoleLauncherOptionsRequest) -> Response:
+        return await read_while_connected(
+            http_request, lambda: alias_response(body, _role_launch_options_endpoint(config, body))
+        )
 
     return endpoint
 

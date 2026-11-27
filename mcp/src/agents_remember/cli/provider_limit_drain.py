@@ -13,6 +13,10 @@ read; only then, and only for a stamped ``ended`` recipient, is one reading take
 
 from __future__ import annotations
 
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+
 from agents_remember.cli.paseo_status import read_agent
 from agents_remember.cli.provider_limit_hold import (
     PROVIDER_LIMIT_REASON,
@@ -30,6 +34,7 @@ from agents_remember.cli.role_held_messages import (
 )
 from agents_remember.cli.role_held_store import open_held_store
 from agents_remember.cli.role_launch_receipts import is_deferred_held_receipt
+from agents_remember.controlplane.held_reset_index import HeldResetIndex, ResetTarget
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.observer.host_activity import (
     HOST_ACTIVITY_FILE,
@@ -55,6 +60,17 @@ def pause_for_provider_limit(batch: _DrainBatch) -> None:
     limit = provider_limit_hold(batch.config, batch.agent_id)
     if limit is None:
         return
+    target = ResetTarget(
+        batch.agent_id,
+        batch.path,
+        Path(batch.folder),
+        datetime.fromisoformat(limit["limitedUntil"]),
+    )
+    try:
+        HeldResetIndex(batch.config.coordination_root).schedule(target)
+    except (sqlite3.Error, OSError, ValueError):
+        _release_claim(batch.ref, batch.claim)
+        raise
     stamp = ended_stamp(batch.config, batch.agent_id)
     if stamp is not None and claim_ended_stamp(batch, stamp):
         reading = read_agent(batch.config, batch.agent_id)

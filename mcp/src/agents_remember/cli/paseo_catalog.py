@@ -14,6 +14,10 @@ from agents_remember.cli.paseo_bridge import (
     BRIDGE_INVALID_REPLY,
     PaseoBridgeFailure,
     bridge_call,
+    launcher_daemon_configuration,
+    operation_role_profiles,
+    paseo_catalog_scope,
+    record_operation_daemon_config,
     require_bridge_runtime,
 )
 from agents_remember.cli.paseo_catalog_features import (
@@ -33,13 +37,19 @@ from agents_remember.cli.paseo_catalog_store import (
     merge_catalog_parts,
     saved_catalog_parts,
 )
+from agents_remember.cli.paseo_launch import (
+    NATIVE_ANTIGRAVITY,
+    native_antigravity_role_start_refusal,
+)
 from agents_remember.cli.role_instructions import launch_choice_metadata
-from agents_remember.cli.role_launch_defaults import extra_args_plan
+from agents_remember.cli.role_launch_defaults import extra_args_plan, host_role_profile
 from agents_remember.cli.role_step_up import label_step_up_choices
+from agents_remember.errors import RolePreparationError
 from agents_remember.kernel._agentic_settings_core import NON_PERMISSION_FEATURES
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.named_choices import named as _named
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.read_cancellation import raise_if_read_cancelled
 from agents_remember.models.role_launcher import RoleAgentOverride
 
 
@@ -77,17 +87,6 @@ _OPERATION_CATALOGS: ContextVar[dict[tuple[str, ...], LauncherCatalog] | None] =
 )
 
 
-def paseo_catalog_scope(config: McpRuntimeConfig) -> tuple[str, str, str, str]:
-    """The identity of one Paseo runtime and its saved catalogue."""
-    settings = require_bridge_runtime(config)
-    return (
-        settings.install_prefix.as_posix(),
-        settings.home.as_posix(),
-        settings.listen,
-        settings.version,
-    )
-
-
 @contextmanager
 def launcher_catalog_question() -> Iterator[None]:
     """Share catalogue metadata and selected answers within one operation."""
@@ -96,7 +95,8 @@ def launcher_catalog_question() -> Iterator[None]:
         return
     token = _OPERATION_CATALOGS.set({})
     try:
-        yield
+        with launcher_daemon_configuration():
+            yield
     finally:
         _OPERATION_CATALOGS.reset(token)
 
@@ -130,6 +130,8 @@ def _question_catalog(
         )
     except PaseoBridgeFailure as failure:
         reply, error = None, str(failure)
+    raise_if_read_cancelled()
+    record_operation_daemon_config(scope, reply, error)
     merged = merge_catalog_parts(catalog_store_path(runtime.home), scope, reply, error)
     return LauncherCatalog(
         origin=f"paseo:{uuid.uuid4().hex}",
@@ -146,7 +148,11 @@ def saved_launcher_catalog(config: McpRuntimeConfig) -> LauncherCatalog:
     saved = saved_catalog_parts(catalog_store_path(runtime.home), paseo_catalog_scope(config))
     return LauncherCatalog(
         origin="paseo:saved",
-        agents=_agents_from_reply(saved),
+        agents=tuple(
+            agent
+            for agent in _agents_from_reply(saved)
+            if is_role_launch_provider_offered(agent["id"])
+        ),
         without_tool_servers=_providers_without_tool_servers(saved),
         discovery=saved["catalogDiscovery"],
         asked=False,
@@ -176,19 +182,13 @@ def runnable_harnesses(config: McpRuntimeConfig) -> list[dict[str, str]] | None:
 def read_host_role(config: McpRuntimeConfig, role: str) -> dict[str, Any]:
     """Read matching host profiles; record an unavailable read and use role settings."""
     try:
-        reply = bridge_call(config, "role-profiles", {})
+        reply = operation_role_profiles(config)
+        if reply is None:
+            reply = bridge_call(config, "role-profiles", {})
         profiles = reply.get("profiles")
         if not isinstance(profiles, list):
             raise _unreadable_catalog()
-        matches = [row for row in profiles if isinstance(row, dict) and row.get("name") == role]
-        return {
-            "profile": matches[0] if matches else {},
-            "passedOver": [row.get("id") for row in matches[1:]],
-            "readAt": reply.get("readAt"),
-            "state": "read" if matches else "no-match",
-            "reason": None if matches else "the host returned no profile with this exact role name",
-            "profileCount": len(profiles),
-        }
+        return host_role_profile(role, profiles, reply.get("readAt"))
     except PaseoBridgeFailure as error:
         return {"profile": {}, "state": "unavailable", "reason": str(error)}
 
@@ -199,12 +199,20 @@ def launcher_options(
     harness_order: tuple[str, ...],
     *,
     refresh: bool = False,
+    catalog: LauncherCatalog | None = None,
 ) -> dict[str, Any]:
-    catalog = replace(launcher_catalog(config, refresh=refresh), model_options="metadata")
+    catalog = replace(
+        catalog or launcher_catalog(config, refresh=refresh), model_options="metadata"
+    )
     try:
+        configured_agent = _canonical_agent_id(catalog, defaults.get("agent"))
+        if configured_agent and not is_role_launch_provider_offered(configured_agent):
+            raise native_antigravity_role_start_refusal()
         agent_id, options = resolve_agent_selection(
             config, defaults, harness_order, None, catalog=catalog
         )
+        if not is_role_launch_provider_offered(agent_id):
+            raise native_antigravity_role_start_refusal()
         role_defaults = {
             "agent": agent_id,
             "stepUp": defaults.get("stepUp"),
@@ -222,11 +230,13 @@ def launcher_options(
             "choices": launch_choice_metadata(options["choices"]),
             "available": True,
         }
-    except LaunchSelectionRefused as error:
+    except (LaunchSelectionRefused, RolePreparationError) as error:
         role_defaults = {**defaults, "available": False, "refusal": str(error)}
     return {
         "roleDefaults": role_defaults,
-        "agents": [dict(agent) for agent in catalog.agents],
+        "agents": [
+            dict(agent) for agent in catalog.agents if is_role_launch_provider_offered(agent["id"])
+        ],
         "catalogOrigin": catalog.origin,
         "catalogDiscovery": catalog.discovery,
     }
@@ -666,7 +676,19 @@ def _default_agent(
 
     if configured:
         return configured
-    return next((harness for harness in harness_order if catalog.agent(harness)), None)
+    return next(
+        (
+            harness
+            for harness in harness_order
+            if (agent := catalog.agent(harness)) and is_role_launch_provider_offered(agent["id"])
+        ),
+        None,
+    )
+
+
+def is_role_launch_provider_offered(provider_id: str) -> bool:
+    """Exclude the native provider whose role starts cannot carry their task tool server."""
+    return provider_id.casefold() != NATIVE_ANTIGRAVITY
 
 
 def _selection_refusal(

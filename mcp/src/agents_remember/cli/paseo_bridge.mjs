@@ -423,17 +423,21 @@ async function readCatalog({ api, daemon, deadline }, input) {
   const enabled = snapshot.entries.filter((entry) => entry.enabled === true)
   // Independent parts share the bounded listing window; a slow support read must not
   // consume the final reply reserve or discard model answers that already arrived.
-  const [providers, support] = await Promise.all([
+  const [providers, configuration] = await Promise.all([
     Promise.all(enabled.map((entry) =>
       entry.status === 'ready' ? listProvider(api, entry, listingDeadline) : stillLoading(entry)
     )),
-    toolServerSupport(api, listingDeadline)
+    catalogConfiguration(api, listingDeadline)
   ])
   // What the runtime reports about tool servers before an agent exists is the provider's entry
   // in its configuration.
-  return catalogReply(daemon, { providers: providers.map((row) => support.error
-    ? { ...row, toolServerError: support.error }
-    : { ...row, acceptsToolServers: support.providers[row.id]?.options?.supportsMcpServers !== false }) })
+  const { daemonConfig, daemonConfigError } = configuration
+  return catalogReply(daemon, {
+    ...(daemonConfigError ? { daemonConfigError } : { daemonConfig }),
+    providers: providers.map((row) => daemonConfigError
+      ? { ...row, toolServerError: daemonConfigError }
+      : { ...row, acceptsToolServers: daemonConfig.providers?.[row.id]?.options?.supportsMcpServers !== false })
+  })
 }
 
 function catalogReply(daemon, parts) {
@@ -447,16 +451,35 @@ function catalogReply(daemon, parts) {
   }
 }
 
-async function toolServerSupport(api, deadline) {
+async function catalogConfiguration(api, deadline) {
   try {
     const reply = await within(api.config?.get(), deadline, () => new Error('Tool-server support discovery timed out'))
-    if (!reply?.config || typeof reply.config !== 'object') throw new Error('The runtime supplied no configuration')
-    const providers = reply.config.providers ?? {}
+    const config = reply?.config
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      throw new Error('The runtime supplied no configuration')
+    }
+    const providers = config.providers ?? {}
     if (typeof providers !== 'object' || Array.isArray(providers)) throw new Error('The runtime supplied an invalid provider configuration')
-    return { providers }
+    const scopedProviders = Object.fromEntries(
+      Object.entries(providers).map(([id, entry]) => [id, catalogProviderSettings(entry)])
+    )
+    return {
+      daemonConfig: {
+        ...(Object.hasOwn(config, 'agentProfiles') ? { agentProfiles: config.agentProfiles } : {}),
+        providers: scopedProviders
+      }
+    }
   } catch (error) {
-    return { error: text(error?.message ?? error) }
+    return { daemonConfigError: text(error?.message ?? error) }
   }
+}
+
+function catalogProviderSettings(entry) {
+  const field = entry?.options != null ? 'options' : 'params'
+  const settings = entry?.[field]
+  if (settings == null) return {}
+  const { extraArgs, supportsMcpServers } = settings
+  return { [field]: { extraArgs, supportsMcpServers } }
 }
 
 async function readRoleProfiles({ daemon }) {

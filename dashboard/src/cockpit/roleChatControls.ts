@@ -202,7 +202,7 @@ function resultFlowFor(
 function dispatchWritersFor(
   run: Pick<RunState, "updateActiveRequest" | "rememberExecution" | "setExecutionErrorState" | "setBusyScope" | "setLaunchRequestId">,
   fetchExecutionResult: (scope: RoleDocumentScope, reportNotFound: boolean, requestId?: string) => Promise<RoleExecutionReceipt | undefined>,
-  requestOptionsRefresh: () => void,
+  requestOptionsRefresh: DispatchWriters["requestOptionsRefresh"],
 ): DispatchWriters {
   return {
     updateActiveRequest: run.updateActiveRequest,
@@ -217,7 +217,7 @@ function dispatchWritersFor(
 function useRoleChatRunActions(
   run: RunState,
   waitForLaunch: () => void,
-  requestOptionsRefresh: () => void,
+  requestOptionsRefresh: DispatchWriters["requestOptionsRefresh"],
   currentSelectionRef: { current: RoleLaunchSelection },
   onExecution: ((receipt: RoleExecutionReceipt, scope: RoleDocumentScope) => void) | undefined,
   setReport: (content: RoleReportContent | null) => void,
@@ -297,7 +297,7 @@ function useRoleChatRunActions(
 
 export interface RoleChatControlsArgs {
   waitForLaunch: () => void;
-  requestOptionsRefresh: () => void;
+  requestOptionsRefresh: DispatchWriters["requestOptionsRefresh"];
   currentSelectionRef: { current: RoleLaunchSelection };
   onExecution: ((receipt: RoleExecutionReceipt, scope: RoleDocumentScope) => void) | undefined;
   setReport: (content: RoleReportContent | null) => void;

@@ -12,6 +12,7 @@ from typing import Any
 from agents_remember.cli.paseo_catalog_parts import merge_reply, merge_selected_reply
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.file_lock import exclusive_file_lock
+from agents_remember.kernel.read_cancellation import raise_if_read_cancelled
 from agents_remember.serving.paseo.paseo_plugin_files import AR_HOME_DIRECTORY
 
 
@@ -106,6 +107,8 @@ def _merge_saved(
         observed = CatalogParts(stored, read_at)
         result = render(observed)
         if observed.changed:
+            # A client can leave while this request waits for the catalog writer.
+            raise_if_read_cancelled()
             _write_saved(path, scope, stored)
         return result
 

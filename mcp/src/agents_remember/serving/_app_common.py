@@ -16,6 +16,7 @@ from agents_remember.observer import observer_root
 from agents_remember.serving.background_accounting import BackgroundLedger
 from agents_remember.serving.build_info import ServingBuild
 from agents_remember.serving.explainer_comparison import ComparisonPreparationPort
+from agents_remember.serving.held_reset_scheduler import ResetDeliveryPorts
 from agents_remember.serving.intent_summary_cache import ReviewIntentSummaryPort
 from agents_remember.serving.knowledge_reader import KnowledgeBytesPort, KnowledgeReaderPort
 from agents_remember.serving.projections.host_activity import (
@@ -298,6 +299,8 @@ class ServingCollaborators:
     the app factory to preserve route precedence over its catch-all asset mount.
     """
 
+    held_reset_delivery: ResetDeliveryPorts | None = None
+
     usage_read: UsageReadPort | None = None
     """MIK-R190 rule 7's usage read: one bridge process per tick that saw a new end.
 
@@ -334,6 +337,8 @@ class _ServingRuntime:
     background_ledger: BackgroundLedger | None = None
     # MIK-R190 rule 7: the one usage read a tick with a new stamped end makes, as the
     # composition root bound it (``None`` when this process was given no such port).
+    held_reset_delivery: ResetDeliveryPorts | None = None
+
     usage_read: UsageReadPort | None = None
     #: The application-tier explainer ports: the routes and the moved watcher read them from here.
     explainer_application: ExplainerApplicationPorts | None = None

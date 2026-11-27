@@ -3,6 +3,7 @@ import type { TaskEntry } from '../types/projection';
 
 import type { RoleReportContent } from '../data/roleReport';
 import { useRoleChatControls } from './roleChatControls';
+import type { DispatchResultRead } from './roleChatDispatch';
 import { useRoleChatScopes } from './roleChatScopes';
 import { useLaunchReread, useRoleChatOptionsLoader } from './roleChatOptionsLoader';
 import { resolveSelectionComplete } from './roleChatExecutionView';
@@ -45,14 +46,7 @@ function useChatSelection(
   return { selection, requestedChat, onSelectionChange };
 }
 
-export function RoleChatsPane({
-  active,
-  tasks,
-  boundSelection,
-  boundRoles,
-  onExecution,
-  openChat,
-}: {
+interface RoleChatsPaneProps {
   active: boolean;
   tasks: TaskEntry[];
   boundSelection?: RoleLaunchSelection;
@@ -66,7 +60,16 @@ export function RoleChatsPane({
    * resolve), so the seat's document is the frame's scope instead — see `chatFrameScope`.
    */
   openChat?: AgentChatTarget | null;
-}) {
+}
+
+export function RoleChatsPane({
+  active,
+  tasks,
+  boundSelection,
+  boundRoles,
+  onExecution,
+  openChat,
+}: RoleChatsPaneProps) {
   const [report, setReport] = useState<RoleReportContent | null>(null);
   const { selection, requestedChat, onSelectionChange } = useChatSelection(
     boundSelection,
@@ -74,7 +77,11 @@ export function RoleChatsPane({
   );
   const [optionsRefresh, setOptionsRefresh] = useState(0);
   const [catalogRefresh, setCatalogRefresh] = useState(0);
-  const requestOptionsRefresh = useCallback(() => setOptionsRefresh((current) => current + 1), []);
+  const resultReadRef = useRef<DispatchResultRead | undefined>(undefined);
+  const requestOptionsRefresh = useCallback((resultRead?: DispatchResultRead) => {
+    resultReadRef.current = resultRead;
+    setOptionsRefresh((current) => current + 1);
+  }, []);
   const bumpCatalogRefresh = useCallback(() => setCatalogRefresh((current) => current + 1), []);
   const currentSelectionRef = useRef(selection);
   currentSelectionRef.current = selection;
@@ -96,6 +103,7 @@ export function RoleChatsPane({
     optionsScope,
     optionsRefresh,
     catalogRefresh,
+    resultReadRef,
     bumpOptionsRefresh: requestOptionsRefresh,
     bumpCatalogRefresh,
     currentSelectionRef,

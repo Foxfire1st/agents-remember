@@ -38,6 +38,11 @@ export type FetchExecutionResult = (
   requestId?: string,
 ) => Promise<RoleExecutionReceipt | undefined>;
 
+export interface DispatchResultRead {
+  scope: RoleDocumentScope;
+  requestId: string;
+}
+
 // The writers a dispatch drives: the request and receipt stores, the busy marks, the
 // error writer, the result poll, and the options reread at the end.
 export interface DispatchWriters {
@@ -47,7 +52,7 @@ export interface DispatchWriters {
   setLaunchRequestId: (requestId: string | null) => void;
   setExecutionErrorState: SetExecutionErrorState;
   fetchExecutionResult: FetchExecutionResult;
-  requestOptionsRefresh: () => void;
+  requestOptionsRefresh: (resultRead?: DispatchResultRead) => void;
 }
 
 // A launch that is already running, settled, or unselected never dispatches.
@@ -300,7 +305,7 @@ async function failDispatchOffline(
   requestId: string,
   perRequest: boolean,
   savedLaunchSelection: RoleLaunchSelection,
-): Promise<void> {
+): Promise<RoleExecutionReceipt | undefined> {
   if (!sameRoleDocumentScope(live.currentSelectionRef.current, requestScope)) return;
   writers.rememberExecution(requestScope, {
     status: "unknown",
@@ -315,7 +320,7 @@ async function failDispatchOffline(
     scope: requestScope,
     message: "The role launch request did not return. Its state is unknown; refresh the AR result before retrying.",
   });
-  await writers.fetchExecutionResult(requestScope, false, perRequest ? requestId : undefined);
+  return writers.fetchExecutionResult(requestScope, false, perRequest ? requestId : undefined);
 }
 
 // The guard behind one dispatch: runnable, then the action's own block. Answers the
@@ -372,6 +377,7 @@ export async function dispatchRoleAction(
   writers.setBusyScope(launchSelection);
   writers.setLaunchRequestId(requestId);
   writers.setExecutionErrorState(null);
+  let result: RoleExecutionReceipt | undefined;
   try {
     const response = await fetch("/api/role-launch/dispatch", {
       method: "POST",
@@ -381,14 +387,17 @@ export async function dispatchRoleAction(
     const value = (await response.json()) as RoleExecutionReceipt | { detail?: unknown };
     if (!sameRoleDocumentScope(roleDocumentScope(live.currentSelectionRef.current), requestScope)) return;
     const continues = applyDispatchResponse(writers, live, response, value, requestScope, launchSelection, perRequest, requestId, savedLaunchSelection);
-    if (continues) await writers.fetchExecutionResult(requestScope, false, perRequest ? requestId : undefined);
+    if (continues) result = await writers.fetchExecutionResult(requestScope, false, perRequest ? requestId : undefined);
   } catch {
-    await failDispatchOffline(writers, live, requestScope, requestId, perRequest, savedLaunchSelection);
+    result = await failDispatchOffline(writers, live, requestScope, requestId, perRequest, savedLaunchSelection);
   } finally {
     if (sameRoleDocumentScope(roleDocumentScope(live.currentSelectionRef.current), requestScope)) {
       writers.setBusyScope(null);
       writers.setLaunchRequestId(null);
-      writers.requestOptionsRefresh();
+      const settledResult = result?.requestId === requestId && !isUncertainRoleExecution(result)
+        ? { scope: requestScope, requestId }
+        : undefined;
+      writers.requestOptionsRefresh(settledResult);
     }
   }
 }

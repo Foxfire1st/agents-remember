@@ -23,13 +23,11 @@ that a prompt was answered, a turn ended, or a start finished is one read of the
 before each drain; the dashboard sweep runs that read every
 ``HELD_DELIVERY_SWEEP_SECONDS``.
 
-Two things make a waiting message reachable without another message being sent to the
-recipient (MIK-R171 rule 1). Every holder names its receipt in the one small bounded queue
-(``note_held_receipt``), and the sweep drains that queue before it walks the receipts,
-so a receipt that holds messages is visited ahead of the others. And the dashboard reads
-the host's own activity record: the agents whose turn it reports ended are drained
-directly (``deliver_ended_turns``) within ``HELD_TURN_END_TICK_SECONDS``, while the
-sweep stays the fallback for everything the record does not show.
+Every holder names its receipt in the ordinary queue. The sweep visits that queue in
+rotating slices and spends its remaining receipt reads on the walk. The queue keeps
+up to 512 recent names for 24 hours. Ordinary turn-end delivery uses the host's
+activity record. Provider-limited holds also have a durable reset index and an
+independent dashboard wake, so their delivery need not wait for the ordinary cursor.
 """
 
 from __future__ import annotations

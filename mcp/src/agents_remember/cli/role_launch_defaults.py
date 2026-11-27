@@ -24,6 +24,19 @@ from agents_remember.serving.paseo.paseo_daemon_config import (
 )
 
 
+def host_role_profile(role: str, profiles: list[Any], read_at: str | None) -> dict[str, Any]:
+    """Summarize how the host's profiles answer this exact role name."""
+    matches = [row for row in profiles if isinstance(row, dict) and row.get("name") == role]
+    return {
+        "profile": matches[0] if matches else {},
+        "passedOver": [row.get("id") for row in matches[1:]],
+        "readAt": read_at,
+        "state": "read" if matches else "no-match",
+        "reason": None if matches else "the host returned no profile with this exact role name",
+        "profileCount": len(profiles),
+    }
+
+
 def role_defaults(
     config: McpRuntimeConfig, context: RoleLaunchContext, host_role: dict[str, Any]
 ) -> tuple[dict[str, Any], tuple[str, ...]]:

@@ -119,7 +119,12 @@ def _batch(tmp_path: Path, folder: str) -> Any:
             encoding="utf-8",
         )
     return held._DrainBatch(
-        config=NO_CONFIG,
+        config=McpRuntimeConfig(
+            config_path=tmp_path / "mcp.json",
+            coordination_root=tmp_path / "coordination",
+            workspace_root=tmp_path,
+            transcript_root=tmp_path / "logs",
+        ),
         path=path,
         receipt=json.loads(path.read_text(encoding="utf-8")),
         folder=folder,
