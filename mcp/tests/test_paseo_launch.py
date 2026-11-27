@@ -20,6 +20,7 @@ from agents_remember.application.agent_binding import (
 )
 from agents_remember.application.role_launch_context import RoleLaunchContext, selection_binding
 from agents_remember.cli import (
+    paseo_bridge,
     paseo_catalog,
     paseo_launch,
     paseo_status,
@@ -50,7 +51,8 @@ from agents_remember.tasks.document import TaskEnclosureRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.task_paths import leaf_enclosure_path
 from agents_remember.worktrees.role_handover_locator import locator_directory
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from paseo_launch_test_support import (
     CATALOG,
     SERVER_ID,
@@ -513,6 +515,49 @@ class LaunchRefusalTests(PaseoLaunchTestCase):
         )
         self.assertEqual(len(self.enclosures.start_calls), 1)
         self.assertEqual(self.receipt(request)["status"], "running")
+
+
+class LaunchCatalogSharingTests(PaseoLaunchTestCase):
+    def setUp(self) -> None:
+        real_defaults = role_launch_preparation._role_defaults
+        super().setUp()
+        self.replace(role_launch_preparation, "_role_defaults", real_defaults)
+
+    def test_dispatch_preparation_shares_metadata_with_host_defaults(self) -> None:
+        profile = {"id": "worker-profile", "name": "worker", "provider": "codex", "model": "gpt-a"}
+        configuration = {"agentProfiles": [profile], "providers": {}}
+        standalone_calls: list[str] = []
+
+        def bridge(config, command, payload):
+            if command == "role-profiles":
+                standalone_calls.append(command)
+                return {"profiles": [profile]}
+            if command == "daemon-config":
+                standalone_calls.append(command)
+                return {"config": configuration}
+            return self.runtime(config, command, payload)
+
+        self.replace(paseo_bridge, "bridge_call", bridge)
+        self.replace(paseo_catalog, "bridge_call", bridge)
+        self.replace(
+            self.runtime, "_catalog", return_value={**CATALOG, "daemonConfig": configuration}
+        )
+        app = FastAPI()
+        role_launch_routes.register_role_launch_routes(app, self.config)
+        request = self.request("worker").model_dump(mode="json", by_alias=True, exclude_none=True)
+        with TestClient(app) as client:
+            response = client.post("/api/role-launch/dispatch", json=request)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "running")
+        self.assertEqual(standalone_calls, [])
+        catalogs = [
+            payload["mode"] for command, payload in self.runtime.calls if command == "catalog"
+        ]
+        self.assertEqual(catalogs, ["metadata"])
+        created = next(
+            payload for command, payload in self.runtime.launch_calls() if command == "agent-create"
+        )
+        self.assertEqual((created["provider"], created["model"]), ("codex", "gpt-a"))
 
 
 class LaunchFeatureValuesTests(unittest.TestCase):

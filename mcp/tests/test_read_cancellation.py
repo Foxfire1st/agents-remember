@@ -1,15 +1,19 @@
 """D569 mean 4: a read whose client went away stops computing, answers nothing and keeps nothing.
 
-The cases follow the cancellation from the route to every safe point it reaches: the route's
-disconnect watch, a shared flight's askers, a Git child, the reviewer worklist child, and the
-kept/persisted answer and closure proof a finished computation would otherwise leave behind.
+The cases follow cancellation through the route's disconnect watch, a shared flight's askers,
+the Git, reviewer worklist and Paseo bridge children, and the saved answers a finished
+computation would otherwise leave behind.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import sys
 import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryFile
 from typing import Any
@@ -17,6 +21,15 @@ from typing import Any
 import pytest
 from agents_remember.application import review_answer_preparation as reads
 from agents_remember.application.review_closure_proofs import ClosureProofStore
+from agents_remember.cli import (
+    paseo_bridge,
+    paseo_catalog_store,
+    role_launch_receipts,
+    role_launch_routes,
+)
+from agents_remember.cli.paseo_catalog import paseo_catalog_scope
+from agents_remember.cli.paseo_catalog_store import catalog_store_path, merge_catalog_parts
+from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND
 from agents_remember.kernel import reviewer_worklist_process as process_owner
 from agents_remember.kernel.git_command import GitRunnerOptions, run_git, run_git_into
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -28,10 +41,13 @@ from agents_remember.kernel.read_cancellation import (
     read_cancellation,
 )
 from agents_remember.models.knowledge.review import ReviewEntryListResult
+from agents_remember.models.role_launcher import RoleLauncherOptionsRequest
 from agents_remember.serving.build_info import process_serving_build
 from agents_remember.serving.read_disconnect import CLIENT_CLOSED_REQUEST
 from agents_remember.serving.review import KNOWLEDGE_REVIEW_ENTRIES_ROUTE, register_review_routes
 from agents_remember.serving.review_answer_reuse import ANSWER_WRITES, RecordedAnswerReuse
+from agents_remember.tasks.document import TaskDocument
+from agents_remember.tasks.store import write_task_doc
 from agents_remember_test_support.testing.review_git_trees import World, git
 from agents_remember_test_support.testing.waits import (
     HANG_GUARD_SECONDS,
@@ -42,6 +58,7 @@ from fastapi import FastAPI
 from reviewer_worklist_process_test_support import one_shot_worklist_child
 from starlette.types import Message
 from test_changeset_cancellation import _gated_git
+from test_paseo_bridge import started_runtime
 from test_review_git_trees import world as _world_fixture
 from test_review_persisted_routes import fixture as persisted_fixture
 from test_review_persisted_routes import query as persisted_query
@@ -63,13 +80,30 @@ def _config(root: Path) -> McpRuntimeConfig:
 async def _get(app: FastAPI, leave: threading.Event) -> tuple[int, bytes]:
     """One GET of the entry route whose client disconnects once ``leave`` is set."""
 
+    return await _asgi_read(
+        app, KNOWLEDGE_REVIEW_ENTRIES_ROUTE, leave.is_set, query=b"repo=r&master=m&leaf=l"
+    )
+
+
+async def _asgi_read(
+    app: FastAPI,
+    path: str,
+    disconnected: Callable[[], bool],
+    *,
+    query: bytes = b"",
+    body: bytes | None = None,
+) -> tuple[int, bytes]:
     sent: list[Message] = []
+    sent_request = False
 
     async def receive() -> Message:
-        if leave.is_set():
-            return {"type": "http.disconnect"}
-        await asyncio.sleep(0)
-        return {"type": "http.request", "body": b"", "more_body": False}
+        nonlocal sent_request
+        if sent_request:
+            if disconnected():
+                return {"type": "http.disconnect"}
+            await asyncio.sleep(0)
+        sent_request = True
+        return {"type": "http.request", "body": body or b"", "more_body": False}
 
     async def send(message: Message) -> None:
         sent.append(message)
@@ -77,12 +111,12 @@ async def _get(app: FastAPI, leave: threading.Event) -> tuple[int, bytes]:
     scope = {
         "type": "http",
         "http_version": "1.1",
-        "method": "GET",
+        "method": "GET" if body is None else "POST",
         "scheme": "http",
-        "path": KNOWLEDGE_REVIEW_ENTRIES_ROUTE,
-        "raw_path": KNOWLEDGE_REVIEW_ENTRIES_ROUTE.encode(),
-        "query_string": b"repo=r&master=m&leaf=l",
-        "headers": [],
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": query,
+        "headers": [] if body is None else [(b"content-type", b"application/json")],
         "server": ("localhost", 1),
         "client": ("localhost", 2),
     }
@@ -122,6 +156,219 @@ def test_a_disconnected_client_stops_the_read_at_its_next_safe_point_and_is_answ
     wait_until(lambda: outcome, "the abandoned read's worker to end")
     assert outcome == ["stopped"]
     assert status == CLIENT_CLOSED_REQUEST and body == b""
+
+
+def _fixture_bridge(tmp_path: Path, command_to_stall: str | None = None) -> Path:
+    node = tmp_path / "fixture-node"
+    node.write_text(
+        f"""#!{sys.executable}
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+root = Path(__file__).parent
+command = sys.argv[2]
+payload = json.load(sys.stdin)
+with (root / "bridge-calls").open("a", encoding="utf-8") as log:
+    print(command, file=log)
+if command == "catalog" and payload["mode"] == "selected":
+    reply = {{
+        "selectedFeatures": {{
+            "provider": payload["selectedProvider"],
+            "model": payload["selectedModel"],
+            "features": [],
+            "serviceTiers": [],
+        }}
+    }}
+elif command == "catalog":
+    reply = {{
+        "providers": [{{"id": "codex", "models": [{{"id": "fixture-model"}}]}}],
+        "daemonConfig": {{"agentProfiles": [], "providers": {{}}}},
+    }}
+elif command == "agent-state":
+    assert payload["agentId"] == "fixture-agent"
+    reply = {{"agent": None}}
+else:
+    reply = {{"profiles": [], "config": {{"providers": {{}}}}}}
+reply["readAt"] = "2026-11-02T00:00:00+00:00"
+if command == {command_to_stall!r}:
+    reply["padding"] = "x" * (128 * 1024)
+    print(json.dumps(reply), flush=True)
+    print("x" * (128 * 1024), file=sys.stderr, flush=True)
+    (root / "bridge-pid").write_text(str(os.getpid()), encoding="utf-8")
+    time.sleep(5)  # The base can finish even though it has no disconnect watch.
+    (root / "bridge-finished").touch()
+else:
+    print(json.dumps(reply))
+""",
+        encoding="utf-8",
+    )
+    node.chmod(0o755)
+    return node
+
+
+def _post_options(
+    config: McpRuntimeConfig, disconnected: Callable[[], bool], body: bytes
+) -> tuple[int, bytes]:
+    app = FastAPI()
+    role_launch_routes.register_role_launch_routes(app, config)
+    return asyncio.run(_asgi_read(app, "/api/role-launch/options", disconnected, body=body))
+
+
+def _bridge_started(pid_file: Path) -> bool:
+    return pid_file.exists() and bool(pid_file.read_text(encoding="utf-8"))
+
+
+def _assert_bridge_reaped(tmp_path: Path, *commands: str) -> None:
+    pid = int((tmp_path / "bridge-pid").read_text(encoding="utf-8"))
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)  # The child has been reaped when the route returns.
+    assert not (tmp_path / "bridge-finished").exists()
+    assert (tmp_path / "bridge-calls").read_text(encoding="utf-8").splitlines() == list(commands)
+
+
+def test_role_launch_options_disconnect_reaps_bridge_and_keeps_saved_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = started_runtime(tmp_path)
+    node = _fixture_bridge(tmp_path, "catalog")
+    monkeypatch.setattr(paseo_bridge, "communication_node", lambda *_: node)
+    saved = catalog_store_path(paseo_bridge.require_bridge_runtime(config).home)
+    merge_catalog_parts(
+        saved,
+        paseo_catalog_scope(config),
+        {"providers": [], "readAt": "2026-11-01T00:00:00+00:00"},
+        None,
+    )
+    before = saved.read_bytes()
+    status, body = _post_options(
+        config,
+        lambda: _bridge_started(tmp_path / "bridge-pid"),
+        b'{"role":"system-specialist"}',
+    )
+
+    assert (status, body) == (CLIENT_CLOSED_REQUEST, b"")
+    _assert_bridge_reaped(tmp_path, "catalog")
+    assert saved.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(b'{"role":"system-specialist"}', id="metadata"),
+        pytest.param(
+            b'{"role":"system-specialist","agentId":"codex","modelId":"fixture-model"}',
+            id="selected",
+        ),
+    ],
+)
+def test_role_launch_options_disconnect_before_catalog_lock_acquisition_keeps_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: bytes
+) -> None:
+    config = started_runtime(tmp_path)
+    node = _fixture_bridge(tmp_path)
+    monkeypatch.setattr(paseo_bridge, "communication_node", lambda *_: node)
+    saved = catalog_store_path(paseo_bridge.require_bridge_runtime(config).home)
+    merge_catalog_parts(
+        saved,
+        paseo_catalog_scope(config),
+        {"providers": [], "readAt": "2026-11-01T00:00:00+00:00"},
+        None,
+    )
+    before = saved.read_bytes(), saved.stat().st_ino
+    lock_requested = threading.Event()
+    acquire_lock = paseo_catalog_store.exclusive_file_lock
+
+    @contextmanager
+    def acquire_after_disconnect(path: Path, purpose: str) -> Iterator[None]:
+        assert path == saved
+        token = read_cancellation()
+        assert isinstance(token, threading.Event)
+        lock_requested.set()
+        assert token.wait(HANG_GUARD_SECONDS), "the route did not observe the disconnect"
+        with acquire_lock(path, purpose):
+            yield
+
+    with monkeypatch.context() as lock_seam:
+        lock_seam.setattr(paseo_catalog_store, "exclusive_file_lock", acquire_after_disconnect)
+        assert _post_options(config, lock_requested.is_set, body) == (CLIENT_CLOSED_REQUEST, b"")
+    assert (tmp_path / "bridge-calls").read_text(encoding="utf-8").splitlines() == ["catalog"]
+    assert (saved.read_bytes(), saved.stat().st_ino) == before
+
+    request = RoleLauncherOptionsRequest.model_validate_json(body)
+    assert role_launch_routes._role_launch_options_endpoint(config, request).status_code == 200
+    assert saved.read_bytes() != before[0]
+
+
+def test_role_launch_options_disconnect_during_receipt_read_keeps_published_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = started_runtime(tmp_path)
+    node = _fixture_bridge(tmp_path, "agent-state")
+    monkeypatch.setattr(paseo_bridge, "communication_node", lambda *_: node)
+    snapshot = catalog_store_path(paseo_bridge.require_bridge_runtime(config).home)
+    request = _task_bound_options(config)
+    receipt = role_launch_receipts._receipt_path(config, request)
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    original_receipt = json.dumps(
+        {
+            "schema": role_launch_receipts.RECEIPT_SCHEMA,
+            "status": "running",
+            "execution": {"kind": PASEO_AGENT_KIND, "agentId": "fixture-agent"},
+        }
+    ).encode()
+    receipt.write_bytes(original_receipt)
+    receipt_inode = receipt.stat().st_ino
+    published: list[tuple[bytes, int]] = []
+
+    def disconnect_after_receipt_bridge_starts() -> bool:
+        if not _bridge_started(tmp_path / "bridge-pid"):
+            return False
+        data = snapshot.read_bytes()
+        parts = json.loads(data)["parts"]
+        assert parts['["providers"]']["value"] == [{"id": "codex"}]
+        assert parts['["provider", "codex", "models"]']["value"] == [{"id": "fixture-model"}]
+        published.append((data, snapshot.stat().st_ino))
+        return True
+
+    assert not snapshot.exists()
+    status, body = _post_options(
+        config,
+        disconnect_after_receipt_bridge_starts,
+        request.model_dump_json(by_alias=True, exclude_none=True).encode(),
+    )
+
+    assert (status, body) == (CLIENT_CLOSED_REQUEST, b"")
+    _assert_bridge_reaped(tmp_path, "catalog", "agent-state")
+    # Atomic publication replaces the inode even if the second write has identical bytes.
+    assert published == [(snapshot.read_bytes(), snapshot.stat().st_ino)]
+    assert receipt.read_bytes() == original_receipt
+    assert receipt.stat().st_ino == receipt_inode
+
+
+def _task_bound_options(config: McpRuntimeConfig) -> RoleLauncherOptionsRequest:
+    write_task_doc(
+        config.coordination_root / "tasks" / "repo" / "launch",
+        TaskDocument.model_validate(
+            {
+                "id": "LAUNCH",
+                "slug": "task",
+                "title": "Launch",
+                "kind": "master",
+                "repo": "repo",
+                "createdAt": "2026-11-12T00:00:00+00:00",
+                "executionNature": "atomic",
+            }
+        ),
+    )
+    return RoleLauncherOptionsRequest.model_validate(
+        {
+            "role": "manager",
+            "masterDocumentRef": {"repository": "repo", "path": "launch/task.json"},
+        }
+    )
 
 
 def test_a_shared_read_continues_for_the_client_that_remains_when_its_first_asker_leaves(

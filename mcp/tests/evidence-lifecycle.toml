@@ -4565,6 +4565,7 @@ consumers = [
   "mcp/tests/test_previous_host_removed.py",
   "mcp/tests/test_product_start_messages.py",
   "mcp/tests/test_provider_limit_suppression.py",
+  "mcp/tests/test_read_cancellation.py",
   "mcp/tests/test_refusal_references.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_first_message.py",

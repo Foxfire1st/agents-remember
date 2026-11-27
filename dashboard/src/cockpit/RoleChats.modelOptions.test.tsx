@@ -7,6 +7,8 @@ import { tasklessRequestStorageKey } from './roleLaunchModel';
 
 const optionsRoute = '/api/role-launch/options';
 const dispatchRoute = '/api/role-launch/dispatch';
+const savedCatalogRoute = '/api/role-launch/saved-catalog';
+const resultRoute = '/api/role-launch/result';
 const master = { repository: 'fixture', path: 'example/task.json' };
 const tasks = [taskEntry({ reference: master, summary: taskSummary({ form: 'master' }) })];
 const agents = [
@@ -52,23 +54,27 @@ function fixture(replies: {
 } = {}) {
   const requests: RequestBody[] = [];
   const starts: RequestBody[] = [];
+  const metadataReads: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, request?: RequestInit) => {
     const body = JSON.parse(String(request?.body ?? '{}')) as RequestBody;
+    if ((url === optionsRoute && !body.modelId) || url === savedCatalogRoute || url === resultRoute) {
+      metadataReads.push(url);
+    }
     if (url === optionsRoute) {
       requests.push(body);
       return body.modelId
         ? (replies.selected ?? selected)(body)
         : (replies.metadata ?? metadata)(body);
     }
-    if (url === '/api/role-launch/saved-catalog' && replies.savedCatalog) return replies.savedCatalog(body);
+    if (url === savedCatalogRoute && replies.savedCatalog) return replies.savedCatalog(body);
     if (url === dispatchRoute) starts.push(body);
-    if (url === '/api/role-launch/result' && replies.result) return replies.result(body);
-    if (url === dispatchRoute || url === '/api/role-launch/result') {
+    if (url === resultRoute && replies.result) return replies.result(body);
+    if (url === dispatchRoute || url === resultRoute) {
       return Response.json({ status: 'completed', requestId: body.requestId, canStart: true });
     }
     return Response.json({}, { status: 503 });
   }));
-  return { requests, starts, modelRequests: () => requests.filter((body) => body.modelId) };
+  return { requests, starts, metadataReads, modelRequests: () => requests.filter((body) => body.modelId) };
 }
 
 function start(view: ReturnType<typeof render>): HTMLButtonElement {
@@ -94,6 +100,40 @@ it('opens with all choices available and asks only for the shown model', async (
   await waitFor(() => expect(run.requests).toEqual([{ role: 'architect' }, openA]));
   expect((view.getByLabelText('Role agent override') as HTMLSelectElement).options).toHaveLength(3);
   expect((view.getByLabelText('Role model override') as HTMLSelectElement).options).toHaveLength(4);
+});
+
+it.each([
+  ['agent', 'claude', { ...openA, agentId: 'claude' }],
+  ['model', 'b', { ...openA, modelId: 'b' }],
+  ['effort', 'high', undefined],
+  ['mode', 'ask', undefined],
+] as const)('keeps metadata and the result when setting or clearing the first %s override', async (field, value, newPair) => {
+  sessionStorage.setItem(tasklessRequestStorageKey('architect'), JSON.stringify({ requestId: 'saved-request' }));
+  const offered = [{
+    ...agents[0],
+    modes: [{ id: 'ask', label: 'Ask' }],
+    models: agents[0].models.map((model) => ({ ...model, efforts: [{ id: 'high', label: 'High' }] })),
+  }, agents[1]];
+  const run = fixture({ metadata: (body) => metadata(body, offered) });
+  const view = render(<RoleChatsPane active tasks={tasks} />);
+  await waitFor(() => expect(start(view).disabled).toBe(false));
+  await view.findByLabelText('Speed override');
+  const before = [savedCatalogRoute, optionsRoute, resultRoute];
+  expect(run.metadataReads).toEqual(before);
+
+  const control = view.getByLabelText('Role ' + field + ' override') as HTMLSelectElement;
+  fireEvent.change(control, { target: { value } });
+  await act(async () => {});
+  expect(control.value).toBe(value);
+  expect(run.metadataReads).toEqual(before);
+  const features = newPair ? [openA, newPair] : [openA];
+  expect(run.modelRequests()).toEqual(features);
+
+  fireEvent.change(control, { target: { value: '' } });
+  await act(async () => {});
+  expect(control.value).toBe('');
+  expect(run.metadataReads).toEqual(before);
+  expect(run.modelRequests()).toEqual(features);
 });
 
 it('queries each newly shown provider and model, reusing its answer across roles and documents', async () => {
@@ -200,8 +240,8 @@ it('starts once during pending discovery with host defaults and rereads the same
   await waitFor(() => expect(run.requests.filter((body) => !body.modelId)).toHaveLength(2));
   await act(async () => {});
   expect(run.requests).toEqual([
-    { role: 'architect', agentId: 'codex' }, openA,
-    { role: 'architect', agentId: 'codex' }, openA,
+    { role: 'architect' }, openA,
+    { role: 'architect' }, openA,
   ]);
   expect(run.starts).toHaveLength(1);
   expect(run.starts[0].agentOverride).toEqual({ agentId: 'codex', modelId: 'a' });
