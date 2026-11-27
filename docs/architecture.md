@@ -251,8 +251,12 @@ and exclusions, its open weaknesses and the documents that stand on it. `read_ar
 card information and gives the brief's path for eligible files with recorded knowledge. It includes
 rule text within the answer's bound. The reply reports when the saved brief is missing, older or
 of unknown freshness. A writing call that covers the file or folder renews it. Before editing a
-file, the agent opens its saved brief when available. `knowledge_read` names the records that
-belong to a path.
+file, the agent opens its saved brief when available. `knowledge_read` queries converted memory
+across 11 views, returning text-bearing rows for `impact` and `search`, verbatim full record text
+for up to 25 IDs in `records`, compact or full dependent triage in `dependent`, and structured
+locations or reports in `source_context`, `invariant`, `family`, `record`, `weakness`, `writers`,
+and `consolidation_proposal` (auto-pairing the code tree from `repo_id`, `contractPath`, or
+`memoryRoot`).
 The skill holds the
 [knowledge-use guidance](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/reference/knowledge/use.md).
 

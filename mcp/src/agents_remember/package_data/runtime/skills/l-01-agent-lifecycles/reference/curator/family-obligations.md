@@ -8,6 +8,6 @@ A member or membership change requires a fresh examination of the recorded guara
 
 When restating a family's guarantee, name that family in `history` as a `changed` row with your authored `effect`. The writer fills the family's own revision.
 
-After authoring families, call `knowledge_read` with `view="family"` over the leaf's memory worktree. Read back the writer report and open every record named in the result with your own file tools. Carry authored, updated, examined and unchanged families into the handover.
+After authoring families, call `knowledge_read` with `view="family"` over the leaf's memory worktree and `view="records"` (`recordIds=[...]`) to inspect verbatim record text. Read back the writer report and open referenced source code and tests with your own file tools. Carry authored, updated, examined and unchanged families into the handover.
 
 Attribute every code location the task's prepared context names as unattributed to its family, or explain in the report why it does not belong.

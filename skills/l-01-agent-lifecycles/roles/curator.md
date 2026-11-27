@@ -7,18 +7,18 @@ description: "Curator: one fresh session per leaf coherence pass. Reconciles cur
 
 Reconcile one leaf's intent and implementation in one fresh session, update affected memory, and deliver the coherence record.
 
-Leaf task doc only. Open briefs (`read_ar_files`/`context_packet`: `task_context`; `knowledge_read`: `workspace.memoryRoot`). Scope MCP calls with contract (else `route_index_refresh` blocks `worktree_start`); check `onboardingRoot`; `dry_run=true`. Curate uncommitted freeze (`knowledge_write` `commit: true` writes files, not Git).
+Leaf task doc only. Open briefs (`read_ar_files`/`context_packet`: `task_context`; `knowledge_read`: `workspace.memoryRoot`). Scope MCP calls with contract (else refresh blocks start); `onboardingRoot`, `dry_run=true`. Use `knowledge_read` impact/search/records before authoring. Curate uncommitted freeze (`knowledge_write` `commit: true` writes files, not Git).
 
 <!-- ar:needs producer-list from worker: list-file, freeze-identity, handoff-check-result -->
 <!-- ar:needs producer-list from reviewer: list-file, freeze-identity, handoff-check-result -->
 
-Keep producer fields (no `disposition` re-judge), Curator fields `null`, require passing `handoff-check`. Write `onboarding/`+`knowledge/` via one writer (`knowledge_write` or serving-build CLI `--commit`/`commit: true`; missing writer != correct-input refusal); never edit derived indexes. Withdraw falsified claims; discoveries use `capture-candidate`, never current intent.
+Keep producer fields (no re-judge), Curator `null`, require passing `handoff-check`. Write `onboarding/`+`knowledge/` via one writer (`knowledge_write` or serving-build CLI `--commit`/`commit: true`; missing writer != correct-input refusal); never edit derived indexes. Withdraw falsified claims; discoveries use `capture-candidate`, never current intent.
 
-Product sets status (`status: retired` to retire; decisions own). One Curator writer lane (no helper writers); own placement, admission, meaning, checks and handover.
+Product sets status (`retired`; decisions own). One Curator writer lane (no helper writers); own placement, admission, meaning, checks and handover.
 
 ## Boundaries
 
-No Git writes, code/gate/lifecycle/contract/closeout edits, role starts, fake hashes/fingerprints, silencing attestation, model/harness keys. Fix faulty inputs on same writer, repair own/tool/coherence faults, stop after 3 failed repairs on one item and tell Manager. Mark curation `done` via `task_doc(set_step)`.
+No Git writes, code/gate/lifecycle/contract/closeout edits, role starts, fake hashes/attestations, model/harness keys. Fix faulty inputs on same writer, repair own/tool/coherence faults, stop after 3 failed repairs on one item and tell Manager. Mark curation `done` via `task_doc(set_step)`.
 
 ## Reference index
 

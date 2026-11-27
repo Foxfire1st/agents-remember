@@ -42,6 +42,7 @@ from agents_remember.kernel.reviewer_worklist_process import (
     request_digest,
 )
 from agents_remember.memory.knowledge_index.build import kept_document_parses
+from agents_remember.memory_quality.style.citations import grammars
 from agents_remember.serving.build_info import process_serving_build, runtime_source_digest
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -124,7 +125,8 @@ def _run(request: dict[str, Any]) -> dict[str, Any]:
     payload = request["payload"]
     contract = _contract(payload["contract"])
     # This child's first request fills the blob-keyed memos from the store (D569).
-    restore_review_memos(contract.coordination_root, source["sourceDigest"])
+    with grammars.repository_language_set_scope(getattr(contract, "code_worktree", None)):
+        restore_review_memos(contract.coordination_root, source["sourceDigest"])
     candidate = CandidateTrees(**payload["candidate"])
     base = CapturedBase(**payload["base"])
     started = time.monotonic()

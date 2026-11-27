@@ -41,9 +41,10 @@ def range_proof(code: Any, test: TestRangeReference) -> CaseProof:
     except (AnchorResolutionError, UnicodeDecodeError) as error:
         return CaseProof(refusal=str(error))
     try:
-        found = grammars.test_case_range(
-            test.path, lines, start, end, _reaches(code, test, start, end)
-        )
+        with grammars.repository_language_set_scope(getattr(code, "root", None)):
+            found = grammars.test_case_range(
+                test.path, lines, start, end, _reaches(code, test, start, end)
+            )
     except GrammarUnavailableError as error:
         return CaseProof(refusal=str(error))
     if isinstance(found, str):

@@ -575,14 +575,15 @@ class CodeTrees:
         return None
 
     def _binding_count(self, path: str, blob: str, name: str) -> int:
-        grammar = grammars.grammar_of(path)
-        if grammar is None:
-            return 0
-        self._blob(blob)
-        try:
-            return len(self.objects.qualified_spans(path, blob, name))
-        except GrammarUnavailableError as error:
-            raise CodeReadError(f"the grammar for {path!r} is unavailable: {error}") from error
+        with grammars.repository_language_set_scope(self.repository):
+            grammar = grammars.grammar_of(path)
+            if grammar is None:
+                return 0
+            self._blob(blob)
+            try:
+                return len(self.objects.qualified_spans(path, blob, name))
+            except GrammarUnavailableError as error:
+                raise CodeReadError(f"the grammar for {path!r} is unavailable: {error}") from error
 
     def _holding(self, leaf: str) -> tuple[str, ...]:
         """The sorted paths ``git grep -l -F`` lists for C and ``leaf`` (:data:`TREE_GREPS`)."""

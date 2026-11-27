@@ -1,0 +1,353 @@
+{
+  "schema": "ar-language-catalog/v1",
+  "treeSitter": {
+    "package": "tree-sitter",
+    "version": "0.26.1",
+    "minAbi": 13,
+    "maxAbi": 15
+  },
+  "reservedSuffixes": [
+    ".lean"
+  ],
+  "ambiguousSuffixes": [
+    ".cls",
+    ".fs",
+    ".h",
+    ".inc",
+    ".m",
+    ".mod",
+    ".pl",
+    ".pro",
+    ".t",
+    ".v"
+  ],
+  "languagePack": {
+    "package": "tree-sitter-language-pack",
+    "version": "1.0.0",
+    "module": "tree_sitter_language_pack",
+    "getter": "get_language",
+    "wheels": []
+  },
+  "languages": {
+    "python": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-python",
+      "version": "0.25.0",
+      "module": "tree_sitter_python",
+      "symbol": "language",
+      "suffixes": [
+        ".py"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "python",
+        "python3"
+      ],
+      "tagsQuery": "python/tags.scm",
+      "tagsQuerySha256": "d5b06b8097aeeaf0df45ad55ba62f2b34b971dce3dcf0d3399d288445388bbe6",
+      "wrappers": [
+        "decorated_definition"
+      ],
+      "destructuring": {
+        "leaves": [
+          "identifier"
+        ],
+        "recurseChildren": [
+          "list_pattern",
+          "pattern_list",
+          "tuple_pattern"
+        ],
+        "recurseFields": {}
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_python-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/cf/64/a4e503c78a4eb3ac46d8e72a29c1b1237fa85238d8e972b063e0751f5a94/tree_sitter_python-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "14a79a47ddef72f987d5a2c122d148a812169d7484ff5c75a3db9609d419f361"
+        },
+        {
+          "filename": "tree_sitter_python-0.25.0-cp310-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/e6/1d/60d8c2a0cc63d6ec4ba4e99ce61b802d2e39ef9db799bdf2a8f932a6cd4b/tree_sitter_python-0.25.0-cp310-abi3-macosx_11_0_arm64.whl",
+          "sha256": "480c21dbd995b7fe44813e741d71fed10ba695e7caab627fb034e3828469d762"
+        },
+        {
+          "filename": "tree_sitter_python-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/aa/cb/d9b0b67d037922d60cbe0359e0c86457c2da721bc714381a63e2c8e35eba/tree_sitter_python-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "sha256": "86f118e5eecad616ecdb81d171a36dde9bef5a0b21ed71ea9c3e390813c3baf5"
+        },
+        {
+          "filename": "tree_sitter_python-0.25.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/40/bd/bf4787f57e6b2860f3f1c8c62f045b39fb32d6bac4b53d7a9e66de968440/tree_sitter_python-0.25.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "be71650ca2b93b6e9649e5d65c6811aad87a7614c8c1003246b303f6b150f61b"
+        },
+        {
+          "filename": "tree_sitter_python-0.25.0-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/5d/25/feff09f5c2f32484fbce15db8b49455c7572346ce61a699a41972dea7318/tree_sitter_python-0.25.0-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "sha256": "e6d5b5799628cc0f24691ab2a172a8e676f668fe90dc60468bee14084a35c16d"
+        },
+        {
+          "filename": "tree_sitter_python-0.25.0-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/75/69/4946da3d6c0df316ccb938316ce007fb565d08f89d02d854f2d308f0309f/tree_sitter_python-0.25.0-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "71959832fc5d9642e52c11f2f7d79ae520b461e63334927e93ca46cd61cd9683"
+        },
+        {
+          "filename": "tree_sitter_python-0.25.0-cp310-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/ed/a2/996fc2dfa1076dc460d3e2f3c75974ea4b8f02f6bc925383aaae519920e8/tree_sitter_python-0.25.0-cp310-abi3-win_amd64.whl",
+          "sha256": "9bcde33f18792de54ee579b00e1b4fe186b7926825444766f849bf7181793a76"
+        },
+        {
+          "filename": "tree_sitter_python-0.25.0-cp310-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/07/19/4b5569d9b1ebebb5907d11554a96ef3fa09364a30fcfabeff587495b512f/tree_sitter_python-0.25.0-cp310-abi3-win_arm64.whl",
+          "sha256": "0fbf6a3774ad7e89ee891851204c2e2c47e12b63a5edbe2e9156997731c128bb"
+        }
+      ]
+    },
+    "typescript": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-typescript",
+      "version": "0.23.2",
+      "module": "tree_sitter_typescript",
+      "symbol": "language_typescript",
+      "anchorSpelling": true,
+      "suffixes": [
+        ".cts",
+        ".mts",
+        ".ts"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "ts-node",
+        "tsx"
+      ],
+      "tagsQuery": "typescript/tags.scm",
+      "tagsQuerySha256": "b751ecca19e3cd66b21314c725cb086565cb03dd36ab2f0663ee3f8a1f0dc270",
+      "testsQuery": "typescript/tests.scm",
+      "testsQuerySha256": "e0fe23a4915942beebc4a987a20a21faac192e00c29a6f65ef2091b2fc2e64a7",
+      "wrappers": [
+        "ambient_declaration",
+        "export_statement"
+      ],
+      "destructuring": {
+        "leaves": [
+          "identifier",
+          "shorthand_property_identifier_pattern"
+        ],
+        "recurseChildren": [
+          "array_pattern",
+          "object_pattern",
+          "rest_pattern"
+        ],
+        "recurseFields": {
+          "assignment_pattern": "left",
+          "object_assignment_pattern": "left",
+          "pair_pattern": "value"
+        }
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_typescript-0.23.2-cp39-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/28/95/4c00680866280e008e81dd621fd4d3f54aa3dad1b76b857a19da1b2cc426/tree_sitter_typescript-0.23.2-cp39-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "3cd752d70d8e5371fdac6a9a4df9d8924b63b6998d268586f7d374c9fba2a478"
+        },
+        {
+          "filename": "tree_sitter_typescript-0.23.2-cp39-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/8f/2f/1f36fda564518d84593f2740d5905ac127d590baf5c5753cef2a88a89c15/tree_sitter_typescript-0.23.2-cp39-abi3-macosx_11_0_arm64.whl",
+          "sha256": "c7cc1b0ff5d91bac863b0e38b1578d5505e718156c9db577c8baea2557f66de8"
+        },
+        {
+          "filename": "tree_sitter_typescript-0.23.2-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/96/2d/975c2dad292aa9994f982eb0b69cc6fda0223e4b6c4ea714550477d8ec3a/tree_sitter_typescript-0.23.2-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "sha256": "4b1eed5b0b3a8134e86126b00b743d667ec27c63fc9de1b7bb23168803879e31"
+        },
+        {
+          "filename": "tree_sitter_typescript-0.23.2-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/49/d1/a71c36da6e2b8a4ed5e2970819b86ef13ba77ac40d9e333cb17df6a2c5db/tree_sitter_typescript-0.23.2-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "sha256": "e96d36b85bcacdeb8ff5c2618d75593ef12ebaf1b4eace3477e2bdb2abb1752c"
+        },
+        {
+          "filename": "tree_sitter_typescript-0.23.2-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/7f/cb/f57b149d7beed1a85b8266d0c60ebe4c46e79c9ba56bc17b898e17daf88e/tree_sitter_typescript-0.23.2-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "8d4f0f9bcb61ad7b7509d49a1565ff2cc363863644a234e1e0fe10960e55aea0"
+        },
+        {
+          "filename": "tree_sitter_typescript-0.23.2-cp39-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/8b/ab/dd84f0e2337296a5f09749f7b5483215d75c8fa9e33738522e5ed81f7254/tree_sitter_typescript-0.23.2-cp39-abi3-win_amd64.whl",
+          "sha256": "3f730b66396bc3e11811e4465c41ee45d9e9edd6de355a58bbbc49fa770da8f9"
+        },
+        {
+          "filename": "tree_sitter_typescript-0.23.2-cp39-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/9f/e4/81f9a935789233cf412a0ed5fe04c883841d2c8fb0b7e075958a35c65032/tree_sitter_typescript-0.23.2-cp39-abi3-win_arm64.whl",
+          "sha256": "05db58f70b95ef0ea126db5560f3775692f609589ed6f8dd0af84b7f19f1cbb7"
+        }
+      ]
+    },
+    "tsx": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-typescript",
+      "version": "0.23.2",
+      "module": "tree_sitter_typescript",
+      "symbol": "language_tsx",
+      "suffixes": [
+        ".tsx"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "typescript/tags.scm",
+      "tagsQuerySha256": "b751ecca19e3cd66b21314c725cb086565cb03dd36ab2f0663ee3f8a1f0dc270",
+      "testsQuery": "typescript/tests.scm",
+      "testsQuerySha256": "e0fe23a4915942beebc4a987a20a21faac192e00c29a6f65ef2091b2fc2e64a7",
+      "wrappers": [
+        "ambient_declaration",
+        "export_statement"
+      ],
+      "destructuring": {
+        "leaves": [
+          "identifier",
+          "shorthand_property_identifier_pattern"
+        ],
+        "recurseChildren": [
+          "array_pattern",
+          "object_pattern",
+          "rest_pattern"
+        ],
+        "recurseFields": {
+          "assignment_pattern": "left",
+          "object_assignment_pattern": "left",
+          "pair_pattern": "value"
+        }
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_typescript-0.23.2-cp39-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/28/95/4c00680866280e008e81dd621fd4d3f54aa3dad1b76b857a19da1b2cc426/tree_sitter_typescript-0.23.2-cp39-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "3cd752d70d8e5371fdac6a9a4df9d8924b63b6998d268586f7d374c9fba2a478"
+        },
+        {
+          "filename": "tree_sitter_typescript-0.23.2-cp39-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/8f/2f/1f36fda564518d84593f2740d5905ac127d590baf5c5753cef2a88a89c15/tree_sitter_typescript-0.23.2-cp39-abi3-macosx_11_0_arm64.whl",
+          "sha256": "c7cc1b0ff5d91bac863b0e38b1578d5505e718156c9db577c8baea2557f66de8"
+        },
+        {
+          "filename": "tree_sitter_typescript-0.23.2-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/96/2d/975c2dad292aa9994f982eb0b69cc6fda0223e4b6c4ea714550477d8ec3a/tree_sitter_typescript-0.23.2-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "sha256": "4b1eed5b0b3a8134e86126b00b743d667ec27c63fc9de1b7bb23168803879e31"
+        },
+        {
+          "filename": "tree_sitter_typescript-0.23.2-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/49/d1/a71c36da6e2b8a4ed5e2970819b86ef13ba77ac40d9e333cb17df6a2c5db/tree_sitter_typescript-0.23.2-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "sha256": "e96d36b85bcacdeb8ff5c2618d75593ef12ebaf1b4eace3477e2bdb2abb1752c"
+        },
+        {
+          "filename": "tree_sitter_typescript-0.23.2-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/7f/cb/f57b149d7beed1a85b8266d0c60ebe4c46e79c9ba56bc17b898e17daf88e/tree_sitter_typescript-0.23.2-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "8d4f0f9bcb61ad7b7509d49a1565ff2cc363863644a234e1e0fe10960e55aea0"
+        },
+        {
+          "filename": "tree_sitter_typescript-0.23.2-cp39-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/8b/ab/dd84f0e2337296a5f09749f7b5483215d75c8fa9e33738522e5ed81f7254/tree_sitter_typescript-0.23.2-cp39-abi3-win_amd64.whl",
+          "sha256": "3f730b66396bc3e11811e4465c41ee45d9e9edd6de355a58bbbc49fa770da8f9"
+        },
+        {
+          "filename": "tree_sitter_typescript-0.23.2-cp39-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/9f/e4/81f9a935789233cf412a0ed5fe04c883841d2c8fb0b7e075958a35c65032/tree_sitter_typescript-0.23.2-cp39-abi3-win_arm64.whl",
+          "sha256": "05db58f70b95ef0ea126db5560f3775692f609589ed6f8dd0af84b7f19f1cbb7"
+        }
+      ]
+    },
+    "javascript": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-javascript",
+      "version": "0.25.0",
+      "module": "tree_sitter_javascript",
+      "symbol": "language",
+      "suffixes": [
+        ".cjs",
+        ".js",
+        ".jsx",
+        ".mjs"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "bun",
+        "deno",
+        "node",
+        "nodejs"
+      ],
+      "tagsQuery": "javascript/tags.scm",
+      "tagsQuerySha256": "48fd89260e3be2db4dac986744d7c4fc79d74e1d60b7d8c06b7eecac27d05f7c",
+      "testsQuery": "javascript/tests.scm",
+      "testsQuerySha256": "ab613aa84ec67eadcd21c9c991debe080118b178dc2ca164cd88a53a8bc6dd1f",
+      "wrappers": [
+        "ambient_declaration",
+        "export_statement"
+      ],
+      "destructuring": {
+        "leaves": [
+          "identifier",
+          "shorthand_property_identifier_pattern"
+        ],
+        "recurseChildren": [
+          "array_pattern",
+          "object_pattern",
+          "rest_pattern"
+        ],
+        "recurseFields": {
+          "assignment_pattern": "left",
+          "object_assignment_pattern": "left",
+          "pair_pattern": "value"
+        }
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_javascript-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/2c/df/5106ac250cd03661ebc3cc75da6b3d9f6800a3606393a0122eca58038104/tree_sitter_javascript-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "b70f887fb269d6e58c349d683f59fa647140c410cfe2bee44a883b20ec92e3dc"
+        },
+        {
+          "filename": "tree_sitter_javascript-0.25.0-cp310-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/b1/8f/6b4b2bc90d8ab3955856ce852cc9d1e82c81d7ab9646385f0e75ffd5b5d3/tree_sitter_javascript-0.25.0-cp310-abi3-macosx_11_0_arm64.whl",
+          "sha256": "8264a996b8845cfce06965152a013b5d9cbb7d199bc3503e12b5682e62bb1de1"
+        },
+        {
+          "filename": "tree_sitter_javascript-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/5f/c4/7da74ecdcd8a398f88bd003a87c65403b5fe0e958cdd43fbd5fd4a398fcf/tree_sitter_javascript-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "sha256": "9dc04ba91fc8583344e57c1f1ed5b2c97ecaaf47480011b92fbeab8dda96db75"
+        },
+        {
+          "filename": "tree_sitter_javascript-0.25.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/96/c8/97da3af4796495e46421e9344738addb3602fa6426ea695be3fcbadbee37/tree_sitter_javascript-0.25.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "199d09985190852e0912da2b8d26c932159be314bc04952cf917ed0e4c633e6b"
+        },
+        {
+          "filename": "tree_sitter_javascript-0.25.0-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/13/be/c964e8130be08cc9bd6627d845f0e4460945b158429d39510953bbcb8fcc/tree_sitter_javascript-0.25.0-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "sha256": "dfcf789064c58dc13c0a4edb550acacfc6f0f280577f1e7a00de3e89fc7f8ddc"
+        },
+        {
+          "filename": "tree_sitter_javascript-0.25.0-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/ee/89/9b773dee0f8961d1bb8d7baf0a204ab587618df19897c1ef260916f318ec/tree_sitter_javascript-0.25.0-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "1b852d3aee8a36186dbcc32c798b11b4869f9b5041743b63b65c2ef793db7a54"
+        },
+        {
+          "filename": "tree_sitter_javascript-0.25.0-cp310-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/3b/dc/d90cb1790f8cec9b4878d278ad9faf7c8f893189ce0f855304fd704fc274/tree_sitter_javascript-0.25.0-cp310-abi3-win_amd64.whl",
+          "sha256": "e5ed840f5bd4a3f0272e441d19429b26eedc257abe5574c8546da6b556865e3c"
+        },
+        {
+          "filename": "tree_sitter_javascript-0.25.0-cp310-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/2e/1f/f9eba1038b7d4394410f3c0a6ec2122b590cd7acb03f196e52fa57ebbe72/tree_sitter_javascript-0.25.0-cp310-abi3-win_arm64.whl",
+          "sha256": "622a69d677aa7f6ee2931d8c77c981a33f0ebb6d275aa9d43d3397c879a9bb0b"
+        }
+      ]
+    },
+    "lean": {
+      "providerKind": "builtin_lean",
+      "version": "builtin-lean/1",
+      "suffixes": [
+        ".lean"
+      ],
+      "filenames": [],
+      "shebangs": []
+    }
+  }
+}

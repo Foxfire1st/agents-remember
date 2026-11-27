@@ -109,9 +109,15 @@ def code_span_texts(text: str) -> list[str]:
 
 
 def anchors_in(
-    text: str, *, cited_grammars: frozenset[str | None] = frozenset()
+    text: str,
+    *,
+    cited_grammars: frozenset[str | None] = frozenset(),
+    language_set: grammars.LanguageSet | None = None,
 ) -> tuple[tuple[Anchor, ...], int]:
     """``(anchors, count of backticked spans that are not anchors)``."""
+    if language_set is not None:
+        with grammars.language_set_scope(language_set):
+            return anchors_in(text, cited_grammars=cited_grammars)
     found: list[Anchor] = []
     skipped = 0
     for span in code_span_texts(text):

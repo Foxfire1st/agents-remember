@@ -51,6 +51,8 @@ RUNTIME_PROOF_CONTEXT = (
 VENV_ROOT = "/opt/ar-venv"
 VENV_PYTHON = f"{VENV_ROOT}/bin/python"
 VENV_PROOF = "/opt/agents-remember-venv-runtime.json"
+LANGUAGE_CACHE_ROOT = "/opt/ar-language-cache"
+LANGUAGE_CACHE_VOLUME = "ar-language-cache-v1"
 
 
 async def _contract_uv_minor(source: dagger.Directory) -> str:
@@ -158,6 +160,8 @@ async def _candidate_base(
     base = await _canonical_python_base(source, image_reference=image_reference)
     return (
         base.with_mounted_cache("/root/.npm", dag.cache_volume("ar-quality-npm-v1"))
+        .with_mounted_cache(LANGUAGE_CACHE_ROOT, dag.cache_volume(LANGUAGE_CACHE_VOLUME))
+        .with_env_variable("AR_LANGUAGE_CACHE", LANGUAGE_CACHE_ROOT)
         .with_env_variable("HOME", "/tmp/ar-home")
         .with_env_variable("TMPDIR", "/tmp/ar-quality")
         .with_env_variable("TMP", "/tmp/ar-quality")
@@ -216,6 +220,17 @@ async def _candidate_base(
             ]
         )
         .with_exec([RUNTIME_UV, "pip", "check", "--python", VENV_PYTHON])
+        .with_exec(
+            [
+                VENV_PYTHON,
+                "-m",
+                "agents_remember.cli",
+                "languages",
+                "warm",
+                "--repo",
+                "/workspace",
+            ]
+        )
     )
 
 
@@ -292,6 +307,8 @@ def _portable_candidate_container(
     return (
         dag.container()
         .from_(image_reference)
+        .with_mounted_cache(LANGUAGE_CACHE_ROOT, dag.cache_volume(LANGUAGE_CACHE_VOLUME))
+        .with_env_variable("AR_LANGUAGE_CACHE", LANGUAGE_CACHE_ROOT)
         .with_env_variable("CI", "1")
         .with_env_variable("AR_CERTIFICATION_SELECTOR_ROOT", "/tmp/ar-profile")
         .with_directory("/workspace", source)

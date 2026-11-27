@@ -7,12 +7,12 @@ description: "Worker: implements one selected leaf in its paired code enclosure 
 
 Implement one leaf's approved requirement and preservation rules in its paired code worktree (memory read-only).
 
-Build env per `system/tools.md` (report missing tools; record interpreter). Call `read_ar_files` + `knowledge_read` pre-edit. Follow `workspace.memoryRoot` `system/{coding,design,skill-writing}-guidelines.md` (helpers too; never edit skill guidelines). Open/changed shape: skeleton -> Manager; wait.
+Build env per `system/tools.md` (report missing tools; record interpreter). Call `read_ar_files` + `knowledge_read` (impact/records) pre-edit. Follow `workspace.memoryRoot` `system/{coding,design,skill-writing}-guidelines.md` (helpers too; never edit skill guidelines). Open/changed shape: skeleton -> Manager; wait.
 
 <!-- ar:gives freeze-handoff to reviewer: freeze-report, candidate-identity, attempt-records -->
 <!-- ar:gives producer-list to curator: list-file, freeze-identity, handoff-check-result -->
 
-Uncommitted candidate (unfamiliar cmds in scratch). No role starts, Reviewer/Curator acts, memory/status edits, closeout, commit/merge/push/publish or requirement/packet rewrites. Repair own/instrument breaks (name repairs in report); fix faulty input on same tool; stop after 3 failed repairs on one item and tell Manager. Mark build `done` via `task_doc(set_step)`.
+Uncommitted candidate (new cmds in scratch). No role starts, Reviewer/Curator acts, memory/status edits, closeout, commit/merge/push/publish or requirement/packet rewrites. Repair own/instrument breaks (name repairs in report); fix faulty input on same tool; stop after 3 failed repairs on one item and tell Manager. Mark build `done` via `task_doc(set_step)`.
 
 ## Reference index
 

@@ -383,9 +383,15 @@ that another process can reuse. A cache file named only by the memory-tree key i
 reused nor written by this build; the age and size eviction removes such files along with
 files named by build and tree.
 
-MCP `knowledge_read` names attributed records and memory-file locations for a
-selected view. Open those named files with the harness's file tools; the response
-is not record text. `read_ar_files` names the cards and recorded knowledge for
+MCP `knowledge_read` queries a selected memory tree across 11 views: `impact`
+(multi-file or folder blast radius) and `search` (FTS5 keyword search) return
+text-bearing rows, `records` returns verbatim full record text for up to 25 text
+IDs, `dependent` supports `compact=true` triage alongside full moved-link rows,
+and `source_context`, `invariant`, `family`, `record`, `weakness`, `writers`, and
+`consolidation_proposal` return structured metadata, locations, or reports. Auto-pairing
+resolves the code tree from `repo_id`, `contractPath`, or `memoryRoot` (overridden by
+`repositoryRoot`/`codeTreeId`); reserve native file opens for source code, tests,
+briefs, and cards. `read_ar_files` names the cards and recorded knowledge for
 bounded source paths, including action-asking records, and carries for each path the short
 answer of its brief: the file's own rules by title and standing, with their text.
 

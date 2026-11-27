@@ -147,9 +147,6 @@ OTHER_ATTRIBUTES_ALLOWED = {
 # A module name computed at run time cannot be checked, so each module that imports one is named.
 # None of them may spell a SQLite module's name in any string.
 COMPUTED_IMPORTS_ALLOWED = {
-    "memory_quality/style/citations/grammars.py": (
-        "loads the tree-sitter grammar package its own GRAMMAR_PACKAGES table names"
-    ),
     "mcp/registration/lazy.py": (
         "a lazy view over the payload-builder package: the name comes from the attribute a "
         "registration module asks for, never from an author or a request"

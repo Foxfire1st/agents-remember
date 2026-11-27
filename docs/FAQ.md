@@ -31,16 +31,20 @@ Three ways, matched to what the agent already knows:
 
 - **By path**: when it has the file in hand, the card is at a deterministic path (`src/foo/bar.ts` → `<memory-root>/onboarding/src/foo/bar.ts.md`). Nothing is searched or ranked: the path is the address, so reads stay predictable.
 - **By tool**: `read_ar_files` names the governing card and the knowledge records of up to 20
-  paths, and `knowledge_read` names the invariants and families attributed to one source file.
+  paths, and `knowledge_read` queries converted memory across 11 views (`impact`, `search`,
+  `records`, `dependent`, `source_context`, `invariant`, `family`, `record`, `weakness`, `writers`,
+  and `consolidation_proposal`).
   `read_ar_files` also carries, per file, the short answer of its brief: the rules recorded at the
   file with their text. As the answer nears its size bound, the further paths get their counts
   and the path of their brief. If those rows would pass the bound too, every path gets a compact
   row instead: its path and, where applicable, whether it exists, its card's status and the path
   of its brief, marked when that brief is missing or older. The brief holds the full story.
-  See the [tool reference](reference/mcp-tools.md). `knowledge_read` returns names and locations;
-  the agent opens the named files itself.
-- **By text search**: when it knows a concept but no file, the agent searches the code and the
-  cards as text.
+  See the [tool reference](reference/mcp-tools.md). `knowledge_read` returns text-bearing rows in
+  `impact` and `search`, verbatim full text for up to 25 IDs in `records`, and structured locations
+  or reports in the other views, leaving native file opens for source code, tests, briefs, and
+  cards.
+- **By text search**: when it knows a concept but no file, the agent queries `knowledge_read`
+  (`view="search"`) or searches the code and the cards as text.
 
 See [Concepts](concepts.md#how-an-agent-finds-memory).
 
