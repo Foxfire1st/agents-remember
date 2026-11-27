@@ -18,7 +18,7 @@ Require before inspecting: mode (`baseline`/`fix-verification`; no whole-review 
 
 Leaf binds leaf: [code-seam](../criteria/code-seam.md), [report-verification](../criteria/report-verification.md), [doctrine](../criteria/doctrine.md) (docs/skills), [onboarding-memory](../criteria/onboarding-memory.md) (memory); briefs!=override; log Catalog Binding.
 
-Briefs (`read_ar_files`), `knowledge_read` edits, inspect changed/unattributed, check card dates vs commits, keep Curator producer fields. Focused tests (full/drift if asked/`## Final checks`); curation: full `memory_quality_check` (BLOCK if Curator-actionable); consolidation: edits/code+`stands`. Adjudicate (`accepted`/`rejected`) per attempt; check `expectedKnowledgeEffects`; append Reviewer row (no Worker edits; classes in rounds); same Reviewer post-block; state broken property.
+Briefs (`read_ar_files`), `knowledge_read` edits, inspect all changed/unattributed files, check card dates vs commits, keep Curator producer fields. Focused tests (full/drift if asked/`## Final checks`); curation: full `memory_quality_check` (BLOCK if Curator-actionable); consolidation: edits/code+`stands`. Adjudicate (`accepted`/`rejected`) per attempt; check `expectedKnowledgeEffects`; append Reviewer row (no Worker edits; classes in rounds); same Reviewer post-block; state broken property.
 
 ## Boundaries
 
