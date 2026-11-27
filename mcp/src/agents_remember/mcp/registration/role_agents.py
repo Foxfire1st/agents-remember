@@ -5,8 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any, Literal
 
-from mcp.server.fastmcp import FastMCP
-from mcp.server.lowlevel.server import request_ctx
+from mcp.server.mcpserver import Context, MCPServer
 from pydantic import Field, StrictBool, StrictStr
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -61,27 +60,28 @@ def seat_override(role: str, mapping: dict[str, Any] | None) -> SeatLaunchOverri
     )
 
 
-def caller_harness_name() -> str | None:
+def caller_harness_name(ctx: Context[Any, Any] | None = None) -> str | None:
     """The name the calling harness sent in its MCP ``initialize`` request, else ``None``.
 
     This is the whole caller-harness signal (MIK-R196 rule 1): the transport's own report about
-    its client, read from the request the server is serving. A caller that sends no name, or a
-    call made outside a served request (an in-process check), gives ``None`` -- reported as
-    unknown, never replaced by a guess.
+    its client, read from the request context the server is serving. A caller that sends no name,
+    or a call made outside a served request (where ``ctx.session`` raises ``ValueError``), gives
+    ``None`` -- reported as unknown, never replaced by a guess.
     """
 
-    try:
-        context = request_ctx.get()
-    except LookupError:
+    if ctx is None:
         return None
-    session = getattr(context, "session", None)
+    try:
+        session = ctx.session
+    except ValueError:
+        return None
     params = getattr(session, "client_params", None)
-    info = getattr(params, "clientInfo", None)
+    info = getattr(params, "client_info", None)
     name = getattr(info, "name", None)
     return name.strip() if isinstance(name, str) and name.strip() else None
 
 
-def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def register_role_agent_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """Register ``role_start``, ``role_start_set`` and ``role_message``, in that order."""
 
     @server.tool()
@@ -99,6 +99,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         replaces_agent_id: str | None = None,
         replaces_interrupt_turn: bool = False,
         step_up: str | None = None,
+        ctx: Context[Any, Any] | None = None,
     ) -> dict[str, object]:
         """Start one role agent in Paseo (caller as parent). Only a role agent that AR launched can call this. Only the agent that started an execution repeats its request_id. Returns agent id or rejected (the launch is closed; no usable agent exists). Starts run one at a time. Call waits up to 60 seconds, then refuses; nextAction says to call again with the same arguments. Docs: docs/reference/mcp-tools.md."""
         call = RoleStartCall(
@@ -114,7 +115,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
             replaces_agent_id=replaces_agent_id,
             replaces_interrupt_turn=replaces_interrupt_turn,
             step_up=step_up,
-            caller_harness=caller_harness_name(),
+            caller_harness=caller_harness_name(ctx),
         )
         return await run_in_request_thread(tools.role_start_payload, config, call)
 

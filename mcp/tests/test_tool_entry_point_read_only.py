@@ -85,8 +85,8 @@ class ReadOnlyMarkTests(unittest.TestCase):
                 assert annotations is not None
                 self.assertEqual(
                     tool in READ_ONLY_TOOLS,
-                    annotations.readOnlyHint,
-                    f"{tool} advertises readOnlyHint={annotations.readOnlyHint}",
+                    annotations.read_only_hint,
+                    f"{tool} advertises readOnlyHint={annotations.read_only_hint}",
                 )
 
     def test_a_tool_marked_as_a_read_changes_no_file_of_the_world(self) -> None:

@@ -4,7 +4,7 @@ the mounted surface's own refusals.
 Every case names the failure it catches. The view vocabulary, the closed rule registry and the
 ordering pass are pure functions of their inputs -- which is exactly why the classification rule
 can be tested without a store. The §1 literal case is pure too. The §6 cases are not: they drive the
-**registered** ``knowledge_*`` handlers through a real ``FastMCP`` server over a converted memory
+**registered** ``knowledge_*`` handlers through a real ``MCPServer`` server over a converted memory
 tree, and their point is precisely that the mounted surface executes rather than merely appearing in
 the roster.
 
@@ -64,7 +64,8 @@ from knowledge_index_test_support import (
     init_repository,
     write_review_tree,
 )
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult
 
 SNAPSHOT = KnowledgeReadSnapshot(
     repository_id="11111111-1111-1111-1111-111111111111",
@@ -364,7 +365,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _knowledge_tool_server(root: Path) -> FastMCP:
+def _knowledge_tool_server(root: Path) -> MCPServer:
     """One server carrying **only** the knowledge family, as its own registrar mounts it.
 
     The registrar reads two registration-time facts: the workspace root a read falls back to, and
@@ -376,12 +377,12 @@ def _knowledge_tool_server(root: Path) -> FastMCP:
         coordination_root = root / "coordination"
         repositories: Mapping[str, Any] = MappingProxyType({})
 
-    server = FastMCP("knowledge-refusal-probe")
+    server = MCPServer("knowledge-refusal-probe")
     register_knowledge_tools(server, cast(McpRuntimeConfig, _RegistrationConfig()))
     return server
 
 
-async def _call(server: FastMCP, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+async def _call(server: MCPServer, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """The JSON body the named registered tool returned for one call.
 
     A registered handler that lets a model's own ``ValidationError`` escape reaches the transport as
@@ -390,8 +391,9 @@ async def _call(server: FastMCP, tool: str, arguments: dict[str, Any]) -> dict[s
     reason: "a schema-conformant input is answered" is asserted at the mounted boundary.
     """
 
-    _content, structured = await server.call_tool(tool, arguments)
-    return cast(dict[str, Any], structured)
+    result = await server.call_tool(tool, arguments)
+    assert isinstance(result, CallToolResult)
+    return cast(dict[str, Any], result.structured_content)
 
 
 def _memory_tree(tmp_path: Path) -> Path:
@@ -487,7 +489,7 @@ async def test_the_registered_handlers_read_a_memory_tree_and_take_no_database_p
     )
     assert "no `afterRevision`" in diff_description
     assert "writes loose, unreferenced objects" in " ".join(diff_description.split())
-    schemas = {tool.name: set(tool.inputSchema["properties"]) for tool in tools}
+    schemas = {tool.name: set(tool.input_schema["properties"]) for tool in tools}
     assert schemas == {
         "knowledge_read": {
             "memoryRoot",

@@ -15,13 +15,15 @@ from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.application.tool_build_currentness import tool_build_currentness
 from agents_remember.application.tool_response import complete_tool_response
 from agents_remember.mcp.build_staleness import is_stale_build_write
-from agents_remember.mcp.server import AgentsRememberMCP, _complete_fastmcp_settings
+from agents_remember.mcp.server import AgentsRememberMCP
 from agents_remember.mcp.tools.core import runtime_install_payload
 from agents_remember.models.build_currentness import BuildCurrentnessPayload
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.serving.daemon import DaemonState, EnsureResult
-from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.types import CallToolResult, TextContent
 from test_tool_answer_rows_quality import _scoped_pair
+
+from mcp import Client
 
 _STALE = BuildCurrentnessPayload(
     mode="installed",
@@ -36,6 +38,12 @@ _STALE = BuildCurrentnessPayload(
 def _answer(result: Any) -> dict[str, Any]:
     if isinstance(result, dict):
         return result
+    if isinstance(result, CallToolResult):
+        if result.structured_content is not None:
+            return result.structured_content
+        first = result.content[0]
+        assert isinstance(first, TextContent)
+        return json.loads(first.text)
     if isinstance(result, tuple):
         return result[1]
     return json.loads(result[0].text)
@@ -45,7 +53,6 @@ class MCPBuildStalenessTests(unittest.IsolatedAsyncioTestCase):
     async def test_stale_refusal_is_structured_over_the_mcp_transport(self) -> None:
         with TemporaryDirectory() as directory:
             _, config, _ = _scoped_pair(Path(directory))
-            _complete_fastmcp_settings()
             server = AgentsRememberMCP("stale-wire-test")
             server._agents_remember_config = config
             entered: list[bool] = []
@@ -59,13 +66,13 @@ class MCPBuildStalenessTests(unittest.IsolatedAsyncioTestCase):
                 patch("agents_remember.mcp.server.build_currentness", return_value=_STALE),
                 patch("agents_remember.mcp.server.server_startup.start_after_discovery"),
             ):
-                async with create_connected_server_and_client_session(server._mcp_server) as client:
+                async with Client(server, mode="legacy") as client:
                     result = await client.call_tool("worktree_closeout_apply", {})
-            self.assertFalse(result.isError)
+            self.assertFalse(result.is_error)
             self.assertEqual(entered, [])
-            assert result.structuredContent is not None
-            self.assertEqual(result.structuredContent["code"], "server-build-stale")
-            self.assertEqual(result.structuredContent["buildCurrentness"]["state"], "stale")
+            assert result.structured_content is not None
+            self.assertEqual(result.structured_content["code"], "server-build-stale")
+            self.assertEqual(result.structured_content["buildCurrentness"]["state"], "stale")
 
     async def test_each_publication_refuses_before_its_handler_and_dry_run_answers(self) -> None:
         publications = (
@@ -89,7 +96,6 @@ class MCPBuildStalenessTests(unittest.IsolatedAsyncioTestCase):
         )
         with TemporaryDirectory() as directory:
             _, config, _ = _scoped_pair(Path(directory))
-            _complete_fastmcp_settings()
             server = AgentsRememberMCP("staleness-test")
             server._agents_remember_config = config
             entered: list[str] = []
@@ -147,7 +153,6 @@ class MCPBuildStalenessTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(is_stale_build_write(name, arguments))
         with TemporaryDirectory() as directory:
             _, config, _ = _scoped_pair(Path(directory))
-            _complete_fastmcp_settings()
             server = AgentsRememberMCP("allowed-test")
             server._agents_remember_config = config
 

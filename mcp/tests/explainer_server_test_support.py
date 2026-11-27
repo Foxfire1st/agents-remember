@@ -1,7 +1,7 @@
 """The explainer's own tools at the mounted boundary: render and the three grade tools (MIK-R211 v5).
 
 Each case protects one distinct operation of the seat's own server, at the mounted boundary
-(``FastMCP.call_tool``), against a real environment: :func:`build_environment` writes the
+(``MCPServer.call_tool``), against a real environment: :func:`build_environment` writes the
 workspace, its snapshot of two real Git trees, the packet and the grants, and the assertion is on
 what came back and what lies on disk.
 
@@ -46,7 +46,8 @@ from agents_remember.models.knowledge.review_frame import FrameBinding
 from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord, ReviewTreeSide
 from canvas_host_test_support import LEAF, REPO, TASK, config, packet, publish, task
 from knowledge_index_test_support import commit_all, init_repository, write_review_tree
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult
 
 AT = "2026-10-22T09:00:00+00:00"
 MESSAGE_ID = "8d1b0f5e-0f4a-4a57-9c2e-4f4b1f2a6c11"
@@ -221,10 +222,10 @@ def _server(world: World, **overrides: Any):
 
 def _server_only(
     workspace: Path, *, seat: str | None = None, inputs: ExplainerInputs | None = None
-) -> FastMCP:
+) -> MCPServer[Any]:
     """The explainer's tools on a bare server: what a launch would register, without a launch."""
 
-    server = FastMCP("review-explainer")
+    server: MCPServer[Any] = MCPServer("review-explainer")
     register_bound_explainer_tools(server, workspace=workspace, seat=seat, inputs=inputs)
     return server
 
@@ -233,10 +234,13 @@ def _content(server: Any, tool: str, arguments: Mapping[str, Any] | None = None)
     """The text one mounted tool call answered, whichever shape the SDK returns it in."""
 
     result = asyncio.run(server.call_tool(tool, dict(arguments or {})))
-    if isinstance(result, tuple):  # (content blocks, structured body) on a non-object return
+    if isinstance(result, CallToolResult):
+        result = result.content
+    elif isinstance(result, tuple):  # (content blocks, structured body) on a non-object return
         result = result[0]
     first = result[0]
-    return first.text if hasattr(first, "text") else str(first)
+    text = getattr(first, "text", None)
+    return text if isinstance(text, str) else str(first)
 
 
 def _call(server: Any, tool: str, arguments: Mapping[str, Any] | None = None) -> Any:

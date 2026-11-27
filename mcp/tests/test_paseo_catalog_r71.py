@@ -54,7 +54,7 @@ from agents_remember.worktrees import role_reports
 from agents_remember.worktrees.modules import terminal_group
 from agents_remember.worktrees.role_reports import collect_group_reports, remove_group_role_folders
 from agents_remember.worktrees.worktree_contract import WorktreeContract
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import ValidationError
 from test_paseo_catalog import (
     CATALOG,
@@ -762,7 +762,7 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
         self.assertEqual(canonical.read_text(), "Newly collected evidence")
 
     def test_r71_public_reader_has_no_caller_path_or_mutating_operation(self) -> None:
-        server = FastMCP("fixture")
+        server = MCPServer("fixture")
         _register_identity_tools(
             server,
             self.config,
@@ -771,10 +771,10 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
         listed = {tool.name: tool for tool in asyncio.run(server.list_tools())}
         for name in ("server_info",):
             tool = listed[name]
-            self.assertEqual(tool.inputSchema.get("properties", {}), {})
+            self.assertEqual(tool.input_schema.get("properties", {}), {})
             assert tool.annotations is not None
-            self.assertTrue(tool.annotations.readOnlyHint)
-            self.assertFalse(tool.annotations.destructiveHint)
+            self.assertTrue(tool.annotations.read_only_hint)
+            self.assertFalse(tool.annotations.destructive_hint)
         self.assertEqual(set(listed), {"server_info"})
 
     def test_r71_layer_binding_keeps_codex_auto_from_becoming_claude_auto(self) -> None:

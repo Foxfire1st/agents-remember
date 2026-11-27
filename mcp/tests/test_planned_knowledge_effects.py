@@ -46,8 +46,7 @@ from agents_remember.tasks.leaf_decisions import leaf_decision_refusal
 from agents_remember.tasks.render import render_markdown
 from agents_remember.tasks.task_intent import task_intent_identity, task_intent_projection
 from agents_remember.worktrees.worktree_contract import load_contract
-from mcp.server.fastmcp import FastMCP
-from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.server.mcpserver import MCPServer
 from pydantic import ValidationError
 from reconsideration_test_support import write_master
 from test_knowledge_requirement_reference_contract import _write_packet
@@ -68,6 +67,8 @@ from test_knowledge_worklist import (
     git,
     invariant,
 )
+
+from mcp import Client
 
 LEAF = "260928-MIK-L99"
 DECISION_AT = "2026-09-29T10:00+02:00"
@@ -626,7 +627,7 @@ def test_mounted_task_doc_effect_is_reconciled_by_the_leaf_gate(world: World) ->
             "agents-remember": RepositoryScope(repo_id="agents-remember", path=world.code)
         },
     )
-    server = FastMCP("planned-effect-fixture")
+    server = MCPServer("planned-effect-fixture")
     register_task_tools(server, config)
     declaration = effect("family:FAM-F00001", "weaken", "MIK-R55@v1")
     arguments = dict(
@@ -643,12 +644,12 @@ def test_mounted_task_doc_effect_is_reconciled_by_the_leaf_gate(world: World) ->
     )
 
     async def declare():
-        async with create_connected_server_and_client_session(server._mcp_server) as client:
+        async with Client(server, mode="legacy") as client:
             return await client.call_tool("task_doc", arguments)
 
     answer = anyio.run(declare)
-    assert not answer.isError and answer.structuredContent is not None, answer
-    assert answer.structuredContent["ok"], answer
+    assert not answer.is_error and answer.structured_content is not None, answer
+    assert answer.structured_content["ok"], answer
     assert json.loads(document_path.read_text())["expectedKnowledgeEffects"] == [declaration]
     contract = load_contract(contract_path)
     # The declared family is planned; the undeclared touched invariant is unplanned.

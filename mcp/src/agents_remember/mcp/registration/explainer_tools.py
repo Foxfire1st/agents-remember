@@ -19,7 +19,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from agents_remember.canvas.explainer_answer_bounds import (
     EXPLAINER_ANSWER_BOUNDS,
@@ -43,7 +43,7 @@ def _render(
 
 
 def register_render_tool(
-    server: FastMCP,
+    server: MCPServer[Any],
     workspace: Path,
     *,
     task_root: Path | None = None,
@@ -193,7 +193,7 @@ def _moved(
 
 
 def register_judgment_tools(
-    server: FastMCP,
+    server: MCPServer[Any],
     workspace: Path,
     *,
     task_root: Path | None,
@@ -250,7 +250,7 @@ def register_judgment_tools(
 
 
 def register_bound_explainer_tools(
-    server: FastMCP,
+    server: MCPServer[Any],
     *,
     workspace: Path,
     seat: str | None = None,

@@ -37,17 +37,25 @@ from agents_remember.install import runtime
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.mcp.registration import role_agents as role_agent_registration
-from agents_remember.mcp.registration.role_agents import register_role_agent_tools
+from agents_remember.mcp.registration.role_agents import (
+    caller_harness_name,
+    register_role_agent_tools,
+)
 from agents_remember.models.role_agents import RoleStartResponse
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import TOOL_ANSWER_OVERFLOW_MAX_TOKENS, bound_for
 from agents_remember.serving import daemon as serving_daemon
 from fastapi import HTTPException
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import Context, MCPServer
 from paseo_launch_test_support import SERVER_ID
 from test_mik_r196_l188_preparation_order import _stub_host, _workspace_config
 from test_paseo_role_tools import RoleToolsTestCase
+
+from mcp import Client
+from mcp import types as mcp_types
+
+_REAL_CALLER_HARNESS_NAME = caller_harness_name
 
 # The host's own web route this installation's dashboard embeds, so a chat address exists.
 FRAME_BASE = "http://127.0.0.1:6835"
@@ -167,11 +175,12 @@ class _FreeSeatWorld(RoleToolsTestCase):
         """Run one registered tool call, as a harness reaches it."""
 
         async def invoke() -> dict[str, Any]:
-            server = FastMCP("free-seat-test")
+            server = MCPServer("free-seat-test")
             register_role_agent_tools(server, self.config)
             with tool_call_context(tool, arguments, config=self.config):
-                _content, structured = await server.call_tool(tool, arguments)
-            return cast(dict[str, Any], structured)
+                result = await server.call_tool(tool, arguments)
+            assert isinstance(result, mcp_types.CallToolResult)
+            return cast(dict[str, Any], result.structured_content)
 
         return asyncio.run(invoke())
 
@@ -318,6 +327,39 @@ class FreeSeatOverrideTests(_FreeSeatWorld):
         self.assertEqual(self.runtime.launch_calls(), [])
         self.assertEqual(self.receipt_files(), [])
 
+    def test_real_session_client_info_arrives_via_injected_context(self) -> None:
+        """Real MCP initialize client_info.name reaches role_start via Context, and None outside."""
+
+        self.replace(role_agent_registration, "caller_harness_name", _REAL_CALLER_HARNESS_NAME)
+        self.assertIsNone(_REAL_CALLER_HARNESS_NAME(None))
+        self.assertIsNone(_REAL_CALLER_HARNESS_NAME(Context()))
+
+        request_id = uuid.uuid4()
+        arguments = {"role": "bootstrap", "request_id": str(request_id), "model": "gpt-a"}
+
+        async def invoke() -> tuple[list[mcp_types.Tool], mcp_types.CallToolResult]:
+            server = MCPServer("free-seat-session-test")
+            register_role_agent_tools(server, self.config)
+            async with Client(
+                server,
+                mode="legacy",
+                client_info=mcp_types.Implementation(name=CALLER_HARNESS, version="0.170.0"),
+            ) as client:
+                listed = (await client.list_tools()).tools
+                with tool_call_context("role_start", arguments, config=self.config):
+                    result = await client.call_tool("role_start", arguments)
+            return listed, result
+
+        listed, result = asyncio.run(invoke())
+        role_start_tool = next(tool for tool in listed if tool.name == "role_start")
+        self.assertNotIn("ctx", role_start_tool.input_schema.get("properties", {}))
+        self.assertFalse(result.is_error, result.content)
+        assert result.structured_content is not None
+        self.assertEqual(result.structured_content["ok"], True, result.structured_content)
+        created = self.created_agents()
+        self.assertEqual(len(created), 2)
+        self.assertEqual((created[0]["provider"], created[0]["model"]), (CALLER_HARNESS, "gpt-a"))
+
 
 class FreeSeatDiscoveryTests(_FreeSeatWorld):
     """MIK-R196 rule 1 through L188-B08: the free seats are found, in pages that end."""
@@ -369,12 +411,13 @@ class FreeSeatDiscoveryTests(_FreeSeatWorld):
 
 def _preparation_refusal(config) -> dict:
     async def invoke():
-        server = FastMCP("preparation-refusal-test")
+        server = MCPServer("preparation-refusal-test")
         register_role_agent_tools(server, config)
         arguments = {"role": "bootstrap", "request_id": str(uuid.uuid4())}
         with tool_call_context("role_start", arguments, config=config):
-            _content, answer = await server.call_tool("role_start", arguments)
-        return cast(dict[str, Any], answer)
+            result = await server.call_tool("role_start", arguments)
+        assert isinstance(result, mcp_types.CallToolResult)
+        return cast(dict[str, Any], result.structured_content)
 
     answer = asyncio.run(invoke())
     assert answer["ok"] is False and answer["status"] == "refused", answer

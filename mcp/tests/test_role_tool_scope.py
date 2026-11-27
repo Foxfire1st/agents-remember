@@ -41,7 +41,7 @@ from agents_remember.models.tools.role_tool_scope import (
 )
 from agents_remember.models.tools.tool_schema_compaction import compact_tool_schema
 from mcp.client.stdio import stdio_client
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ToolError
 from packaging.requirements import Requirement
 from packaging.version import Version
 
@@ -213,7 +213,7 @@ def test_a_bound_server_advertises_only_its_roles_tools_in_public_order(
     assert tuple(tool.name for tool in tools) == tools_for_role(canonical)
     for tool in tools:
         assert tool.annotations is not None, f"{tool.name} is advertised unmarked"
-        assert tool.annotations.readOnlyHint is read_only_hint(tool.name)
+        assert tool.annotations.read_only_hint is read_only_hint(tool.name)
 
 
 def test_an_unbound_server_keeps_the_whole_public_roster(tmp_path: Path) -> None:
@@ -416,8 +416,8 @@ def test_a_real_stdio_session_advertises_and_dispatches_only_the_bound_roles_too
             after = await session.call_tool("role_start", {"role": "worker"})
             return (
                 tuple(tool.name for tool in listed.tools),
-                bool(before.isError),
-                bool(after.isError),
+                bool(before.is_error),
+                bool(after.is_error),
             )
 
     names, before_error, after_error = asyncio.run(exercise())
@@ -451,10 +451,10 @@ def test_a_real_stdio_session_on_a_malformed_binding_serves_only_server_info(
 
     assert instructions is None
     assert names == ("server_info",)
-    assert info.isError is True
+    assert info.is_error is True
     assert any("AR_PASEO_AGENT_ID" in getattr(content, "text", "") for content in info.content)
     for sibling in siblings:
-        assert sibling.isError is True
+        assert sibling.is_error is True
         assert any("Unknown tool" in getattr(content, "text", "") for content in sibling.content)
 
 
@@ -484,16 +484,16 @@ def test_a_real_stdio_manager_session_lists_32_compacted_tools_and_validates_cal
     assert names == tools_for_role("manager")
     assert {"curator_coherence", "worktree_operation_control"} <= set(names)
     for tool in tools:
-        assert tool.inputSchema == compact_tool_schema(tool.inputSchema)
-        assert "title" not in tool.inputSchema
-    assert bad_coherence.isError is True
-    assert bad_control.isError is True
+        assert tool.input_schema == compact_tool_schema(tool.input_schema)
+        assert "title" not in tool.input_schema
+    assert bad_coherence.is_error is True
+    assert bad_control.is_error is True
 
 
 def test_installed_mcp_meets_declared_floor_and_server_lists_tools(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Installed mcp meets mcp/pyproject.toml's floor (>=1.30.0,<2) and serves tools."""
+    """Installed mcp meets mcp/pyproject.toml's floor (>=2.3.0,<3) and serves tools."""
 
     pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
     dependencies = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))["project"][
@@ -505,13 +505,13 @@ def test_installed_mcp_meets_declared_floor_and_server_lists_tools(
     floors = [Version(spec.version) for spec in specifier if spec.operator == ">="]
     ceilings = [Version(spec.version) for spec in specifier if spec.operator == "<"]
     assert len(floors) == 1
-    assert floors[0] >= Version("1.30.0")
-    assert Version("2") in ceilings
+    assert floors[0] >= Version("2.3.0")
+    assert Version("3") in ceilings
 
     installed = Version(importlib.metadata.version("mcp"))
     assert installed >= floors[0]
     assert installed in specifier
-    assert hasattr(server_module.FastMCP, "remove_tool")
+    assert hasattr(server_module.MCPServer, "remove_tool")
 
     config, _ = _world(tmp_path)
     unbound = create_server(config)

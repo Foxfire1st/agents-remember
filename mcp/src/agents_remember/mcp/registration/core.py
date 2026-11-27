@@ -3,7 +3,7 @@
 from importlib import import_module
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
 from agents_remember.application.runtime.startup import mcp_serving_build_payload
@@ -22,7 +22,7 @@ def server_info_payload(
     return tools.server_info_payload(config, serving_build)
 
 
-def _scrub_removed_argument(server: FastMCP, tool_name: str, argument: str) -> None:
+def _scrub_removed_argument(server: MCPServer, tool_name: str, argument: str) -> None:
     """Drop one receivable-but-removed argument from the advertised schema.
 
     The argument stays in the signature so a call that supplies it reaches
@@ -43,7 +43,7 @@ def _scrub_removed_argument(server: FastMCP, tool_name: str, argument: str) -> N
     tool.parameters = parameters
 
 
-def register_core_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def register_core_tools(server: MCPServer, config: McpRuntimeConfig) -> None:
     """Register the core tools, split by what the caller is trying to find out."""
     serving_build = mcp_serving_build_payload()
     _register_identity_tools(server, config, serving_build)
@@ -52,13 +52,13 @@ def register_core_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
 
 
 def _register_identity_tools(
-    server: FastMCP, config: McpRuntimeConfig, serving_build: ServingBuildPayload
+    server: MCPServer, config: McpRuntimeConfig, serving_build: ServingBuildPayload
 ) -> None:
     """What this server is and how it was configured."""
 
     @server.tool(
         annotations=ToolAnnotations(
-            readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+            read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False
         )
     )
     def server_info() -> dict[str, Any]:
@@ -67,7 +67,7 @@ def _register_identity_tools(
 
 
 def _register_orientation_tools(
-    server: FastMCP, config: McpRuntimeConfig, serving_build_commit: str | None
+    server: MCPServer, config: McpRuntimeConfig, serving_build_commit: str | None
 ) -> None:
     """Read-only reads that orient a session in a repository before it changes anything."""
 
@@ -109,7 +109,7 @@ def _register_orientation_tools(
     _scrub_removed_argument(server, "read_ar_files", "refresh")
 
 
-def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_installation_tools(server: MCPServer, config: McpRuntimeConfig) -> None:
     """Install or refresh what the coordinator runtime needs on disk."""
 
     @server.tool()

@@ -412,9 +412,9 @@ def test_a_real_paired_enclosures_named_tool_is_carried_out_then_retirement_is_r
     """All repositories, control-plane authority and tool calls belong to the scratch world."""
     world = paired_world
     started = world.start(dry_run=False)
-    assert not started.isError, started
-    assert started.structuredContent is not None and started.structuredContent["ok"], started
-    path = Path(started.structuredContent["nextArgs"]["contract_path"])
+    assert not started.is_error, started
+    assert started.structured_content is not None and started.structured_content["ok"], started
+    path = Path(started.structured_content["nextArgs"]["contract_path"])
     child = readiness.load_contract(path)
     assert child.code_worktree is not None and child.memory_worktree is not None
     assert child.code_worktree.exists() and child.memory_worktree.exists()
@@ -439,7 +439,7 @@ def test_a_real_paired_enclosures_named_tool_is_carried_out_then_retirement_is_r
     before = world.snapshot()
     refused = anyio.run(world._call, "task_doc", arguments)
     world.record("retirement-refused", refused.model_dump(mode="json"))
-    assert refused.isError, refused
+    assert refused.is_error, refused
     text = " ".join(getattr(content, "text", "") for content in refused.content)
     assert f"worktree_abandon (contract_path={path})" in text, text
     assert str(child.code_worktree) in text and str(child.memory_worktree) in text
@@ -479,8 +479,10 @@ def test_a_real_paired_enclosures_named_tool_is_carried_out_then_retirement_is_r
     abandon_arguments: dict[str, object] = {"contract_path": str(path)}
     abandoned = anyio.run(world._call, "worktree_abandon", abandon_arguments)
     world.record("named-tool-carried-out", abandoned.model_dump(mode="json"))
-    assert not abandoned.isError and abandoned.structuredContent is not None, abandoned
-    assert abandoned.structuredContent["ok"] and abandoned.structuredContent["state"] == "abandoned"
+    assert not abandoned.is_error and abandoned.structured_content is not None, abandoned
+    assert (
+        abandoned.structured_content["ok"] and abandoned.structured_content["state"] == "abandoned"
+    )
     assert not child.code_worktree.exists() and not child.memory_worktree.exists()
     assert (
         readiness.inspect_lifecycle_operation_locator(world.coord, path).state
@@ -488,9 +490,9 @@ def test_a_real_paired_enclosures_named_tool_is_carried_out_then_retirement_is_r
     )
     repeated = anyio.run(world._call, "task_doc", arguments)
     world.record("same-retirement-repeated", repeated.model_dump(mode="json"))
-    assert not repeated.isError and repeated.structuredContent is not None, repeated
+    assert not repeated.is_error and repeated.structured_content is not None, repeated
     assert (
-        json.loads(Path(repeated.structuredContent["log"]).read_text(encoding="utf-8"))["state"]
+        json.loads(Path(repeated.structured_content["log"]).read_text(encoding="utf-8"))["state"]
         == "would-retire"
     )
     assert git(world.code, "branch", "--list", child.code_work_branch) == ""
@@ -505,8 +507,8 @@ def test_abandon_dry_run_names_populated_logs_and_changes_nothing(
 
     world = paired_world
     started = world.start(dry_run=False)
-    assert started.structuredContent is not None and started.structuredContent["ok"], started
-    path = Path(started.structuredContent["nextArgs"]["contract_path"])
+    assert started.structured_content is not None and started.structured_content["ok"], started
+    path = Path(started.structured_content["nextArgs"]["contract_path"])
     child = readiness.load_contract(path)
     group = child.worktree_group
     assert isinstance(group, Path)
@@ -526,7 +528,7 @@ def test_abandon_dry_run_names_populated_logs_and_changes_nothing(
         observed = anyio.run(
             world._call, "worktree_status", {"repo_id": REPO, "contract_path": str(path)}
         )
-    assert not observed.isError, observed
+    assert not observed.is_error, observed
     populated = [
         entry
         for entry in group.rglob("*")
@@ -743,8 +745,8 @@ def test_the_repositorys_own_checkout_is_nobodys_leaf_worktree(world):
 def test_nonforced_abandon_removes_unlisted_task_folder_contents(paired_world) -> None:
     world = paired_world
     started = world.start(dry_run=False)
-    assert started.structuredContent is not None and started.structuredContent["ok"], started
-    path = Path(started.structuredContent["nextArgs"]["contract_path"])
+    assert started.structured_content is not None and started.structured_content["ok"], started
+    path = Path(started.structured_content["nextArgs"]["contract_path"])
     group = readiness.load_contract(path).worktree_group
     (group / "reference").mkdir(exist_ok=True)
     (group / "reference" / "copied.md").write_text("copy", encoding="utf-8")
@@ -752,9 +754,9 @@ def test_nonforced_abandon_removes_unlisted_task_folder_contents(paired_world) -
 
     result = anyio.run(world._call, "worktree_abandon", {"contract_path": str(path)})
 
-    assert not result.isError and result.structuredContent is not None
-    assert result.structuredContent["ok"] and not group.exists(), (
-        f"abandoned leaf folder was not fully removed: {result.structuredContent}"
+    assert not result.is_error and result.structured_content is not None
+    assert result.structured_content["ok"] and not group.exists(), (
+        f"abandoned leaf folder was not fully removed: {result.structured_content}"
     )
     assert group.parent.is_dir()
 

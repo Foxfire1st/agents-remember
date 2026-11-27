@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
 __all__ = [
@@ -153,7 +153,7 @@ def read_only_hint(tool_name: str) -> bool:
     )
 
 
-def apply_read_only_marks(server: FastMCP) -> None:
+def apply_read_only_marks(server: MCPServer) -> None:
     """Carry this list onto one registered server's advertised annotations.
 
     Runs after the registrars: every advertised tool gets exactly the mark
@@ -163,6 +163,4 @@ def apply_read_only_marks(server: FastMCP) -> None:
 
     tools: dict[str, Any] = server._tool_manager._tools
     for name in sorted(tools):
-        tools[name].annotations = ToolAnnotations.model_validate(
-            {"readOnlyHint": read_only_hint(name)}
-        )
+        tools[name].annotations = ToolAnnotations(read_only_hint=read_only_hint(name))

@@ -33,8 +33,9 @@ from agents_remember.models.tools.tool_answer import (
     truncate_lists,
 )
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
-from mcp.shared.memory import create_connected_server_and_client_session
 from pydantic import ValidationError
+
+from mcp import Client
 
 REPO = "repo-a"
 ADOPT_REPO = "adopt-repo"
@@ -89,7 +90,7 @@ ARMS = (
 )
 
 # The refusal a validation error names: `1 validation error for <Model>`. Matched as the MODEL
-# IDENTITY, never as "did a validation message appear" — FastMCP refuses an invalid ARGUMENT
+# IDENTITY, never as "did a validation message appear" — MCPServer refuses an invalid ARGUMENT
 # with the same wording and a different model (`<tool>Arguments`), and calling that "the tool's
 # own response model refused its payload" would be a wrong diagnosis.
 REFUSED_MODEL = re.compile(r"validation error for (?P<model>[A-Za-z_][A-Za-z0-9_]*)")
@@ -488,9 +489,7 @@ class EntryPointWorld:
         wait_seconds = SESSION_WAIT_SECONDS
         try:
             with anyio.fail_after(wait_seconds) as deadline:
-                async with create_connected_server_and_client_session(
-                    self.server._mcp_server
-                ) as client:
+                async with Client(self.server, mode="legacy") as client:
                     phase = "tool response"
                     wait_seconds = TOOL_RESPONSE_WAIT_SECONDS
                     deadline.deadline = anyio.current_time() + wait_seconds
@@ -518,12 +517,12 @@ class EntryPointWorld:
                 "exceptionType": type(exc).__name__,
                 "exceptionLocation": f"{origin.filename}:{origin.lineno}",
             }
-        if result.isError:
+        if result.is_error:
             text = "\n".join(
                 text for content in result.content if (text := getattr(content, "text", None))
             )
             return "RAISED ToolError", {"detail": text}
-        return "RETURNED", result.structuredContent
+        return "RETURNED", result.structured_content
 
     # -- the fixture the sweep addresses -------------------------------------------------
 

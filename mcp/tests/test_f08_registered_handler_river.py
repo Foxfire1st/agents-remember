@@ -37,8 +37,9 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
-from mcp.server.fastmcp import FastMCP
-from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.server.mcpserver import MCPServer
+
+from mcp import Client
 
 _TESTS_DIR = Path(__file__).resolve().parent
 _MCP_SRC = Path(os.environ.get("AR_F08_MCP_SRC") or (_TESTS_DIR.parent / "src"))
@@ -225,7 +226,7 @@ def _isolated_environment(root: Path, binding: dict[str, str]) -> dict[str, str]
 
 
 def _result_payload(result: object) -> dict:
-    structured = getattr(result, "structuredContent", None)
+    structured = getattr(result, "structured_content", None)
     if isinstance(structured, dict) and structured:
         return structured
     content = getattr(result, "content", None) or []
@@ -238,9 +239,8 @@ def _result_payload(result: object) -> dict:
     raise AssertionError(f"registered server_info answered without a mapping payload: {result!r}")
 
 
-async def _call_server_info(server: FastMCP) -> dict:
-    inner = server._mcp_server
-    async with create_connected_server_and_client_session(inner) as client:
+async def _call_server_info(server: MCPServer) -> dict:
+    async with Client(server, mode="legacy") as client:
         result = await asyncio.wait_for(
             client.call_tool("server_info", {}), timeout=SESSION_TIMEOUT_SECONDS
         )

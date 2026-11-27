@@ -2,7 +2,7 @@
 
 Every domain error subclasses :class:`AgentsRememberError`, which itself
 subclasses :class:`ValueError` so existing ``except ValueError`` handlers and
-the FastMCP error surface keep working unchanged. New code should raise (and
+the MCPServer error surface keep working unchanged. New code should raise (and
 catch) the typed members of this family rather than bare ``ValueError`` /
 ``RuntimeError`` so the public surface has one coherent error contract.
 """

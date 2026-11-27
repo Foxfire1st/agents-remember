@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from agents_remember.canvas.explainer_binding import (
     EXPLAINER_BINDING_ENV,
@@ -180,7 +180,7 @@ def binds_explainer() -> bool:
 
 
 def register_explainer_surface(
-    server: FastMCP, config: McpRuntimeConfig, binding: ExplainerBinding
+    server: MCPServer[Any], config: McpRuntimeConfig, binding: ExplainerBinding
 ) -> None:
     """Register the explainer's four tools on the normal server, for this leaf and no other."""
 

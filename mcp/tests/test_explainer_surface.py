@@ -265,8 +265,10 @@ def _answer(server: Any, name: str) -> dict[str, Any]:
     """One tool call's answer as data: the transport hands a tool's dict back as its JSON text."""
 
     answer = asyncio.run(server.call_tool(name, {}))
-    if isinstance(answer, tuple):  # (content blocks, structured body) on a dict return
+    if isinstance(answer, tuple):
         answer = answer[0]
+    elif hasattr(answer, "content"):
+        answer = answer.content
     if isinstance(answer, list):
         assert len(answer) == 1, answer
         answer = json.loads(answer[0].text)
@@ -348,7 +350,7 @@ def test_a_marker_pointing_at_another_environment_refuses(
 
 
 def _server_stub() -> Any:
-    """A stand-in FastMCP instance; the captured registration never touches it."""
+    """A stand-in MCPServer instance; the captured registration never touches it."""
 
     class _Stub:
         pass

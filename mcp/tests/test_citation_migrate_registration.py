@@ -54,7 +54,7 @@ class CitationMigrateRegistrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             config = _config(tmp, code_root=tmp / "code", memory_root=tmp / "memory")
-            server = register_memory_tools.__globals__["FastMCP"]("test")
+            server = register_memory_tools.__globals__["MCPServer"]("test")
 
             register_memory_tools(server, config)
 
@@ -104,8 +104,8 @@ class CitationMigrateRegistrationTests(unittest.TestCase):
         schema = next(
             tool for tool in asyncio.run(server.list_tools()) if tool.name == "citation_fix"
         )
-        self.assertNotIn("expected_snapshot", schema.inputSchema["properties"])
-        self.assertNotIn("exclude", schema.inputSchema["properties"])
+        self.assertNotIn("expected_snapshot", schema.input_schema["properties"])
+        self.assertNotIn("exclude", schema.input_schema["properties"])
         parser = argparse.ArgumentParser()
         memory_citations.add_arguments(parser)
         options = {option for action in parser._actions for option in action.option_strings}

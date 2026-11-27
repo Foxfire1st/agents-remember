@@ -438,12 +438,12 @@ class CitationFixRegistrationTests(unittest.TestCase):
     """The registered tool declares ``documents``."""
 
     def test_the_registered_tool_declares_documents(self) -> None:
-        server = register_memory_tools.__globals__["FastMCP"]("test")
+        server = register_memory_tools.__globals__["MCPServer"]("test")
         config = SimpleNamespace(repositories={})
         register_memory_tools(server, config)  # type: ignore[arg-type]
         tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
         self.assertIn("citation_fix", tools)
-        schema = dict(tools["citation_fix"].inputSchema)
+        schema = dict(tools["citation_fix"].input_schema)
         self.assertIn("documents", schema["properties"])
 
 

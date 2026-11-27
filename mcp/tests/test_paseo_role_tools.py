@@ -44,7 +44,7 @@ from agents_remember.cli.role_launch_preparation import (
 )
 from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference
 from agents_remember.mcp.registration.role_agents import register_role_agent_tools
-from agents_remember.mcp.server import AgentsRememberMCP, _complete_fastmcp_settings
+from agents_remember.mcp.server import AgentsRememberMCP
 from agents_remember.mcp.tools import role_agents as role_agent_payloads
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.models.role_agents import RoleEnvironmentPreparation
@@ -55,10 +55,9 @@ from agents_remember_test_support.testing.review_git_trees import commit, git
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.exceptions import ToolError
-from mcp.shared.memory import create_connected_server_and_client_session
-from mcp.types import ToolAnnotations
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult, ToolAnnotations
 from paseo_role_tools_test_support import (
     CALL_REFS,
     OTHER_LEAF,
@@ -76,6 +75,8 @@ from test_paseo_launch import (
     ROLE_REFS,
     SPRINT_REF,
 )
+
+from mcp import Client
 
 
 class MayStartRuleTests(unittest.TestCase):
@@ -301,10 +302,10 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
 
     def test_r71_mode_is_absent_from_tool_schema_and_rejected_by_the_http_route(self) -> None:
         async def schema() -> dict[str, Any]:
-            server = FastMCP("no-mode")
+            server = MCPServer("no-mode")
             register_role_agent_tools(server, self.config)
             tools = await server.list_tools()
-            return next(tool.inputSchema for tool in tools if tool.name == "role_start")
+            return next(tool.input_schema for tool in tools if tool.name == "role_start")
 
         self.assertNotIn("mode", asyncio.run(schema())["properties"])
         app = FastAPI()
@@ -320,11 +321,12 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
 
     def call(self, tool: str, arguments: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         async def invoke() -> tuple[int, dict[str, Any]]:
-            server = FastMCP("role-tools-test")
+            server = MCPServer("role-tools-test")
             register_role_agent_tools(server, self.config)
             with tool_call_context(tool, arguments, config=self.config):
-                _content, structured = await server.call_tool(tool, arguments)
-            return threading.get_ident(), cast(dict[str, Any], structured)
+                result = await server.call_tool(tool, arguments)
+            assert isinstance(result, CallToolResult)
+            return threading.get_ident(), cast(dict[str, Any], result.structured_content)
 
         return asyncio.run(invoke())
 
@@ -377,7 +379,7 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
 
     def test_the_tools_are_registered_under_their_names_and_answer_in_the_envelope(self) -> None:
         async def names() -> list[str]:
-            server = FastMCP("role-tools-names")
+            server = MCPServer("role-tools-names")
             register_role_agent_tools(server, self.config)
             return [tool.name for tool in await server.list_tools()]
 
@@ -480,16 +482,15 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
         self.replace(paseo_catalog, "bridge_call", slow_catalog)
 
         async def invoke() -> None:
-            _complete_fastmcp_settings()
             server = AgentsRememberMCP("role-catalog-concurrency")
             server._agents_remember_config = self.config
             register_role_agent_tools(server, self.config)
 
-            @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+            @server.tool(annotations=ToolAnnotations(read_only_hint=True))
             def read_call() -> dict[str, str]:
                 return {"answer": "read while discovery waits"}
 
-            async with create_connected_server_and_client_session(server._mcp_server) as client:
+            async with Client(server, mode="legacy") as client:
                 refs = {
                     key: ref.model_dump(mode="json") for key, ref in selection_of("worker").items()
                 }
@@ -503,17 +504,17 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
                     read = await asyncio.wait_for(
                         client.call_tool("read_call", {}), HANG_GUARD_SECONDS
                     )
-                    self.assertFalse(read.isError)
+                    self.assertFalse(read.is_error)
                     self.assertEqual(
-                        read.structuredContent, {"answer": "read while discovery waits"}
+                        read.structured_content, {"answer": "read while discovery waits"}
                     )
                     self.assertFalse(start.done(), "the read waited for catalog discovery")
                 finally:
                     release.set()
                     started = await asyncio.wait_for(start, HANG_GUARD_SECONDS)
-                self.assertFalse(started.isError)
-                assert started.structuredContent is not None
-                self.assertTrue(started.structuredContent["ok"])
+                self.assertFalse(started.is_error)
+                assert started.structured_content is not None
+                self.assertTrue(started.structured_content["ok"])
 
         asyncio.run(invoke())
 

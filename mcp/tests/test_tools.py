@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import ValidationError
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -194,13 +194,13 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
     """
 
     def test_live_registration_matches_the_public_inventory_in_order(self) -> None:
-        server = FastMCP("inventory-probe")
+        server = MCPServer("inventory-probe")
         for register_tools in TOOL_REGISTRARS:
             register_tools(server, _permissive_registration_config())
 
         live = tuple(tool.name for tool in asyncio.run(server.list_tools()))
 
-        # FastMCP publishes in registration order, so this comparison is ordered on purpose:
+        # MCPServer publishes in registration order, so this comparison is ordered on purpose:
         # a tool registered into the wrong group is a reordering bug, not just a missing row.
         self.assertEqual(live, PUBLIC_TOOLS)
 
@@ -255,7 +255,7 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
         present a partial publication and say the pause is a separate matter.
         """
 
-        server = FastMCP("description-probe")
+        server = MCPServer("description-probe")
         for register_tools in TOOL_REGISTRARS:
             register_tools(server, _permissive_registration_config())
         descriptions = {
@@ -285,7 +285,7 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
         beside it, so that absence cannot be satisfied by an emptied-out text.
         """
 
-        server = FastMCP("pause-surface-probe")
+        server = MCPServer("pause-surface-probe")
         for register_tools in TOOL_REGISTRARS:
             register_tools(server, _permissive_registration_config())
         advertised = {
@@ -348,7 +348,7 @@ class CuratorCoherencePublishContractTests(unittest.TestCase):
     """
 
     def test_the_description_names_every_field_publish_requires(self) -> None:
-        server = FastMCP("curator-coherence-description-probe")
+        server = MCPServer("curator-coherence-description-probe")
         for register_tools in TOOL_REGISTRARS:
             register_tools(server, _permissive_registration_config())
         advertised = {

@@ -11,6 +11,7 @@ from typing import Any
 
 from agents_remember.errors import AuthorityError
 from mcp.client.stdio import stdio_client
+from mcp.types import PaginatedRequestParams
 
 from mcp import ClientSession, StdioServerParameters
 
@@ -58,11 +59,12 @@ async def _probe(definition: dict[str, Any]) -> dict[str, Any]:
         seen: set[str] = set()
         while True:
             async with _probe_step(f"list_tools page {len(pages) + 1}"):
-                listing = await session.list_tools(cursor=cursor)
+                params = PaginatedRequestParams(cursor=cursor) if cursor is not None else None
+                listing = await session.list_tools(params=params)
             page = listing.model_dump(mode="json", by_alias=True, exclude_none=True)
             tools.extend(page["tools"])
             pages.append({"cursor": cursor, "receiptSha256": json_digest(page)})
-            cursor = listing.nextCursor
+            cursor = listing.next_cursor
             if cursor is None:
                 break
             if cursor in seen:
@@ -75,9 +77,9 @@ async def _probe(definition: dict[str, Any]) -> dict[str, Any]:
         # before call_tool, which still performs its normal result validation.
         async with _probe_step("server_info (including SDK result validation)"):
             result = await session.call_tool("server_info", {})
-        if result.isError or not isinstance(result.structuredContent, dict):
+        if result.is_error or not isinstance(result.structured_content, dict):
             raise AuthorityError("fixture tool server did not return structured identity")
-        info = result.structuredContent
+        info = result.structured_content
         return {
             **info,
             "evaluationToolInventory": {

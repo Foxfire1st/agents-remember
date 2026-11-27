@@ -11,14 +11,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
 from .lazy import tools
 
 
-def register_explainer_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def register_explainer_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """Register the architect's one explainer tool (MIK-R186 rule 6, MIK-R189 rule 7)."""
 
     @server.tool()

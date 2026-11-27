@@ -304,8 +304,8 @@ def test_create_server_compacts_every_advertised_schema_with_contract_parity(
     assert [tool.name for tool in compacted_tools] == [tool.name for tool in raw_tools]
     for compacted, raw in zip(compacted_tools, raw_tools, strict=True):
         assert compacted.annotations == raw.annotations
-        assert _schema_compaction_violations(compacted.inputSchema) == []
-        assert compacted.inputSchema == _contract_signature(raw.inputSchema)
+        assert _schema_compaction_violations(compacted.input_schema) == []
+        assert compacted.input_schema == _contract_signature(raw.input_schema)
 
 
 def test_literal_const_enum_and_default_payloads_survive_compaction_and_signature() -> None:

@@ -27,7 +27,7 @@ from agents_remember.application.skill_resources.operation import (
     skill_catalog_registry,
 )
 from agents_remember.mcp.registration.capsule_serving import (
-    declare_skills_extension,
+    build_skills_extension,
     declared_extensions,
     index_resource,
 )
@@ -37,8 +37,9 @@ from agents_remember.models.skill_resources import UnreadableSkill
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from mcp.client.stdio import stdio_client
-from mcp.server.fastmcp import FastMCP
-from pydantic import AnyUrl, BaseModel
+from mcp.server.mcpserver import MCPServer
+from mcp.types import Request
+from pydantic import BaseModel, Field
 from test_capsule_serving import (
     ALPHA_TASK,
     DEV_SOURCE,
@@ -232,18 +233,16 @@ async def _drive_exchange(parameters: StdioServerParameters) -> dict[str, Any]:
                 observed["resourceMeta"] = {
                     str(item.uri): item.meta or {} for item in listed.resources
                 }
-                index = await session.read_resource(AnyUrl(INDEX_URI))
+                index = await session.read_resource(INDEX_URI)
                 observed["index"] = index.contents[0].text  # type: ignore[union-attr]
-                observed["indexMime"] = index.contents[0].mimeType
+                observed["indexMime"] = index.contents[0].mime_type
                 for label, uri in (("body", _skill_uri()), ("guide", _guide_uri())):
-                    content = (await session.read_resource(AnyUrl(uri))).contents[0]
+                    content = (await session.read_resource(uri)).contents[0]
                     observed[label] = content.text  # type: ignore[union-attr]
-                    observed[f"{label}Mime"] = content.mimeType
+                    observed[f"{label}Mime"] = content.mime_type
                     observed[f"{label}Meta"] = content.meta or {}
                 try:
-                    await session.read_resource(
-                        AnyUrl("skill://agents-remember/skills/absent/SKILL.md")
-                    )
+                    await session.read_resource("skill://agents-remember/skills/absent/SKILL.md")
                 except Exception as error:
                     observed["absent"] = type(error).__name__
                     observed["absentMessage"] = str(error)
@@ -262,9 +261,9 @@ async def _drive_extension_methods(session: ClientSession) -> dict[str, Any]:
     comes back as the SDK's own "Invalid request parameters" error.
     """
 
-    class _ExtensionRequest(BaseModel):
+    class _ExtensionRequest(Request[dict[str, Any], str]):
         method: str
-        params: dict[str, Any] = {}
+        params: dict[str, Any] = Field(default_factory=dict)
 
     class _ExtensionResult(BaseModel):
         model_config = {"extra": "allow"}
@@ -405,10 +404,8 @@ def test_the_server_process_never_serves_a_file_outside_a_skill_directory(
                     await session.initialize()
                     try:
                         await session.read_resource(
-                            AnyUrl(
-                                "skill://agents-remember/skills/l-01-agent-lifecycles"
-                                "/../../../../etc/passwd"
-                            )
+                            "skill://agents-remember/skills/l-01-agent-lifecycles"
+                            "/../../../../etc/passwd"
                         )
                     except Exception as error:
                         return type(error).__name__
@@ -510,20 +507,13 @@ def test_a_skill_whose_directory_name_disagrees_with_its_name_is_recorded_not_se
 def test_the_extension_declaration_is_installed_once_per_server(
     world: World,  # noqa: F811 - ``world`` is the fixture
 ) -> None:
-    """The declaration idempotence guard, reached: a second install adds no second wrapper.
+    """The SEP-2640 extension is declared once at construction and rejects duplicates."""
 
-    The reviewer's seed removed the guard and every case still passed. This case
-    registers the same server twice and asserts that the ``initialize`` options are
-    built by one wrapper and declare the extension exactly once.
-    """
-
-    server = FastMCP("idempotence-probe")
-    declare_skills_extension(server)
-    first = server._mcp_server.create_initialization_options
-    declare_skills_extension(server)
-    second = server._mcp_server.create_initialization_options
-    assert first is second, "a second declaration must not stack a second wrapper"
+    extension = build_skills_extension()
+    server: MCPServer[Any] = MCPServer("extension-probe", extensions=[extension])
     assert declared_extensions(server) == {EXTENSION_ID: {}}
+    with pytest.raises(ValueError, match="already registered"):
+        MCPServer("duplicate-probe", extensions=[extension, build_skills_extension()])
 
 
 def test_altitude_admission_admits_every_role_the_document_can_carry_and_refuses_the_rest(

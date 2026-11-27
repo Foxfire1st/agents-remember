@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import LauncherRole
@@ -12,7 +12,7 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from .lazy import tools
 
 
-def register_seat_retirement_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def register_seat_retirement_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """Register ``retire_child``."""
 
     @server.tool()

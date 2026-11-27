@@ -15,7 +15,7 @@ from unittest.mock import patch
 from agents_remember.application.agent_binding import AgentBinding
 from agents_remember.application.tool_answer_log import TOOL_LOG_BASENAME_PREFIX, tool_call_context
 from agents_remember.application.tool_response import complete_tool_response
-from agents_remember.mcp.compact_content import _compact_text_block
+from agents_remember.mcp.tool_results import compact_json_text
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import (
     ENVELOPE_STRIPPED_FIELDS,
@@ -34,7 +34,6 @@ from agents_remember.models.tools.tool_answer import (
     truncate_lists,
 )
 from agents_remember.models.tools.tool_answer_short_fields import declared_short_fields
-from mcp.types import TextContent
 from tool_answer_table_support import _big_blob, _server_info_case, _stub_config
 from tool_entry_point_sweep_support import EntryPointWorld, classify
 
@@ -72,8 +71,8 @@ class DeclaredOverflowTests(unittest.TestCase):
                     self.assertTrue(answer["overflow"])
                     self.assertEqual(answer["cut"]["log"], answer["log"])
                     self.assertEqual(next(reversed(answer)), "cut")
-                    block = _compact_text_block(TextContent(type="text", text=json.dumps(answer)))
-                    for delivered in (answer, json.loads(block.text)):
+                    compact_text = compact_json_text(answer)
+                    for delivered in (answer, json.loads(compact_text)):
                         self.assertEqual(tuple(key for key in delivered if key in order), order)
 
     def test_higher_priority_omission_keeps_its_space(self) -> None:

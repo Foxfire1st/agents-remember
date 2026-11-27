@@ -30,7 +30,7 @@ from agents_remember.memory.knowledge_index import (
 class ReadToolRequest:
     """One ``knowledge_read`` call's arguments as one value.
 
-    The tool signature stays flat because FastMCP derives the published input schema from it; this
+    The tool signature stays flat because MCPServer derives the published input schema from it; this
     value is what the builder consumes.
 
     ``memory_root`` is the *selection*, and the caller owns it: the root directory of a converted

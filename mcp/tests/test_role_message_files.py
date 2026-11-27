@@ -24,7 +24,8 @@ from agents_remember.cli.role_message_files import (
 )
 from agents_remember.mcp.registration.role_agents import register_role_agent_tools
 from agents_remember.worktrees import role_reports
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult
 from paseo_role_tools_test_support import ARCHIVED_AT
 from test_paseo_role_tools import (
     RoleToolsTestCase,
@@ -640,11 +641,12 @@ class RegisteredRefusalTests(RoleToolsTestCase):
 
     def registered(self, caller: Any, arguments: dict[str, Any]) -> dict[str, Any]:
         async def invoke() -> dict[str, Any]:
-            server = FastMCP("role-message-registered")
+            server = MCPServer("role-message-registered")
             register_role_agent_tools(server, self.config)
             with tool_call_context("role_message", arguments, config=self.config):
-                _content, structured = await server.call_tool("role_message", arguments)
-            return cast(dict[str, Any], structured)
+                result = await server.call_tool("role_message", arguments)
+            assert isinstance(result, CallToolResult)
+            return cast(dict[str, Any], result.structured_content)
 
         with patch.dict(os.environ, caller.environment()):
             return asyncio.run(invoke())

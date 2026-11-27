@@ -30,7 +30,8 @@ from agents_remember.kernel.agentic_settings import (
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.server import create_server
 from agents_remember.worktrees.services import reset_worktree_services
-from mcp.shared.memory import create_connected_server_and_client_session
+
+from mcp import Client
 
 SETTINGS_REFERENCE = Path(__file__).resolve().parents[2] / "docs" / "reference" / "settings-json.md"
 # The two commands the settings reference gives a user, as it prints them.
@@ -57,10 +58,10 @@ def call_registered_tool(
 
     async def call() -> dict[str, Any]:
         with anyio.fail_after(60):
-            async with create_connected_server_and_client_session(server._mcp_server) as client:
+            async with Client(server, mode="legacy") as client:
                 result = await client.call_tool(name, arguments)
-        assert not result.isError and result.structuredContent is not None, result.content
-        return result.structuredContent
+        assert not result.is_error and result.structured_content is not None, result.content
+        return result.structured_content
 
     try:
         return anyio.run(call)

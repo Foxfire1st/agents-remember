@@ -74,8 +74,8 @@ from knowledge_index_test_support import (
     init_repository,
     write_review_tree,
 )
-from mcp.server.fastmcp import FastMCP
-from mcp.types import ImageContent
+from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult, ImageContent
 
 # ---------------------------------------------------------------------------------------------
 # 1-4. The grade tools
@@ -332,7 +332,7 @@ def test_the_explainer_registration_adds_exactly_its_four_tools(tmp_path: Path) 
     (`test_explainer_surface.py`); this registration adds none of them and none of the eighteen.
     """
 
-    server = FastMCP("review-explainer")
+    server = MCPServer("review-explainer")
     register_bound_explainer_tools(server, workspace=tmp_path, seat="seat-1")
     names = {tool.name for tool in asyncio.run(server.list_tools())}
     assert (
@@ -763,8 +763,14 @@ def test_render_replies_with_its_report_file_and_publishes_rereading_the_binding
     page = world.workspace / "drafts" / "assets" / "index.html"
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text(html, encoding="utf-8")  # the explainer writes its page with its own tools
-    blocks = asyncio.run(server.call_tool("render", {}))
-    blocks = blocks[0] if isinstance(blocks, tuple) else blocks
+    raw = asyncio.run(server.call_tool("render", {}))
+    blocks = (
+        raw.content
+        if isinstance(raw, CallToolResult)
+        else raw[0]
+        if isinstance(raw, tuple)
+        else raw
+    )
     assert not any(isinstance(block, ImageContent) for block in blocks)  # no picture in the answer
     rendered = _call(server, "render")
     assert rendered["state"] == "loaded"
@@ -824,7 +830,7 @@ def test_render_replies_with_its_report_file_and_publishes_rereading_the_binding
 
 
 def _assert_a_resumed_run_publishes_a_successor(
-    world: Any, server: FastMCP, scope: Any, passes: list[dict[str, Any]], first: Any
+    world: Any, server: MCPServer, scope: Any, passes: list[dict[str, Any]], first: Any
 ) -> None:
     """The resumed run reaches what was left: the same page with new coverage is a successor
     revision that says so, never the old revision quietly patched; the same again is unchanged.
@@ -867,7 +873,7 @@ def _tree_digest(folder: Path) -> str:
 
 
 def _assert_a_moved_binding_refuses_and_keeps_the_revision(
-    world: Any, server: FastMCP, scope: Any
+    world: Any, server: MCPServer, scope: Any
 ) -> None:
     """binding.json moved before the next publication: refused `binding-moved` in its own run, and
     the published revision keeps its original binding (#7), not #9."""
@@ -893,7 +899,7 @@ def test_the_render_tool_tells_the_explainer_to_say_the_fetch_is_coming(tmp_path
     command of the user's shell, and the sentence's wording is kept.
     """
 
-    server = FastMCP("review-explainer")
+    server = MCPServer("review-explainer")
     register_bound_explainer_tools(server, workspace=tmp_path, seat="seat-1")
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
 

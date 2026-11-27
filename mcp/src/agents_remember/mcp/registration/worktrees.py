@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tool_requests import (
@@ -22,7 +22,7 @@ from agents_remember.models.worktree import (
 from .lazy import tools
 
 
-def register_worktree_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def register_worktree_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """Register the worktree tools, split by whether the contract exists yet."""
     _register_worktree_start_tools(server, config)
     _register_worktree_address_tools(server, config)
@@ -30,7 +30,7 @@ def register_worktree_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     _register_worktree_stop_tools(server, config)
 
 
-def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_worktree_start_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """Create or load the task contract and its git worktrees."""
 
     @server.tool()
@@ -73,7 +73,7 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
         )
 
 
-def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_worktree_address_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """Adopt or re-attach one existing worktree enclosure."""
 
     @server.tool()
@@ -120,7 +120,7 @@ def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) 
         )
 
 
-def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_worktree_observation_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """Observe or pull forward a canonically addressable worktree enclosure."""
 
     @server.tool()
@@ -164,7 +164,7 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         )
 
 
-def _register_worktree_stop_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_worktree_stop_tools(server: MCPServer[Any], config: McpRuntimeConfig) -> None:
     """Stop a master. The pause and the publication are two different verbs."""
 
     @server.tool()

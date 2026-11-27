@@ -26,13 +26,14 @@ from agents_remember.application.task_docs.task_doc_tools import (
 from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.registration.tasks import register_task_tools
-from agents_remember.mcp.server import _complete_fastmcp_settings
 from agents_remember.models.task_doc import TaskDocResponse
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees.candidate_identity import resolve_candidate_identity
-from mcp.server.fastmcp import FastMCP
-from mcp.types import CallToolRequest, CallToolRequestParams, CallToolResult
+from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult
 from test_task_document import _config
+
+from mcp import Client
 
 
 def _target() -> TaskDocTarget:
@@ -125,8 +126,7 @@ def test_recorded_review_answer_keeps_settings_warning(
     config = _config(tmp_path)
     _create(config)
     _call(config, "begin_review", review={})
-    _complete_fastmcp_settings()
-    server = FastMCP("Recorded review")
+    server = MCPServer("Recorded review")
     register_task_tools(server, config)
     target = _target()
     arguments = {
@@ -139,21 +139,22 @@ def test_recorded_review_answer_keeps_settings_warning(
             "findings": [{"findingId": "A", "description": description}],
         },
     }
-    request = CallToolRequest(
-        method="tools/call", params=CallToolRequestParams(name="task_doc", arguments=arguments)
-    )
+
+    async def invoke() -> CallToolResult:
+        async with Client(server, mode="legacy") as client:
+            return await client.call_tool("task_doc", arguments)
+
     with (
         patch.object(
             task_review_step_up, "load_agentic_settings", side_effect=OSError("unreadable")
         ),
         tool_call_context("task_doc", arguments, config=config),
     ):
-        response = anyio.run(server._mcp_server.request_handlers[CallToolRequest], request)
+        result = anyio.run(invoke)
 
-    result = response.root
     assert isinstance(result, CallToolResult)
-    assert not result.isError and result.structuredContent is not None, result.content
-    answer = result.structuredContent
+    assert not result.is_error and result.structured_content is not None, result.content
+    answer = result.structured_content
     assert answer["ok"] is True and answer["updated"] == "review recorded"
     assert (answer.get("overflow") is True) is overflow
     whole = TaskDocResponse.model_validate_json(Path(answer["log"]).read_text(encoding="utf-8"))

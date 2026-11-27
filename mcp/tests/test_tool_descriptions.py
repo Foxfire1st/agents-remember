@@ -34,7 +34,7 @@ from agents_remember.models.tools.tool_descriptions import (
     TOOL_DESCRIPTION_MAX_CHARS,
 )
 from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 # The length each interim-owned description has when this leaf lands. Recorded at
 # landing from the live server; the test fails on any growth before the owning leaf
@@ -86,7 +86,7 @@ TOOL_DETAILS_PACKAGED = (
 
 
 def _live_descriptions() -> dict[str, str]:
-    server = FastMCP("description-bounds-probe")
+    server = MCPServer("description-bounds-probe")
     for register_tools in TOOL_REGISTRARS:
         register_tools(server, None)  # type: ignore[arg-type]
     return {
@@ -96,10 +96,10 @@ def _live_descriptions() -> dict[str, str]:
 
 
 def _live_tool_schemas() -> dict[str, dict[str, Any]]:
-    server = FastMCP("argument-bounds-probe")
+    server = MCPServer("argument-bounds-probe")
     for register_tools in TOOL_REGISTRARS:
         register_tools(server, None)  # type: ignore[arg-type]
-    return {tool.name: tool.inputSchema or {} for tool in asyncio.run(server.list_tools())}
+    return {tool.name: tool.input_schema or {} for tool in asyncio.run(server.list_tools())}
 
 
 def _check_node_description(schema: dict[str, Any], prefix: str, overlong: list[str]) -> None:

@@ -60,7 +60,8 @@ from agents_remember_test_support.testing.leaf_instruction_wording import (
     assert_emitted_detail_links,
 )
 from lifecycle_enclosure_test_support import discard_test_enclosures, publish_test_enclosure
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult
 from paseo_role_tools_test_support import RoleToolsTestCase
 from role_first_message_support import FIXTURE_HARNESSES, FirstMessageMatrixBase
 from test_role_capsule_admission import (
@@ -302,7 +303,7 @@ async def test_knowledge_detail_views_and_keywords_match_the_registered_tool(
 ) -> None:
     """Check the mounted schema and advertised views, rather than another documentation list."""
 
-    server = FastMCP("capsule-knowledge-schema")
+    server = MCPServer("capsule-knowledge-schema")
     register_knowledge_tools(
         server,
         McpRuntimeConfig(
@@ -314,7 +315,7 @@ async def test_knowledge_detail_views_and_keywords_match_the_registered_tool(
     )
     tool = next(tool for tool in await server.list_tools() if tool.name == "knowledge_read")
     text = (LIFECYCLE_ROOT / KNOWLEDGE_SOURCE).read_text(encoding="utf-8")
-    properties = set(tool.inputSchema["properties"])
+    properties = set(tool.input_schema["properties"])
     views = set(re.findall(r'view="([a-z_]+)"', text))
     assert views == {"source_context", "invariant", "family"}
     description = tool.description or ""
@@ -323,10 +324,11 @@ async def test_knowledge_detail_views_and_keywords_match_the_registered_tool(
     advertised = {token.strip() for token in advertised_match.group(1).split(",") if token.strip()}
     assert views <= advertised
     for view in views:
-        _content, answer = await server.call_tool(
+        result = await server.call_tool(
             "knowledge_read", {"memoryRoot": str(tmp_path / "absent-memory"), "view": view}
         )
-        payload = cast(dict[str, Any], answer)
+        assert isinstance(result, CallToolResult)
+        payload = cast(dict[str, Any], result.structured_content)
         assert (payload["state"], payload["refusalCode"]) == (
             "refused",
             "selected_input_unavailable",

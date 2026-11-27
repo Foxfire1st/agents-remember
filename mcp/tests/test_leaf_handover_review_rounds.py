@@ -13,9 +13,10 @@ from agents_remember.application.agent_binding import AgentBinding, read_agent_b
 from agents_remember.mcp.server import create_server
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.worktrees.services import reset_worktree_services
-from mcp.shared.memory import create_connected_server_and_client_session
 from test_task_doc_review_public import _create
 from test_task_document import _config
+
+from mcp import Client
 
 
 def test_reviewer_binding_opens_repairs_and_preserves_sealed_round_limits(
@@ -41,11 +42,11 @@ def test_reviewer_binding_opens_repairs_and_preserves_sealed_round_limits(
 
     async def exercise() -> None:
         with anyio.fail_after(60):
-            async with create_connected_server_and_client_session(server._mcp_server) as client:
+            async with Client(server, mode="legacy") as client:
                 info = await client.call_tool("server_info", {})
-                assert not info.isError and info.structuredContent is not None
-                assert info.structuredContent["toolServer"] == "agents-remember-task"
-                assert info.structuredContent["agentBinding"] == binding.as_report()
+                assert not info.is_error and info.structured_content is not None
+                assert info.structured_content["toolServer"] == "agents-remember-task"
+                assert info.structured_content["agentBinding"] == binding.as_report()
 
                 async def call(operation: str, review: dict[str, Any]) -> Any:
                     # Every round/result runs under this same Reviewer server environment;
@@ -66,15 +67,15 @@ def test_reviewer_binding_opens_repairs_and_preserves_sealed_round_limits(
 
                 async def successful(operation: str, review: dict[str, Any]) -> dict[str, Any]:
                     result = await call(operation, review)
-                    assert not result.isError and result.structuredContent is not None, (
+                    assert not result.is_error and result.structured_content is not None, (
                         result.content
                     )
-                    return result.structuredContent["reviewState"]
+                    return result.structured_content["reviewState"]
 
                 async def refused(operation: str, review: dict[str, Any], expected: str) -> None:
                     before = (document_path.read_bytes(), markdown_path.read_bytes())
                     result = await call(operation, review)
-                    assert result.isError
+                    assert result.is_error
                     assert expected in "\n".join(
                         getattr(content, "text", "") for content in result.content
                     )
