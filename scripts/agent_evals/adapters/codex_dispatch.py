@@ -21,7 +21,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
-from agents_remember.memory_quality.style.citations.grammars import JAVASCRIPT, language
+from agents_remember.memory_quality.style.citations.grammars import language
 from tree_sitter import Node, Parser
 
 from ..artifacts import json_digest
@@ -299,7 +299,7 @@ def _catalog_print(statement: Node) -> bool:
         "text(ALL_TOOLS.filter(x=>/skills.*(list|read)/.test(x.name))"
         ".map(x=>({name:x.name,description:x.description.slice(0,100)})));"
     )
-    template = Parser(language(JAVASCRIPT)).parse(source.encode()).root_node
+    template = Parser(language("javascript")).parse(source.encode()).root_node
     return _ast_shape(statement) == _ast_shape(template.named_children[0])
 
 
@@ -747,7 +747,7 @@ def _close(scan: _Scan, identity: str, output: dict[str, Any], covered: set[str]
 def returned_dispatches(
     records: list[dict[str, Any]], covered: set[str], session_id: str
 ) -> tuple[dict[str, DispatchReturn], dict[str, str]]:
-    parser = Parser(language(JAVASCRIPT))
+    parser = Parser(language("javascript"))
     scan = _Scan(session_id)
     for row in records:
         payload = row.get("payload", {})

@@ -22,7 +22,6 @@ from agents_remember.memory_quality.style.citations import (
 )
 from agents_remember.memory_quality.style.citations.language_set import (
     LEAN,
-    PYTHON,
     LanguageSet,
     LeanLanguageProvider,
     TreeSitterLanguageProvider,
@@ -41,10 +40,10 @@ def _functions_only_python_set() -> LanguageSet:
     return grammars.default_language_set().with_providers(
         [
             TreeSitterLanguageProvider(
-                key=PYTHON,
+                key="python",
                 suffixes=frozenset({".py"}),
                 grammar_version="tree-sitter-python=0.25.0",
-                load_language=lambda: grammars.language(PYTHON),
+                load_language=lambda: grammars.language("python"),
                 tags_query_text=_FUNCTIONS_ONLY_PYTHON,
                 wrappers=frozenset({"decorated_definition"}),
             )
@@ -57,7 +56,7 @@ def test_lean_suffix_is_permanently_reserved_from_tree_sitter_providers() -> Non
         key="lean_ts",
         suffixes=frozenset({".lean"}),
         grammar_version="tree-sitter-lean=0.0.1",
-        load_language=lambda: grammars.language(PYTHON),
+        load_language=lambda: grammars.language("python"),
         tags_query_text=_FUNCTIONS_ONLY_PYTHON,
     )
     with pytest.raises(AgentsRememberError, match="reserved for the built-in Lean scanner"):
@@ -194,7 +193,7 @@ def test_tags_engine_handles_wrappers_destructuring_errors_and_exclusions() -> N
 
 
 def test_model_anchors_in_accepts_explicit_language_set() -> None:
-    custom = grammars.default_language_set().without(PYTHON)
+    custom = grammars.default_language_set().without("python")
     anchors, skipped = model.anchors_in("`useEffect(cb, [a])`", language_set=custom)
     assert [anchor.text for anchor in anchors] == ["useEffect"]
     assert skipped == 0
@@ -216,8 +215,8 @@ def test_read_anchors_and_extents_share_holder_containment_for_qualified_names(
     )
     lines = source.splitlines()
     bound = extents.definitions("pair.py", lines)
-    assert extents.qualified_spans("First.run", bound, grammar=PYTHON) == ((2, 3),)
-    assert extents.qualified_spans("Second.run", bound, grammar=PYTHON) == ((6, 7),)
+    assert extents.qualified_spans("First.run", bound, grammar="python") == ((2, 3),)
+    assert extents.qualified_spans("Second.run", bound, grammar="python") == ((6, 7),)
 
     repo = tmp_path / "repo"
     init_repository(repo)
@@ -248,7 +247,7 @@ def test_tags_engine_ignores_doc_and_local_captures_and_preserves_document_order
       body: (block (expression_statement (string) @doc)?)) @definition.function
     (parameters (identifier) @local.definition)
     """
-    lang = grammars.language(PYTHON)
+    lang = grammars.language("python")
     query = tags_engine.compile_query(lang, query_text)
     source = 'def alpha(p):\n    """doc"""\n    return p\n\ndef beta(q):\n    return q\n'
     tree = grammars.Parser(lang).parse(source.encode("utf-8"))

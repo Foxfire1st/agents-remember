@@ -2,8 +2,8 @@
 
 Language resolution is a pure function of ``(LanguageSet, path)`` rather than a
 process-global suffix table. Each ``LanguageSet`` carries its resolved providers,
-pinned versions, and query digests so every cache and observation key derives its
-extractor identity from the active set.
+pinned versions, query digests, and any explicit glob/suffix overrides so every
+cache and observation key derives its extractor identity from the active set.
 
 ``.lean`` is permanently reserved for the built-in Lean declaration scanner and
 cannot be bound to a tree-sitter provider.
@@ -32,16 +32,22 @@ from agents_remember.memory_quality.style.citations.tags_engine import (
     DestructuringSpec,
 )
 
-PYTHON: Final = "python"
-TYPESCRIPT: Final = "typescript"
-TSX: Final = "tsx"
-JAVASCRIPT: Final = "javascript"
 LEAN: Final = "lean"
-
 RESERVED_SUFFIXES: Final[frozenset[str]] = frozenset({".lean"})
 LEAN_SCANNER_VERSION: Final = "builtin-lean/1"
 
 ParseTreeFn = Callable[[Language, Sequence[str]], Tree]
+
+
+def matches_glob(path: str, pattern: str) -> bool:
+    """Match a POSIX relative ``path`` against ``pattern`` (including ``**`` segments)."""
+    normalized = path.lstrip("/")
+    if not normalized:
+        return False
+    posix = PurePosixPath(normalized)
+    return posix.full_match(pattern) or (
+        pattern.startswith("**/") and posix.full_match(pattern[3:])
+    )
 
 
 class LanguageProvider(Protocol):
@@ -54,6 +60,15 @@ class LanguageProvider(Protocol):
     def suffixes(self) -> frozenset[str]: ...
 
     @property
+    def filenames(self) -> frozenset[str]: ...
+
+    @property
+    def globs(self) -> tuple[str, ...]: ...
+
+    @property
+    def shebangs(self) -> frozenset[str]: ...
+
+    @property
     def version(self) -> str: ...
 
     @property
@@ -64,6 +79,9 @@ class LanguageProvider(Protocol):
 
     @property
     def has_test_cases(self) -> bool: ...
+
+    @property
+    def anchor_spelling(self) -> bool: ...
 
     def supports_test_cases(self, path: str) -> bool: ...
 
@@ -80,6 +98,10 @@ class TreeSitterLanguageProvider:
     wrappers: frozenset[str] = frozenset()
     destructuring: DestructuringSpec = field(default_factory=DestructuringSpec)
     tests_query_text: str | None = None
+    filenames: frozenset[str] = frozenset()
+    globs: tuple[str, ...] = ()
+    shebangs: frozenset[str] = frozenset()
+    anchor_spelling: bool = False
     _version: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -147,7 +169,11 @@ class LeanLanguageProvider:
 
     key: str = LEAN
     suffixes: frozenset[str] = frozenset({".lean"})
+    filenames: frozenset[str] = frozenset()
+    globs: tuple[str, ...] = ()
+    shebangs: frozenset[str] = frozenset()
     version: str = LEAN_SCANNER_VERSION
+    anchor_spelling: bool = False
 
     @property
     def is_tree_sitter(self) -> bool:
@@ -190,36 +216,55 @@ class LeanLanguageProvider:
 
 @dataclass(frozen=True)
 class LanguageSet:
-    """Immutable, versioned mapping from file suffixes to ``LanguageProvider`` instances."""
+    """Immutable, versioned mapping from paths to ``LanguageProvider`` instances."""
 
     providers: tuple[LanguageProvider, ...]
     tree_sitter_version: str
+    glob_overrides: tuple[tuple[str, str], ...] = ()
+    suffix_overrides: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
     by_key: Mapping[str, LanguageProvider] = field(init=False)
     by_suffix: Mapping[str, LanguageProvider] = field(init=False)
+    by_filename: Mapping[str, LanguageProvider] = field(init=False)
     extractor_version: str = field(init=False)
 
     def __post_init__(self) -> None:
-        by_key: dict[str, LanguageProvider] = {}
-        by_suffix: dict[str, LanguageProvider] = {}
-        for provider in self.providers:
-            if provider.key in by_key:
-                raise AgentsRememberError(
-                    f"duplicate language provider key {provider.key!r} in LanguageSet"
-                )
-            by_key[provider.key] = provider
-            for suffix in provider.suffixes:
-                _register_suffix(suffix, provider, by_suffix)
+        by_key, by_suffix, by_filename = _index_providers(self.providers)
+        validated_suffix_overrides = _validate_overrides(
+            self.glob_overrides, self.suffix_overrides, by_key
+        )
+        object.__setattr__(self, "suffix_overrides", MappingProxyType(validated_suffix_overrides))
         object.__setattr__(self, "by_key", MappingProxyType(by_key))
         object.__setattr__(self, "by_suffix", MappingProxyType(by_suffix))
+        object.__setattr__(self, "by_filename", MappingProxyType(by_filename))
         object.__setattr__(
             self,
             "extractor_version",
-            _build_extractor_version(self.tree_sitter_version, self.providers),
+            _build_extractor_version(
+                self.tree_sitter_version,
+                self.providers,
+                glob_overrides=self.glob_overrides,
+                suffix_overrides=validated_suffix_overrides,
+            ),
         )
 
     def resolve(self, path: str) -> LanguageProvider | None:
-        """Return the provider owning ``path``'s suffix in this set, or ``None``."""
-        return self.by_suffix.get(PurePosixPath(path).suffix.lower())
+        """Return the provider owning ``path`` in this set, or ``None``."""
+        posix = PurePosixPath(path)
+        suffix = posix.suffix.lower()
+        if suffix in RESERVED_SUFFIXES:
+            return self.by_suffix.get(suffix)
+        for pattern, lang_id in self.glob_overrides:
+            if matches_glob(path, pattern):
+                return self.by_key.get(lang_id)
+        if suffix in self.suffix_overrides:
+            return self.by_key.get(self.suffix_overrides[suffix])
+        for provider in self.providers:
+            if provider.globs and any(matches_glob(path, pattern) for pattern in provider.globs):
+                return provider
+        by_name = self.by_filename.get(posix.name)
+        if by_name is not None:
+            return by_name
+        return self.by_suffix.get(suffix)
 
     def grammar_of(self, path: str) -> str | None:
         """Return the language key owning ``path`` in this set, or ``None``."""
@@ -229,6 +274,13 @@ class LanguageSet:
     def provider_for(self, key: str) -> LanguageProvider | None:
         """Return the provider registered under ``key``, or ``None``."""
         return self.by_key.get(key)
+
+    def anchor_spelling_provider(self) -> TreeSitterLanguageProvider | None:
+        """Return the active provider marked for call/generic anchor spelling, if any."""
+        for provider in self.providers:
+            if isinstance(provider, TreeSitterLanguageProvider) and provider.anchor_spelling:
+                return provider
+        return None
 
     def language_identity(self, path: str) -> str | None:
         """Return ``<key>@<version>`` for ``path`` in this set, or ``None``."""
@@ -241,6 +293,16 @@ class LanguageSet:
         return LanguageSet(
             providers=tuple(p for p in self.providers if p.key not in excluded),
             tree_sitter_version=self.tree_sitter_version,
+            glob_overrides=tuple(
+                (pattern, lang_id)
+                for pattern, lang_id in self.glob_overrides
+                if lang_id not in excluded
+            ),
+            suffix_overrides={
+                suffix: lang_id
+                for suffix, lang_id in self.suffix_overrides.items()
+                if lang_id not in excluded
+            },
         )
 
     def with_providers(
@@ -258,6 +320,76 @@ class LanguageSet:
             tree_sitter_version=(
                 self.tree_sitter_version if tree_sitter_version is None else tree_sitter_version
             ),
+            glob_overrides=self.glob_overrides,
+            suffix_overrides=self.suffix_overrides,
+        )
+
+
+def _index_providers(
+    providers: Sequence[LanguageProvider],
+) -> tuple[
+    dict[str, LanguageProvider],
+    dict[str, LanguageProvider],
+    dict[str, LanguageProvider],
+]:
+    by_key: dict[str, LanguageProvider] = {}
+    by_suffix: dict[str, LanguageProvider] = {}
+    by_filename: dict[str, LanguageProvider] = {}
+    for provider in providers:
+        if provider.key in by_key:
+            raise AgentsRememberError(
+                f"duplicate language provider key {provider.key!r} in LanguageSet"
+            )
+        by_key[provider.key] = provider
+        for suffix in provider.suffixes:
+            _register_suffix(suffix, provider, by_suffix)
+        for filename in provider.filenames:
+            if filename in by_filename:
+                existing = by_filename[filename].key
+                raise AgentsRememberError(
+                    f"filename {filename!r} is claimed by both {existing!r} and {provider.key!r}"
+                )
+            by_filename[filename] = provider
+        for pattern in provider.globs:
+            _check_reserved_glob(pattern, provider.key)
+    return by_key, by_suffix, by_filename
+
+
+def _validate_overrides(
+    glob_overrides: Sequence[tuple[str, str]],
+    suffix_overrides: Mapping[str, str],
+    by_key: Mapping[str, LanguageProvider],
+) -> dict[str, str]:
+    validated: dict[str, str] = {}
+    for suffix, lang_id in suffix_overrides.items():
+        normalized = suffix.lower()
+        if not normalized.startswith(".") or normalized != suffix:
+            raise AgentsRememberError(
+                f"suffix override {suffix!r} must be lowercase and start with '.'"
+            )
+        if normalized in RESERVED_SUFFIXES:
+            raise AgentsRememberError(
+                f"suffix {normalized!r} is reserved for the built-in Lean scanner and cannot be overridden"
+            )
+        if lang_id not in by_key:
+            raise AgentsRememberError(
+                f"suffix override {suffix!r} references unknown provider {lang_id!r}"
+            )
+        validated[normalized] = lang_id
+    for pattern, lang_id in glob_overrides:
+        _check_reserved_glob(pattern, lang_id)
+        if lang_id not in by_key:
+            raise AgentsRememberError(
+                f"glob override {pattern!r} references unknown provider {lang_id!r}"
+            )
+    return validated
+
+
+def _check_reserved_glob(pattern: str, owner: str) -> None:
+    lower = pattern.lower().strip()
+    if any(lower.endswith(suffix) for suffix in RESERVED_SUFFIXES):
+        raise AgentsRememberError(
+            f"glob {pattern!r} for {owner!r} targets reserved Lean suffix and is refused"
         )
 
 
@@ -287,17 +419,34 @@ def _register_suffix(
 def _build_extractor_version(
     tree_sitter_version: str,
     providers: Sequence[LanguageProvider],
+    *,
+    glob_overrides: Sequence[tuple[str, str]] = (),
+    suffix_overrides: Mapping[str, str] = MappingProxyType({}),
 ) -> str:
     parts = [f"tree-sitter={tree_sitter_version}"]
     for provider in sorted(providers, key=lambda item: item.key):
-        suffix_list = ",".join(sorted(provider.suffixes))
-        parts.append(f"{provider.key}[{suffix_list}]={provider.version}")
+        selectors = [
+            *sorted(provider.suffixes),
+            *(f"file:{name}" for name in sorted(provider.filenames)),
+            *(f"glob:{pattern}" for pattern in provider.globs),
+        ]
+        selector_list = ",".join(selectors)
+        parts.append(f"{provider.key}[{selector_list}]={provider.version}")
+    if suffix_overrides:
+        override_text = ",".join(
+            f"{suffix}->{lang_id}" for suffix, lang_id in sorted(suffix_overrides.items())
+        )
+        parts.append(f"suffix-overrides[{override_text}]")
+    if glob_overrides:
+        glob_text = ",".join(f"{pattern}->{lang_id}" for pattern, lang_id in glob_overrides)
+        parts.append(f"glob-overrides[{glob_text}]")
     return ";".join(parts)
 
 
 _active_language_set: ContextVar[LanguageSet | None] = ContextVar(
     "active_language_set", default=None
 )
+_explicit_language_set: ContextVar[bool] = ContextVar("explicit_language_set", default=False)
 
 
 def current_language_set(default: LanguageSet) -> LanguageSet:
@@ -312,9 +461,30 @@ def has_language_set_override(default: LanguageSet) -> bool:
     return bound is not None and bound != default
 
 
+def is_explicit_language_set() -> bool:
+    """Whether the current context entered an explicit caller-supplied ``language_set_scope``."""
+    return _explicit_language_set.get()
+
+
 @contextmanager
 def language_set_scope(language_set: LanguageSet) -> Iterator[LanguageSet]:
-    """Bind ``language_set`` for the current context and restore the prior set on exit."""
+    """Bind ``language_set`` explicitly for the current context and restore the prior set on exit."""
+    set_token = _active_language_set.set(language_set)
+    explicit_token = _explicit_language_set.set(True)
+    try:
+        yield language_set
+    finally:
+        _explicit_language_set.reset(explicit_token)
+        _active_language_set.reset(set_token)
+
+
+@contextmanager
+def derived_language_set_scope(language_set: LanguageSet) -> Iterator[LanguageSet]:
+    """Bind a repository-derived ``language_set`` unless an explicit override is already active."""
+    if _explicit_language_set.get():
+        bound = _active_language_set.get()
+        yield language_set if bound is None else bound
+        return
     token = _active_language_set.set(language_set)
     try:
         yield language_set

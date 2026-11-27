@@ -14,10 +14,12 @@ from collections.abc import Callable, Mapping
 from contextvars import Context
 from copy import deepcopy
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 from agents_remember.application.memory_scope import MemoryScopeIdentity
 from agents_remember.kernel.request_memo import request_memo_scope
+from agents_remember.memory_quality.style.citations import grammars
 from agents_remember.memory_quality.style.citations.extents import definition_scope
 
 MAX_QUALITY_RUNS = 8
@@ -134,7 +136,11 @@ def _complete_quality_run(
     fn: Callable[[], dict[str, object]],
 ) -> None:
     try:
-        with request_memo_scope(), definition_scope():
+        with (
+            request_memo_scope(),
+            grammars.repository_language_set_scope(Path(run.identity.scope.code_root)),
+            definition_scope(),
+        ):
             result = fn()
     except Exception as exc:  # the retained run translates arbitrary worker failure
         with _lock:

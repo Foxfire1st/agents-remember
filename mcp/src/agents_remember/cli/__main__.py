@@ -33,6 +33,7 @@ from agents_remember.cli import (
     knowledge_routes,
     knowledge_validate,
     knowledge_worklist,
+    languages,
     leaf_enclosure_start,
     memory_backfill,
     memory_briefs,
@@ -222,6 +223,12 @@ def _register_runtime_commands(sub: argparse._SubParsersAction) -> None:
     )
     removed_stores.add_arguments(stores)
     stores.set_defaults(func=removed_stores.run)
+    lang_cmd = sub.add_parser(
+        "languages",
+        help="Scan repositories for catalog languages and pre-warm the isolated grammar cache.",
+    )
+    languages.add_arguments(lang_cmd)
+    lang_cmd.set_defaults(func=languages.run)
 
 
 def _run_finite_command(args: argparse.Namespace) -> int:

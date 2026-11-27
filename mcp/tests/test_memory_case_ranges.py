@@ -170,7 +170,7 @@ def test_a_plain_case_under_a_modified_suite_still_resolves_by_name() -> None:
     """L186-R1-F03: a suite's modifier never removes a plain case's name (base behaviour kept)."""
 
     source = "describe.skip('s', () => {\n  it('plain', () => {});\n});"
-    tree = Parser(language=grammars.language(grammars.TSX)).parse(source.encode())
+    tree = Parser(language=grammars.language("tsx")).parse(source.encode())
     names = [one for node in grammars._walk(tree.root_node) if (one := test_cases.case_names(node))]
     assert names == [("s > plain", "plain")], names
     # The range route meanwhile refuses: a case that does not run proves nothing.

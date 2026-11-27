@@ -255,8 +255,10 @@ def observe_entry(
 
     recorded = _Recorded.of(entry)
     observed_blob = code.files.get(entry.path)
+    repo_root = code.tree.repository if code.tree is not None else None
     try:
-        state, reason, content = _verdict(recorded, observed_blob, code, cache)
+        with grammars.repository_language_set_scope(repo_root):
+            state, reason, content = _verdict(recorded, observed_blob, code, cache)
         read_failed = state == "unverifiable" and code.problem not in (None, NO_TREE_REQUESTED)
     except CodeReadError as error:  # its message names the object and why
         state, reason, content = "unverifiable", str(error), None

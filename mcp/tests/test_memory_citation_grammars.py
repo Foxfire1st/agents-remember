@@ -16,7 +16,7 @@ UV_LOCK = Path(__file__).resolve().parents[1] / "uv.lock"
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.memory_quality.style.citations import extents, grammars
+from agents_remember.memory_quality.style.citations import extents, grammars, language_catalog
 from tree_sitter import Parser
 
 
@@ -32,15 +32,14 @@ def _numbered(text: str) -> tuple[int, ...]:
 
 
 class PinnedDependencyTests(unittest.TestCase):
-    """Parser measurements remain aligned with pyproject bounds, uv.lock, and installed wheels."""
+    """Core tree-sitter runtime and data-driven catalog lock stay aligned with pyproject and uv.lock."""
 
     def setUp(self) -> None:
         declared = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+        self.raw_dependencies = list(declared["project"]["dependencies"])
         self.pins = {
             name: bounds
-            for name, _, bounds in (
-                one.partition(">=") for one in declared["project"]["dependencies"]
-            )
+            for name, _, bounds in (one.partition(">=") for one in self.raw_dependencies)
         }
         lock_doc = tomllib.loads(UV_LOCK.read_text(encoding="utf-8"))
         self.locked = {
@@ -48,6 +47,7 @@ class PinnedDependencyTests(unittest.TestCase):
             for pkg in lock_doc.get("package", ())
             if isinstance(pkg, dict) and "name" in pkg and "version" in pkg
         }
+        self.catalog = language_catalog.load_language_catalog()
 
     def bounds(self, package: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
         """The ``>=lower,<upper`` a dependency line declares, as comparable tuples."""
@@ -56,30 +56,28 @@ class PinnedDependencyTests(unittest.TestCase):
         self.assertEqual(separator, ",<", f"{package} carries no upper bound: {self.pins[package]}")
         return _numbered(lower), _numbered(upper)
 
-    def test_every_measured_version_is_a_declared_dependency_within_its_pin(self) -> None:
-        for package, measured in grammars.MEASURED_VERSIONS.items():
-            with self.subTest(package=package):
-                lower, upper = self.bounds(package)
-                self.assertLessEqual(lower, _numbered(measured))
-                self.assertLess(_numbered(measured), upper)
+    def test_tree_sitter_runtime_pin_matches_pyproject_uv_lock_and_installed_wheel(self) -> None:
+        ts = self.catalog.tree_sitter
+        lower, upper = self.bounds(ts.package)
+        self.assertLessEqual(lower, _numbered(ts.version))
+        self.assertLess(_numbered(ts.version), upper)
+        self.assertEqual(self.locked.get(ts.package), ts.version)
+        installed = version(ts.package)
+        self.assertEqual(installed, ts.version)
 
-    def test_every_measured_version_matches_uv_lock_and_installed_wheel(self) -> None:
-        for package, measured in grammars.MEASURED_VERSIONS.items():
-            with self.subTest(package=package):
-                self.assertEqual(
-                    self.locked.get(package),
-                    measured,
-                    f"{package} measured {measured!r} drifted from uv.lock {self.locked.get(package)!r}",
-                )
-                lower, upper = self.bounds(package)
-                installed = version(package)
-                self.assertLessEqual(lower, _numbered(installed))
-                self.assertLess(_numbered(installed), upper)
-                self.assertEqual(installed, measured)
+    def test_pyproject_has_zero_privileged_tree_sitter_grammar_dependencies(self) -> None:
+        grammar_deps = [
+            dep for dep in self.raw_dependencies if dep.lower().startswith("tree-sitter-")
+        ]
+        self.assertEqual(
+            grammar_deps,
+            [],
+            f"mcp/pyproject.toml must not declare privileged grammar packages: {grammar_deps}",
+        )
 
-    def test_every_declared_language_provider_loads_and_compiles_queries(self) -> None:
+    def test_every_catalog_language_provider_loads_and_compiles_queries(self) -> None:
         default_set = grammars.default_language_set()
-        for suffix, key in grammars.SUFFIX_GRAMMARS.items():
+        for suffix, key in self.catalog.by_suffix.items():
             with self.subTest(suffix=suffix, key=key):
                 self.assertEqual(default_set.grammar_of(f"sample{suffix}"), key)
         for provider in default_set.providers:

@@ -109,7 +109,7 @@
       ]
     }
   ],
-  "profileDigest": "cddaa7ff9424112d0ffe29dfee2bc90576c10d4d100335729d6d201cdaadc0d5",
+  "profileDigest": "afb3b7012e24df258c0fffefdb15e9417a848767b23d6a1ea46a1b2feee29006",
   "profileId": "agents-remember-certification",
   "publishedArtifacts": [
     {
@@ -551,6 +551,7 @@
           "{reports}/causal-failures.json"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -625,6 +626,7 @@
           "mcp/tests/test_codex_clean_room_probe.py"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -711,6 +713,7 @@
           "--reporter=line,json"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -792,6 +795,7 @@
           "build"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -858,6 +862,7 @@
           "codegen"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -924,6 +929,7 @@
           "coverage:diff"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -992,6 +998,7 @@
           "lint"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -1057,6 +1064,7 @@
           "ci"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -1125,6 +1133,7 @@
           "test:coverage"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -1207,6 +1216,7 @@
           "typecheck"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -1275,6 +1285,7 @@
           "/opt/ar-venv/bin/python"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -1338,6 +1349,7 @@
           "."
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -1402,6 +1414,7 @@
           "{size-paths}"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -1465,6 +1478,7 @@
           "--check"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -1526,6 +1540,7 @@
           "--check"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -1587,6 +1602,7 @@
           "--check"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -1648,6 +1664,7 @@
           "--check"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -1711,6 +1728,7 @@
           "."
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -1777,6 +1795,7 @@
           "{type-closure}"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -1849,6 +1868,7 @@
           "{selector-output}"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -1926,6 +1946,7 @@
           "{memory-cap-bytes}"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -2010,6 +2031,7 @@
           "{memory-cap-bytes}"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -2094,6 +2116,7 @@
           "{memory-cap-bytes}"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -2185,6 +2208,7 @@
           "SCORE"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -2253,6 +2277,7 @@
           "B"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -2318,6 +2343,7 @@
           "{lint-paths}"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -2384,6 +2410,7 @@
           "{lint-paths}"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -2447,6 +2474,7 @@
           ". scripts/python-runtime-contract.env\nruntime_python=$(/usr/local/bin/uv python find --system --managed-python --no-python-downloads \"$AR_PYTHON_MINOR\")\nuv_version=$(/usr/local/bin/uv --version)\nexec /opt/ar-venv/bin/python scripts/check-python-runtime.py --expected-version \"$AR_PYTHON_MINOR\" --expected-base-prefix \"$(dirname -- \"$(dirname -- \"$runtime_python\")\")\" --require-linux-pidfd --uv-version \"$uv_version\""
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",
@@ -2517,6 +2545,7 @@
           "{selector-output}"
         ],
         "environmentContract": [
+          "AR_LANGUAGE_CACHE",
           "AR_QUALITY_INVOCATION",
           "CI",
           "HOME",

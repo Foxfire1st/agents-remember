@@ -160,7 +160,8 @@ class CodeSnapshot:
                 "from link bytes; cite a line_range or the file instead"
             )
         data = self.blob_bytes(path)
-        start, end = _range(path, locator, data)
+        with grammars.repository_language_set_scope(self.root):
+            start, end = _range(path, locator, data)
         located = data if locator.get("kind") == "file" else _range_bytes(data, start, end)
         return Anchor.model_validate(
             {

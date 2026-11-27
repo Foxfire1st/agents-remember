@@ -72,7 +72,6 @@ from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.conversion.code_objects import SYMBOL_SPANS
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo, is_complete_object_id
 from agents_remember.memory_quality.style.citations import grammars
-from agents_remember.memory_quality.style.citations.grammars import GRAMMAR_PACKAGES
 from agents_remember.serving.review_answer_reuse import (
     ANSWER_WRITES,
     AnswerCodec,
@@ -212,14 +211,34 @@ _LOCK = Lock()
 _STORES: dict[tuple[Path, str], _Store | None] = {}
 
 
-def memo_namespace(source_digest: str, anchor: Path) -> str:
+def memo_namespace(
+    source_digest: str,
+    anchor: Path,
+    *,
+    code_root: Path | None = None,
+    language_set: grammars.LanguageSet | None = None,
+) -> str:
     """The producing build, grammars and Git of every stored answer: the store's exact scope."""
 
+    selected = (
+        language_set
+        if language_set is not None
+        else (
+            grammars.repository_language_set(code_root)
+            if code_root is not None
+            else grammars.active_language_set()
+        )
+    )
     return (
         "review-memo:"
         + hashlib.sha256(
             json.dumps(
-                [_FORMAT, source_digest, _grammar_identity(), _git_identity(anchor)],
+                [
+                    _FORMAT,
+                    source_digest,
+                    _grammar_identity(grammars.extractor_version(selected)),
+                    _git_identity(anchor),
+                ],
                 separators=(",", ":"),
             ).encode("utf-8")
         ).hexdigest()
@@ -227,13 +246,12 @@ def memo_namespace(source_digest: str, anchor: Path) -> str:
 
 
 @cache
-def _grammar_identity() -> list[list[str]]:
-    """The bytes of tree-sitter, each grammar package, and the default extractor queries."""
+def _grammar_identity(extractor_version: str) -> list[list[str]]:
+    """The bytes of tree-sitter and the active catalog/repository extractor identity."""
 
-    packages = sorted({"tree_sitter", *(module for module, _ in GRAMMAR_PACKAGES.values())})
     return [
-        *([package, _package_digest(package)] for package in packages),
-        ["extractor-version", grammars.extractor_version(grammars.default_language_set())],
+        ["tree_sitter", _package_digest("tree_sitter")],
+        ["extractor-version", extractor_version],
     ]
 
 
@@ -263,14 +281,19 @@ def _git_identity(anchor: Path) -> str:
     return result.stdout.strip() if result.returncode == 0 else "unknown"
 
 
-def restore_review_memos(coordination_root: Path, source_digest: str | None) -> None:
+def restore_review_memos(
+    coordination_root: Path,
+    source_digest: str | None,
+    *,
+    code_root: Path | None = None,
+) -> None:
     """Fill the memos from this coordination root's store, once per process and store.
 
     Nothing is restored without a producing build. A memo whose stored answer is absent or
     invalid starts as it is; entries already held are kept and stay the most recently used.
     """
 
-    store = _store(coordination_root, source_digest)
+    store = _store(coordination_root, source_digest, code_root=code_root)
     if store is None:
         return
     for stored in STORED:
@@ -325,17 +348,26 @@ def _write(store: _Store, stored: _Stored) -> None:
         store.agreed[stored.name] = changes
 
 
-def _store(coordination_root: Path, source_digest: str | None) -> _Store | None:
+def _store(
+    coordination_root: Path,
+    source_digest: str | None,
+    *,
+    code_root: Path | None = None,
+) -> _Store | None:
     if not source_digest:
         return None
     directory = coordination_root.joinpath(*MEMO_DIRECTORY)
+    try:
+        namespace = memo_namespace(source_digest, coordination_root, code_root=code_root)
+    except (OSError, ValueError):
+        return None
     with _LOCK:
-        known = (directory, source_digest)
+        known = (directory, namespace)
         if known in _STORES:
             return _STORES[known]
     store = None
     with contextlib.suppress(OSError, ValueError):
-        disk = DiskAnswers.open(directory, memo_namespace(source_digest, coordination_root))
+        disk = DiskAnswers.open(directory, namespace)
         store = None if disk is None else _Store(disk, {})
     with _LOCK:
         return _STORES.setdefault(known, store)

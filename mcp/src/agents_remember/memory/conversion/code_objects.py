@@ -339,16 +339,20 @@ class CodeObjects:
                 f"{path!r} is a symlink (mode 120000): symbol anchors are never parsed "
                 "from link bytes; cite a line_range or the file instead"
             )
-        grammar = self.reader.grammar_of(path)
-        if grammar is None:
-            return None
-        try:
-            spans = self.qualified_spans(path, blob_id, name)
-            if len(spans) != 1 and top_level:
-                spans = _outermost(spans, self._bound(path, blob_id, grammar))
-        except GrammarUnavailableError as error:
-            raise CodeObjectError(f"the grammar for {path!r} is unavailable: {error}") from error
-        return spans[0] if len(spans) == 1 else None
+        scope_root = self.repository if self.reader is CitationReader.LIVE else None
+        with grammars.repository_language_set_scope(scope_root):
+            grammar = self.reader.grammar_of(path)
+            if grammar is None:
+                return None
+            try:
+                spans = self.qualified_spans(path, blob_id, name)
+                if len(spans) != 1 and top_level:
+                    spans = _outermost(spans, self._bound(path, blob_id, grammar))
+            except GrammarUnavailableError as error:
+                raise CodeObjectError(
+                    f"the grammar for {path!r} is unavailable: {error}"
+                ) from error
+            return spans[0] if len(spans) == 1 else None
 
     def qualified_spans(self, path: str, blob_id: str, name: str) -> Spans:
         """:func:`extents.qualified_spans` of ``name`` in ``blob_id`` read at ``path``.
@@ -360,28 +364,32 @@ class CodeObjects:
         """
 
         data = self.blob(blob_id)
-        grammar = self.reader.grammar_of(path)
-        if grammar is None:
-            return ()
-        use_memo = is_complete_object_id(blob_id) and grammars.is_default_language_set()
-        key = (str(self.repository), blob_id, path, name)
-        remembered = SYMBOL_SPANS.get(key) if use_memo else None
-        if remembered is not None:
-            return remembered[0]
-        spans = extents.qualified_spans(
-            name, self._bound(path, blob_id, grammar, data), grammar=grammar
-        )
-        if use_memo:
-            SYMBOL_SPANS.put(key, spans)
-        return spans
+        scope_root = self.repository if self.reader is CitationReader.LIVE else None
+        with grammars.repository_language_set_scope(scope_root):
+            grammar = self.reader.grammar_of(path)
+            if grammar is None:
+                return ()
+            use_memo = is_complete_object_id(blob_id) and grammars.is_default_language_set()
+            key = (str(self.repository), blob_id, path, name)
+            remembered = SYMBOL_SPANS.get(key) if use_memo else None
+            if remembered is not None:
+                return remembered[0]
+            spans = extents.qualified_spans(
+                name, self._bound(path, blob_id, grammar, data), grammar=grammar
+            )
+            if use_memo:
+                SYMBOL_SPANS.put(key, spans)
+            return spans
 
     def known_spans(self, path: str, blob_id: str, name: str) -> Spans | None:
         """The kept answer of :meth:`qualified_spans`, if one is kept; nothing is read or parsed."""
 
-        if self.reader.grammar_of(path) is None or not grammars.is_default_language_set():
-            return None
-        remembered = SYMBOL_SPANS.get((str(self.repository), blob_id, path, name))
-        return None if remembered is None else remembered[0]
+        scope_root = self.repository if self.reader is CitationReader.LIVE else None
+        with grammars.repository_language_set_scope(scope_root):
+            if self.reader.grammar_of(path) is None or not grammars.is_default_language_set():
+                return None
+            remembered = SYMBOL_SPANS.get((str(self.repository), blob_id, path, name))
+            return None if remembered is None else remembered[0]
 
     def _bound(
         self, path: str, blob_id: str, grammar: str, data: bytes | None = None

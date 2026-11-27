@@ -49,7 +49,7 @@ from agents_remember.memory.knowledge.read_anchor_memo import (
     Definitions,
     is_complete_object_id,
 )
-from agents_remember.memory_quality.style.citations import extents, grammars, test_cases
+from agents_remember.memory_quality.style.citations import extents, grammars
 from agents_remember.models.knowledge.read import AnchorResolution, KnowledgeReadContext
 from agents_remember.models.knowledge.source import LineRangeLocator
 
@@ -255,6 +255,16 @@ def _observed_symbol(
 ) -> AnchorResolution:
     """Observe the symbol on the exact recorded blob through the shared definition extractor."""
 
+    with grammars.repository_language_set_scope(repository_root):
+        return _observed_symbol_in_scope(common, locator, object_id, repository_root)
+
+
+def _observed_symbol_in_scope(
+    common: dict[str, Any],
+    locator: Any,
+    object_id: str,
+    repository_root: Path,
+) -> AnchorResolution:
     name = _locator_text(locator, "qualified_name")
     path = str(common["path"])
     language_set = grammars.active_language_set()
@@ -426,14 +436,7 @@ def _blob_definitions(
         grammars.active_language_set().provider_for(grammar) if provider is None else provider
     )
     version = "" if active_provider is None else active_provider.version
-    recognizes_cases = (
-        active_provider.supports_test_cases(path)
-        if active_provider is not None
-        else (
-            grammar in {grammars.JAVASCRIPT, grammars.TYPESCRIPT, grammars.TSX}
-            and test_cases.is_test_file(path)
-        )
-    )
+    recognizes_cases = active_provider is not None and active_provider.supports_test_cases(path)
     reader = f"{grammar}@{version}:test" if recognizes_cases else f"{grammar}@{version}"
     key = (str(repository_root), object_id, reader)
     remembered = BLOB_DEFINITIONS.get(key)

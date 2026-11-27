@@ -348,21 +348,22 @@ class TreeLane:
             detail = f"recorded against blob {recorded}; the {side.name} blob is {blob}"
             return Placed(entry, None, "recorded_blob_mismatch", detail)
         kind = locator.get("kind")
-        if kind not in _LOCATOR_KINDS or (
-            kind == "symbol" and grammars.grammar_of(entry.path) is None
-        ):
-            detail = f"the locator kind {kind!r} is not resolved in this file"
-            return Placed(entry, None, "unsupported_locator", detail)
-        try:
-            resolved = (
-                _placement(self.code, entry.path, locator, blob)
-                if placements is None
-                else placements.get(entry.id)
-            )
-        except (CodeReadError, subprocess.SubprocessError, OSError) as error:
-            return Placed(
-                entry, None, "unreadable", f"a Git read failed: {bounded_text(str(error))}"
-            )
+        with grammars.repository_language_set_scope(self.code.repository):
+            if kind not in _LOCATOR_KINDS or (
+                kind == "symbol" and grammars.grammar_of(entry.path) is None
+            ):
+                detail = f"the locator kind {kind!r} is not resolved in this file"
+                return Placed(entry, None, "unsupported_locator", detail)
+            try:
+                resolved = (
+                    _placement(self.code, entry.path, locator, blob)
+                    if placements is None
+                    else placements.get(entry.id)
+                )
+            except (CodeReadError, subprocess.SubprocessError, OSError) as error:
+                return Placed(
+                    entry, None, "unreadable", f"a Git read failed: {bounded_text(str(error))}"
+                )
         if resolved is None:
             detail = _UNRESOLVED.get(str(kind), "the locator does not resolve in this blob")
             return Placed(entry, None, "unresolved", detail)
