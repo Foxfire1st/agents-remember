@@ -254,6 +254,7 @@ class OpenObservations:
             self._opens.clear()
             self._page_streams.clear()
             self.evicted = 0
+            self._opened = None
 
     @contextmanager
     def page_stream(self, page: str | None) -> Iterator[None]:

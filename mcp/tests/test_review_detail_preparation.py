@@ -81,6 +81,7 @@ class _Details:
         self.keys = keys
         self.started: list[str] = []
         self.computed: Counter[str] = Counter()
+        self.cancelled: Counter[str] = Counter()
         self.release = {key: threading.Event() for key in keys}
         self._kept: set[str] = set()
         self._flights: SharedFlights[str, None] = SharedFlights()
@@ -91,10 +92,14 @@ class _Details:
 
         def produce() -> None:
             self.started.append(key)
-            while not self.release[key].is_set():
+            try:
+                while not self.release[key].is_set():
+                    raise_if_read_cancelled()
+                    time.sleep(0.005)
                 raise_if_read_cancelled()
-                time.sleep(0.005)
-            raise_if_read_cancelled()
+            except read_cancellation.ReadCancelled:
+                self.cancelled[key] += 1
+                raise
             self.computed[key] += 1
             self._kept.add(key)
 
@@ -231,23 +236,46 @@ def test_an_open_that_joins_returns_at_the_opening_answers_and_a_second_open_bui
 
     # A second open while the queue works: its capture names the trees being built, and its
     # read (here the store's answer) does not wait for the item the queue holds.
+    capture = build.owner._captured
+    queued: list[bool] = []
+
+    def observed_capture(selection: LeafSelection) -> None:
+        with build.owner._changed:
+            capture(selection)
+            queued.append(selection.as_key() in build.owner._pending)
+
+    monkeypatch.setattr(build.owner, "_captured", observed_capture)
     build.owner.opened(_selection())
     assert build.join() == ("read by the open", True)
     assert details.started == ["first"] and details.computed == Counter()
-    time.sleep(0.2)  # load-independent: a second build would have started within this
+    _until(lambda: queued, "the second open's capture decision")
     assert build.computed == [41] and build.owner.superseded == 0
+    assert queued == [False], "the second open queued another build"
 
 
 def test_a_page_read_stops_the_running_detail_which_is_asked_again_once_it_is_answered(
-    build: _Build, details: _Details, caplog: pytest.LogCaptureFixture
+    build: _Build,
+    details: _Details,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    retry_waiting = threading.Event()
+    wait_answered = PAGE_READS.wait_answered
+
+    def observe_retry(timeout: float, *, opens: bool = True) -> bool:
+        answered = wait_answered(timeout, opens=opens)
+        if not answered and details.cancelled["first"] == 1:
+            retry_waiting.set()
+        return answered
+
+    monkeypatch.setattr(PAGE_READS, "wait_answered", observe_retry)
     build.opening.set()
     with caplog.at_level("INFO", logger=LOGGER):
         build.owner.offer(_selection(), build.record)
         _until(lambda: details.started == ["first"], "the first detail")
         with PAGE_READS.answering():
             details.release["first"].set()  # it would finish now, but a page read is answered
-            time.sleep(0.2)  # load-independent: the item stops at a safe point within this
+            assert retry_waiting.wait(HANG_GUARD_SECONDS), "the detail's retry did not wait"
             assert details.computed == Counter(), "the queue computed beside a page read"
             assert details.started == ["first"], "the queue started an item beside a page read"
         for event in details.release.values():
@@ -259,8 +287,9 @@ def test_a_page_read_stops_the_running_detail_which_is_asked_again_once_it_is_an
 
 
 def test_a_click_on_an_unprepared_detail_computes_it_at_once_and_the_queue_never_again(
-    build: _Build, details: _Details
+    build: _Build, details: _Details, caplog: pytest.LogCaptureFixture
 ) -> None:
+    caplog.set_level("INFO", logger=LOGGER)
     build.opening.set()
     build.owner.offer(_selection(), build.record)
     _until(lambda: details.started == ["first"], "the first detail")
@@ -271,8 +300,7 @@ def test_a_click_on_an_unprepared_detail_computes_it_at_once_and_the_queue_never
     assert details.computed == Counter(third=1)
     details.release["first"].set()
     details.release["second"].set()
-    _until(lambda: sum(details.computed.values()) == 3, "the queue")
-    time.sleep(0.1)  # load-independent: a second computation of the clicked one would be here
+    _until(lambda: "prepared the details" in caplog.text, "the queue's line")
     assert details.computed == Counter(first=1, second=1, third=1), "a detail was computed twice"
     assert details.started.count("third") == 1
 
@@ -338,7 +366,10 @@ def test_an_item_stopped_for_page_reads_again_and_again_is_left_for_a_click_and_
         for attempt in range(1, DETAIL_YIELDS + 1):
             _until(lambda attempt=attempt: details.started == ["first"] * attempt, "an attempt")
             with PAGE_READS.answering():  # a page read arrives while the item computes
-                time.sleep(0.05)  # load-independent: the item stops at its next safe point
+                _until(
+                    lambda attempt=attempt: details.cancelled["first"] == attempt,
+                    "this detail's safe-point stop",
+                )
         details.release["second"].set()
         details.release["third"].set()
         _until(lambda: "prepared the details" in caplog.text, "the queue's line")

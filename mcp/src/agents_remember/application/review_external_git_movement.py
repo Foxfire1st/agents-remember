@@ -9,6 +9,7 @@ The boundary reads Git and retained JSON only; it never changes a checkout or re
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -792,7 +793,10 @@ def _worktree_branch(worktree: Path) -> str:
                 raise OSError(f"relative administrative directory in {worktree}")
             head = gitdir / "HEAD"
         content = observed_text(head).strip()
-    except OSError:
+    except OSError as error:
+        logging.getLogger(__name__).warning(
+            "worktree branch file read fell back to git for %s: %r", worktree, error
+        )
         return current_branch(worktree)
     if content.startswith("ref: "):
         reference = content[len("ref: ") :].strip()

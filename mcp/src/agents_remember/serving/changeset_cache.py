@@ -21,6 +21,7 @@ observation.
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
 # is not "unchanged": the stamp records that it is unknown, and only a refusal may be
 # kept on it (L174-R1-04). A successful result is computed uncached instead.
 UNKNOWN_STATUS = "unknown-status:"
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -326,7 +328,8 @@ class ChangesetCache:
                 if source.working and working.startswith(UNKNOWN_STATUS)
                 else digest
             )
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError) as error:
+            logger.warning("changeset snapshot unreadable for %r: %r", source, error)
             return None
 
     def _working_generation(self, root: Path) -> str:

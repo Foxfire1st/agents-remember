@@ -275,6 +275,11 @@ PROCESS_MUTABLE_STATES = (
         "Every test module must observe its own legacy delegation warning.",
     ),
     _row(
+        "kernel.read_cancellation",
+        "PAGE_READS",
+        "Forget held page opens and active page-read counts between test modules.",
+    ),
+    _row(
         "memory.conversion.base",
         "_cache",
         "Forget comparison bases so every module establishes its own conversion inputs.",
@@ -427,6 +432,11 @@ PROCESS_MUTABLE_STATES = (
         "_PROCESS_WATCH",
         "Shut the process's one worktree watch down between test modules.",
         _reset_process_worktree_watch,
+    ),
+    _row(
+        "serving.review_open_observation",
+        "OPEN_OBSERVATIONS",
+        "Forget open observations, page streams, and the bound opened callback between test modules.",
     ),
     _row(
         "tasks.document_field_effects",

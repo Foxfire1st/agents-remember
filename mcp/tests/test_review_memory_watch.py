@@ -31,6 +31,7 @@ from agents_remember.serving.explainer_watcher import LeafSelection
 from agents_remember.serving.leaf_worktree_watch import process_worktree_watch
 from agents_remember.serving.projector import ProjectionCadence
 from agents_remember.serving.review_memory_watch import multiplex_review_memory
+from agents_remember.serving.review_open_observation import OPEN_OBSERVATIONS
 from agents_remember_test_support.testing.review_git_trees import LEAF, MASTER, REPO, build_world
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, wait_until
 from fastapi import FastAPI
@@ -164,26 +165,28 @@ def test_change_during_registration_is_not_swallowed_by_baseline(tmp_path, monke
     # own native handle; the edit lands right after the subscription armed, before the baseline.
     watch = process_worktree_watch()
     subscribe = watch.subscribe
-    installed = threading.Event()
+    delivered = threading.Event()
 
-    def installing(*args):
-        unsubscribe = subscribe(*args)
-        (tmp_path / "registered.md").write_text("outside edit during installation")
-        installed.set()
+    def installing(identity, root, notify):
+        def delivered_to_stream(signal):
+            notify(signal)
+            delivered.set()
+
+        unsubscribe = subscribe(identity, root, delivered_to_stream)
+        try:
+            (tmp_path / "registered.md").write_text("outside edit during installation")
+            assert delivered.wait(HANG_GUARD_SECONDS), "native delivery during registration"
+        except BaseException:
+            unsubscribe()
+            raise
         return unsubscribe
 
     monkeypatch.setattr(watch, "subscribe", installing)
 
     async def check():
         stream = module._memory_events(tmp_path, ("repo", "master", "leaf"))
-        initial = asyncio.create_task(anext(stream))
-        await asyncio.sleep(0)
-        # Hold the consumer while real native delivery queues both ready and change.
-        wait_until(installed.is_set, "native registration")
-        # load-independent: a scheduling yield while both deliveries queue, not a bound
-        time.sleep(0.15)
         try:
-            first = await initial
+            first = await anext(stream)
             second = await asyncio.wait_for(anext(stream), HANG_GUARD_SECONDS)
             assert first.data["revision"] != second.data["revision"]
         finally:
@@ -226,11 +229,9 @@ def test_arming_baseline_names_how_long_ago_memory_last_changed(tmp_path):
         elapsed_ms = (time.monotonic() - before) * 1000
         try:
             assert edited.data["changedAgoMs"] <= elapsed_ms + 20, (edited.data, elapsed_ms)
-            pending = asyncio.create_task(anext(stream))
-            # load-independent: a scheduling yield so the armed worker is blocked in its watch
-            await asyncio.sleep(0.05)
+            # The baseline is emitted after the native watch has armed.
             (root / "onboarding" / "next.md").write_text("an edit after arming")
-            later = await asyncio.wait_for(pending, HANG_GUARD_SECONDS)
+            later = await asyncio.wait_for(anext(stream), HANG_GUARD_SECONDS)
             assert later.event == "review.memory"
             assert "changedAgoMs" not in later.data
         finally:
@@ -519,20 +520,26 @@ def test_dashboard_port_resolves_only_canonical_live_memory_without_capture(tmp_
         raise AssertionError("root admission must not capture a review")
 
     monkeypatch.setattr(review_candidate_resolution, "_captured_candidate", forbidden)
-    port = serving_collaborators(world.config).review_memory_root
-    assert callable(port)
-    assert port(REPO, MASTER, LEAF) == world.memory_worktree.resolve()
-    assert port(REPO, "different-master", LEAF) is None
-    assert port("../escape", MASTER, LEAF) is None
-    contract = world.contract()
-    text = contract.read_text()
-    contract.write_text(
-        text.replace(str(world.config.coordination_root), str(tmp_path / "foreign"))
-    )
-    assert port(REPO, MASTER, LEAF) is None
-    contract.write_text(text)
-    world.contract(live=False)
-    assert port(REPO, MASTER, LEAF) is None
+    collaborators = serving_collaborators(world.config)
+    try:
+        port = collaborators.review_memory_root
+        assert callable(port)
+        assert port(REPO, MASTER, LEAF) == world.memory_worktree.resolve()
+        assert port(REPO, "different-master", LEAF) is None
+        assert port("../escape", MASTER, LEAF) is None
+        contract = world.contract()
+        text = contract.read_text()
+        contract.write_text(
+            text.replace(str(world.config.coordination_root), str(tmp_path / "foreign"))
+        )
+        assert port(REPO, MASTER, LEAF) is None
+        contract.write_text(text)
+        world.contract(live=False)
+        assert port(REPO, MASTER, LEAF) is None
+    finally:
+        if collaborators.review_trees_shutdown is not None:
+            collaborators.review_trees_shutdown()
+        OPEN_OBSERVATIONS.bind_opened(None)
 
 
 # --- D569: one process watch, streams subscribe, every change source builds -----------------------

@@ -7,11 +7,14 @@ import time
 import unittest
 from itertools import pairwise
 from pathlib import Path
+from typing import Literal
+from unittest.mock import patch
 
 import pytest
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving import change_watcher as m
 from agents_remember.serving.projections import paths as projection_paths
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 
 class Trace:
@@ -40,6 +43,21 @@ async def until(
             await asyncio.sleep(0.01)
 
 
+class ReplanEvent(asyncio.Event):
+    """The second wait begins after the first plan decision has completed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.waiting_again = asyncio.Event()
+        self._waited = False
+
+    async def wait(self) -> Literal[True]:
+        if self._waited:
+            self.waiting_again.set()
+        self._waited = True
+        return await super().wait()
+
+
 class NativeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -56,16 +74,33 @@ class NativeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.pacer = Trace()
         self.watcher = m.ProjectionInputWatcher(self.config, refresh_seconds=30)
+        self.runner: asyncio.Task[None] | None = None
+
+    def start_watcher(self) -> None:
         self.runner = asyncio.create_task(self.watcher.run(self.pacer))
 
     async def asyncTearDown(self):
-        self.runner.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await self.runner
+        if self.runner is not None:
+            self.runner.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.runner
         self.tmp.cleanup()
 
     async def test_real_registration_loop_progress_and_report_quiet(self):
+        assert m.watchfiles is not None
+        awatch = m.watchfiles.awatch
+        first_batch = asyncio.Event()
+        deliver_batch = asyncio.Event()
         ticks = []
+
+        async def observe_registration(*roots, **options):
+            async with contextlib.aclosing(awatch(*roots, **options)) as batches:
+                batch = await anext(batches)
+                first_batch.set()
+                await deliver_batch.wait()
+                yield batch
+                async for batch in batches:
+                    yield batch
 
         async def beat():
             while True:
@@ -74,10 +109,12 @@ class NativeTests(unittest.IsolatedAsyncioTestCase):
 
         heart = asyncio.create_task(beat())
         try:
-            # load-independent: parks the task on the real condition before the assertion; nothing reads the clock
-            await asyncio.sleep(0.15)
-            self.assertFalse(self.pacer.health)  # no synthetic early registration signal
-            await until(lambda: True in self.pacer.health)
+            with patch.object(m.watchfiles, "awatch", observe_registration):
+                self.start_watcher()
+                await asyncio.wait_for(first_batch.wait(), HANG_GUARD_SECONDS)
+                self.assertFalse(self.pacer.health)  # no synthetic early registration signal
+                deliver_batch.set()
+                await until(lambda: True in self.pacer.health)
         finally:
             heart.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -96,6 +133,7 @@ class NativeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.pacer.health, [True])
 
     async def test_real_late_task_receipt_and_contract_are_reconciled(self):
+        self.start_watcher()
         await until(lambda: True in self.pacer.health)
         child = self.root / "tasks/repo/new-task"
         holder = child / "notes/reports/paseo-native-executions"
@@ -242,7 +280,7 @@ class TopologyTests(unittest.IsolatedAsyncioTestCase):
             plan = m.projection_watch_plan(cfg)
             pacer = Trace()
             health = pacer.health
-            replan = asyncio.Event()
+            replan = ReplanEvent()
             stop = asyncio.Event()
             replace_watch = asyncio.Event()
             owner = m.ProjectionInputWatcher(cfg, refresh_seconds=0.01)
@@ -250,8 +288,7 @@ class TopologyTests(unittest.IsolatedAsyncioTestCase):
                 owner._stop_when_roots_change(plan, stop, replan, replace_watch, pacer)
             )
             try:
-                # load-independent: parks the task on the real condition before the assertion; nothing reads the clock
-                await asyncio.sleep(0.05)
+                await asyncio.wait_for(replan.waiting_again.wait(), HANG_GUARD_SECONDS)
                 self.assertFalse(task.done())
                 self.assertEqual(health, [])
                 replace_watch.set()
@@ -288,7 +325,7 @@ class TopologyTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(plan, m.projection_watch_plan(cfg))
             pacer = Trace()
             health = pacer.health
-            replan = asyncio.Event()
+            replan = ReplanEvent()
             replace_watch = asyncio.Event()
             stop = asyncio.Event()
             replan.set()
@@ -297,8 +334,7 @@ class TopologyTests(unittest.IsolatedAsyncioTestCase):
                 owner._stop_when_roots_change(plan, stop, replan, replace_watch, pacer)
             )
             try:
-                # load-independent: parks the task on the real condition before the assertion; nothing reads the clock
-                await asyncio.sleep(0.05)
+                await asyncio.wait_for(replan.waiting_again.wait(), HANG_GUARD_SECONDS)
                 self.assertFalse(task.done())
                 self.assertFalse(stop.is_set())
                 self.assertEqual(health, [])

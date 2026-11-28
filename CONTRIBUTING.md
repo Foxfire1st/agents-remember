@@ -260,6 +260,11 @@ same command only validates the two catalogs. The pre-commit hook runs it that w
 
 ### A test under load
 
+Wait for the condition a test needs before releasing background work or cancelling a shared
+reader. For example, observe the second reader joining the same job. Use the shared hang guard
+to bound the wait, and let the fixture control any producer the test drives explicitly.
+Use a test-controlled clock when checking a rate limit so that host scheduling cannot refill it.
+
 `scripts/test-under-load.sh` runs a command on one processor core that ten busy loops share,
 and stops the loops afterwards. Use it to show that a timing-sensitive test passes on a busy
 machine:

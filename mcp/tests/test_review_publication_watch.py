@@ -9,6 +9,7 @@ from unittest.mock import ANY
 
 from agents_remember.canvas.explainer_state import record_request
 from agents_remember.serving import _app_routes as routes
+from agents_remember.serving import review_publication_watch as publication
 from agents_remember.serving._app_common import _ServingRuntime
 from agents_remember.serving.explainer_move_watch import MoveNoticeWatch
 from agents_remember.serving.review_publication_watch import (
@@ -16,6 +17,7 @@ from agents_remember.serving.review_publication_watch import (
     publication_events,
     safe_publication_events,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, async_wait_until
 from fastapi.sse import ServerSentEvent
 
 IDENTITY = ("repo", "master", "leaf")
@@ -43,11 +45,21 @@ def route_inputs(monkeypatch, root):
     )
 
 
-def test_future_frame_and_ready_replacement_are_observed_and_worker_reaped(tmp_path):
+def test_future_frame_and_ready_replacement_are_observed_and_worker_reaped(tmp_path, monkeypatch):
     async def run():
         root = tmp_path / "task"
         root.mkdir()
         pointer = root / "notes/reports/review-frames/leaf/explainer/ready.json"
+        armed = threading.Event()
+        rust_notify = publication.RustNotify
+
+        def observe_arming(paths, *options):
+            watcher = rust_notify(paths, *options)
+            if str(pointer.parent) in paths:
+                armed.set()
+            return watcher
+
+        monkeypatch.setattr(publication, "RustNotify", observe_arming)
         stream = publication_events(IDENTITY, lambda _: watch_inputs(root, pointer))
         async with contextlib.aclosing(stream):
             baseline = await asyncio.wait_for(
@@ -67,29 +79,23 @@ def test_future_frame_and_ready_replacement_are_observed_and_worker_reaped(tmp_p
             assert first.data["revision"] != baseline.data["revision"]
             assert first.data["kind"] == "page"
             assert first.data["pageStamp"] is not None
-            # Allow the worker to settle/rearm, draining any registration baseline.
+            await async_wait_until(armed.is_set, "the native watch on the publication directory")
             pending = asyncio.create_task(anext(stream))
-            while True:
-                done, _ = await asyncio.wait(
-                    {pending},
-                    # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-                    timeout=0.15,
-                )
-                if not done:
-                    break
-                pending.result()
-                pending = asyncio.create_task(anext(stream))
-            (pointer.parent / "unrelated.html").write_text("not a publication")
-            # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-            assert not (await asyncio.wait({pending}, timeout=0.15))[0]
-            temporary = pointer.with_suffix(".tmp")
-            temporary.write_text('{"revision":2}')
-            temporary.replace(pointer)
-            replaced = await asyncio.wait_for(
-                pending,
+            try:
+                (pointer.parent / "unrelated.html").write_text("not a publication")
                 # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-                5,
-            )
+                assert not (await asyncio.wait({pending}, timeout=0.15))[0]
+                temporary = pointer.with_suffix(".tmp")
+                temporary.write_text('{"revision":2}')
+                temporary.replace(pointer)
+                replaced = await asyncio.wait_for(
+                    pending,
+                    # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
+                    5,
+                )
+            finally:
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
             assert replaced.event == "review.explainer.changed"
             pointer.unlink()
             assert (
@@ -105,14 +111,22 @@ def test_cancel_pending_read_reaps_native_worker(tmp_path):
     async def run():
         pointer = tmp_path / "ready.json"
         stream = publication_events(IDENTITY, lambda _: watch_inputs(tmp_path, pointer))
-        await anext(stream)
-        pending = asyncio.create_task(anext(stream))
-        # load-independent: parks the task on the real condition before the assertion; nothing reads the clock
-        await asyncio.sleep(0.02)
-        pending.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await pending
-        await stream.aclose()
+        started = asyncio.Event()
+
+        async def read_again():
+            started.set()
+            return await anext(stream)
+
+        async with contextlib.aclosing(stream):
+            await anext(stream)
+            pending = asyncio.create_task(read_again())
+            try:
+                await asyncio.wait_for(started.wait(), HANG_GUARD_SECONDS)
+                assert not pending.done()
+            finally:
+                pending.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await pending
         assert not any(t.name.startswith("review-publication-") for t in threading.enumerate())
 
     asyncio.run(run())

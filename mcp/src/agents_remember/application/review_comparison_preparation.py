@@ -6,6 +6,7 @@ stay in process; after restart native admission runs again before any disk value
 
 from __future__ import annotations
 
+import logging
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -50,6 +51,16 @@ from agents_remember.worktrees.modules.future_code_candidate import capture_futu
 from agents_remember.worktrees.modules.git import head_commit
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
+logger = logging.getLogger(__name__)
+
+
+def _memory_recheck_refused(trees: ReviewTrees, leaf_id: str) -> bool:
+    refusal = recheck_memory_candidate(trees)
+    if refusal is None:
+        return False
+    logger.debug("comparison witness memory recheck refused for %s: %s", leaf_id, refusal.code)
+    return True
+
 
 def _query_key(query: ReviewTreesQuery) -> tuple[object, ...]:
     return (query.repository_id, query.master, query.leaf_id, query.number, query.recorded)
@@ -84,7 +95,12 @@ class ComparisonInputWitness:
             # indexes or changed files, not a weaker status-only fallback.
             try:
                 fresh = capture_future_code_candidate(contract, kept=True)
-            except (FutureCodeCandidateError, OSError, RuntimeError, ValueError):
+            except (FutureCodeCandidateError, OSError, RuntimeError, ValueError) as error:
+                logger.warning(
+                    "comparison witness code re-capture failed for %s: %r",
+                    contract.leaf_id,
+                    error,
+                )
                 return False
             if (
                 fresh.codeCandidateTree != trees.record.code_candidate.tree
@@ -92,9 +108,9 @@ class ComparisonInputWitness:
                 or fresh.observedCodeHead != self.code_head
             ):
                 return False
-        if (self.memory is None or not self.memory.current()) and recheck_memory_candidate(
-            trees
-        ) is not None:
+        if (self.memory is None or not self.memory.current()) and _memory_recheck_refused(
+            trees, contract.leaf_id
+        ):
             return False
         return (
             not changed_observations(dict(self.reads)) and self.observe(self.sources) == self.stamps

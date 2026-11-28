@@ -16,6 +16,7 @@ any reuse.
 
 from __future__ import annotations
 
+import logging
 import mmap
 import os
 import tempfile
@@ -26,6 +27,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from agents_remember.application._review_answer_helpers import (
+    _additions_kept,
+    _answer_name,
+    _comparison_sources_of,
+    _expected_reads,
+    _index_inputs,
+    _keepable_persisted_tree,
+    _keepable_summary,
+    _listed_comparison,
+    _reads_from_its_record,
+    _reviewed_comparison,
+    _tree_key,
+    _unmeasured_open,
+    _whole_review,
+)
 from agents_remember.application.review_candidate_resolution import (
     ReviewCandidateResolution,
     recorded_leaf_contract,
@@ -39,7 +55,6 @@ from agents_remember.application.review_closure_proofs import (
     remember_closure,
     witnesses_digest,
 )
-from agents_remember.application.review_comparison_generation import leaf_generation_root
 from agents_remember.application.review_delivered_comparison import (
     delivered_notice,
     recorded_latest,
@@ -57,26 +72,17 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.read_cancellation import SharedFlights, raise_if_read_cancelled
 from agents_remember.kernel.recorded_reads import (
     changed_observations,
-    file_identity,
     has_failed_observation,
     observed_path_exists,
     recorded_reads,
     replay_reads,
 )
-from agents_remember.memory.knowledge.logical import dataset_identity
-from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge_index.cache import default_cache_directory
-from agents_remember.models.knowledge.review import (
-    KnowledgeReviewResult,
-    ReviewEntryListResult,
-    ReviewSurfaceRequest,
-)
+from agents_remember.models.knowledge.review import ReviewSurfaceRequest
 from agents_remember.models.knowledge.review_intent_summary import ReviewIntentSummaryResult
 from agents_remember.models.knowledge.review_trees import ReviewTrees, ReviewTreesResult
 from agents_remember.serving.changeset_cache import (
     ContentRead,
-    DirectoryRead,
-    ListingRead,
     ObjectStoreRead,
     ReadInput,
     RepositoryRead,
@@ -95,6 +101,8 @@ __all__ = [
     "recorded_answer_sources",
     "recorded_review_answers",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 def recorded_answer_sources(
@@ -120,34 +128,6 @@ def _recorded_contract(
     return contract if contract is not None and contract.kind == "leaf" else None
 
 
-def _comparison_sources_of(
-    config: McpRuntimeConfig,
-    contract: WorktreeContract,
-    repository_id: str,
-    master: str,
-    leaf_id: str,
-) -> tuple[ReadInput, ...]:
-    """The record, the directories its generation lives in, and the stores it is read from.
-
-    A successor record is another answer, so the names the comparison directory lists are an input
-    -- its names, not the identities of the records under them: a record is an input only of the
-    answers that read it (D570); a generation's listing is one too. The object census is an
-    additional invalidator; direct recorded-closure checks below detect a pruned dependency even
-    when an unrelated new object compensates for its count.
-    """
-
-    task_root = config.coordination_root / "tasks" / repository_id / master
-    sources: list[ReadInput] = [
-        ContentRead(contract.contract_path),
-        ListingRead(comparison_directory(task_root, leaf_id)),
-        DirectoryRead(leaf_generation_root(task_root, leaf_id)),
-    ]
-    for root in (contract.code_repo_path, contract.memory_repo_path):
-        if root is not None and Path(root).is_dir():
-            sources.append(ObjectStoreRead(Path(root)))
-    return tuple(dict.fromkeys(sources))
-
-
 def _sources_of(
     config: McpRuntimeConfig,
     contract: WorktreeContract,
@@ -160,25 +140,6 @@ def _sources_of(
     return (
         *_comparison_sources_of(config, contract, repository_id, master, leaf_id),
         ContentRead(worklist) if worklist.exists() else worklist,
-    )
-
-
-def _additions_kept(sources: tuple[ReadInput, ...]) -> tuple[ReadInput, ...]:
-    """``sources`` with each object store observed as a kept success needs it (D570).
-
-    A kept success names its objects by id and proves their closures present again before each
-    reuse, so an object added to its store -- another worktree's capture or commit, in the store
-    every worktree of a repository shares -- changes nothing it read and keeps it; a removal, a
-    repack or an alternate-store change still moves the store's stamp. The strict census
-    (:class:`ObjectStoreRead`) stays with an answer that may be a refusal, which an added object
-    can answer.
-    """
-
-    return tuple(
-        dict.fromkeys(
-            RepositoryRead(source.root) if isinstance(source, ObjectStoreRead) else source
-            for source in sources
-        )
     )
 
 
@@ -426,6 +387,13 @@ def _object_bodies_readable(repository: Path, objects: list[str]) -> bool:
             GitRunnerOptions(input_text="\n".join(objects) + "\n"),
         )
         if result.returncode or result.stderr:
+            logger.warning(
+                "git cat-file --batch rejected %d object(s) in %s (rc=%d, stderr=%r)",
+                len(objects),
+                repository,
+                result.returncode,
+                result.stderr[:200],
+            )
             return False
         if os.fstat(output.fileno()).st_size == 0:
             return not objects
@@ -448,20 +416,6 @@ def _batch_framed(written: mmap.mmap, objects: list[str]) -> bool:
             return False
         offset = end + 1
     return offset == len(written)
-
-
-def _reads_from_its_record(contract: WorktreeContract | None) -> bool:
-    """Whether a leaf is answered from a durable record rather than from a live enclosure.
-
-    A leaf whose enclosure still names a capture worktree is a live comparison: its answers depend
-    on a working view this module never observes, so they are computed on every read. The entry
-    catalogue has no ``history`` selector of its own, so this is how its recordedness is decided.
-    """
-
-    if contract is None:
-        return False
-    worktree = contract.code_worktree
-    return worktree is None or not worktree.exists()
 
 
 @dataclass(frozen=True)
@@ -868,7 +822,16 @@ class RecordedReviewAnswers:
                 value = produce()
             replay_reads(actual)
             made = dict(actual)
-            held = not has_failed_observation(made) and witness.current()
+            failed = has_failed_observation(made)
+            current = False if failed else witness.current()
+            held = not failed and current
+            if not held:
+                logger.debug(
+                    "live answer not held for %r (failed_observation=%s, witness_current=%s)",
+                    key[:2],
+                    failed,
+                    current,
+                )
             return value
 
         def keep(value: T) -> bool:
@@ -1056,61 +1019,6 @@ class RecordedReviewAnswers:
         return store.answer(key, sources, compute, keep=keep_answer, codec=codec, made=lambda: made)
 
 
-def _keepable_tree_view(value: object) -> bool:
-    """Whether a tree-view answer is a function of its recorded inputs alone.
-
-    An answer is kept only after the reuse found every recorded tree readable, so a side it names
-    ``unavailable-history`` names a read that failed -- an index that could not be built over a
-    readable tree -- not a state of the record; a tree that is gone is never kept anyway. A card
-    answer whose ``entry_memory`` is unavailable while its after side is available names a failed
-    read too (MIK-R89 v2 rule 3, Failure and Recovery). Neither is kept, so the next read tries
-    again; an unconverted (``legacy-unavailable``) side is the record's own state and is kept.
-    """
-
-    if not isinstance(value, ReviewTreesResult):
-        return True
-    sides = (*value.knowledge_sides, *value.code_sides)
-    if any(side.state == "unavailable-history" for side in sides):
-        return False
-    if value.entry_memory is None or value.entry_memory.state == "available":
-        return True
-    return not any(
-        side.side == "after" and side.state == "available" for side in value.knowledge_sides
-    )
-
-
-def _answer_name(key: tuple[object, ...]) -> str:
-    """A short name of one answer's question, for an open's log: intent, overview, files, ..."""
-
-    kind = str(key[0]) if key else "answer"
-    if kind in ("live", "live-kept"):
-        return "live " + _answer_name(key[1:])
-    if kind == "trees" and len(key) > 1 and isinstance(key[1], tuple):
-        fields = key[1]
-        view, lane = fields[6], fields[8]
-        return "files" if lane else "overview" if view == "overview" else "trees"
-    return kind
-
-
-def _tree_key(query: ReviewTreesQuery) -> tuple[object, ...]:
-    """Every field of a tree-view query that selects its answer."""
-
-    return (
-        "trees",
-        query.repository_id,
-        query.master,
-        query.leaf_id,
-        query.number,
-        query.recorded,
-        query.view,
-        query.invariants,
-        query.lane,
-        query.file,
-        query.entry,
-        query.entry_side,
-    )
-
-
 def _persistent_binding(
     config: McpRuntimeConfig,
     contract: WorktreeContract,
@@ -1147,55 +1055,6 @@ def _persistent_inputs(
         f"{trees.record.number}.json"
     )
     return (ContentRead(record), *sources), identities
-
-
-def _index_inputs(trees: ReviewTrees) -> tuple[tuple[ReadInput, ...], tuple[str, ...]] | None:
-    """The logical and physical inputs of these already-resolved indexes."""
-    databases = (trees.before.database, trees.after.database)
-    if any(path is None for path in databases):
-        return None
-    try:
-        paths = tuple(path for path in databases if path is not None)
-        identities = tuple(dataset_identity(path).logical_digest for path in paths)
-    except (KnowledgeStorageError, OSError, ValueError):
-        return None
-    physical = tuple(
-        Path(f"{path}{suffix}") for path in paths for suffix in ("", "-wal", "-journal")
-    )
-    return tuple(ContentRead(path) for path in physical), identities
-
-
-def _whole_review(request: ReviewSurfaceRequest) -> bool:
-    """A whole review read -- the task context's or one subject's: no page, no refreshed binding.
-
-    Both are the questions whose every read was named (D570; a subject's since D574), so a live
-    leaf's answer to them is kept on its comparison's witness.
-    """
-
-    return (
-        request.page_of is None
-        and request.continuation is None
-        and request.previous_binding_digest is None
-    )
-
-
-def _reviewed_comparison(value: object) -> int | None:
-    """The comparison number a live review answer was resolved on, or ``None``."""
-
-    if not isinstance(value, KnowledgeReviewResult) or value.payload is None:
-        return None
-    movement = value.payload.external_git_movement
-    if movement is None or movement.comparison is None:
-        return None
-    return movement.comparison.number
-
-
-def _listed_comparison(value: object) -> int | None:
-    """The comparison number a live subject catalogue was listed on, or ``None``."""
-
-    if not isinstance(value, ReviewEntryListResult) or value.state != "entries":
-        return None
-    return value.comparison
 
 
 def _live_sources(
@@ -1240,54 +1099,6 @@ def _live_sources(
     )
 
 
-def _unmeasured_open(value: ReviewIntentSummaryResult) -> bool:
-    """A counted summary whose stored worklist measured no open count."""
-
-    return (
-        value.state == "counted"
-        and value.attribution is not None
-        and value.attribution.state == "counted"
-        and value.unexplained_open is None
-    )
-
-
-def _keepable_summary(value: ReviewIntentSummaryResult) -> bool:
-    return (
-        value.state == "counted"
-        and value.attribution is not None
-        and value.attribution.state == "counted"
-        and value.unexplained_open is not None
-    )
-
-
-def _keepable_persisted_tree(value: object) -> bool:
-    return (
-        isinstance(value, ReviewTreesResult)
-        and value.state == "trees"
-        and _keepable_tree_view(value)
-        and (value.entry_inventory is None or value.entry_inventory.state == "ready")
-        and (value.overview is None or value.overview.state == "ready")
-    )
-
-
-def _expected_reads(
-    sources: tuple[ReadInput, ...], resolved_reads: Mapping[str, str]
-) -> dict[str, str] | None:
-    """Byte and selection identities obtained from current caller-owned resolution."""
-    if has_failed_observation(resolved_reads) or changed_observations(resolved_reads):
-        return None
-    expected = dict(resolved_reads)
-    for source in sources:
-        path = source.path if isinstance(source, ContentRead) else source
-        if isinstance(path, Path):
-            identity = file_identity(path)
-            previous = expected.get(str(path))
-            if previous is not None and previous != identity:
-                return None
-            expected[str(path)] = identity
-    return expected
-
-
 #: How many detail answers (an invariant's cards, its review) are held, in memory only: two per
 #: changed invariant of a leaf of up to 200 of them; the least recently used is computed again.
 DETAIL_CAPACITY = 400
@@ -1299,11 +1110,12 @@ def recorded_review_answers(config: McpRuntimeConfig) -> RecordedReviewAnswers:
 
     source = process_serving_build().source_digest
     directory = config.coordination_root / "runtime" / "review-answers"
+    reuse = RecordedAnswerReuse(
+        directory=None if source is None else directory, build_namespace=source
+    )
     return RecordedReviewAnswers(
         config,
-        RecordedAnswerReuse(
-            directory=None if source is None else directory, build_namespace=source
-        ),
+        reuse,
         None if source is None else ClosureProofStore(directory / "closures", source),
-        RecordedAnswerReuse(capacity=DETAIL_CAPACITY),
+        RecordedAnswerReuse(cache=reuse.cache, capacity=DETAIL_CAPACITY),
     )

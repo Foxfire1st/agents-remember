@@ -41,7 +41,7 @@ _HOST_LANGUAGE_CACHE = os.environ.get("AR_LANGUAGE_CACHE") or str(
     / "agents-remember"
     / "grammars"
 )
-_TEMPORARY = tempfile.TemporaryDirectory(prefix="ar-pytest-", dir="/tmp")
+_TEMPORARY = tempfile.TemporaryDirectory(prefix="ar-pytest-")
 _ISOLATED_ROOT = Path(_TEMPORARY.name)
 _ISOLATED_ENVIRONMENT = mock.patch.dict(
     os.environ,

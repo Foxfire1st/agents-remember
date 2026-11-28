@@ -29,10 +29,11 @@ import datetime
 import errno
 import fcntl
 import json
+import os
 import sys
 import tempfile
 import threading
-import time
+from concurrent.futures import Future
 from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
@@ -322,19 +323,32 @@ def test_concurrent_cut_during_protected_read_waits() -> None:
         row_bytes = len(rows[0])
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"".join(rows))
-        (path.parent / "events.lock").write_bytes(b"")
+        lock = path.parent / "events.lock"
+        lock.write_bytes(b"")
+        lock_stat = lock.stat()
         virtual_start = row_bytes
         original = serving._read_lines_from
         entered = threading.Event()
+        writer_contended = Future[bool]()
         outcome: dict = {}
+        real_flock = fcntl.flock
 
-        def slow_read(p: Path, start: int):
+        def observe_writer_lock(fd: int, operation: int) -> None:
+            if operation == fcntl.LOCK_EX and os.path.samestat(os.fstat(fd), lock_stat):
+                try:
+                    real_flock(fd, operation | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    writer_contended.set_result(True)
+                else:
+                    writer_contended.set_result(False)
+                    return
+            real_flock(fd, operation)
+
+        def protected_read(p: Path, start: int):
             entered.set()
-            # Hold the protected read open while the writer's compaction, already unblocked
-            # by `entered`, lands. A condition wait would deadlock: the cut takes the lock
-            # this held read owns; the asserts below verify the interleaving loudly.
-            # load-independent: bounded hold for an already-unblocked local compaction.
-            time.sleep(0.3)
+            assert writer_contended.result(timeout=HANG_GUARD_SECONDS), (
+                "the cut must contend on the reader's shared lock"
+            )
             return original(p, start)
 
         def writer() -> None:
@@ -343,13 +357,17 @@ def test_concurrent_cut_during_protected_read_waits() -> None:
                 root, now=base_time + datetime.timedelta(seconds=1, milliseconds=500), ttl_seconds=0
             )
 
-        thread = threading.Thread(target=writer)
-        thread.start()
-        try:
-            with mock.patch.object(serving, "_read_lines_from", side_effect=slow_read):
+        with (
+            mock.patch.object(fcntl, "flock", side_effect=observe_writer_lock),
+            mock.patch.object(serving, "_read_lines_from", side_effect=protected_read),
+        ):
+            thread = threading.Thread(target=writer)
+            thread.start()
+            try:
                 first, cursor = serving.read_new_events(root, {"workspace": virtual_start})
-        finally:
-            thread.join(timeout=HANG_GUARD_SECONDS)
+            finally:
+                entered.set()
+                thread.join(timeout=HANG_GUARD_SECONDS)
         assert not thread.is_alive(), "writer did not finish after the hold released"
         assert outcome.get("dropped") == 1, "concurrent cut never landed"
         assert [e.payload["id"] for e in first] == [f"row-{i:06d}" for i in range(2, 5)]
