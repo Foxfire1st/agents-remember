@@ -134,6 +134,17 @@ Changed or ambiguous content, an absent path or an unresolved
 result of a call of `context_packet` with `include_drift`, reports current and stale
 reference counts and names unreadable sidecars and validator findings separately.
 
+**Language-agnostic anchors with lazy, hash-verified grammars.** Symbol anchors work across a
+hash-pinned catalog of 75 tree-sitter languages (19 dedicated grammar pins plus 56
+`tree-sitter-language-pack` languages) alongside the built-in Lean scanner. Agents Remember
+auto-detects the languages a repository uses and lazily unpacks pinned grammar wheels into
+`AR_LANGUAGE_CACHE` (default `~/.local/state/agents-remember/grammars`) with SHA-256 verification
+and zero runtime mutations to the Python virtualenv. Ambiguous extensions such as `.h`, `.m`, `.v`
+and `.scm` stay occurrence-only unless mapped in `<code-repository>/languages.json`, which also
+supports per-repository enable/disable lists and custom local tree-sitter shared libraries (for
+example, internal or emerging languages such as Bend2; see
+[Language configuration](reference/settings-json.md#language-configuration)).
+
 Realization and proof entries use a separate currentness rule at the exact
 selected code tree: an entry can remain current when its blob changed but its
 resolved content is unchanged. An entry has one of three states:

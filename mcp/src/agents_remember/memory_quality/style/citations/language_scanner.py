@@ -146,7 +146,10 @@ def build_provider_from_catalog(
         load_language=_load,
         tags_query_text=tags_text,
         wrappers=spec.wrappers,
+        leading_wrappers=spec.leading_wrappers,
         destructuring=spec.destructuring,
+        qualifiers=spec.qualifiers,
+        guarantee_tier=spec.guarantee_tier,
         tests_query_text=tests_text,
         anchor_spelling=spec.anchor_spelling,
     )
@@ -397,6 +400,18 @@ def scan_repository_languages(
         disabled_languages=tuple(sorted(overrides.disable)),
         config_sources=overrides.sources,
         file_count=len(tracked),
+    )
+
+
+def all_catalog_language_ids(catalog: LanguageCatalog | None = None) -> tuple[str, ...]:
+    """Return every tree-sitter language ID declared in the global catalog."""
+    active_catalog = language_catalog.load_language_catalog() if catalog is None else catalog
+    return tuple(
+        sorted(
+            lang_id
+            for lang_id, spec in active_catalog.languages.items()
+            if spec.provider_kind != "builtin_lean"
+        )
     )
 
 

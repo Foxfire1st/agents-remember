@@ -115,7 +115,7 @@ MISMATCH_PATH = "src/timeout.py"
 # A recorded path whose language the shipped extractor has NO grammar for. It is what makes the read
 # rail's one remaining ``unsupported_locator`` reachable from the fixture: a symbol cannot be told
 # from a mention in a language nothing parses, so the observation reports that instead of guessing.
-UNPARSED_PATH = "src/schema.sql"
+UNPARSED_PATH = "src/schema.dsl"
 
 # The blob identity recorded for the mismatch claim is deliberately not the one the fixture
 # repository holds at that path, so the observation is a real comparison and not a fixture fact.

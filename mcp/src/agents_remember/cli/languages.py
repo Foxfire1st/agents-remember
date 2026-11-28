@@ -10,6 +10,7 @@ from pathlib import Path
 
 from agents_remember.errors import AgentsRememberError
 from agents_remember.memory_quality.style.citations.language_scanner import (
+    all_catalog_language_ids,
     scan_repository_languages,
     warm_repository_languages,
 )
@@ -21,6 +22,7 @@ class LanguagesCliArgs:
     repo: Path
     cache_dir: Path | None
     languages: tuple[str, ...]
+    all_languages: bool
     dry_run: bool
     as_json: bool
 
@@ -53,6 +55,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Explicit catalog language ID to warm (may be repeated; skips repo auto-scan filter).",
     )
     warm.add_argument(
+        "--all",
+        action="store_true",
+        dest="all_languages",
+        help="Warm every pinned language in the global catalog (for CI and offline caches).",
+    )
+    warm.add_argument(
         "--dry-run", action="store_true", help="Report what would be warmed without downloading."
     )
     warm.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON output.")
@@ -64,6 +72,7 @@ def _parse_args(args: argparse.Namespace) -> LanguagesCliArgs:
         repo=Path(str(args.repo)).expanduser().resolve(),
         cache_dir=None if getattr(args, "cache_dir", None) is None else Path(str(args.cache_dir)),
         languages=tuple(getattr(args, "languages", ()) or ()),
+        all_languages=bool(getattr(args, "all_languages", False)),
         dry_run=bool(getattr(args, "dry_run", False)),
         as_json=bool(getattr(args, "as_json", False)),
     )
@@ -85,9 +94,14 @@ def run(args: argparse.Namespace) -> int:
                 )
             return 0
         if parsed.action == "warm":
+            explicit = (
+                parsed.languages
+                if parsed.languages
+                else (all_catalog_language_ids() if parsed.all_languages else None)
+            )
             warm = warm_repository_languages(
                 parsed.repo,
-                languages=parsed.languages or None,
+                languages=explicit,
                 cache_root=parsed.cache_dir,
                 dry_run=parsed.dry_run,
             )

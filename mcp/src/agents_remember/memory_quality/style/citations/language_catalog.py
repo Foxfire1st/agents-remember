@@ -25,6 +25,7 @@ from agents_remember.memory_quality.style.citations.language_set import (
 from agents_remember.memory_quality.style.citations.tags_engine import (
     QUERIES_ROOT,
     DestructuringSpec,
+    QualifierSpec,
 )
 
 CATALOG_SCHEMA: Final = "ar-language-catalog/v1"
@@ -35,6 +36,8 @@ CATALOG_LOCK_PATH: Final = (
     / "language_catalog.lock.json"
 )
 ProviderKind = Literal["pypi_wheel", "language_pack", "builtin_lean"]
+GuaranteeTier = Literal["verified", "best_effort", "unverified"]
+_GUARANTEE_TIERS: Final = frozenset({"verified", "best_effort", "unverified"})
 
 
 class LanguageCatalogError(AgentsRememberError):
@@ -91,7 +94,10 @@ class CatalogLanguageSpec:
     tests_query_relpath: str | None = None
     tests_query_sha256: str | None = None
     wrappers: frozenset[str] = frozenset()
+    leading_wrappers: frozenset[str] = frozenset()
     destructuring: DestructuringSpec = field(default_factory=DestructuringSpec)
+    qualifiers: QualifierSpec = field(default_factory=QualifierSpec)
+    guarantee_tier: GuaranteeTier = "verified"
     wheels: tuple[WheelArtifact, ...] = ()
 
     @property
@@ -252,6 +258,40 @@ def _parse_destructuring(raw: object, context: str) -> DestructuringSpec:
     )
 
 
+def _parse_qualifiers(raw: object, context: str) -> QualifierSpec:
+    if raw is None:
+        return QualifierSpec()
+    if not isinstance(raw, dict):
+        raise LanguageCatalogError(f"{context} must be an object")
+    seps_raw = raw.get("separators", ["."])
+    if not isinstance(seps_raw, list) or not all(isinstance(s, str) and s for s in seps_raw):
+        raise LanguageCatalogError(f"{context}.separators must be a list of non-empty strings")
+    kinds_raw = raw.get("separatorKinds", {})
+    if not isinstance(kinds_raw, dict):
+        raise LanguageCatalogError(f"{context}.separatorKinds must be an object")
+    separator_kinds: dict[str, frozenset[str]] = {}
+    for sep, allowed in kinds_raw.items():
+        if not isinstance(sep, str) or sep not in seps_raw:
+            raise LanguageCatalogError(
+                f"{context}.separatorKinds key {sep!r} must appear in separators"
+            )
+        separator_kinds[sep] = _parse_str_set(allowed, f"{context}.separatorKinds[{sep!r}]")
+    return QualifierSpec(
+        separators=tuple(seps_raw),
+        separator_kinds=MappingProxyType(separator_kinds),
+    )
+
+
+def _parse_guarantee_tier(raw: object, context: str) -> GuaranteeTier:
+    if raw is None:
+        return "verified"
+    if not isinstance(raw, str) or raw not in _GUARANTEE_TIERS:
+        raise LanguageCatalogError(
+            f"{context}.guaranteeTier must be one of {sorted(_GUARANTEE_TIERS)}, got {raw!r}"
+        )
+    return raw  # type: ignore[return-value]
+
+
 @dataclass(frozen=True)
 class _CatalogParseContext:
     reserved: frozenset[str]
@@ -360,7 +400,12 @@ def _parse_language_spec(
         tests_query_relpath=tests_rel,
         tests_query_sha256=tests_sha,
         wrappers=_parse_str_set(raw.get("wrappers", []), f"{context}.wrappers"),
+        leading_wrappers=_parse_str_set(
+            raw.get("leadingWrappers", []), f"{context}.leadingWrappers"
+        ),
         destructuring=_parse_destructuring(raw.get("destructuring"), f"{context}.destructuring"),
+        qualifiers=_parse_qualifiers(raw.get("qualifiers"), f"{context}.qualifiers"),
+        guarantee_tier=_parse_guarantee_tier(raw.get("guaranteeTier"), context),
         wheels=wheels,
     )
     if ctx.verify_queries:

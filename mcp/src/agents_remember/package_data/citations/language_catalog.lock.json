@@ -18,15 +18,42 @@
     ".mod",
     ".pl",
     ".pro",
+    ".scm",
     ".t",
     ".v"
   ],
   "languagePack": {
     "package": "tree-sitter-language-pack",
-    "version": "1.0.0",
+    "version": "0.13.0",
     "module": "tree_sitter_language_pack",
     "getter": "get_language",
-    "wheels": []
+    "wheels": [
+      {
+        "filename": "tree_sitter_language_pack-0.13.0-cp310-abi3-macosx_10_15_universal2.whl",
+        "url": "https://files.pythonhosted.org/packages/e9/38/aec1f450ae5c4796de8345442f297fcf8912c7d2e00a66d3236ff0f825ed/tree_sitter_language_pack-0.13.0-cp310-abi3-macosx_10_15_universal2.whl",
+        "sha256": "0e7eae812b40a2dc8a12eb2f5c55e130eb892706a0bee06215dd76affeb00d07"
+      },
+      {
+        "filename": "tree_sitter_language_pack-0.13.0-cp310-abi3-manylinux2014_aarch64.whl",
+        "url": "https://files.pythonhosted.org/packages/90/09/11f51c59ede786dccddd2d348d5d24a1d99c54117d00f88b477f5fae4bd5/tree_sitter_language_pack-0.13.0-cp310-abi3-manylinux2014_aarch64.whl",
+        "sha256": "7fdacf383418a845b20772118fcb53ad245f9c5d409bd07dae16acec65151756"
+      },
+      {
+        "filename": "tree_sitter_language_pack-0.13.0-cp310-abi3-manylinux2014_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/72/9d/644db031047ab1a70fc5cb6a79a4d4067080fac628375b2320752d2d7b58/tree_sitter_language_pack-0.13.0-cp310-abi3-manylinux2014_x86_64.whl",
+        "sha256": "0d4f261fce387ae040dae7e4d1c1aca63d84c88320afcc0961c123bec0be8377"
+      },
+      {
+        "filename": "tree_sitter_language_pack-0.13.0-cp310-abi3-musllinux_1_2_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/48/92/5fd749bbb3f5e4538492c77de7bc51a5e479fec6209464ddc25be9153b13/tree_sitter_language_pack-0.13.0-cp310-abi3-musllinux_1_2_x86_64.whl",
+        "sha256": "78f369dc4d456c5b08d659939e662c2f9b9fba8c0ec5538a1f973e01edfcf04d"
+      },
+      {
+        "filename": "tree_sitter_language_pack-0.13.0-cp310-abi3-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/97/59/2287f07723c063475d6657babed0d5569f4b499e393ab51354d529c3e7b5/tree_sitter_language_pack-0.13.0-cp310-abi3-win_amd64.whl",
+        "sha256": "1cdbc88a03dacd47bec69e56cc20c48eace1fbb6f01371e89c3ee6a2e8f34db1"
+      }
+    ]
   },
   "languages": {
     "python": {
@@ -100,7 +127,13 @@
           "url": "https://files.pythonhosted.org/packages/07/19/4b5569d9b1ebebb5907d11554a96ef3fa09364a30fcfabeff587495b512f/tree_sitter_python-0.25.0-cp310-abi3-win_arm64.whl",
           "sha256": "0fbf6a3774ad7e89ee891851204c2e2c47e12b63a5edbe2e9156997731c128bb"
         }
-      ]
+      ],
+      "guaranteeTier": "verified",
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
     },
     "typescript": {
       "providerKind": "pypi_wheel",
@@ -179,7 +212,13 @@
           "url": "https://files.pythonhosted.org/packages/9f/e4/81f9a935789233cf412a0ed5fe04c883841d2c8fb0b7e075958a35c65032/tree_sitter_typescript-0.23.2-cp39-abi3-win_arm64.whl",
           "sha256": "05db58f70b95ef0ea126db5560f3775692f609589ed6f8dd0af84b7f19f1cbb7"
         }
-      ]
+      ],
+      "guaranteeTier": "verified",
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
     },
     "tsx": {
       "providerKind": "pypi_wheel",
@@ -252,7 +291,13 @@
           "url": "https://files.pythonhosted.org/packages/9f/e4/81f9a935789233cf412a0ed5fe04c883841d2c8fb0b7e075958a35c65032/tree_sitter_typescript-0.23.2-cp39-abi3-win_arm64.whl",
           "sha256": "05db58f70b95ef0ea126db5560f3775692f609589ed6f8dd0af84b7f19f1cbb7"
         }
-      ]
+      ],
+      "guaranteeTier": "verified",
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
     },
     "javascript": {
       "providerKind": "pypi_wheel",
@@ -338,7 +383,13 @@
           "url": "https://files.pythonhosted.org/packages/2e/1f/f9eba1038b7d4394410f3c0a6ec2122b590cd7acb03f196e52fa57ebbe72/tree_sitter_javascript-0.25.0-cp310-abi3-win_arm64.whl",
           "sha256": "622a69d677aa7f6ee2931d8c77c981a33f0ebb6d275aa9d43d3397c879a9bb0b"
         }
-      ]
+      ],
+      "guaranteeTier": "verified",
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
     },
     "lean": {
       "providerKind": "builtin_lean",
@@ -348,6 +399,2121 @@
       ],
       "filenames": [],
       "shebangs": []
+    },
+    "c": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-c",
+      "version": "0.24.2",
+      "module": "tree_sitter_c",
+      "symbol": "language",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".c"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "c/tags.scm",
+      "tagsQuerySha256": "bdeed09102ca7f9001152c7136633380facb404674d78e82b0a92a5d53518e61",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_c-0.24.2-cp310-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/28/c1/26ed17730ec2c17bedc1b673349e5e0a466c578e3eb0327c3b73cf52bf97/tree_sitter_c-0.24.2-cp310-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "4d4579a8b54f0a442f903d88d3304cab77cd5c2031d4015baa4f2f8e15d6dcb7"
+        },
+        {
+          "filename": "tree_sitter_c-0.24.2-cp310-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/c1/1c/1140db75e7e375cda3c68792a33826c4fd40b5b98c3259d93c75f6c8368f/tree_sitter_c-0.24.2-cp310-abi3-macosx_11_0_arm64.whl",
+          "sha256": "97bc80a224d48215d4e6e6376bf30d114f4c317b8145ff1b02afe785d4ba7bdd"
+        },
+        {
+          "filename": "tree_sitter_c-0.24.2-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/e9/8c/0dfb88d726f8821d1c4c36042f092be974a800afd734307a595b8604190c/tree_sitter_c-0.24.2-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "sha256": "5041ef67eb68ce6bc8bb0b1f8ef3a5585ce523dae0c7eec109ab0627dd75aede"
+        },
+        {
+          "filename": "tree_sitter_c-0.24.2-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/87/78/47dc570e7aee6b0a1ecc2520b30639cc2b06003154c9ab0672d86bf720d5/tree_sitter_c-0.24.2-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "c098bedcd5ac86ff93fa734d51d1dd86aed40fd5ed7d634c7af11380a0469969"
+        },
+        {
+          "filename": "tree_sitter_c-0.24.2-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/29/37/75d59d3f74f4cfc00f04472917e933d8a9c9fdc6eff980ef9552e010e6aa/tree_sitter_c-0.24.2-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "sha256": "82842c5a5f2acd93f4de10038c33ac179c8979defc39376f990348d6289e933b"
+        },
+        {
+          "filename": "tree_sitter_c-0.24.2-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/64/57/8fc655d5a446a70a637e92b98bd2fdaab88bf5bb5b36076ac4add544808d/tree_sitter_c-0.24.2-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "e2b42e8e22202c251f8629306f9321233542e07a6e01611b5fe83489272143eb"
+        },
+        {
+          "filename": "tree_sitter_c-0.24.2-cp310-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/c1/f7/72a1d6b42dd31fd37e03ff67e7dc5ee572301499e6b216002b8dd42a1714/tree_sitter_c-0.24.2-cp310-abi3-win_amd64.whl",
+          "sha256": "abb549225091f7b25df2dd3a0143ece6e208f7055d8bcb4700b41ee79b9ef1e1"
+        },
+        {
+          "filename": "tree_sitter_c-0.24.2-cp310-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/e2/9d/7475d9ae8ef679aa36c7dfe6c903ab78e573651c68b6ef9862d6a3f994db/tree_sitter_c-0.24.2-cp310-abi3-win_arm64.whl",
+          "sha256": "4a2f4371cd816cc3153458f69062135ebb2ea5f275ddd90494e5c823d778204a"
+        }
+      ]
+    },
+    "cpp": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-cpp",
+      "version": "0.23.4",
+      "module": "tree_sitter_cpp",
+      "symbol": "language",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".cc",
+        ".cpp",
+        ".cxx",
+        ".hh",
+        ".hpp",
+        ".hxx"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "cpp/tags.scm",
+      "tagsQuerySha256": "31f5b96af09efa8814eb05094f0f5258828b9add472c2f8caf903a8d9f1f731c",
+      "wrappers": [
+        "template_declaration"
+      ],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "::"
+        ]
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_cpp-0.23.4-cp39-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/b6/ac/11d56670f7b048362db872ca866fd00ba2002a322ab179f047b7c0fb2910/tree_sitter_cpp-0.23.4-cp39-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "aacb1759f0efd9dbc25bd8ee88184a340483018869f75412d9c3bc32c039a520"
+        },
+        {
+          "filename": "tree_sitter_cpp-0.23.4-cp39-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/12/1c/0337c016bdc00a77a3326d12f10ee836401dd28f27db6fd5b7734bfb21ed/tree_sitter_cpp-0.23.4-cp39-abi3-macosx_11_0_arm64.whl",
+          "sha256": "bc3c404d9f0cbd87951213a85440afbf4c31e718f8d907fa9ee12bea4b8d276f"
+        },
+        {
+          "filename": "tree_sitter_cpp-0.23.4-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/b3/7b/dd38c049b10ed7fda118b903a1d28a8b55a36b98c30606ef90e8f374c6de/tree_sitter_cpp-0.23.4-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "sha256": "ccc43ddf1279d5d5a4ef190373f4cb16522801bec4492bcd4754edf2aeba2b7b"
+        },
+        {
+          "filename": "tree_sitter_cpp-0.23.4-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/6a/4d/23e390234d2acd351f5563b1079c515d7c1fe13ddb7392cee543be74dda3/tree_sitter_cpp-0.23.4-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "sha256": "773d2cafc08bbc0f998687fa33f42f378c1a371cdb582870c4d13abb06092706"
+        },
+        {
+          "filename": "tree_sitter_cpp-0.23.4-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/32/c7/b94a7e0e803af9d3bd4608fb4f0cfb2e9e233abaf0a38c928bfb0b1a025d/tree_sitter_cpp-0.23.4-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "247d127f0eb6574b0f6b30c0151e0bd0774e2e7acf9c558bdf9fbb8adc2e80c0"
+        },
+        {
+          "filename": "tree_sitter_cpp-0.23.4-cp39-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/37/7e/909e52b3dec09c475140b0e175511e275d0d00ba2dbd7c68102d377ae0f6/tree_sitter_cpp-0.23.4-cp39-abi3-win_amd64.whl",
+          "sha256": "68606a45bea92669d155399e1239f771a7767d8683cd8f8e30e7d813107030ca"
+        },
+        {
+          "filename": "tree_sitter_cpp-0.23.4-cp39-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/d4/6a/65435d4d1f4c735be7ffe52d7c2e7b8a7f7c2790343a2719c60c548611c8/tree_sitter_cpp-0.23.4-cp39-abi3-win_arm64.whl",
+          "sha256": "712f84f18be94cbe2a148fa4fdf40fcf4a8c25a8f7670efb9f8a47ddec2fc281"
+        }
+      ]
+    },
+    "rust": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-rust",
+      "version": "0.24.2",
+      "module": "tree_sitter_rust",
+      "symbol": "language",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".rs"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "rust/tags.scm",
+      "tagsQuerySha256": "dca52ac7f577d44254939fdbe23204cbd41f5a6abecd88bcd1dbffebf3d2ee9f",
+      "wrappers": [],
+      "leadingWrappers": [
+        "attribute_item"
+      ],
+      "qualifiers": {
+        "separators": [
+          "::"
+        ]
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_rust-0.24.2-cp39-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/d0/24/2b2d33af5e27c84a4fde4e8cd2594bb4ab1e1cf48756a9f40dadc84956cc/tree_sitter_rust-0.24.2-cp39-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "3620cfd12340efa43082d45df76349ff511893a9c361da2f8d6d51e307020a59"
+        },
+        {
+          "filename": "tree_sitter_rust-0.24.2-cp39-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/78/2a/cf39f881a545360b5a86bb1accba1f4acc713daab01fb9edd35b6e84f473/tree_sitter_rust-0.24.2-cp39-abi3-macosx_11_0_arm64.whl",
+          "sha256": "01a46622735498493f29f3e628a90de95c96a07bfbeb88996243eb986b1cee36"
+        },
+        {
+          "filename": "tree_sitter_rust-0.24.2-cp39-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/ca/45/a051bbd3045a61182dde25b93ae9a33d2677c935b16952283e12eaf46051/tree_sitter_rust-0.24.2-cp39-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "sha256": "e033c5a93b57c88e0a835880de39fc802909ff69f57aaff6000211c196ea5190"
+        },
+        {
+          "filename": "tree_sitter_rust-0.24.2-cp39-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/b5/f6/a5a146df5c0a5daea3ffcd5d7245775fe7f084357770d5a313dd6245ae78/tree_sitter_rust-0.24.2-cp39-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "9d76d1208c3638b871236090759dfc13d478921320653a6c9da5336e7c58f65a"
+        },
+        {
+          "filename": "tree_sitter_rust-0.24.2-cp39-abi3-musllinux_1_2_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/95/a8/f85b1ca75e01361ca5f92d226593ca4857cea49551b9f6c8fa6fc08ea917/tree_sitter_rust-0.24.2-cp39-abi3-musllinux_1_2_aarch64.whl",
+          "sha256": "87930163a462408c49ab62c667e74029bc26b4cc7123dd1bdc7352215786c64a"
+        },
+        {
+          "filename": "tree_sitter_rust-0.24.2-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/a2/e1/3519f866a4679ca36acd9f5a06a779ecb8a92b18887c5546458d521df557/tree_sitter_rust-0.24.2-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "da2b86099028fd42c6cd32878b7b16b01f8aac0f7b0e98742b7fa6bc3cf09b89"
+        },
+        {
+          "filename": "tree_sitter_rust-0.24.2-cp39-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/34/71/7ef609894dbfe5699eb16f7471f9b8af1d958d8ba3e29c238d7607e8cb47/tree_sitter_rust-0.24.2-cp39-abi3-win_amd64.whl",
+          "sha256": "4529c125d928882ddfb879fdc6bc0704913261ecc078b6fa7902559e0daf200d"
+        },
+        {
+          "filename": "tree_sitter_rust-0.24.2-cp39-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/b9/d8/050a781172745bc345f98abb7c56e72022ea0790f8e793de981c83c2ef15/tree_sitter_rust-0.24.2-cp39-abi3-win_arm64.whl",
+          "sha256": "66ba90f61bd54f4c4f5d30434957daf64507c16b0313df76becb37d63f70a227"
+        }
+      ]
+    },
+    "zig": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-zig",
+      "version": "1.1.2",
+      "module": "tree_sitter_zig",
+      "symbol": "language",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".zig"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "zig/tags.scm",
+      "tagsQuerySha256": "91ab1bf54f3f04549279a8a6ec2950749d06f7975d627b8fa4bc221f528dffe7",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_zig-1.1.2-cp39-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/b3/c6/db41d3f6c7c0174db56d9122a2a4d8b345c377ca87268e76557b2879675e/tree_sitter_zig-1.1.2-cp39-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "e7542354a5edba377b5692b2add4f346501306d455e192974b7e76bf1a61a282"
+        },
+        {
+          "filename": "tree_sitter_zig-1.1.2-cp39-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/5a/78/93d32fea98b3b031bc0fbec44e27f2b8cc1a1a8ff5a99dfb1a8f85b11d43/tree_sitter_zig-1.1.2-cp39-abi3-macosx_11_0_arm64.whl",
+          "sha256": "daa2cdd7c1a2d278f2a917c85993adb6e84d37778bfc350ee9e342872e7f8be2"
+        },
+        {
+          "filename": "tree_sitter_zig-1.1.2-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/40/45/ef5afd6b79bd58731dae2cf61ff7960dd616737397db4d2e926457ff24b7/tree_sitter_zig-1.1.2-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "sha256": "1962e95067ac5ee784daddd573f828ef32f15e9c871967df6833d3d389113eae"
+        },
+        {
+          "filename": "tree_sitter_zig-1.1.2-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/78/02/275523eb05108d83e154f52c7255763bac8b588ae14163563e19479322a7/tree_sitter_zig-1.1.2-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "sha256": "e924509dcac5a6054da357e3d6bcf37ea82984ee1d2a376569753d32f61ea8bb"
+        },
+        {
+          "filename": "tree_sitter_zig-1.1.2-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/ef/e9/ff3c11097e37d4d899155c8fbdf7531063b6d15ee252b2e01ce0063f0218/tree_sitter_zig-1.1.2-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "d8f463c370cdd71025b8d40f90e21e8fc25c7394eb64ebd53b1e566d712a3a68"
+        },
+        {
+          "filename": "tree_sitter_zig-1.1.2-cp39-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/ab/5c/f5fb2ce355bbd381e647b04e8b2078a4043e663b6df6145d87550d3c3fe5/tree_sitter_zig-1.1.2-cp39-abi3-win_amd64.whl",
+          "sha256": "7b94f00a0e69231ac4ebf0aa763734b9b5637e0ff13634ebfe6d13fadece71e9"
+        },
+        {
+          "filename": "tree_sitter_zig-1.1.2-cp39-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/34/8d/c0a481cc7bba9d39c533dd3098463854b5d3c4e6134496d9d83cd1331e51/tree_sitter_zig-1.1.2-cp39-abi3-win_arm64.whl",
+          "sha256": "88152ebeaeca1431a6fc943a8b391fee6f6a8058f17435015135157735061ddf"
+        }
+      ]
+    },
+    "go": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-go",
+      "version": "0.25.0",
+      "module": "tree_sitter_go",
+      "symbol": "language",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".go"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "go/tags.scm",
+      "tagsQuerySha256": "6a746352d3e40af89607deda6a04aaec2321b745903b8c261816b45ad548d389",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_go-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/ca/aa/0984707acc2b9bb461fe4a41e7e0fc5b2b1e245c32820f0c83b3c602957c/tree_sitter_go-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "b852993063a3429a443e7bd0aa376dd7dd329d595819fabf56ac4cf9d7257b54"
+        },
+        {
+          "filename": "tree_sitter_go-0.25.0-cp310-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/32/16/dd4cb124b35e99239ab3624225da07d4cb8da4d8564ed81d03fcb3a6ba9f/tree_sitter_go-0.25.0-cp310-abi3-macosx_11_0_arm64.whl",
+          "sha256": "503b81a2b4c31e302869a1de3a352ad0912ccab3df9ac9950197b0a9ceeabd8f"
+        },
+        {
+          "filename": "tree_sitter_go-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/86/fb/b30d63a08044115d8b8bd196c6c2ab4325fb8db5757249a4ef0563966e2e/tree_sitter_go-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "sha256": "04b3b3cb4aff18e74e28d49b716c6f24cb71ddfdd66768987e26e4d0fa812f74"
+        },
+        {
+          "filename": "tree_sitter_go-0.25.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/26/21/d3d88a30ad007419b2c97b3baeeef7431407faf9f686195b6f1cad0aedf9/tree_sitter_go-0.25.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "148255aca2f54b90d48c48a9dbb4c7faad6cad310a980b2c5a5a9822057ed145"
+        },
+        {
+          "filename": "tree_sitter_go-0.25.0-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/cd/d0/0dd6442353ced8a88bbda9e546f4ea29e381b59b5a40b122e5abb586bb6c/tree_sitter_go-0.25.0-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "sha256": "4d338116cdf8a6c6ff990d2441929b41323ef17c710407abe0993c13417d6aad"
+        },
+        {
+          "filename": "tree_sitter_go-0.25.0-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/01/e2/ee5e09f63504fc286539535d374d2eaa0e7d489b80f8f744bb3962aff22a/tree_sitter_go-0.25.0-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "5608e089d2a29fa8d2b327abeb2ad1cdb8e223c440a6b0ceab0d3fa80bdeebae"
+        },
+        {
+          "filename": "tree_sitter_go-0.25.0-cp310-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/6e/b6/d9142583374720e79aca9ccb394b3795149a54c012e1dfd80738df2d984e/tree_sitter_go-0.25.0-cp310-abi3-win_amd64.whl",
+          "sha256": "30d4ada57a223dfc2c32d942f44d284d40f3d1215ddcf108f96807fd36d53022"
+        },
+        {
+          "filename": "tree_sitter_go-0.25.0-cp310-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/9e/00/9a2638e7339236f5b01622952a4d71c1474dd3783d1982a89555fc1f03b1/tree_sitter_go-0.25.0-cp310-abi3-win_arm64.whl",
+          "sha256": "d5d62362059bf79997340773d47cc7e7e002883b527a05cca829c46e40b70ded"
+        }
+      ]
+    },
+    "java": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-java",
+      "version": "0.23.5",
+      "module": "tree_sitter_java",
+      "symbol": "language",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".java"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "java/tags.scm",
+      "tagsQuerySha256": "b12cfeb6b33018598549f33253775e395b296277d0f428a933fbad943fab9826",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_java-0.23.5-cp39-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/67/21/b3399780b440e1567a11d384d0ebb1aea9b642d0d98becf30fa55c0e3a3b/tree_sitter_java-0.23.5-cp39-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "355ce0308672d6f7013ec913dee4a0613666f4cda9044a7824240d17f38209df"
+        },
+        {
+          "filename": "tree_sitter_java-0.23.5-cp39-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/57/ef/6406b444e2a93bc72a04e802f4107e9ecf04b8de4a5528830726d210599c/tree_sitter_java-0.23.5-cp39-abi3-macosx_11_0_arm64.whl",
+          "sha256": "24acd59c4720dedad80d548fe4237e43ef2b7a4e94c8549b0ca6e4c4d7bf6e69"
+        },
+        {
+          "filename": "tree_sitter_java-0.23.5-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/4e/6c/74b1c150d4f69c291ab0b78d5dd1b59712559bbe7e7daf6d8466d483463f/tree_sitter_java-0.23.5-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "sha256": "9401e7271f0b333df39fc8a8336a0caf1b891d9a2b89ddee99fae66b794fc5b7"
+        },
+        {
+          "filename": "tree_sitter_java-0.23.5-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/29/09/e0d08f5c212062fd046db35c1015a2621c2631bc8b4aae5740d7adb276ad/tree_sitter_java-0.23.5-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "sha256": "370b204b9500b847f6d0c5ad584045831cee69e9a3e4d878535d39e4a7e4c4f1"
+        },
+        {
+          "filename": "tree_sitter_java-0.23.5-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/43/56/7d06b23ddd09bde816a131aa504ee11a1bbe87c6b62ab9b2ed23849a3382/tree_sitter_java-0.23.5-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "aae84449e330363b55b14a2af0585e4e0dae75eb64ea509b7e5b0e1de536846a"
+        },
+        {
+          "filename": "tree_sitter_java-0.23.5-cp39-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/da/d6/0528c7e1e88a18221dbd8ccee3825bf274b1fa300f745fd74eb343878043/tree_sitter_java-0.23.5-cp39-abi3-win_amd64.whl",
+          "sha256": "1ee45e790f8d31d416bc84a09dac2e2c6bc343e89b8a2e1d550513498eedfde7"
+        },
+        {
+          "filename": "tree_sitter_java-0.23.5-cp39-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/72/57/5bab54d23179350356515526fff3cc0f3ac23bfbc1a1d518a15978d4880e/tree_sitter_java-0.23.5-cp39-abi3-win_arm64.whl",
+          "sha256": "402efe136104c5603b429dc26c7e75ae14faaca54cfd319ecc41c8f2534750f4"
+        }
+      ]
+    },
+    "csharp": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-c-sharp",
+      "version": "0.24.0",
+      "module": "tree_sitter_c_sharp",
+      "symbol": "language",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".cs"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "csharp/tags.scm",
+      "tagsQuerySha256": "d3d0edeb7076e0e049231e1decf01827f1bb4d4e3a6f4a6cc94fee8640bf3634",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_c_sharp-0.24.0-cp310-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/e2/e0/3721fd411b4ae1385c92feeaba9db2657fc4b275822e8b0435813a23acbd/tree_sitter_c_sharp-0.24.0-cp310-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "16930aa75a8ac0eacc41c6bcd4c161401c1c36c11473b2d88c25f3abe5ed14dc"
+        },
+        {
+          "filename": "tree_sitter_c_sharp-0.24.0-cp310-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/b1/26/a095974945588c190e2499a2d136189bd12952443a819ee237eb38d2e4aa/tree_sitter_c_sharp-0.24.0-cp310-abi3-macosx_11_0_arm64.whl",
+          "sha256": "a3acd20d848f7fb2f142b0bfd594746105b273644faf294d10c9b77febdc5812"
+        },
+        {
+          "filename": "tree_sitter_c_sharp-0.24.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/6f/36/765443d4efba5671281f8bf92b3afe9920e1e05b8178ca2a9d3663b715ed/tree_sitter_c_sharp-0.24.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "sha256": "5444b514a8f5fd13b3a9c475212609f426d07366acffa701c975a81600d4d945"
+        },
+        {
+          "filename": "tree_sitter_c_sharp-0.24.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/21/cd/994391594baf99d61d85c679f68a494e6d0294bd7c9af45df4b2d50d3e1a/tree_sitter_c_sharp-0.24.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "4a913c8d9a04049ebb481cea89b435370b8e442660791da8fb0bae6644211956"
+        },
+        {
+          "filename": "tree_sitter_c_sharp-0.24.0-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/39/85/98fc455f93d2c6961f5c18e0a5b3e1878e4a244c5c778969b60e73ad20e1/tree_sitter_c_sharp-0.24.0-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "sha256": "222abe796cc107243495df54f951c387b41dc0f6ca0a03d736bdc3181264cf12"
+        },
+        {
+          "filename": "tree_sitter_c_sharp-0.24.0-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/3a/d3/e53f2452bdc2cae83674ede4e57d2ad34efa2277c56c0b3ade3a9a86bd8e/tree_sitter_c_sharp-0.24.0-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "c5d76a9e2db76307990ccf0ab0d733b39853af23e6820684203d419dc664c75e"
+        },
+        {
+          "filename": "tree_sitter_c_sharp-0.24.0-cp310-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/4d/26/38193aacab7f5b205f0da6f6ecfcd6ba01a368a9896167e6b4aa8442ecda/tree_sitter_c_sharp-0.24.0-cp310-abi3-win_amd64.whl",
+          "sha256": "f23bfec0bb3dd7b5bc1387255a0d4c955878fb24df78135597d89e63d8295ffa"
+        },
+        {
+          "filename": "tree_sitter_c_sharp-0.24.0-cp310-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/27/14/7fcc1a4f992a3d744ab313b78b7e210e3479ba80bf08a6cf820886d547b4/tree_sitter_c_sharp-0.24.0-cp310-abi3-win_arm64.whl",
+          "sha256": "05829baca840b058071c4af073932f87c212c56902ff93a6591f0c9cb45e25ca"
+        }
+      ]
+    },
+    "kotlin": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-kotlin",
+      "version": "1.1.0",
+      "module": "tree_sitter_kotlin",
+      "symbol": "language",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".kt",
+        ".kts"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "kotlin/tags.scm",
+      "tagsQuerySha256": "d768e6375cf9a76acf2baaddf3c5793957ada2b526c751ee8a6472622afa9eef",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_kotlin-1.1.0-cp39-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/2c/a5/ce5a2ba7b97db8d90c89516674f5c46e2d41503e00dd743ba7aad4661097/tree_sitter_kotlin-1.1.0-cp39-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "6cca5ef06d090e8494ac1d9f0aac71ed32207d412766b5df7da00d94334181a2"
+        },
+        {
+          "filename": "tree_sitter_kotlin-1.1.0-cp39-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/7d/20/66105b6e94d062440955d374e64d030c3173cf4f592f6a6a3c426b3c94d0/tree_sitter_kotlin-1.1.0-cp39-abi3-macosx_11_0_arm64.whl",
+          "sha256": "910b41a580dae00d319e555075f3886a41386d1067931b14c7de504eeae3ae2a"
+        },
+        {
+          "filename": "tree_sitter_kotlin-1.1.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/f7/4c/e1ef38fe412fa9851403fc75a653f2b69bbe1e11e2e7faf219631ebe7e4a/tree_sitter_kotlin-1.1.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "sha256": "906e5444ebb01db439cb3ad65913598a4ea957b0e068aa973265926a17eb00e0"
+        },
+        {
+          "filename": "tree_sitter_kotlin-1.1.0-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/65/bd/0f3aac45eb88b6b3173ac9c23bc41d8865943cbbe1caaafc001cd1b73c90/tree_sitter_kotlin-1.1.0-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "sha256": "9a92afe24b634cf914c5812af0f5c53184b1c18bdf6ee5505c83afac81f6bf6c"
+        },
+        {
+          "filename": "tree_sitter_kotlin-1.1.0-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/08/dc/4944abf3a8bc630262e93e0857bd7044d521995c1f6af50650e4fe1fdde0/tree_sitter_kotlin-1.1.0-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "5960034a5c5bcc7ccb21dc7a29e4267ac4f0ef37884f39d75695eac7f004deff"
+        },
+        {
+          "filename": "tree_sitter_kotlin-1.1.0-cp39-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/24/c9/5cca0a44db41224f7f10992450af17ff432c1a336852efb312246d5705e5/tree_sitter_kotlin-1.1.0-cp39-abi3-win_amd64.whl",
+          "sha256": "d4d3f330f515ba8b91da04a5335eb9ff3ce071c7b7855958912f2560f6e14976"
+        },
+        {
+          "filename": "tree_sitter_kotlin-1.1.0-cp39-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/fb/b9/12fa97f63d2b7517c6f5d16938f0c5bfe84d925c652c75ff1c5e29bf6a44/tree_sitter_kotlin-1.1.0-cp39-abi3-win_arm64.whl",
+          "sha256": "e030f127a7d07952907adb9070248bd42fb86dc76fd92744727551b50e131ee7"
+        }
+      ]
+    },
+    "swift": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-swift",
+      "version": "0.7.4",
+      "module": "tree_sitter_swift",
+      "symbol": "language",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".swift"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "swift"
+      ],
+      "tagsQuery": "swift/tags.scm",
+      "tagsQuerySha256": "87cf166b490983de74eae42ec45e224db3eff35c4ccf67297bdf34d87ece2843",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_swift-0.7.4-cp38-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/5d/99/13ce6e8b5ed496fff03a8d04e34d7dd75f60166bea50c435da4a84ddb0f7/tree_sitter_swift-0.7.4-cp38-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "e76bc562815bbeb4a6504a9fac6699ffc2b779ef55e12ea863f6a3f8fa0dfee6"
+        },
+        {
+          "filename": "tree_sitter_swift-0.7.4-cp38-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/3d/94/ae2a4abb3f240b613635507e83893ad192bbc58074f811eeec65dba38ab6/tree_sitter_swift-0.7.4-cp38-abi3-macosx_11_0_arm64.whl",
+          "sha256": "62ce592607fa532687a2d4656a90db2f04cbc197e34077038bca2e47073b6db7"
+        },
+        {
+          "filename": "tree_sitter_swift-0.7.4-cp38-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/9c/d1/05bcef72968411fefb7d6a0a2ccfb5bb3d248600949fe01fb80c6c3db57a/tree_sitter_swift-0.7.4-cp38-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "sha256": "d11d15a479d7d3b14c7fc526b4daab107995feca5752936fec5c60cc7fa6fe4d"
+        },
+        {
+          "filename": "tree_sitter_swift-0.7.4-cp38-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/e8/11/b5a3c0a3bf1bdf64dbaa0ebd71c1cfeff22aa13899443674175c76fdb500/tree_sitter_swift-0.7.4-cp38-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "f54606c229c32ba130fbb005cbfb99e50ccfa0023ab9d1ffd45850515c893a7b"
+        },
+        {
+          "filename": "tree_sitter_swift-0.7.4-cp38-abi3-musllinux_1_2_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/26/0c/21964e32a543fbe4ac8dc6c138a2cd03f40aef9782c4c0b836dd058e08a8/tree_sitter_swift-0.7.4-cp38-abi3-musllinux_1_2_aarch64.whl",
+          "sha256": "6d66607643e65e059b57ffbfcbb8b68db168b1a8709449611cb92646825b86e5"
+        },
+        {
+          "filename": "tree_sitter_swift-0.7.4-cp38-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/ec/7f/6e21e938ad20bb6fd1f14723c99584e3663fd3182daf3666baec551f3cd2/tree_sitter_swift-0.7.4-cp38-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "32bfed7a3a41f6657a836684e47a876affd180e28ee0bd104fe67904be12e74c"
+        },
+        {
+          "filename": "tree_sitter_swift-0.7.4-cp38-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/22/9f/cdc6712032be81a590f275603936a325943424824fab6956bf7e3382f20a/tree_sitter_swift-0.7.4-cp38-abi3-win_amd64.whl",
+          "sha256": "6edfdeff86d842e7ee54f2a5d77dad9b6d9cc8b9f1ae0342e1c4349c44348803"
+        },
+        {
+          "filename": "tree_sitter_swift-0.7.4-cp38-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/70/b0/7582b73528301e4aad3a5c786bf1d10622ec45f8d9676cf0c95c4a699b6e/tree_sitter_swift-0.7.4-cp38-abi3-win_arm64.whl",
+          "sha256": "3d532f3f735e40c0cb84c101dcb43e04e25ab39e5bf6803ea2344a7e45b0cff3"
+        }
+      ]
+    },
+    "ruby": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-ruby",
+      "version": "0.23.1",
+      "module": "tree_sitter_ruby",
+      "symbol": "language",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".rb"
+      ],
+      "filenames": [
+        "Gemfile",
+        "Rakefile"
+      ],
+      "shebangs": [
+        "ruby"
+      ],
+      "tagsQuery": "ruby/tags.scm",
+      "tagsQuerySha256": "2ece974d395ec645036c45aba4787556af1ae2dc2ddd095dd48ee8391f1b5f69",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "::",
+          "#",
+          "."
+        ],
+        "separatorKinds": {
+          "#": [
+            "method"
+          ],
+          ".": [
+            "singleton_method"
+          ]
+        }
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_ruby-0.23.1-cp39-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/23/2e/2717b9451c712b60f833827a696baf29d8e50a0f7dccbf22a8d7006cc19e/tree_sitter_ruby-0.23.1-cp39-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "39f391322d2210843f07081182dbf00f8f69cfbfa4687b9575cac6d324bae443"
+        },
+        {
+          "filename": "tree_sitter_ruby-0.23.1-cp39-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/e7/38/c41ecf7692b8ecccd26861d3293a88150a4a52fc081abe60f837030d7315/tree_sitter_ruby-0.23.1-cp39-abi3-macosx_11_0_arm64.whl",
+          "sha256": "aa4ee7433bd42fac22e2dad4a3c0f332292ecf482e610316828c711a0bb7f794"
+        },
+        {
+          "filename": "tree_sitter_ruby-0.23.1-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/d8/01/14ef2d5107e6f42b64a400c3bbc3dd3b8fd24c3cef5306004ae03668f231/tree_sitter_ruby-0.23.1-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "sha256": "62b36813a56006b7569db7868f6b762caa3f4e419bd0f8cf9ccbb4abb1b6254c"
+        },
+        {
+          "filename": "tree_sitter_ruby-0.23.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/23/dd/1171b5dd25da10f768732a20fb62d2e3ae66e3b42329351f2ce5bf723abb/tree_sitter_ruby-0.23.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "sha256": "f7bcd93972b4ca2803856d4fe0fbd04123ff29c4592bbb9f12a27528bd252341"
+        },
+        {
+          "filename": "tree_sitter_ruby-0.23.1-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/60/bc/de76c877a90fd8a62cd60f496d7832efddc1b18a148593d9aa9b4a9ce5e0/tree_sitter_ruby-0.23.1-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "66c65d6c2a629783ca4ab2bab539bd6f271ce6f77cacb62845831e11665b5bd3"
+        },
+        {
+          "filename": "tree_sitter_ruby-0.23.1-cp39-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/dd/4a/f5bcca350b84cdf75a53e918b8efa06c46ed650d99d3ef22195e9d8020cc/tree_sitter_ruby-0.23.1-cp39-abi3-win_amd64.whl",
+          "sha256": "02e2c19ebefe29226c14aa63e11e291d990f5b5c20a99940ab6e7eda44e744e5"
+        },
+        {
+          "filename": "tree_sitter_ruby-0.23.1-cp39-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/71/5c/a2e068ad4b2c4ba9b774a88b24149168d3bcd94f58b964e49dcabfe5fd24/tree_sitter_ruby-0.23.1-cp39-abi3-win_arm64.whl",
+          "sha256": "ed042007e89f2cceeb1cbdd8b0caa68af1e2ce54c7eb2053ace760f90657ac9f"
+        }
+      ]
+    },
+    "php": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-php",
+      "version": "0.25.2",
+      "module": "tree_sitter_php",
+      "symbol": "language_php",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".php"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "php"
+      ],
+      "tagsQuery": "php/tags.scm",
+      "tagsQuerySha256": "a016386da586eef8d8cd36259510ef5b33d779c992d10e7cc0a410cb0f707e13",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "\\",
+          "::",
+          "."
+        ]
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_php-0.25.2-cp310-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/11/79/5935d45e71beab46ddd79d5bb1382d8648f63bd8b7550a36c4d58eee6f16/tree_sitter_php-0.25.2-cp310-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "915f7049c38eb4730452333876810b14182f50668d4d99b387e9364b8fc5057a"
+        },
+        {
+          "filename": "tree_sitter_php-0.25.2-cp310-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/fa/ac/abee6921d40ef187bc913b38a86389defe5af7bc9433e7914a470adc1200/tree_sitter_php-0.25.2-cp310-abi3-macosx_11_0_arm64.whl",
+          "sha256": "7286d54a54a955feb24cc24ba5c0cd64c3ddd6a64ec97ffcfcb8675520cc23c1"
+        },
+        {
+          "filename": "tree_sitter_php-0.25.2-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/73/2a/3dcd8841e1ad86b8c1819439d907cbc22221a9d565981f5f77eec0c4f136/tree_sitter_php-0.25.2-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "3510792de02afa2903573efbb96353cf9e66e164d5967a0721e392e7ceed591b"
+        },
+        {
+          "filename": "tree_sitter_php-0.25.2-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/95/32/6abf1878cc2e0819a5bd12f2099c2662bb3c01acd206a14c076caef476df/tree_sitter_php-0.25.2-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "4ecc2f39988615922856de4313adc3eef6f9072c82f4f9098b90e645680c4128"
+        },
+        {
+          "filename": "tree_sitter_php-0.25.2-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/33/96/a0f93af02f011c1312b53eba596ffa3c9268eba2207662556d5f254c3766/tree_sitter_php-0.25.2-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "sha256": "024fc0cab9fd6fc189d738859de075cbb830103c1e9335703ba5b6d90d1f700f"
+        },
+        {
+          "filename": "tree_sitter_php-0.25.2-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/42/6f/4e3a735c9d40a5295ef83853e8f09daf546b85ea9b6518df5b849e3683a7/tree_sitter_php-0.25.2-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "e75b5f4044e74bb56798daf31d9c613ac1f5f59ae0eac53f73d009ed2d0387ab"
+        },
+        {
+          "filename": "tree_sitter_php-0.25.2-cp310-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/60/f8/0278ad1c1c99fc1d0eddd6f5029c09b3f06aa7febe6c5e5311b19a56f839/tree_sitter_php-0.25.2-cp310-abi3-win_amd64.whl",
+          "sha256": "f08f52fcc0660cdc417f5361fb74134f45eea3cdd7b1377f02aa2615329a5c06"
+        },
+        {
+          "filename": "tree_sitter_php-0.25.2-cp310-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/bc/f8/9af66ee571969f6d166c6af86276e10d30cc09eb56906ce3c0d20de830a2/tree_sitter_php-0.25.2-cp310-abi3-win_arm64.whl",
+          "sha256": "f8e6904ecc51d62d5424fa6167356574d1faec6717ea4dbd9894873335b8a4d6"
+        }
+      ]
+    },
+    "bash": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-bash",
+      "version": "0.25.1",
+      "module": "tree_sitter_bash",
+      "symbol": "language",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".bash",
+        ".sh"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "ash",
+        "bash",
+        "dash",
+        "sh"
+      ],
+      "tagsQuery": "bash/tags.scm",
+      "tagsQuerySha256": "2130df46d8ae339dec530944831c6cea122892be7243c1ec0dc880b8a5f15638",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_bash-0.25.1-cp310-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/30/8e/37e7364d9c9c58da89e05c510671d8c45818afd7b31c6939ab72f8dc6c04/tree_sitter_bash-0.25.1-cp310-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "0e6235f59e366d220dde7d830196bed597d01e853e44d8ccd1a82c5dd2500acf"
+        },
+        {
+          "filename": "tree_sitter_bash-0.25.1-cp310-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/23/bb/2d2cfbb1f89aaeb1ec892624f069d92d058d06bb66f16b9ec9fb5873ab60/tree_sitter_bash-0.25.1-cp310-abi3-macosx_11_0_arm64.whl",
+          "sha256": "f4a34a6504c7c5b2a9b8c5c4065531dea19ca2c35026e706cf2eeeebe2c92512"
+        },
+        {
+          "filename": "tree_sitter_bash-0.25.1-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/25/f0/1bb25519be27460255d3899db677313cfa1e6306988fbf456a3d7e211bbb/tree_sitter_bash-0.25.1-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "e76c4cfb20b076552406782b7f8c2a3946835993df0a44df006de54b7030c7dc"
+        },
+        {
+          "filename": "tree_sitter_bash-0.25.1-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/d7/22/9f70bc3d3b942ab9fc0f89c1dc9e087519a3a94f64ae6b7377aae3a7a0f0/tree_sitter_bash-0.25.1-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "3f484c4bb8796cde7a87ca351e6116f09653edac0eb3c6d238566359dd28b117"
+        },
+        {
+          "filename": "tree_sitter_bash-0.25.1-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/7a/c3/f1540e42cd41b323c6821e45e52e1aed6ed386209aad52db996f05703963/tree_sitter_bash-0.25.1-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "sha256": "5e76af6df46d958c7f5b6d5884c9743218e3902a00ccb493ec92728b1084430b"
+        },
+        {
+          "filename": "tree_sitter_bash-0.25.1-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/f7/a0/c3050a6277dfcac8c480f514dc4fe49f3f65f0eac68b4702cbaca2584e85/tree_sitter_bash-0.25.1-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "a3332d71c7b7d5f78259b19d02d0ea111fcb82b72712ee4a93aaa5b226d3f0a8"
+        },
+        {
+          "filename": "tree_sitter_bash-0.25.1-cp310-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/71/0f/203fe6b27211387f4b9ba8c4a321567ca4ded2624dae6ccdbd2b6e940e17/tree_sitter_bash-0.25.1-cp310-abi3-win_amd64.whl",
+          "sha256": "52a6802d9218f86278aa3e8b459c3abdad67eed0fde1f9f13aca5b6c634217a6"
+        },
+        {
+          "filename": "tree_sitter_bash-0.25.1-cp310-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/47/75/4ca1a9fabd8fb5aea78cea70f7837ce4dbf2afae115f62051e5fa99cba1c/tree_sitter_bash-0.25.1-cp310-abi3-win_arm64.whl",
+          "sha256": "59115057ec2bae319e8082ff29559861045002964c3431ccb0fc92aa4bc9bccb"
+        }
+      ]
+    },
+    "elixir": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-elixir",
+      "version": "0.3.5",
+      "module": "tree_sitter_elixir",
+      "symbol": "language",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".ex",
+        ".exs"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "elixir"
+      ],
+      "tagsQuery": "elixir/tags.scm",
+      "tagsQuerySha256": "8130135ea577d7bbaa91e59c15258ab1fe6f577d90b43cb0395d275aea4a1928",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_elixir-0.3.5-cp39-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/2f/29/c2c2b028c49f3c08270dd01ee72a9e735d59c59499d0b7ed09f45157f6b8/tree_sitter_elixir-0.3.5-cp39-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "514078a2f68d27da9a1e6b6e9601b8456faba6260ecfa252e898a848c4f8584d"
+        },
+        {
+          "filename": "tree_sitter_elixir-0.3.5-cp39-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/7e/d7/f0ad3de0b359a8a1f694268855bb34134c88774fa2276cb33413163c0403/tree_sitter_elixir-0.3.5-cp39-abi3-macosx_11_0_arm64.whl",
+          "sha256": "015f537731af690cfa238b0fb76a8af4f0d1a2c54a38563f159926d2967ce650"
+        },
+        {
+          "filename": "tree_sitter_elixir-0.3.5-cp39-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/31/35/78c94e164542ad08098b83cb7e046261f3ab2edade96e29727dd209bfa35/tree_sitter_elixir-0.3.5-cp39-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "sha256": "ebfe3491a3d00ac50b12a3bfcabb1c564f3809ed8a095099fe87f49d6b3987e6"
+        },
+        {
+          "filename": "tree_sitter_elixir-0.3.5-cp39-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/3c/50/69ed38e335d1228f6eb1c12707269fefb349710aaf0b6d4a730ea88b95c2/tree_sitter_elixir-0.3.5-cp39-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "d1159057f914d4468fc53cb9d7e8369f8a7826e1d07765bb53fbf391e6058863"
+        },
+        {
+          "filename": "tree_sitter_elixir-0.3.5-cp39-abi3-musllinux_1_2_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/82/8a/8233648868bf2432cb7ab85ffc4ac4b2b1cf4addf75d6a62bacd2dba6f73/tree_sitter_elixir-0.3.5-cp39-abi3-musllinux_1_2_aarch64.whl",
+          "sha256": "d6187b4d592bfb31760799ac6ddbb5a2457ba0a612de43d77bcbcd5f00cc49bf"
+        },
+        {
+          "filename": "tree_sitter_elixir-0.3.5-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/b4/4a/f78454d228835a619db173f816090ab0c86f865987e2504280ced7fdbd5c/tree_sitter_elixir-0.3.5-cp39-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "b5d5d8aa077ff244d24406b1fb5a17c03a2919c5183c51ca35654870d08b239b"
+        },
+        {
+          "filename": "tree_sitter_elixir-0.3.5-cp39-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/c6/a5/634b505a4c349becc753c1faef5350f32ca027297c16a45fb0942967db2a/tree_sitter_elixir-0.3.5-cp39-abi3-win_amd64.whl",
+          "sha256": "c0b5df229405d42ba5c94254d92e414b1f200be8422561d243ae5b3558e84f76"
+        },
+        {
+          "filename": "tree_sitter_elixir-0.3.5-cp39-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/77/f2/711baae88f98e3a30efee9383fbcb603a3188c20941643c71d3d3b936d66/tree_sitter_elixir-0.3.5-cp39-abi3-win_arm64.whl",
+          "sha256": "fee42b90962e1e131cc31720f3038410291b2196ed231e00c1721597fc0567df"
+        }
+      ]
+    },
+    "sql": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-sql",
+      "version": "0.3.13",
+      "module": "tree_sitter_sql",
+      "symbol": "language",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".sql"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "sql/tags.scm",
+      "tagsQuerySha256": "4faba7db924c62345c17ff0385c5ce741d07755c79af11cc25a8455dbd463941",
+      "wrappers": [
+        "statement"
+      ],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_sql-0.3.13-cp310-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/03/43/ad594d4b57bcd103c00ca57b2d3fffb235f538270ce412d233804d7a8374/tree_sitter_sql-0.3.13-cp310-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "37f526282e06abefc395dd4e3d4dee3c3ae9a5a71abdf8c0b6a0c3949b4f58e8"
+        },
+        {
+          "filename": "tree_sitter_sql-0.3.13-cp310-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/6c/94/6457c360ad33dde3800ee3728588ee2fd18688ec24cae64f00233687a751/tree_sitter_sql-0.3.13-cp310-abi3-macosx_11_0_arm64.whl",
+          "sha256": "37261808e55a88457c02fe4844ed87d20cd9ba18c997244538a3c5cd3e508408"
+        },
+        {
+          "filename": "tree_sitter_sql-0.3.13-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/3f/31/ff23443c92ab3c3137227b1305a770903331a85b007230ccd7d15c422738/tree_sitter_sql-0.3.13-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "4ea67aed3f04534421aac7e3a414649088fe0a1ff65283e81cbb5cf22ddb01c0"
+        },
+        {
+          "filename": "tree_sitter_sql-0.3.13-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/ed/ff/c8650b1d47d8ffeed7750938cd85cd1c85cb4d0213790bf6a8f9d49837f3/tree_sitter_sql-0.3.13-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "86569da8c728a73859b41477eff2dbdc2a2c31da77a1eda9328b27d3c2dbd7ce"
+        },
+        {
+          "filename": "tree_sitter_sql-0.3.13-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/0b/34/7b4d2b59611c26e6cf989d18a83140c4222d04886091dd432c4e447ed3fb/tree_sitter_sql-0.3.13-cp310-abi3-musllinux_1_2_aarch64.whl",
+          "sha256": "262e174ff5810e206deeb1c64ef46028c6f1700ee4e5224ae749461da0c1b743"
+        },
+        {
+          "filename": "tree_sitter_sql-0.3.13-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/86/b1/a1d926708b6805198e24c9db3ccfa74a139338ad2357c7862b296cb11071/tree_sitter_sql-0.3.13-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "162920facbfefb619d2d374dd14c7ad86147fe875742e8557404fb26271c1933"
+        },
+        {
+          "filename": "tree_sitter_sql-0.3.13-cp310-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/a3/11/6ca77ea378761c5a58563da7c6fee27cbbe4db0a19be0968a909a3a77413/tree_sitter_sql-0.3.13-cp310-abi3-win_amd64.whl",
+          "sha256": "3adea682a2567435965fbc37ce0daf1d05a0ef71f3d3fdd466470041c9245fad"
+        },
+        {
+          "filename": "tree_sitter_sql-0.3.13-cp310-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/67/9b/dedc8ca28727b53fd801c393b660db4d02a87c69f5997f0620acc2263166/tree_sitter_sql-0.3.13-cp310-abi3-win_arm64.whl",
+          "sha256": "8d401fe5ccb108670e0165313ce63e6b54bcd916e42a3c53b6b6f2b67772ec6b"
+        }
+      ]
+    },
+    "hcl": {
+      "providerKind": "pypi_wheel",
+      "package": "tree-sitter-hcl",
+      "version": "1.2.0",
+      "module": "tree_sitter_hcl",
+      "symbol": "language",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".hcl",
+        ".tf",
+        ".tfvars"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "hcl/tags.scm",
+      "tagsQuerySha256": "b480c625399748a3783cd28a32e5e123a3ead4809295840cb4fef096d1b5c763",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      },
+      "wheels": [
+        {
+          "filename": "tree_sitter_hcl-1.2.0-cp310-abi3-macosx_10_9_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/77/34/7ccb58107ae0d38e0a8f05dedbd990780eb7d429f227725c15fee314cdcd/tree_sitter_hcl-1.2.0-cp310-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "9ae35084a3dc12272f941b424eadd8a44cf2e0e9345b020330cf8db6f67d3524"
+        },
+        {
+          "filename": "tree_sitter_hcl-1.2.0-cp310-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/8e/8b/7618448cde58ca6fbefcf210ef98d7c4bd7d2b54b3e3d5cddd947c804a18/tree_sitter_hcl-1.2.0-cp310-abi3-macosx_11_0_arm64.whl",
+          "sha256": "03678762e8b78d717187848edebed95e4c31a54e14f24dec97555f47fb440e28"
+        },
+        {
+          "filename": "tree_sitter_hcl-1.2.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/12/35/b8f87fffb5527c85f5f292486e53f64963846b94cf3ea258f4b850480f18/tree_sitter_hcl-1.2.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "sha256": "d2e9f3cfb6694e33f5b880e74bed842398cbacd21024251e2ec90f19dee6a64d"
+        },
+        {
+          "filename": "tree_sitter_hcl-1.2.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/ee/0a/01bb627044d273e8e506edff8ab773e562ba447b5790b789f62e47a5e754/tree_sitter_hcl-1.2.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "sha256": "915763da6630610c2efb7afe13145f50feb8043732a74f9bae78811212578d3d"
+        },
+        {
+          "filename": "tree_sitter_hcl-1.2.0-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/f4/40/cc843f07210caa0a2e2a2b3581f93c917ed2139cb0851b32f4852141c95c/tree_sitter_hcl-1.2.0-cp310-abi3-musllinux_1_2_x86_64.whl",
+          "sha256": "5b6c6aaccfca2fde4fcce52aa88d8c3756f44d407b8584fc3cff581d8765b4b7"
+        },
+        {
+          "filename": "tree_sitter_hcl-1.2.0-cp310-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/27/a6/f15096c138eccc0c68b7254c75a8121bab326b62920f2d259079b2d6a7d0/tree_sitter_hcl-1.2.0-cp310-abi3-win_amd64.whl",
+          "sha256": "4ac026d83d72216444963dfb603fc3e1806aca0a5cb3c236d14e82f20fb7b5de"
+        },
+        {
+          "filename": "tree_sitter_hcl-1.2.0-cp310-abi3-win_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/be/de/e8dbfe36c70954dac62da4ca9a2fcff067eb097b48bd4b55fc836b2efd81/tree_sitter_hcl-1.2.0-cp310-abi3-win_arm64.whl",
+          "sha256": "689425894a69423301e0e05faff472317e7ab4013767bce4a33b9234778c275e"
+        }
+      ]
+    },
+    "lua": {
+      "providerKind": "language_pack",
+      "packLanguage": "lua",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".lua"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "lua"
+      ],
+      "tagsQuery": "lua/tags.scm",
+      "tagsQuerySha256": "031a36158fb4570ab52024596c82cf293aa96e3bf6c36ce885458c34df9f2488",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          ".",
+          ":"
+        ]
+      }
+    },
+    "scala": {
+      "providerKind": "language_pack",
+      "packLanguage": "scala",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".sc",
+        ".scala"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "scala/tags.scm",
+      "tagsQuerySha256": "e88c3b7655ca640f7e253b0e00cf684bc7133f975d01fc11f6ef7395cefe7171",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "ocaml": {
+      "providerKind": "language_pack",
+      "packLanguage": "ocaml",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".ml"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "ocaml/tags.scm",
+      "tagsQuerySha256": "38a16eccf2236195065c4ccda86a44c7c83ea4097bab3a0498062ee755b713e5",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "ocaml_interface": {
+      "providerKind": "language_pack",
+      "packLanguage": "ocaml_interface",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".mli"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "ocaml_interface/tags.scm",
+      "tagsQuerySha256": "6f9070942fd0fb331e700579cc492090625a726c10631d6404494a5fea1ff722",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "haskell": {
+      "providerKind": "language_pack",
+      "packLanguage": "haskell",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".hs"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "haskell/tags.scm",
+      "tagsQuerySha256": "0e8169e52c52a81e52e8bb73849ed8c86df2944b9acf70b43ca4cf848a3aa87a",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "dart": {
+      "providerKind": "language_pack",
+      "packLanguage": "dart",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".dart"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "dart/tags.scm",
+      "tagsQuerySha256": "da7f5f33fadfa4d963df32b464fa4fe7ea8240c0fbc1efb54260726e3b7031a2",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "r": {
+      "providerKind": "language_pack",
+      "packLanguage": "r",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".r"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "Rscript"
+      ],
+      "tagsQuery": "r/tags.scm",
+      "tagsQuerySha256": "344de455a6f7100f5d531f2a450645d4fd0113ed6838e7d2ce098e9423e9c457",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      }
+    },
+    "julia": {
+      "providerKind": "language_pack",
+      "packLanguage": "julia",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".jl"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "julia"
+      ],
+      "tagsQuery": "julia/tags.scm",
+      "tagsQuerySha256": "0c20280f840d25b15d79d077eb1dc2eea407550eec5225c5969c66aa663d2108",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "perl": {
+      "providerKind": "language_pack",
+      "packLanguage": "perl",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".pm"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "perl"
+      ],
+      "tagsQuery": "perl/tags.scm",
+      "tagsQuerySha256": "97e1d359281d16a8ee5bcb3e68ada09395214878f784fc28dc38fc7d3bff4f57",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "::"
+        ]
+      }
+    },
+    "fortran": {
+      "providerKind": "language_pack",
+      "packLanguage": "fortran",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".f03",
+        ".f08",
+        ".f90",
+        ".f95"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "fortran/tags.scm",
+      "tagsQuerySha256": "930e6795e74184d9441b4cd801e078405870330a156af05d12f3f67f74aff723",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      }
+    },
+    "clojure": {
+      "providerKind": "language_pack",
+      "packLanguage": "clojure",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".clj",
+        ".cljc",
+        ".cljs"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "clojure/tags.scm",
+      "tagsQuerySha256": "d3c9e24f8c6f306504dab47d13aa0d5b20bd26360fbab38d855a376610ce6f0d",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "/",
+          "."
+        ]
+      }
+    },
+    "erlang": {
+      "providerKind": "language_pack",
+      "packLanguage": "erlang",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".erl",
+        ".hrl"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "erlang/tags.scm",
+      "tagsQuerySha256": "736affab424fe3b654570e7a6e52a233a76d1ec1f972f7e191263e4fc4241c37",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          ":"
+        ]
+      }
+    },
+    "nim": {
+      "providerKind": "language_pack",
+      "packLanguage": "nim",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".nim"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "nim/tags.scm",
+      "tagsQuerySha256": "311fb891fa04399ff8f5c814750a06aadd4af7f9d9db07ee610e9c0a2a2377cb",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "nix": {
+      "providerKind": "language_pack",
+      "packLanguage": "nix",
+      "version": "0.13.0",
+      "guaranteeTier": "best_effort",
+      "suffixes": [
+        ".nix"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "nix/tags.scm",
+      "tagsQuerySha256": "7ca6384b26a82cf4eed11db3b6b26c7c4a812c3752ddd0b0d25a41c0162bfcd9",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "solidity": {
+      "providerKind": "language_pack",
+      "packLanguage": "solidity",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".sol"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "solidity/tags.scm",
+      "tagsQuerySha256": "28dbeb6af37022dcd1e0abf012c0f842335cde34d0a8309d4361efc0aca2fecb",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "d": {
+      "providerKind": "language_pack",
+      "packLanguage": "d",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".d"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "d/tags.scm",
+      "tagsQuerySha256": "24a408f89ec8776f8f6924083433925c7d9c41b774a288f41a83cd1d712e9fd4",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "odin": {
+      "providerKind": "language_pack",
+      "packLanguage": "odin",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".odin"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "odin/tags.scm",
+      "tagsQuerySha256": "eecd116598cb4add978984b6044a5985a428108e77973d5df6e109a6d0eb7458",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "gleam": {
+      "providerKind": "language_pack",
+      "packLanguage": "gleam",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".gleam"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "gleam/tags.scm",
+      "tagsQuerySha256": "2239093c6a36d5044c171f068a8de034779d7cdc8682243337b2cadf0a424873",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "elm": {
+      "providerKind": "language_pack",
+      "packLanguage": "elm",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".elm"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "elm/tags.scm",
+      "tagsQuerySha256": "3b8c6bf3d606758a18c566ad688ea543023035c06c7448650fec5646a26b43e1",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "purescript": {
+      "providerKind": "language_pack",
+      "packLanguage": "purescript",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".purs"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "purescript/tags.scm",
+      "tagsQuerySha256": "9f10ff69c1af648da9b989006d2d6e95916366bccb16f239ca378107b76f8e64",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "fsharp": {
+      "providerKind": "language_pack",
+      "packLanguage": "fsharp",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".fsi",
+        ".fsx"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "fsharp/tags.scm",
+      "tagsQuerySha256": "852a984eaadb459891c93f9ccce6d2a246452e9df88bccbba8877a390f5973da",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "ada": {
+      "providerKind": "language_pack",
+      "packLanguage": "ada",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".adb",
+        ".ads"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "ada/tags.scm",
+      "tagsQuerySha256": "9153cb9f0da4e51473cbc46b0d3a07f0f3f5ca1bfbf127a1b21503c1f77ca2f0",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "pascal": {
+      "providerKind": "language_pack",
+      "packLanguage": "pascal",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".dpr",
+        ".pas"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "pascal/tags.scm",
+      "tagsQuerySha256": "4bc39003b35b210898d707062876005599e49737b03e1c6a9c005c7f2c7fc825",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "commonlisp": {
+      "providerKind": "language_pack",
+      "packLanguage": "commonlisp",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".lisp",
+        ".lsp"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "commonlisp/tags.scm",
+      "tagsQuerySha256": "d1ce1642ce9137388ab81c910fc00c97400375be239164fa48fbc01ef730f671",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          ":"
+        ]
+      }
+    },
+    "scheme": {
+      "providerKind": "language_pack",
+      "packLanguage": "scheme",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".sld",
+        ".ss"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "scheme/tags.scm",
+      "tagsQuerySha256": "a3a59dda07c5fea967fbc96d6c6efc275e000bbc3652a10a251e6217ea924041",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      }
+    },
+    "racket": {
+      "providerKind": "language_pack",
+      "packLanguage": "racket",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".rkt"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "racket/tags.scm",
+      "tagsQuerySha256": "a9989cf512d1d004846747cffb15545bd8f03d3c3eaa18c730d17c619a518952",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      }
+    },
+    "elisp": {
+      "providerKind": "language_pack",
+      "packLanguage": "elisp",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".el"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "elisp/tags.scm",
+      "tagsQuerySha256": "2b3a2de7aedefed76b93bbc5fa41bfbda387cd740e0457b42314efd88cb7f5f1",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      }
+    },
+    "fennel": {
+      "providerKind": "language_pack",
+      "packLanguage": "fennel",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".fnl"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "fennel/tags.scm",
+      "tagsQuerySha256": "88e7d4e88d4994364ce8b56c971e0308f6e38c389ee9d2239692b207cd4545c6",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "fish": {
+      "providerKind": "language_pack",
+      "packLanguage": "fish",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".fish"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "fish"
+      ],
+      "tagsQuery": "fish/tags.scm",
+      "tagsQuerySha256": "c4083d9e2bb383913db6684fbcb25c0264f716e7222572064c6ada9b69931465",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      }
+    },
+    "powershell": {
+      "providerKind": "language_pack",
+      "packLanguage": "powershell",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".ps1",
+        ".psd1",
+        ".psm1"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "pwsh"
+      ],
+      "tagsQuery": "powershell/tags.scm",
+      "tagsQuerySha256": "e541e65b2c72ea9bc4aa7ca9da0f8c41d3106dba453b3e012e5f0c4a79bfd010",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "vim": {
+      "providerKind": "language_pack",
+      "packLanguage": "vim",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".vim"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "vim/tags.scm",
+      "tagsQuerySha256": "77497f91f61798591682b53e0c68abac62f41ff290a3614e258e99e7a6362b07",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "#"
+        ]
+      }
+    },
+    "glsl": {
+      "providerKind": "language_pack",
+      "packLanguage": "glsl",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".comp",
+        ".frag",
+        ".geom",
+        ".glsl",
+        ".vert"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "glsl/tags.scm",
+      "tagsQuerySha256": "42199b1c8baaa3d9a907d874cae37cbb84b03da41d88c2c6b6c4c5a12aea9809",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      }
+    },
+    "hlsl": {
+      "providerKind": "language_pack",
+      "packLanguage": "hlsl",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".fx",
+        ".hlsl"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "hlsl/tags.scm",
+      "tagsQuerySha256": "c3377da9699f0cf870c2fd51ac78df5e614907079e048f54c838ed5d33e5fe31",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      }
+    },
+    "wgsl": {
+      "providerKind": "language_pack",
+      "packLanguage": "wgsl",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".wgsl"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "wgsl/tags.scm",
+      "tagsQuerySha256": "f718f61db3ef81b3561398f93cdef96e2649ae3927f1079db14ba3ab8941d3ba",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      }
+    },
+    "cuda": {
+      "providerKind": "language_pack",
+      "packLanguage": "cuda",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".cu",
+        ".cuh"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "cuda/tags.scm",
+      "tagsQuerySha256": "d71673fadcb5383bdbe46a52a29b3193ec718f3b3705984a77dfea165bf870cc",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "::"
+        ]
+      }
+    },
+    "gdscript": {
+      "providerKind": "language_pack",
+      "packLanguage": "gdscript",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".gd"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "gdscript/tags.scm",
+      "tagsQuerySha256": "e8be4e992ecf2c40e976643053df8a4bac7f0425af0670ee423a14886587149e",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "cairo": {
+      "providerKind": "language_pack",
+      "packLanguage": "cairo",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".cairo"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "cairo/tags.scm",
+      "tagsQuerySha256": "f1f52612586c4de2a27b92b5fc4ca93f5f106906490142b3b2ed06e82a3a3f6c",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "::"
+        ]
+      }
+    },
+    "bicep": {
+      "providerKind": "language_pack",
+      "packLanguage": "bicep",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".bicep"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "bicep/tags.scm",
+      "tagsQuerySha256": "71e2eb908b34922dd5e9bd5eb662f386de64250d2a6012ccd90c14a77a082fc4",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "puppet": {
+      "providerKind": "language_pack",
+      "packLanguage": "puppet",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".pp"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "puppet/tags.scm",
+      "tagsQuerySha256": "56aa75d896d96233096108b7e2612cd8dd436b8ea5a88dece245bb400767730f",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "::"
+        ]
+      }
+    },
+    "tcl": {
+      "providerKind": "language_pack",
+      "packLanguage": "tcl",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".tcl"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "tclsh"
+      ],
+      "tagsQuery": "tcl/tags.scm",
+      "tagsQuerySha256": "67d004b12d383aeca44961a67b433fba7b7c97659932334e0e0d7f46af045ba4",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "::"
+        ]
+      }
+    },
+    "haxe": {
+      "providerKind": "language_pack",
+      "packLanguage": "haxe",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".hx"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "haxe/tags.scm",
+      "tagsQuerySha256": "4116eef52378314d609cce3c4fc49ee5836bc8df3abff49a453d567526b2c575",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "hare": {
+      "providerKind": "language_pack",
+      "packLanguage": "hare",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".ha"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "hare/tags.scm",
+      "tagsQuerySha256": "f1caf1c072afc5ddb04d853925dcaa70a8deccb9463cfdf4587bf51739d8027a",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "::"
+        ]
+      }
+    },
+    "pony": {
+      "providerKind": "language_pack",
+      "packLanguage": "pony",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".pony"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "pony/tags.scm",
+      "tagsQuerySha256": "66643b962541a41bbae943e3e5a21c00bb66d2a448e8f2313521bc1b312c0a7e",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "squirrel": {
+      "providerKind": "language_pack",
+      "packLanguage": "squirrel",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".nut"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "squirrel/tags.scm",
+      "tagsQuerySha256": "536f32c60f680cc6adc2818063c10742ba9408b3ab9bbca31adfcacc6ac89c8f",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "janet": {
+      "providerKind": "language_pack",
+      "packLanguage": "janet",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".janet"
+      ],
+      "filenames": [],
+      "shebangs": [
+        "janet"
+      ],
+      "tagsQuery": "janet/tags.scm",
+      "tagsQuerySha256": "591d5cd9de5e65c393fb0644bf9c7000269d9f6c5572fe5fe7e47f78e60a1cf8",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      }
+    },
+    "starlark": {
+      "providerKind": "language_pack",
+      "packLanguage": "starlark",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".bzl",
+        ".star"
+      ],
+      "filenames": [
+        "BUILD",
+        "BUILD.bazel",
+        "WORKSPACE"
+      ],
+      "shebangs": [],
+      "tagsQuery": "starlark/tags.scm",
+      "tagsQuerySha256": "7717f727075693d85fd38f205380143655c4c506c17f04a84446d75d2bc27d88",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "jsonnet": {
+      "providerKind": "language_pack",
+      "packLanguage": "jsonnet",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".jsonnet",
+        ".libsonnet"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "jsonnet/tags.scm",
+      "tagsQuerySha256": "bdd34b246bae16d6266d87df77a295b9b421b68aa7b31d1ff6391887a86d2e1a",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "rego": {
+      "providerKind": "language_pack",
+      "packLanguage": "rego",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".rego"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "rego/tags.scm",
+      "tagsQuerySha256": "43cb09979620030e3e56d7c2fbbc4b7bd4780a3b6d1737d1e976fa7d03618482",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "proto": {
+      "providerKind": "language_pack",
+      "packLanguage": "proto",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".proto"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "proto/tags.scm",
+      "tagsQuerySha256": "e4f304fcbced250129f3b42a0afd6aa8540195e9b1f6c42191e60d66433b8f84",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "graphql": {
+      "providerKind": "language_pack",
+      "packLanguage": "graphql",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".gql",
+        ".graphql"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "graphql/tags.scm",
+      "tagsQuerySha256": "2e95e71a0ab962c02f5a2f50a1264715a8da61202c9b2bab13db4caafb98379c",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "thrift": {
+      "providerKind": "language_pack",
+      "packLanguage": "thrift",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".thrift"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "thrift/tags.scm",
+      "tagsQuerySha256": "e490132f1d1cd549366702659bd126caadda4180254a42b68cc05741a3faf769",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "prisma": {
+      "providerKind": "language_pack",
+      "packLanguage": "prisma",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".prisma"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "prisma/tags.scm",
+      "tagsQuerySha256": "70ef4c53eae1425d3bde91ed7060912ae01f662c159480ac9ace04a4aa45efb4",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "cmake": {
+      "providerKind": "language_pack",
+      "packLanguage": "cmake",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".cmake"
+      ],
+      "filenames": [
+        "CMakeLists.txt"
+      ],
+      "shebangs": [],
+      "tagsQuery": "cmake/tags.scm",
+      "tagsQuerySha256": "d5d85c304bbd99e0fd7fb173c7f8721403e6a398be94d5b819935c295a3d3962",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      }
+    },
+    "make": {
+      "providerKind": "language_pack",
+      "packLanguage": "make",
+      "version": "0.13.0",
+      "guaranteeTier": "best_effort",
+      "suffixes": [
+        ".mk"
+      ],
+      "filenames": [
+        "GNUmakefile",
+        "Makefile"
+      ],
+      "shebangs": [],
+      "tagsQuery": "make/tags.scm",
+      "tagsQuerySha256": "78d3271da7cde81bc4b33bacae83c4a9051feed48e562adf8b4bc99f7e1f09a1",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      }
+    },
+    "vhdl": {
+      "providerKind": "language_pack",
+      "packLanguage": "vhdl",
+      "version": "0.13.0",
+      "guaranteeTier": "verified",
+      "suffixes": [
+        ".vhd",
+        ".vhdl"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "tagsQuery": "vhdl/tags.scm",
+      "tagsQuerySha256": "d6d6258473979aaba3a1b9f8ce9ed9ea98bab2f77d31b07fa12d8aa568abb6fc",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": [
+          "."
+        ]
+      }
+    },
+    "dockerfile": {
+      "providerKind": "language_pack",
+      "packLanguage": "dockerfile",
+      "version": "0.13.0",
+      "guaranteeTier": "best_effort",
+      "suffixes": [],
+      "filenames": [
+        "Dockerfile"
+      ],
+      "shebangs": [],
+      "tagsQuery": "dockerfile/tags.scm",
+      "tagsQuerySha256": "f4068a5493f60485c237f76202251cf8bc47dbedd333e289d04399ebccf7a66f",
+      "wrappers": [],
+      "leadingWrappers": [],
+      "qualifiers": {
+        "separators": []
+      }
     }
   }
 }

@@ -293,9 +293,12 @@ preview and dry run. A read changes no branch, no tag and no `HEAD`. It changes 
 working tree, no Git index, no task document and no requirement packet. A read can use
 private temporary storage for intermediate data. Batched Git blob reads, changed-history
 reads for Explainer evidence, and Explainer grade refresh use private Git output spools.
-A read's persistent writes are limited to four cases:
+A read's persistent writes are limited to five cases:
 
 - It writes cache files under `<coordination-root>/runtime/`.
+- When a read parses a repository language whose pinned grammar wheel is not yet unpacked, it
+  downloads, SHA-256 verifies and unpacks that grammar into `AR_LANGUAGE_CACHE` (default
+  `~/.local/state/agents-remember/grammars`) without mutating the repository or Python virtualenv.
 - When the review page records a [comparison](concepts.md#comparison) of a task's change, the
   read writes the record of the comparison into the task's reports folder, the Git objects of the
   compared trees, and one Git ref under `refs/ar/review/` that keeps those objects from Git's

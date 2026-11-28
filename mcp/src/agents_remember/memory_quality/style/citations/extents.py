@@ -9,8 +9,10 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from agents_remember.memory_quality.style.citations import grammars
+from agents_remember.memory_quality.style.citations.tags_engine import QualifierSpec
 
 DEFINITION = "definition"
+_DEFAULT_QUALIFIERS = QualifierSpec()
 LEAN_SCOPE_EXPLANATION = (
     "An unclassified token could be a scope name, a command declared in this file, "
     "or an imported command. Cite a line range."
@@ -36,6 +38,8 @@ class Extent:
     test_case: bool = False
     full_name: str | None = None
     scope_uncertain: bool = False
+    containers: tuple[str, ...] = ()
+    qualifier_kind: str = ""
 
 
 @dataclass
@@ -109,6 +113,8 @@ def _definitions(path: str, lines: Sequence[str]) -> dict[str, list[Extent]]:
                 test_case=binding.test_case,
                 full_name=binding.full_name,
                 scope_uncertain=binding.scope_uncertain,
+                containers=binding.containers,
+                qualifier_kind=binding.qualifier_kind,
             )
             for binding in items
         ]
@@ -145,7 +151,7 @@ def qualified_spans(
         return _direct_spans(bound[name])
     if _uses_exact_bindings(grammar):
         return ()
-    return _enclosed_qualified_spans(name, bound)
+    return _enclosed_qualified_spans(name, bound, _qualifier_spec(grammar))
 
 
 def _direct_spans(entries: Sequence[Extent]) -> tuple[tuple[int, int], ...]:
@@ -160,18 +166,124 @@ def _uses_exact_bindings(grammar: str | None) -> bool:
     return provider is not None and provider.uses_exact_bindings
 
 
+def _qualifier_spec(grammar: str | None) -> QualifierSpec:
+    if grammar is None:
+        return _DEFAULT_QUALIFIERS
+    provider = grammars.active_language_set().provider_for(grammar)
+    return _DEFAULT_QUALIFIERS if provider is None else provider.qualifiers
+
+
+def _split_qualified(
+    text: str, separators: tuple[str, ...]
+) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """Split ``text`` on the configured ``separators`` (longest match first)."""
+    if not separators:
+        return None
+    ordered = sorted(separators, key=len, reverse=True)
+    parts: list[str] = []
+    used_seps: list[str] = []
+    start = 0
+    idx = 0
+    length = len(text)
+    while idx < length:
+        matched = next((sep for sep in ordered if text.startswith(sep, idx)), None)
+        if matched is not None:
+            parts.append(text[start:idx])
+            used_seps.append(matched)
+            idx += len(matched)
+            start = idx
+        else:
+            idx += 1
+    parts.append(text[start:])
+    if len(parts) < 2 or any(not part for part in parts):
+        return None
+    return tuple(parts), tuple(used_seps)
+
+
+def _expand_containers(containers: tuple[str, ...], separators: tuple[str, ...]) -> tuple[str, ...]:
+    expanded: list[str] = []
+    for item in containers:
+        split = _split_qualified(item, separators)
+        if split is not None:
+            expanded.extend(split[0])
+        elif item:
+            expanded.append(item)
+    return tuple(expanded)
+
+
+def _encloses(holder: Extent, inner: Extent) -> bool:
+    return holder.start <= inner.start and inner.end <= holder.end
+
+
+def _is_lexically_enclosed(
+    target: Extent,
+    parents: tuple[str, ...],
+    seps: tuple[str, ...],
+    bound: Mapping[str, Sequence[Extent]],
+    outer_limit: Extent | None = None,
+) -> bool:
+    """Check whether ``parents`` form a nested chain of enclosing holders around ``target``."""
+    if not parents:
+        return True
+    for split_end in range(1, len(parents) + 1):
+        holder_name = parents[0]
+        for index in range(1, split_end):
+            holder_name += seps[index - 1] + parents[index]
+        holders = bound.get(holder_name)
+        if not holders:
+            continue
+        rem_parents = parents[split_end:]
+        rem_seps = seps[split_end:]
+        for holder in holders:
+            if not _encloses(holder, target):
+                continue
+            if outer_limit is not None and not _encloses(outer_limit, holder):
+                continue
+            if _is_lexically_enclosed(target, rem_parents, rem_seps, bound, outer_limit=holder):
+                return True
+    return False
+
+
+def _matches_qualifier_chain(
+    candidate: Extent,
+    parents: tuple[str, ...],
+    parent_seps: tuple[str, ...],
+    separators: tuple[str, ...],
+    bound: Mapping[str, Sequence[Extent]],
+) -> bool:
+    explicit = _expand_containers(candidate.containers, separators)
+    if explicit:
+        if len(parents) < len(explicit) or parents[-len(explicit) :] != explicit:
+            return False
+        rem_count = len(parents) - len(explicit)
+        rem_parents = parents[:rem_count]
+        rem_seps = parent_seps[: max(0, rem_count - 1)]
+        return _is_lexically_enclosed(candidate, rem_parents, rem_seps, bound)
+    return _is_lexically_enclosed(candidate, parents, parent_seps, bound)
+
+
 def _enclosed_qualified_spans(
-    name: str, bound: Mapping[str, Sequence[Extent]]
+    name: str,
+    bound: Mapping[str, Sequence[Extent]],
+    qualifiers: QualifierSpec = _DEFAULT_QUALIFIERS,
 ) -> tuple[tuple[int, int], ...]:
-    parts = [part for part in name.split(".") if part]
-    if not parts or any(part not in bound for part in parts):
+    split = _split_qualified(name, qualifiers.separators)
+    if split is None:
         return ()
-    candidates = list(bound[parts[-1]])
-    for parent in parts[:-1]:
-        holders = bound[parent]
-        candidates = [
-            one
-            for one in candidates
-            if any(holder.start <= one.start and one.end <= holder.end for holder in holders)
-        ]
-    return tuple(dict.fromkeys((extent.start, extent.end) for extent in candidates))
+    parts, seps = split
+    leaf_name = parts[-1]
+    candidates = list(bound.get(leaf_name, ()))
+    if not candidates:
+        return ()
+    final_sep = seps[-1]
+    allowed_kinds = qualifiers.separator_kinds.get(final_sep)
+    if allowed_kinds is not None:
+        candidates = [one for one in candidates if one.qualifier_kind in allowed_kinds]
+    parents = parts[:-1]
+    parent_seps = seps[:-1]
+    matched = [
+        one
+        for one in candidates
+        if _matches_qualifier_chain(one, parents, parent_seps, qualifiers.separators, bound)
+    ]
+    return tuple(dict.fromkeys((extent.start, extent.end) for extent in matched))

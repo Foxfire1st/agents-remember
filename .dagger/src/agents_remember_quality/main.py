@@ -229,6 +229,7 @@ async def _candidate_base(
                 "warm",
                 "--repo",
                 "/workspace",
+                "--all",
             ]
         )
     )
