@@ -83,9 +83,11 @@ def compile_closeout_readiness(source: CloseoutReadinessInput) -> CloseoutReadin
         "certificationReady": certification_ready,
         "finalizationAuthorityDigest": authority_digest,
     }
-    return CloseoutReadinessProjection(
-        **payload,
-        projectionDigest=content_digest(payload),
+    return CloseoutReadinessProjection.model_validate(
+        {
+            **payload,
+            "projectionDigest": content_digest(payload),
+        }
     )
 
 

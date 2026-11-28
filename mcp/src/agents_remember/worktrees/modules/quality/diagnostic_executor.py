@@ -453,7 +453,9 @@ class DiagnosticExecutionEngine:
             "requestedAt": self._clock(),
             "state": state,
         }
-        return DiagnosticAttemptRecord(**payload, attemptDigest=content_digest(payload))
+        return DiagnosticAttemptRecord.model_validate(
+            {**payload, "attemptDigest": content_digest(payload)}
+        )
 
     def _draft(
         self,
@@ -513,7 +515,7 @@ class DiagnosticExecutionEngine:
             "startedAt": record.requestedAt,
             "terminalAt": self._clock(),
         }
-        return DiagnosticRunResultDraft(**payload)
+        return DiagnosticRunResultDraft.model_validate(payload)
 
     # ------------------------------------------------------------------ telemetry + nonce helpers
 
@@ -602,7 +604,9 @@ def build_diagnostic_run_spec(
         "gatePlanDigest": gate_plan.planDigest,
         "planVersion": resolved.plan_version,
     }
-    plan_record = DiagnosticPlanRecord(**payload, planDigest=content_digest(payload))
+    plan_record = DiagnosticPlanRecord.model_validate(
+        {**payload, "planDigest": content_digest(payload)}
+    )
     return DiagnosticRunSpec(
         candidateIdentity=candidate_identity,
         registry=registry,

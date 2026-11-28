@@ -143,6 +143,7 @@ def _answer(world: Gated, *, edit: bool, gone: bool = True) -> None:
     carry a deleted path, so only the row's own evidence can put it in the refresh's way.
     """
 
+    before = None
     if edit:
         _edit(world, CODE_A.replace("return value", "return -value"))
         before = world.reanchor("RLZ-A00001", "RLZ-A00002")
@@ -154,6 +155,7 @@ def _answer(world: Gated, *, edit: bool, gone: bool = True) -> None:
     if not edit:
         world.rows(*rows)
         return
+    assert before is not None
     world.rows(
         world.invariant_row("INV-AAAAAA", before),
         family_row({"INV-AAAAAA": 1, "INV-BBBBBB": 1}),

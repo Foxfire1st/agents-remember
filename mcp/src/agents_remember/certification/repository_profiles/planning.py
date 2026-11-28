@@ -164,7 +164,7 @@ def compile_repository_profile_plan(
         "mode": selection.mode,
         "gates": [gate.model_dump(mode="json") for gate in gate_plans],
     }
-    return RepositoryProfilePlan(**payload, planDigest=content_digest(payload))
+    return RepositoryProfilePlan.model_validate({**payload, "planDigest": content_digest(payload)})
 
 
 def admit_repository_profile_plan(
@@ -266,7 +266,9 @@ def _compile_gate_plan(
         "semanticInputs": [item.model_dump(mode="json") for item in semantic_inputs],
         "waves": [[identity.model_dump(mode="json") for identity in wave] for wave in waves],
     }
-    return RepositoryGatePlan(**payload, planDigest=repository_gate_plan_digest(payload))
+    return RepositoryGatePlan.model_validate(
+        {**payload, "planDigest": repository_gate_plan_digest(payload)}
+    )
 
 
 def _compile_rail(

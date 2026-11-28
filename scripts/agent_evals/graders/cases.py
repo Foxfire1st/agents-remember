@@ -374,7 +374,7 @@ def _fenced_verdicts(text: str) -> list[tuple[object, dict]]:
 
 def _decode_native_verdict(capture: NativeCapture) -> tuple[dict, str, dict]:
     text, sequence = _final_verdict_text(capture)
-    provenance = {
+    provenance: dict[str, object] = {
         "schema": "ar-native-verdict-parse/v1",
         "status": "invalid",
         "reason": "final assistant message has no decodable verdict",

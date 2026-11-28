@@ -623,7 +623,7 @@ def keep_direct_closing(
         raise ClosingReceiptError(
             f"the direct landing's history {closing.path} changed before admission; nothing was admitted"
         )
-    document = {
+    document: dict[str, Any] = {
         "schema": _RECEIPT_SCHEMA,
         "fingerprint": fingerprint,
         "repository": None if repository is None else str(repository),

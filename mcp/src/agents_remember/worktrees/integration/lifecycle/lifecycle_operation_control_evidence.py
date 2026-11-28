@@ -107,7 +107,7 @@ def _reconciled_closeout_record(
             }
         )
         record = resolved
-    unsafe = {
+    unsafe: dict[str, object] = {
         leg: item.state
         for leg, item in record.mutationEvidence.items()
         if item.state in {"mutation-intent", "commit-proven"}

@@ -120,7 +120,7 @@ def _absent_worktree_entries(
 ) -> dict[str, dict[str, object]]:
     """The already-absent worktree entries the probe above just proved."""
 
-    entries = {
+    entries: dict[str, dict[str, object]] = {
         "code": {
             "path": contract.code_worktree.as_posix(),
             "removed": False,
@@ -141,7 +141,7 @@ def _absent_branch_entries(
 ) -> dict[str, dict[str, object]]:
     """The already-absent branch entries the probe above just proved."""
 
-    entries = {
+    entries: dict[str, dict[str, object]] = {
         "code": {
             "branch": contract.code_work_branch,
             "deleted": False,

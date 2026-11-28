@@ -1067,7 +1067,7 @@ def test_a_completed_retry_reports_the_root_it_removed(tmp_path: Path) -> None:
 
     contract, _ = enclosure_contract(tmp_path)
     recorded = outside_scratch.with_root_record(contract)
-    payload = {
+    payload: dict[str, object] = {
         "state": "already-clean",
         "directories": {
             "outside_scratch": {

@@ -55,12 +55,15 @@ class ResultIdentityTests(unittest.TestCase):
             ("admission", {"case": "CE10", "admittedPaths": []}),
         ):
             with self.subTest(field=field):
-                changed = {**original, field: replacement}
+                changed = dict(original)
+                changed[field] = replacement
                 self.assertNotEqual(deterministic_identity(**changed)["digest"], identity["digest"])
         history = self.root / "mcp/src/agents_remember/models/history.py"
         history.write_text("changed transitive product history validator")
+        updated = dict(original)
+        updated["source"] = source_snapshot(self.root)
         self.assertNotEqual(
-            deterministic_identity(**{**original, "source": source_snapshot(self.root)})["digest"],
+            deterministic_identity(**updated)["digest"],
             identity["digest"],
         )
 

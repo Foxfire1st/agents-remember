@@ -318,7 +318,11 @@ def test_a_record_only_correction_keeps_the_hand_over_stamped_when_the_round_was
         between(holder, receipt)
     if new_round:
         _call(config, "begin_review", review={"reviewKind": "memory"})
-    review = {**memory_review, "remainingFindingIds": [], "verdictRef": "notes/reports/b.md"}
+    review: dict[str, object] = {
+        **memory_review,
+        "remainingFindingIds": [],
+        "verdictRef": "notes/reports/b.md",
+    }
     rounds = _call(config, "record_review", review=review)["memoryReviewState"]["recordedRounds"]
 
     stored = rounds[-1]

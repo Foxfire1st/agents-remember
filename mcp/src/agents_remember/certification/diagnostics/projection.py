@@ -215,7 +215,9 @@ def _projection(
         else None,
         "blockingCertification": blocking,
     }
-    return DiagnosticLaneProjection(**payload, projectionDigest=content_digest(payload))
+    return DiagnosticLaneProjection.model_validate(
+        {**payload, "projectionDigest": content_digest(payload)}
+    )
 
 
 def _raise_lane(detail: str, code: str, path: str, message: str) -> Never:

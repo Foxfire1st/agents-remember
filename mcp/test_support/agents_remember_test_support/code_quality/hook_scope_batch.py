@@ -24,7 +24,7 @@ HOOK_GENERATED_SCRIPTS: tuple[tuple[str, Path], ...] = (
 HOOK_FIXED_STEPS: tuple[str, ...] = (
     "ruff",
     "ruff-format",
-    "pyright",
+    "pyrefly",
     "evidence-lifecycle",
 )
 

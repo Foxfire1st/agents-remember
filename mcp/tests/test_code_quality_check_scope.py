@@ -17,8 +17,8 @@ from test_code_quality_check import (
 )
 
 
-def _matches_pyright_exclude(path: Path, pattern: str) -> bool:
-    """Return True when ``path`` or any ancestor directory matches a Pyright exclude glob."""
+def _matches_pyrefly_exclude(path: Path, pattern: str) -> bool:
+    """Return True when ``path`` or any ancestor directory matches a Pyrefly exclude glob."""
     posix = path.as_posix()
     normalized = pattern.rstrip("/")
     if normalized.startswith("**/"):
@@ -30,17 +30,18 @@ def _matches_pyright_exclude(path: Path, pattern: str) -> bool:
     return any(fnmatch.fnmatchcase(candidate, normalized) for candidate in candidates)
 
 
-def _run_pyright_json(project_root: Path, *extra_args: str) -> tuple[int, dict[str, object]]:
+def _run_pyrefly_json(project_root: Path, *extra_args: str) -> tuple[int, dict[str, object]]:
     completed = subprocess.run(
         [
             sys.executable,
             "-m",
-            "pyright",
-            "--project",
-            ".",
-            "--pythonpath",
+            "pyrefly",
+            "check",
+            "--force-exclude",
+            "--python-interpreter-path",
             sys.executable,
-            "--outputjson",
+            "--output-format",
+            "json",
             *extra_args,
         ],
         cwd=project_root,
@@ -49,44 +50,44 @@ def _run_pyright_json(project_root: Path, *extra_args: str) -> tuple[int, dict[s
         stdin=subprocess.DEVNULL,
         check=False,
     )
-    return completed.returncode, json.loads(completed.stdout)
+    raw = completed.stdout.strip()
+    if not raw and completed.returncode == 0:
+        return completed.returncode, {"errors": []}
+    return completed.returncode, json.loads(raw)
 
 
-def _write_pyright_pyproject(
+def _write_pyrefly_pyproject(
     project_root: Path,
     *,
-    include: list[str],
-    exclude: list[str],
+    includes: list[str],
+    excludes: list[str],
 ) -> None:
     lines = [
-        "[tool.pyright]",
-        f"include = {json.dumps(include)}",
-        f"exclude = {json.dumps(exclude)}",
-        'pythonVersion = "3.14"',
-        'typeCheckingMode = "basic"',
+        "[tool.pyrefly]",
+        f"project-includes = {json.dumps(includes)}",
+        f"project-excludes = {json.dumps(excludes)}",
+        "disable-project-excludes-heuristics = true",
+        'python-version = "3.14"',
         "",
     ]
     (project_root / "pyproject.toml").write_text("\n".join(lines), encoding="utf-8")
 
 
-def _summary_files_analyzed(payload: dict[str, object]) -> int:
-    summary = payload.get("summary")
-    assert isinstance(summary, dict)
-    analyzed = summary.get("filesAnalyzed")
-    assert isinstance(analyzed, int)
-    return analyzed
-
-
 def _diagnostic_relative_paths(payload: dict[str, object], project_root: Path) -> set[str]:
-    diagnostics = payload.get("generalDiagnostics")
+    diagnostics = payload.get("errors")
     assert isinstance(diagnostics, list)
     resolved_root = project_root.resolve()
     result: set[str] = set()
     for entry in diagnostics:
         assert isinstance(entry, dict)
-        raw_file = entry.get("file")
+        if entry.get("severity") != "error":
+            continue
+        raw_file = entry.get("path")
         assert isinstance(raw_file, str)
-        result.add(Path(raw_file).resolve().relative_to(resolved_root).as_posix())
+        candidate = Path(raw_file)
+        if not candidate.is_absolute():
+            candidate = resolved_root / candidate
+        result.add(candidate.resolve().relative_to(resolved_root).as_posix())
     return result
 
 
@@ -150,25 +151,27 @@ class GateScopeDerivationTests(unittest.TestCase):
             self.assertIn("stale=['missing_support']", str(stale.exception))
 
 
-class PyrightScopeConfigurationTests(unittest.TestCase):
-    def _repo_pyright_exclude(self) -> list[str]:
+class PyreflyScopeConfigurationTests(unittest.TestCase):
+    def _repo_pyrefly_exclude(self) -> list[str]:
         _, data = quality_scope.read_pyproject(REPOSITORY_ROOT)
-        pyright = quality_scope.toml_section(data, ("tool", "pyright"))
-        exclude = pyright.get("exclude")
+        pyrefly = quality_scope.toml_section(data, ("tool", "pyrefly"))
+        exclude = pyrefly.get("project-excludes")
         assert isinstance(exclude, list)
         assert all(isinstance(entry, str) for entry in exclude)
         return list(exclude)
 
-    def test_repo_pyright_config_excludes_nested_environments_and_keeps_tracked_python(
+    def test_repo_pyrefly_config_excludes_nested_environments_and_keeps_tracked_python(
         self,
     ) -> None:
         quality_scope.validate_quality_config(REPOSITORY_ROOT)
         _, data = quality_scope.read_pyproject(REPOSITORY_ROOT)
-        pyright = quality_scope.toml_section(data, ("tool", "pyright"))
-        self.assertEqual(pyright.get("include"), ["."])
+        pyrefly = quality_scope.toml_section(data, ("tool", "pyrefly"))
+        self.assertEqual(pyrefly.get("project-includes"), [".", ".dagger"])
+        self.assertIs(pyrefly.get("disable-project-excludes-heuristics"), True)
 
-        exclude = self._repo_pyright_exclude()
+        exclude = self._repo_pyrefly_exclude()
         for required in (
+            "**/.git",
             "**/__pycache__",
             "**/.cache",
             "**/.mypy_cache",
@@ -194,20 +197,21 @@ class PyrightScopeConfigurationTests(unittest.TestCase):
             (path.as_posix(), pattern)
             for path in tracked
             for pattern in exclude
-            if _matches_pyright_exclude(path, pattern)
+            if _matches_pyrefly_exclude(path, pattern)
         ]
         self.assertEqual(dropped, [])
 
-    def test_pyright_cli_file_list_replaces_include_and_exclude_filters_listed_files(
+    def test_pyrefly_cli_file_list_and_force_exclude_match_project_scope(
         self,
     ) -> None:
-        exclude = self._repo_pyright_exclude()
+        exclude = self._repo_pyrefly_exclude()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             for rel, body in (
                 ("included_dir/inc_err.py", 'x: int = "bad_inc"\n'),
                 ("other_dir/other_err.py", 'y: int = "bad_other"\n'),
                 ("scripts/script_err.py", 's: int = "bad_script"\n'),
+                (".dagger/src/dagger_err.py", 'd: int = "bad_dagger"\n'),
                 ("mcp/.venv/lib/venv_err.py", 'v: int = "bad_venv"\n'),
                 ("dashboard/node_modules/pkg/node_err.py", 'n: int = "bad_node"\n'),
             ):
@@ -215,77 +219,45 @@ class PyrightScopeConfigurationTests(unittest.TestCase):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(body, encoding="utf-8")
 
-            _write_pyright_pyproject(root, include=["included_dir"], exclude=exclude)
+            _write_pyrefly_pyproject(root, includes=["included_dir"], excludes=exclude)
 
-            # Fact 1: an explicit CLI file list replaces [tool.pyright] include.
-            rc_other, payload_other = _run_pyright_json(root, "other_dir/other_err.py")
+            # Fact 1: an explicit CLI file list checks listed files outside project-includes.
+            rc_other, payload_other = _run_pyrefly_json(root, "other_dir/other_err.py")
             self.assertEqual(rc_other, 1)
-            self.assertEqual(_summary_files_analyzed(payload_other), 1)
             self.assertEqual(
                 _diagnostic_relative_paths(payload_other, root),
                 {"other_dir/other_err.py"},
             )
 
-            # Fact 2: Pyright drops an explicitly listed file when an exclude pattern matches it,
-            # while non-dot tracked paths stay checked under the repo's exclude list (Pyright
-            # 1.1.414+ auto-excludes `**/.*` independently of `[tool.pyright] exclude`).
-            rc_excluded, payload_excluded = _run_pyright_json(root, "mcp/.venv/lib/venv_err.py")
+            # Fact 2: `--force-exclude` drops explicitly listed files matching project-excludes,
+            # while tracked paths including `.dagger/` stay checked.
+            rc_excluded, payload_excluded = _run_pyrefly_json(root, "mcp/.venv/lib/venv_err.py")
             self.assertEqual(rc_excluded, 0)
-            self.assertEqual(_summary_files_analyzed(payload_excluded), 0)
+            self.assertEqual(_diagnostic_relative_paths(payload_excluded, root), set())
 
-            rc_listed, payload_listed = _run_pyright_json(
+            rc_listed, payload_listed = _run_pyrefly_json(
                 root,
                 "other_dir/other_err.py",
                 "scripts/script_err.py",
+                ".dagger/src/dagger_err.py",
             )
             self.assertEqual(rc_listed, 1)
-            self.assertEqual(_summary_files_analyzed(payload_listed), 2)
             self.assertEqual(
                 _diagnostic_relative_paths(payload_listed, root),
-                {"other_dir/other_err.py", "scripts/script_err.py"},
+                {"other_dir/other_err.py", "scripts/script_err.py", ".dagger/src/dagger_err.py"},
             )
 
-            # Bare run with include = ["."] skips nested .venv and node_modules while checking
-            # checkout code outside excluded trees.
-            _write_pyright_pyproject(root, include=["."], exclude=exclude)
-            rc_bare, payload_bare = _run_pyright_json(root)
+            # Bare run with project-includes = [".", ".dagger"] skips nested .venv and node_modules
+            # while checking checkout code including `.dagger/`.
+            _write_pyrefly_pyproject(root, includes=[".", ".dagger"], excludes=exclude)
+            rc_bare, payload_bare = _run_pyrefly_json(root)
             self.assertEqual(rc_bare, 1)
-            self.assertEqual(_summary_files_analyzed(payload_bare), 3)
             self.assertEqual(
                 _diagnostic_relative_paths(payload_bare, root),
                 {
                     "included_dir/inc_err.py",
                     "other_dir/other_err.py",
                     "scripts/script_err.py",
+                    ".dagger/src/dagger_err.py",
                 },
-            )
-
-            # Hook/wrapper file-list invocation gives identical results under the old top-level
-            # exclude list and the new nested exclude list on the same tracked file list.
-            tracked_args = (
-                "included_dir/inc_err.py",
-                "other_dir/other_err.py",
-                "scripts/script_err.py",
-            )
-            rc_after_list, payload_after_list = _run_pyright_json(root, *tracked_args)
-            legacy_exclude = [
-                "**/__pycache__",
-                ".cache",
-                ".pytest_cache",
-                ".ruff_cache",
-                ".venv",
-                "build",
-                "dist",
-                "node_modules",
-            ]
-            _write_pyright_pyproject(root, include=["."], exclude=legacy_exclude)
-            rc_before_list, payload_before_list = _run_pyright_json(root, *tracked_args)
-            self.assertEqual(rc_after_list, rc_before_list)
-            self.assertEqual(
-                _summary_files_analyzed(payload_after_list),
-                _summary_files_analyzed(payload_before_list),
-            )
-            self.assertEqual(
-                _diagnostic_relative_paths(payload_after_list, root),
-                _diagnostic_relative_paths(payload_before_list, root),
             )

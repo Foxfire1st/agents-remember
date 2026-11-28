@@ -173,7 +173,7 @@ def _collect_report_fixture(
     canonical = reports_root / "worker" / request
     primary = next(iter(sources))
     _write(local, sources)
-    receipt = {
+    receipt: dict[str, object] = {
         "schema": RECEIPT_SCHEMA,
         "requestId": request,
         "selection": {"taskDocumentRef": {"repository": REPOSITORY, "path": document}},

@@ -714,15 +714,13 @@ def test_a_roster_continuation_carries_the_steps_of_the_members_it_returns(
             if entry.kind == "invariant" and entry.state == "steps"
         }
         for record in covered:
-            seen.setdefault(
-                record,
-                [
-                    step.effect
-                    for entry in payload.meaning_effects.records
-                    if entry.record == record
-                    for step in entry.steps
-                ],
-            )
+            effects: list[str | None] = [
+                step.effect
+                for entry in payload.meaning_effects.records
+                if entry.record == record
+                for step in entry.steps
+            ]
+            seen.setdefault(record, effects)
         # Every covered member is a member this page returned: the continuation
         # carries the steps of the members it returns, no more and no fewer.
         returned = {

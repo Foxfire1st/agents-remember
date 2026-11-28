@@ -355,7 +355,7 @@ class AgentEvalTrajectoryTests(unittest.TestCase):
     def history_case(self, *, family: bool = False) -> CaseEvidence:
         memory = "projects/memory/"
         subject = "INV-7K3F9Q"
-        record = {
+        record: dict[str, object] = {
             "schema": "ar-invariant/v1",
             "id": subject,
             "revision": 1,
@@ -373,7 +373,7 @@ class AgentEvalTrajectoryTests(unittest.TestCase):
             "blob": "0" * 40,
             "content": "sha256:" + "1" * 64,
         }
-        card = {
+        card: dict[str, object] = {
             "schema": "ar-onboarding-file/v1",
             "path": "source.py",
             "references": {},

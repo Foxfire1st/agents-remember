@@ -89,7 +89,7 @@ class Fixture:
 def fixture(tmp_path: Path) -> Iterator[Fixture]:
     one = _repository(tmp_path / "one")
     two = _repository(tmp_path / "two")
-    roots = {"A": (one,), "B": (two,), "S": (one,)}
+    roots: dict[str, tuple[Path, ...]] = {"A": (one,), "B": (two,), "S": (one,)}
     recorder = Recorder()
     watch: LeafWorktreeWatch[str] = LeafWorktreeWatch(
         lambda key: roots[key], recorder.change, recorder.overflow

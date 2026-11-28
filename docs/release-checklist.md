@@ -12,7 +12,7 @@ In this page, `<version>` is the version of the release, as `mcp/pyproject.toml`
 ## Checks And Certification
 
 The Git hooks of this repository run deterministic checks and no test: the generated copies, Ruff,
-the format check, Pyright, the two test catalogs, and the dashboard's code generation, lint and
+the format check, Pyrefly, the two test catalogs, and the dashboard's code generation, lint and
 type check. The pull-request check on GitHub runs the same checks.
 
 No hook, no closeout, no landing, no pull request and no release job starts a test suite or a

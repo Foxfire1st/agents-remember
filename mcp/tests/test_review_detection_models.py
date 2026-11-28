@@ -480,7 +480,7 @@ def test_a_manifest_reference_that_cannot_be_resolved_names_what_would_resolve_i
     assert unresolved.what_would_resolve is not None
     assert "notes/reports/evidence/17/manifest-17.json" in unresolved.what_would_resolve
     with pytest.raises(ValidationError):
-        type(unresolved)(**{**unresolved.model_dump(), "what_would_resolve": None})
+        type(unresolved).model_validate({**unresolved.model_dump(), "what_would_resolve": None})
 
 
 # ---------------------------------------------------------------------------

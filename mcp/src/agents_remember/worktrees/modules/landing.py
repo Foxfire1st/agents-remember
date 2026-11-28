@@ -71,6 +71,7 @@ def _sweep_memo[R](key: tuple[str, str], compute: Callable[[], R]) -> R:
     scope = _LS_REMOTE_SWEEP.get()
     if scope is None:
         return compute()
+    seen: object = None
     with _LS_REMOTE_LOCK:
         if key in scope:
             seen = scope[key]

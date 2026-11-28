@@ -195,7 +195,7 @@ class StatusTableTests(StatusTestCase):
         self.assertNotIn("terminalObservedAt", public)
 
     def test_row_05_a_closed_session_keeps_the_previous_status_and_is_revivable(self) -> None:
-        closed_by = {
+        closed_by: dict[str, dict[str, Any]] = {
             "completed": {"status": "idle", "lastTurn": REPLIED},
             "failed": {"status": "error", "lastError": "The model refused the turn."},
             "stopped": {"status": "idle", "lastTurn": {"state": "unreplied"}},
@@ -352,12 +352,13 @@ class StatusTableTests(StatusTestCase):
 
     def test_row_12_an_agent_that_is_starting_keeps_the_status_and_says_so(self) -> None:
         # Not a row of the packet's table: ruled for the runtime's `initializing`.
-        for previous, state in (
+        cases: tuple[tuple[str, dict[str, Any]], ...] = (
             ("running", {}),
             ("completed", {"status": "idle", "lastTurn": REPLIED}),
             # Revive was on offer for the closed session; a session that is starting is not closed.
             ("interrupted", {"status": "closed"}),
-        ):
+        )
+        for previous, state in cases:
             with self.subTest(previous=previous):
                 request = self.launched(**state)
                 before = self.refresh(request)

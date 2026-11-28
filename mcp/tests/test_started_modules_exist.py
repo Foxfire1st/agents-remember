@@ -125,12 +125,12 @@ def _module_constants(tree: ast.Module) -> dict[str, str]:
 
     constants: dict[str, str] = {}
     for node in tree.body:
-        targets: list[ast.expr]
+        targets: tuple[ast.expr, ...]
         value: ast.expr | None
         if isinstance(node, ast.Assign):
-            targets, value = list(node.targets), node.value
+            targets, value = tuple(node.targets), node.value
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets, value = [node.target], node.value
+            targets, value = (node.target,), node.value
         else:
             continue
         if not isinstance(value, ast.Constant) or not isinstance(value.value, str):

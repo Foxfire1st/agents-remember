@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -441,14 +442,12 @@ def test_a_line_range_recorded_against_a_blob_the_store_lacks_is_unverifiable(
     tree = world.change({LINES: LINES_V1 + "line 11\n"})
     with world.index() as index:
         entry = index.invariant("INV-EEEEEE").value.realizations[0]
-    lost = type(entry)(
-        **{
-            **entry.__dict__,
-            "document": {
-                **entry.document,
-                "anchor": {**entry.document["anchor"], "blob": "e" * 40},
-            },
-        }
+    lost = replace(
+        entry,
+        document={
+            **entry.document,
+            "anchor": {**entry.document["anchor"], "blob": "e" * 40},
+        },
     )
     observed = currentness.observe_entry(
         lost, currentness.open_code_tree(tree), cache=BoundedMemo(8)

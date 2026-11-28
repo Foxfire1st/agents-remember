@@ -16,6 +16,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
@@ -286,11 +287,8 @@ def _observe_append_opportunity(log: Path, opportunity: Any) -> Any:
                     return
         real_flock(descriptor, operation)
 
-    fcntl.flock = observed_flock
-    try:
+    with patch.object(fcntl, "flock", observed_flock):
         yield
-    finally:
-        fcntl.flock = real_flock
 
 
 def _forced_appender_main(

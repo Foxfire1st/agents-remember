@@ -378,9 +378,11 @@ def _finalize_result(draft: FinalCodexRepetitionResultDraft) -> FinalCodexRepeti
     payload = {**draft.model_dump(mode="json"), "predecessorDigest": ""}
     result_id = content_digest(payload)
     final_payload = {**payload, "resultId": result_id}
-    return FinalCodexRepetitionResult(
-        **final_payload,
-        resultDigest=content_digest(final_payload),
+    return FinalCodexRepetitionResult.model_validate(
+        {
+            **final_payload,
+            "resultDigest": content_digest(final_payload),
+        }
     )
 
 
@@ -408,7 +410,9 @@ def _manifest(
         "attempt": attempt.model_dump(mode="json"),
         "repetitions": [item.model_dump(mode="json") for item in repetitions],
     }
-    return FinalCodexRunManifest(**payload, manifestDigest=content_digest(payload))
+    return FinalCodexRunManifest.model_validate(
+        {**payload, "manifestDigest": content_digest(payload)}
+    )
 
 
 def _canonical_bytes(manifest: FinalCodexRunManifest) -> bytes:

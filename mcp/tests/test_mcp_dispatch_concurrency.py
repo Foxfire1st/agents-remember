@@ -12,7 +12,7 @@ from contextlib import suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import patch
 
 import pytest
@@ -49,7 +49,7 @@ class _ObservedWriteLock(asyncio.Lock):
         super().__init__()
         self.waiting: asyncio.Queue[None] = asyncio.Queue()
 
-    async def acquire(self) -> bool:
+    async def acquire(self) -> Literal[True]:
         if self.locked():
             self.waiting.put_nowait(None)
         return await super().acquire()

@@ -969,7 +969,9 @@ def test_the_integrity_check_runs_the_validator_and_bounds_its_listing(
         "truncated": True,
     }
     assert validation["violationsTruncated"] is True
-    assert window["items"][0]["reportOnly"] is False
+    items = window["items"]
+    assert isinstance(items, list)
+    assert items[0]["reportOnly"] is False
     assert "worklistState" not in reported  # no leaf was named
 
     # Against its own commit as the base nothing changed, so no anchor is checked for a path.

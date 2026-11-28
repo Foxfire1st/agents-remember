@@ -738,7 +738,7 @@ def test_the_reference_does_not_claim_a_launch_never_reads_the_daemon_configurat
 
 def test_a_start_call_cannot_carry_extra_arguments() -> None:
     with pytest.raises(ValidationError):
-        RoleAgentOverride(**{"agentId": "claude", "extraArgs": {"chrome": None}})
+        RoleAgentOverride(**{"agentId": "claude", "extraArgs": {"chrome": None}})  # pyrefly: ignore[unexpected-keyword]
 
 
 def test_a_step_up_to_another_harness_does_not_take_the_role_entries(root: Path) -> None:

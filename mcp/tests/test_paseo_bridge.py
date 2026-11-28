@@ -111,6 +111,7 @@ class BridgeProcessTests(unittest.TestCase):
                 "paseo_runtime_not_configured": (root / "unconfigured", None),
                 "paseo_daemon_unreachable": (root, runtime_settings(root)),
             }
+            last_error: PaseoBridgeFailure | None = None
             for code, (path, settings) in cases.items():
                 with (
                     self.subTest(code=code),
@@ -127,9 +128,11 @@ class BridgeProcessTests(unittest.TestCase):
                     self.assertRaises(PaseoBridgeFailure) as raised,
                 ):
                     bridge_call(runtime_config(path, settings), "catalog", {"cwd": "/work/folder"})
-                self.assertEqual(raised.exception.code, code)
+                last_error = raised.exception
+                self.assertEqual(last_error.code, code)
                 run.assert_not_called()
-            self.assertTrue(str(raised.exception).startswith("The Paseo daemon of "))
+            assert last_error is not None
+            self.assertTrue(str(last_error).startswith("The Paseo daemon of "))
         with self.assertRaises(PaseoBridgeFailure) as unconfigured:
             bridge_call(runtime_config(Path("/trusted"), None), "catalog", {"cwd": "/work/folder"})
         self.assertTrue(str(unconfigured.exception).startswith("no Paseo runtime configured: "))

@@ -74,7 +74,7 @@ def selection_result(
     full = quality_scope.derive_scope(root)
     dashboard_tests = _dashboard_tests(root)
     if mode == "full":
-        outputs = {
+        full_outputs: dict[str, Sequence[str]] = {
             "changed-files": (),
             "lint-paths": _paths(full.lint_paths),
             "type-closure": _paths(full.type_paths),
@@ -95,9 +95,9 @@ def selection_result(
                 population="full",
                 complete=True,
                 global_invalidators=("declared-full-mode",),
-                dependency_reasons=_declared_full_reasons(outputs),
+                dependency_reasons=_declared_full_reasons(full_outputs),
                 unresolved_inputs=(),
-                outputs=outputs,
+                outputs=full_outputs,
             )
         )
     base = resolve_base(root, explicit_base=diff_base)
@@ -350,6 +350,7 @@ def _paths(paths: Iterable[Path]) -> list[str]:
 
 def _confined_output(project_root: Path, requested: Path) -> Path:
     root = project_root.resolve()
+    authority = root
     if requested.is_absolute():
         scratch_text = os.environ.get("AR_CERTIFICATION_SELECTOR_ROOT")
         if not scratch_text:

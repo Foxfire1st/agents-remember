@@ -43,7 +43,7 @@ FIXED_STEP_SCOPE_NAMES = (
     "ruff-format",
     "file-size",
     "layering",
-    "pyright",
+    "pyrefly",
     "evidence-lifecycle",
     "causal-preflight",
     "radon-cc",
@@ -132,23 +132,25 @@ def invocation_description(environment: dict[str, str] | None = None) -> str:
     return "manual dirty tree; index-known paths read current working-tree bytes"
 
 
-def pyright_config_description(project_root: Path, python_executable: str) -> str:
+def pyrefly_config_description(project_root: Path, python_executable: str) -> str:
     try:
         _path, data = read_pyproject(project_root)
     except ScopeError:
         return (
-            f"MISSING pyproject.toml [tool.pyright]; interpreter=--pythonpath {python_executable}"
+            "MISSING pyproject.toml [tool.pyrefly]; "
+            f"interpreter=--python-interpreter-path {python_executable}"
         )
-    pyright = toml_section(data, ("tool", "pyright"))
-    venv_path = pyright.get("venvPath")
-    venv = pyright.get("venv")
-    if isinstance(venv_path, str) and isinstance(venv, str):
-        resolved = (project_root / venv_path / venv).resolve()
-        venv_state = f"venv={resolved.as_posix()}"
+    pyrefly = toml_section(data, ("tool", "pyrefly"))
+    interpreter = pyrefly.get("python-interpreter-path")
+    if isinstance(interpreter, str) and interpreter.strip():
+        candidate = Path(interpreter)
+        resolved = candidate if candidate.is_absolute() else (project_root / candidate).resolve()
+        interp_state = f"python-interpreter-path={resolved.as_posix()}"
     else:
-        venv_state = "no venv declaration"
+        interp_state = "no interpreter declaration"
     return (
-        f"pyproject.toml [tool.pyright]; interpreter=--pythonpath {python_executable}; {venv_state}"
+        "pyproject.toml [tool.pyrefly]; "
+        f"interpreter=--python-interpreter-path {python_executable}; {interp_state}"
     )
 
 
@@ -168,7 +170,7 @@ def wrapper_scope_line(
         f"{(project_root / 'pyproject.toml').name} validated quality sections",
         (
             f"{len(scope.lint_paths)} changed Python files; "
-            f"{len(scope.type_paths)} pyright files (changed + reverse-import closure); "
+            f"{len(scope.type_paths)} pyrefly files (changed + reverse-import closure); "
             f"{len(scope.coverage_paths)} changed production modules; "
             f"{len(scope.test_paths)} derived test files; "
             f"{len(scope.size_paths)} size-scoped changed files"
@@ -226,7 +228,7 @@ def fixed_step_scope_line(
             if targeted
             else f"{len(scope.lint_paths)} index-known Python files",
         )
-    if name == "pyright":
+    if name == "pyrefly":
         return scope_line(
             name,
             (
@@ -234,7 +236,7 @@ def fixed_step_scope_line(
                 if targeted
                 else "current checkout bytes at paths enumerated by git ls-files '*.py'"
             ),
-            pyright_config_description(project_root, python_executable),
+            pyrefly_config_description(project_root, python_executable),
             f"{len(scope.type_paths)} files (changed + reverse-import closure)"
             if targeted
             else f"{len(scope.type_paths)} index-known Python files",
@@ -309,7 +311,7 @@ def targeted_scope_lines(
         f"targeted changed files ({len(changed)}):",
         *(f"  {path}" for path in changed),
         (
-            f"targeted reverse-import closure for pyright adds {len(closure)} file(s):"
+            f"targeted reverse-import closure for pyrefly adds {len(closure)} file(s):"
             if closure
             else "targeted reverse-import closure: none"
         ),

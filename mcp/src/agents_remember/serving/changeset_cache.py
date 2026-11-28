@@ -314,6 +314,7 @@ class ChangesetCache:
                 facts.append(layout.metadata(working=source.working, references=source.references))
             else:
                 facts.append(layout.references(()))
+            working = ""
             if source.working:
                 working = self._working_generation(source.root)
                 facts.append(working)

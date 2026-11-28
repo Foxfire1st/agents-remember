@@ -872,7 +872,7 @@ def create_realization_claim(
             )
     tree.claim_entries[str(claim.claim_id)] = entry_id
     sidecar_path = file_sidecar_path(facts["path"])
-    sidecar = tree.sidecars.get(sidecar_path)
+    sidecar: dict[str, Any] | None = tree.sidecars.get(sidecar_path)
     if sidecar is None:
         sidecar = {
             "schema": "ar-onboarding-file/v1",
@@ -961,7 +961,7 @@ def create_proof(store: OpenedKnowledgeStore, request: ProofRequest) -> RowOutco
                 "a text tree holds one entry per path and facet"
             )
     sidecar_path = file_sidecar_path(facts["path"])
-    sidecar = tree.sidecars.get(sidecar_path)
+    sidecar: dict[str, Any] | None = tree.sidecars.get(sidecar_path)
     if sidecar is None:
         sidecar = {
             "schema": "ar-onboarding-file/v1",
@@ -970,7 +970,7 @@ def create_proof(store: OpenedKnowledgeStore, request: ProofRequest) -> RowOutco
             "realizes": [],
         }
         tree.sidecars[sidecar_path] = sidecar
-    proves = sidecar.get("proves")
+    proves: list[dict[str, Any]] | None = sidecar.get("proves")
     if proves is None:
         proves = sidecar["proves"] = []
     proves.append(

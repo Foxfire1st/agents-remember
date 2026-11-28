@@ -115,7 +115,12 @@ def test_codex_credits_remaining_is_not_limited() -> None:
 
 def test_a_full_window_without_a_future_reset_is_not_limited() -> None:
     past = _window(resets=NOW - timedelta(minutes=1))
-    missing = {"id": "five_hour", "label": "Session", "usedPct": 100.0, "summary": True}
+    missing: dict[str, object] = {
+        "id": "five_hour",
+        "label": "Session",
+        "usedPct": 100.0,
+        "summary": True,
+    }
 
     assert writer.judge_report(_report(past), NOW) is None
     assert writer.judge_report(_report(missing), NOW) is None

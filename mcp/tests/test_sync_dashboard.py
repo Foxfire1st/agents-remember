@@ -24,14 +24,13 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from types import ModuleType
 from typing import Any
 
 SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "sync-dashboard.py"
 BUILD_INPUT = "package.json"
 
 
-def load_sync_dashboard() -> ModuleType:
+def load_sync_dashboard() -> Any:
     spec = importlib.util.spec_from_file_location("sync_dashboard", SCRIPT_PATH)
     if spec is None or spec.loader is None:
         raise AssertionError("could not load sync-dashboard.py")

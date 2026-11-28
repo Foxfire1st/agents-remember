@@ -213,7 +213,7 @@ def validate_quality_config(project_root: Path) -> None:
     pyproject, data = read_pyproject(project_root)
     required = (
         ("tool.ruff", ("tool", "ruff")),
-        ("tool.pyright", ("tool", "pyright")),
+        ("tool.pyrefly", ("tool", "pyrefly")),
         ("tool.radon", ("tool", "radon")),
         ("tool.coverage.run", ("tool", "coverage", "run")),
         ("tool.pytest.ini_options", ("tool", "pytest", "ini_options")),
@@ -232,16 +232,16 @@ def validate_quality_config(project_root: Path) -> None:
             "branch data"
         )
 
-    pyright = toml_section(data, ("tool", "pyright"))
-    if pyright:
-        includes = pyright.get("include")
+    pyrefly = toml_section(data, ("tool", "pyrefly"))
+    if pyrefly:
+        includes = pyrefly.get("project-includes")
         if not isinstance(includes, list) or not includes:
             findings.append(
-                "[tool.pyright] include is missing or empty; declare the checkout scope it "
-                "must type-check"
+                "[tool.pyrefly] project-includes is missing or empty; declare the checkout scope "
+                "it must type-check"
             )
         try:
-            validate_pyright_venv(project_root, pyright, pyproject)
+            validate_pyrefly_interpreter(project_root, pyrefly, pyproject)
         except ScopeError as error:
             findings.append(str(error))
 
@@ -261,26 +261,27 @@ def validate_quality_config(project_root: Path) -> None:
         raise ScopeError(f"quality configuration has {len(findings)} finding(s):\n{rendered}")
 
 
-def validate_pyright_venv(
+def validate_pyrefly_interpreter(
     project_root: Path,
-    pyright: Mapping[str, object],
+    pyrefly: Mapping[str, object],
     pyproject: Path,
 ) -> None:
-    """Reject a declared virtual environment that cannot resolve in this checkout."""
-    venv_path = pyright.get("venvPath")
-    venv = pyright.get("venv")
-    if venv_path is None and venv is None:
+    """Reject a declared Python interpreter path that cannot resolve in this checkout."""
+    interpreter = pyrefly.get("python-interpreter-path")
+    if interpreter is None:
         return
-    if not isinstance(venv_path, str) or not isinstance(venv, str):
+    if not isinstance(interpreter, str) or not interpreter.strip():
         raise ScopeError(
-            f"[tool.pyright] venvPath and venv must either both be strings or both be absent in "
+            f"[tool.pyrefly] python-interpreter-path must be a non-empty string or absent in "
             f"{pyproject}"
         )
-    resolved = (project_root / venv_path / venv).resolve()
-    if not resolved.is_dir():
+    candidate = Path(interpreter)
+    resolved = candidate if candidate.is_absolute() else (project_root / candidate).resolve()
+    if not resolved.is_file():
         raise ScopeError(
-            f"[tool.pyright] venvPath/venv resolves to missing directory {resolved}; "
-            "repair the declaration or remove it when --pythonpath owns interpreter resolution"
+            f"[tool.pyrefly] python-interpreter-path resolves to missing file {resolved}; "
+            "repair the declaration or remove it when --python-interpreter-path owns interpreter "
+            "resolution"
         )
 
 

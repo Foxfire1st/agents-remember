@@ -140,7 +140,7 @@ def _candidate(frame: _PlanFrame, relative: str, seed: dict[str, Any]):
     context = frame.context
     index_error = frame.index_error
     kind, decision = seed["kind"], seed["decision"]
-    result = {
+    result: dict[str, Any] = {
         **seed,
         "branch_onboarding": str(request.source_memory / relative),
         "target_onboarding": str(request.target_memory / relative),

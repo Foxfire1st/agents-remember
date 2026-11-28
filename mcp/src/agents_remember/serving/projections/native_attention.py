@@ -422,7 +422,7 @@ class NativeAttentionInput:
 
         settled = settle_terminal_notices(config.coordination_root, verify)
         if settled is not None:
-            store: AttentionNoticeStore | None = settled
+            store: AttentionNoticeStore = settled
         else:
             # The store itself could not be observed: an unreadable store is unknown, never
             # an empty complete one (L190-R1-F07).

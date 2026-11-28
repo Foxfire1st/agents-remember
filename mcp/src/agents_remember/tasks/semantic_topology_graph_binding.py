@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Self, cast
+from typing import Any, Self, cast
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
@@ -38,7 +38,7 @@ class _ImmutableSprintExecutionNode(SprintExecutionNode):
 
     @field_validator("leafIds")
     @classmethod
-    def _trim_leaf_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+    def _trim_leaf_ids(cls, value: Any) -> Any:
         trimmed = tuple(leaf.strip() for leaf in value)
         if any(not leaf for leaf in trimmed):
             raise ValueError("execution-graph node leafIds must not be blank")

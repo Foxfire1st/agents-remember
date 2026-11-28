@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.14,<3.15"
 # The supported minor line and platforms live here so consumers do not need to clone the
-# repository to discover them. Pyright targets Python 3.14. GitHub workflows and Dagger
+# repository to discover them. Pyrefly targets Python 3.14. GitHub workflows and Dagger
 # use uv-managed Python 3.14. Ruff syntax rewrites stay at 3.13. Windows is
 # supported through WSL, which presents as Linux and therefore has no separate classifier.
 classifiers = [
@@ -51,7 +51,7 @@ dev = [
   "pytest-cov>=7,<8",
   "pytest-reportlog>=1,<2",
   "pytest-xdist>=3,<4",
-  "pyright>=1.1,<2",
+  "pyrefly>=1.5.0,<2",
   "radon>=6,<7",
   "ruff==0.16.1",
 ]

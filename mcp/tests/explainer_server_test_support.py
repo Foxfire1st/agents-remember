@@ -210,7 +210,7 @@ def _fingerprints(references: tuple[str, ...]) -> dict[str, str]:
 
 
 def _server(world: World, **overrides: Any):
-    inputs = {
+    inputs: dict[str, Any] = {
         "task_root": world.task_root,
         "fingerprints": _fingerprints,
         "now": lambda: AT,

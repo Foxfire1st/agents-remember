@@ -35,6 +35,7 @@ def _detached_data(
 
     graph = sprint.executionGraph
     removed_nodes = 0
+    data_graph: Any = None
     if graph is not None:
         _require_no_touching_edges(graph, master_ref)
         remaining = [node for node in graph.nodes if node.ref != master_ref]

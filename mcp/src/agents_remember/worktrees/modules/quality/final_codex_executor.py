@@ -536,7 +536,9 @@ class FinalCodexExecutionEngine:
             "requestedAt": self._clock(),
             "state": state,
         }
-        return FinalCodexAttemptRecord(**payload, attemptDigest=content_digest(payload))
+        return FinalCodexAttemptRecord.model_validate(
+            {**payload, "attemptDigest": content_digest(payload)}
+        )
 
     def _draft_payload(
         self,

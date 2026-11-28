@@ -35,8 +35,8 @@ def write_sample_repository(root: Path) -> Path:
             (
                 "[tool.ruff]",
                 "line-length = 100",
-                "[tool.pyright]",
-                'include = ["."]',
+                "[tool.pyrefly]",
+                'project-includes = ["."]',
                 "[tool.radon]",
                 'cc_min = "B"',
                 "[tool.coverage.run]",

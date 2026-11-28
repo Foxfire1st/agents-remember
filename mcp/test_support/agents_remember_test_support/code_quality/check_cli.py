@@ -15,7 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Run the Agents Remember source quality suite over every tracked Python "
             "file. Enforcing steps: Ruff (lint, complexity rules "
-            "C901/PLR0911/PLR0912/PLR0915 included), Ruff format (--check), Pyright "
+            "C901/PLR0911/PLR0912/PLR0915 included), Ruff format (--check), Pyrefly "
             "(types), and pytest. CRAP and changed-lines coverage are diagnostic reports. The File Size Budget rail is wired here "
             "too; [tool.agents_remember] file_size_armed decides whether a violation "
             "fails the run (unarmed runs still report every band). Radon "
@@ -36,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Run the leaf change-set contract instead of the full tree: ruff over the "
-            "changed Python files, pyright over the changed files plus the reverse-import "
+            "changed Python files, pyrefly over the changed files plus the reverse-import "
             "closure, pytest over the derived test subset, and coverage/CRAP scoped to the "
             "changed production modules. The derivation is printed for review."
         ),

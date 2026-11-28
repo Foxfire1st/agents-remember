@@ -1,6 +1,6 @@
 """Run the repository-owned Python quality rails with explicit provenance.
 
-Ruff, Ruff format, file size, Pyright and pytest enforce; coverage and CRAP report.
+Ruff, Ruff format, file size, Pyrefly and pytest enforce; coverage and CRAP report.
 Cheap deterministic rails precede pytest, which is the final subprocess; CRAP and diff
 coverage then score its artifact. Radon CC and MI are labelled reports because Radon
 findings do not change its exit status. Scope

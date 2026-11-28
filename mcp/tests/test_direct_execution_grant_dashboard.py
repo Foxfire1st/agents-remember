@@ -111,7 +111,7 @@ class DeveloperGrantControlTests(unittest.TestCase):
     def test_request_model_rejects_extra_fields(self) -> None:
         with self.assertRaises(ValueError):
             DeveloperGrantRequest(
-                **{
+                **{  # pyrefly: ignore[unexpected-keyword]
                     "repository": "repo-a",
                     "path": f"{MASTER_NAME}/{LEAF_SLUG}.json",
                     "action": "give",

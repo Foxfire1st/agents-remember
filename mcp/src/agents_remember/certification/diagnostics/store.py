@@ -375,9 +375,11 @@ def _finalize_result(
     payload = {**draft.model_dump(mode="json"), "predecessorDigest": predecessor}
     result_id = content_digest(payload)
     final_payload = {**payload, "resultId": result_id}
-    return DiagnosticRunResult(
-        **final_payload,
-        resultDigest=content_digest(final_payload),
+    return DiagnosticRunResult.model_validate(
+        {
+            **final_payload,
+            "resultDigest": content_digest(final_payload),
+        }
     )
 
 
@@ -408,7 +410,9 @@ def _manifest(
         "attempts": [item.model_dump(mode="json") for item in attempts],
         "results": [item.model_dump(mode="json") for item in (*results, *extra_results)],
     }
-    return DiagnosticRunManifest(**payload, manifestDigest=content_digest(payload))
+    return DiagnosticRunManifest.model_validate(
+        {**payload, "manifestDigest": content_digest(payload)}
+    )
 
 
 def _canonical_bytes(manifest: DiagnosticRunManifest) -> bytes:

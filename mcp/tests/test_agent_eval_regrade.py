@@ -342,7 +342,7 @@ class RegradeTests(unittest.TestCase):
     def test_retained_real_hermes_dispatch_is_normalized_without_rewriting_refusal(self) -> None:
         fixture = read_object(Path(__file__).parent / "fixtures/hermes-nested-authoring.json")
         selected = fixture["rows"][-1]
-        raw = {
+        raw: dict[str, Any] = {
             **selected["capture"],
             "capture_version": "native-capture/v1",
             "raw_export_sha256": raw_export_digest(
@@ -582,6 +582,7 @@ class RegradeTests(unittest.TestCase):
             "11111111-1111-4111-8111-111111111111",
             "22222222-2222-4222-8222-222222222222",
         )
+        batch: Path | None = None
         for slot, (identity, value) in enumerate(zip(identities, ("one", "two"), strict=True), 1):
             batch, source = source_attempt(self.root, identity=identity, slot=slot)
             target = source / "after/projects/memory/state.txt"
@@ -591,6 +592,7 @@ class RegradeTests(unittest.TestCase):
                 EvidenceFile.capture(source / "after", "projects/memory/state.txt").to_dict()
             ]
             write_object(source / "attempt.json", original)
+        assert batch is not None
         manifest = self.plan(batch)
         rows = read_object(manifest)["attempts"]
         self.assertEqual(len(rows), 2)
@@ -851,7 +853,7 @@ class RegradeTests(unittest.TestCase):
                 "preparationSource": preparation_source(),
             },
         )
-        row = {
+        row: dict[str, Any] = {
             "source": str(source),
             "originalAttemptId": "original",
             "originalRowHash": "row-hash",
@@ -1103,7 +1105,7 @@ class RegradeTests(unittest.TestCase):
             },
         )
         original = previous.read_bytes()
-        row = {
+        row: dict[str, Any] = {
             "source": str(source),
             "originalAttemptId": "original",
             "ready": False,

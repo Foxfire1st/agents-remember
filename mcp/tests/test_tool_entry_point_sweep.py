@@ -114,7 +114,7 @@ class EntryPointExceptionEvidenceTests(unittest.TestCase):
                     def run_wrapper(*_args: Any, **_kwargs: Any) -> None:
                         inner()
 
-                    world = world_type.__new__(world_type)
+                    world = object.__new__(world_type)
                     with patch.object(anyio, "run", side_effect=run_wrapper):
                         kind, answer = world.call("synthetic_exception", {})
 

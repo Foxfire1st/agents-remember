@@ -15,7 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 from unittest.mock import patch
 
 import pytest
@@ -139,7 +139,7 @@ def test_the_legacy_reader_drops_a_stored_preparation_command() -> None:
     (("closeout", "worktree_closeout_apply"), ("integrate", "worktree_integrate")),
 )
 def test_a_closeout_or_integration_record_names_the_tool_that_replaces_it(
-    kind: str, next_tool: str
+    kind: Literal["closeout", "direct-landing", "integrate"], next_tool: str
 ) -> None:
     """The refusal names the exact record and the call that replaces it."""
 

@@ -306,7 +306,9 @@ class EvidenceSelectionTests(unittest.TestCase):
 
     def snapshot(self, phase: str, path: str, value: object) -> None:
         write_object(self.root / phase / path, value)
-        self.report[phase].append(EvidenceFile.capture(self.root / phase, path).to_dict())
+        items = self.report[phase]
+        assert isinstance(items, list)
+        items.append(EvidenceFile.capture(self.root / phase, path).to_dict())
 
     def _cited_case(self, case_id: str) -> CaseBundle:
         # Exact CE01/CE02 carrier identities from their registered M7 claims lists.
@@ -325,10 +327,10 @@ class EvidenceSelectionTests(unittest.TestCase):
             },
         ]
         inputs = []
+        document = {"references": {"1": {"note": "named evidence " * 6000}}}
         for carrier in [c for row in claims for c in row["carriers"]]:
             path = carrier.partition("#")[0]
             source = "inputs/" + path
-            document = {"references": {"1": {"note": "named evidence " * 6000}}}
             write_object(self.root / source, document)
             inputs.append({"source": source, "destination": "projects/memory/" + path})
         uncited = "inputs/overview.json"

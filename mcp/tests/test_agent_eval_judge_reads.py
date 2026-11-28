@@ -263,9 +263,10 @@ def test_outside_read_without_bound_result_does_not_invent_a_read_or_refusal(
             events[index] = replace(
                 events[index], payload={**events[index].payload, "tool_use_id": "other"}
             )
+        elif pairing == "foreign-session":
+            events[index] = replace(events[index], session_id="other")
         else:
-            field = "session_id" if pairing == "foreign-session" else "source_sha256"
-            events[index] = replace(events[index], **{field: "other"})
+            events[index] = replace(events[index], source_sha256="other")
         capture = replace(capture, events=tuple(events))
     audit = judges.audit_judge_reads(capture, binding)
     assert not audit["opened"]
@@ -497,8 +498,10 @@ def test_unpaired_read_result_is_channel_unknown(tmp_path: Path, identity: str) 
     index = next(i for i, event in enumerate(events) if event.kind == "tool_result")
     if identity == "tool_use_id":
         events[index] = replace(events[index], payload={**events[index].payload, identity: "other"})
+    elif identity == "session_id":
+        events[index] = replace(events[index], session_id="other")
     else:
-        events[index] = replace(events[index], **{identity: "other"})
+        events[index] = replace(events[index], source_sha256="other")
     audit = judges.audit_judge_reads(replace(capture, events=tuple(events)), binding)
     assert not audit["opened"]
     assert _missing_paths(audit) == {"mandatory.json"}

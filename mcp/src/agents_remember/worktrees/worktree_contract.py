@@ -218,11 +218,12 @@ def amend_contract(contract: WorktreeContract, cells: ContractCells) -> Worktree
     The lifecycle tools amend a contract with ``dataclasses.replace``, and typeshed declares
     that ``def replace(obj, /, **changes: Any)``. One ``Any`` in a third-party stub is enough
     to void the guarantee this module is built on: ``replace(contract, cleanup="reclaimed-ish")``
-    is *zero* pyright errors, even though ``WorktreeContract.cleanup`` is a four-member
+    is *zero* type-checker errors under typeshed's ``Any`` stub, even though
+    ``WorktreeContract.cleanup`` is a four-member
     ``Literal`` and the wire model that reports it rejects everything else. Measured: a bare
     off-vocabulary literal at every one of the six fields, through ``replace``, produced no
     diagnostic at all. Declaring them as :class:`ContractCells` fields is what puts them back
-    in front of the checker -- pyright now rejects the wrong literal, the concatenation, the
+    in front of the checker -- Pyrefly now rejects the wrong literal, the concatenation, the
     f-string, the dict subscript, the imported constant and the untyped local, at the call
     site. (``cast`` still passes, as it must: it is the programmer overriding the checker on
     purpose. ``test_wire_vocabulary_exhaustiveness`` is what closes that one, together with

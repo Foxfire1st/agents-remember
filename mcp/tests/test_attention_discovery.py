@@ -97,6 +97,7 @@ def test_heartbeats_finish_pause_discovery_at_two_sizes(subtests, tmp_path, monk
             monkeypatch.setattr(native_attention, "ENUMERATION_BUDGET", 7, raising=False)
             with monkeypatch.context() as scoped:
                 examined = _enumeration_spy(scoped, directory)
+                facts = None
                 for _call in range(size * 2 // 7 + 2):
                     before = len(examined)
                     facts = reader.read(
@@ -109,6 +110,7 @@ def test_heartbeats_finish_pause_discovery_at_two_sizes(subtests, tmp_path, monk
                     assert len(examined) - before <= 7
                     if facts.pauses_complete:
                         break
+                assert facts is not None
                 assert facts.pauses_complete, "ordinary heartbeats must finish the parked walk"
                 assert len(examined) == 2 * size, "non-JSON entries consume the same allowance"
                 assert facts.paused_task_keys == frozenset({"repo/master/task.json"})
@@ -135,12 +137,14 @@ def test_held_discovery_shares_one_entry_allowance_at_two_sizes(
             reader = layout.HeldAuthorityReader()
             with monkeypatch.context() as scoped:
                 examined = _enumeration_spy(scoped, root)
+                view = None
                 for _call in range(size // 2 + 10):
                     before = len(examined)
                     view = reader.read(coordination)
                     assert len(examined) - before <= 256
                     if not reader.pending:
                         break
+                assert view is not None
                 assert view.complete, "the bounded root and receipt cursors must reach their ends"
                 assert {row.message_id for row in view.rows} == {row[2] for row in holders}
 
@@ -220,12 +224,14 @@ def test_an_unreadable_receipt_keeps_later_chunks_incomplete(
             next(receipts.iterdir()).write_text("{broken")
             monkeypatch.setattr(layout, "MAX_HELD_AUTHORITY_RECEIPTS", 2)
             reader = layout.HeldAuthorityReader()
+            view = None
             for _call in range(size + 5):
                 view = reader.read(coordination)
                 assert not view.complete
                 if not reader.pending:
                     break
             assert not reader.pending, "the failed record must not force an endless walk"
+            assert view is not None
             assert len(view.rows) == size - 1
 
 
@@ -245,12 +251,14 @@ def test_receipt_root_cursors_are_capped_and_shed_at_two_sizes(
             _queue(coordination, {})
             monkeypatch.setattr(layout, "MAX_HELD_AUTHORITY_RETAINED", 4)
             reader = layout.HeldAuthorityReader()
+            view = None
             for _call in range(size + 5):
                 view = reader.read(coordination)
                 assert len(reader._walks) <= 4
                 if not reader.pending:
                     break
             assert not reader.pending
+            assert view is not None
             assert not view.complete
             reader.reset()
             assert not reader._walks

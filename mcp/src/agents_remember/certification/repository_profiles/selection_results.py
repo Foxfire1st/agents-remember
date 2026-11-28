@@ -231,9 +231,11 @@ def build_repository_selection_result(
             for artifact_id, values in sorted(draft.outputs.items())
         ],
     }
-    return RepositorySelectionResult(
-        **payload,
-        selectionDigest=repository_selection_result_digest(payload),
+    return RepositorySelectionResult.model_validate(
+        {
+            **payload,
+            "selectionDigest": repository_selection_result_digest(payload),
+        }
     )
 
 

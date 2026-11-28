@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os
+import sys
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
@@ -255,18 +255,18 @@ WINDOWS_MAX_PATH_BUDGET = 250
 
 
 def _windows_long_paths_enabled() -> bool:
-    if os.name != "nt":
-        return True
-    import winreg  # noqa: PLC0415 — Windows-only stdlib module
+    if sys.platform == "win32":
+        import winreg  # noqa: PLC0415 — Windows-only stdlib module
 
-    try:
-        with winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem"
-        ) as key:
-            value, _ = winreg.QueryValueEx(key, "LongPathsEnabled")
-        return bool(value)
-    except OSError:
-        return False
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem"
+            ) as key:
+                value, _ = winreg.QueryValueEx(key, "LongPathsEnabled")
+            return bool(value)
+        except OSError:
+            return False
+    return True
 
 
 def long_path_block_payload(

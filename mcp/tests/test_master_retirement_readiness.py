@@ -268,8 +268,19 @@ def _leaf_named_by_no_row(world: World, series: WorktreeContract) -> None:
 
 def _foreign(cell: str):
     def alter(world: World, series: WorktreeContract) -> None:
-        wrong = "foreign" if cell in {"repo_name", "task_name"} else world.coord / "foreign"
-        write_contract(series.contract_path, replace(series, **{cell: wrong}))
+        if cell == "repo_name":
+            updated = replace(series, repo_name="foreign")
+        elif cell == "task_name":
+            updated = replace(series, task_name="foreign")
+        elif cell == "coordination_root":
+            updated = replace(series, coordination_root=world.coord / "foreign")
+        elif cell == "task_root":
+            updated = replace(series, task_root=world.coord / "foreign")
+        elif cell == "code_repo_path":
+            updated = replace(series, code_repo_path=world.coord / "foreign")
+        else:
+            raise AssertionError(f"unexpected contract cell: {cell}")
+        write_contract(series.contract_path, updated)
 
     return alter
 

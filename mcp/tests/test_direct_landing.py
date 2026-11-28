@@ -120,6 +120,12 @@ from test_knowledge_closeout_gate import (
 from test_worktree_support import git, init_repo
 
 
+def _candidate_tree(preview: dict[str, object]) -> str | None:
+    tree = preview["candidateTree"]
+    assert tree is None or isinstance(tree, str)
+    return tree
+
+
 def direct_landing(*args, **kwargs):
     """Exercise the production direct-landing path in process."""
 
@@ -579,7 +585,7 @@ class DirectLandingTests(unittest.TestCase):
         code_base = fixture["code_head"]
         preview = direct_landing_tool(config, self._converted_create_request(fixture, dry_run=True))
         apply_request = self._converted_create_request(fixture, dry_run=False)
-        apply_request = replace(apply_request, candidate_tree=preview["candidateTree"])
+        apply_request = replace(apply_request, candidate_tree=_candidate_tree(preview))
         landed = direct_landing_tool(config, apply_request)
         self.assertEqual(landed["state"], "landed")
         self.assertEqual(DirectLandingResponse.model_validate(landed).state, "landed")
@@ -630,7 +636,7 @@ class DirectLandingTests(unittest.TestCase):
         memory = world.memory
         preview = direct_landing_tool(config, self._converted_create_request(fixture, dry_run=True))
         request = self._converted_create_request(fixture, dry_run=False)
-        request = replace(request, candidate_tree=preview["candidateTree"])
+        request = replace(request, candidate_tree=_candidate_tree(preview))
         head_before = git(code, "rev-parse", "HEAD")
         porcelain_before = git(code, "status", "--porcelain")
         cached_before = git(code, "diff", "--cached", "--name-only")
@@ -672,7 +678,7 @@ class DirectLandingTests(unittest.TestCase):
         code_base = git(code, "rev-parse", "HEAD")
         preview = direct_landing_tool(config, self._converted_create_request(fixture, dry_run=True))
         request = self._converted_create_request(fixture, dry_run=False)
-        request = replace(request, candidate_tree=preview["candidateTree"])
+        request = replace(request, candidate_tree=_candidate_tree(preview))
         landed = direct_landing_tool(config, request)
         self.assertEqual(landed["state"], "landed")
         created = landed["codeCommit"]
@@ -706,7 +712,7 @@ class DirectLandingTests(unittest.TestCase):
         code = fixture["code"]
         preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
         request = self._create_request(fixture, dry_run=False)
-        request = replace(request, candidate_tree=preview["candidateTree"])
+        request = replace(request, candidate_tree=_candidate_tree(preview))
         with (
             mock.patch(
                 "agents_remember.worktrees.integration.direct_landing."
@@ -729,7 +735,7 @@ class DirectLandingTests(unittest.TestCase):
         memory = fixture["memory"]
         preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
         request = self._create_request(fixture, dry_run=False)
-        request = replace(request, candidate_tree=preview["candidateTree"])
+        request = replace(request, candidate_tree=_candidate_tree(preview))
         memory_before = git(memory, "rev-parse", "HEAD")
         with (
             mock.patch(
@@ -761,7 +767,7 @@ class DirectLandingTests(unittest.TestCase):
         memory = fixture["memory"]
         preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
         request = self._create_request(fixture, dry_run=False)
-        request = replace(request, candidate_tree=preview["candidateTree"])
+        request = replace(request, candidate_tree=_candidate_tree(preview))
         with (
             mock.patch(
                 "agents_remember.worktrees.integration.direct_landing."
@@ -816,7 +822,7 @@ class DirectLandingTests(unittest.TestCase):
         memory = fixture["memory"]
         preview = direct_landing_tool(config, self._converted_create_request(fixture, dry_run=True))
         request = self._converted_create_request(fixture, dry_run=False)
-        request = replace(request, candidate_tree=preview["candidateTree"])
+        request = replace(request, candidate_tree=_candidate_tree(preview))
         store = direct_landing_store(contract)
         memory_before = git(memory, "rev-parse", "HEAD")
         with (
@@ -907,7 +913,7 @@ class DirectLandingTests(unittest.TestCase):
         code = fixture["code"]
         preview = direct_landing_tool(config, self._converted_create_request(fixture, dry_run=True))
         request = self._converted_create_request(fixture, dry_run=False)
-        request = replace(request, candidate_tree=preview["candidateTree"])
+        request = replace(request, candidate_tree=_candidate_tree(preview))
         published: dict[str, str] = {}
 
         def cut_after_code(*args, **kwargs):
@@ -1061,7 +1067,7 @@ class DirectLandingTests(unittest.TestCase):
         # no door publication and an enabled, proven code leg.
         preview = direct_landing_tool(config, self._converted_create_request(fixture, dry_run=True))
         request = self._converted_create_request(fixture, dry_run=False)
-        request = replace(request, candidate_tree=preview["candidateTree"])
+        request = replace(request, candidate_tree=_candidate_tree(preview))
         landed = direct_landing_tool(config, request)
         self.assertEqual(landed["state"], "landed")
         record = direct_landing_store(contract).read()
@@ -1244,7 +1250,7 @@ class DirectLandingTests(unittest.TestCase):
         memory = fixture["memory"]
         preview = direct_landing_tool(config, self._converted_create_request(fixture, dry_run=True))
         request = self._converted_create_request(fixture, dry_run=False)
-        request = replace(request, candidate_tree=preview["candidateTree"])
+        request = replace(request, candidate_tree=_candidate_tree(preview))
         store = direct_landing_store(contract)
         with (
             mock.patch(
@@ -1332,7 +1338,7 @@ class DirectLandingTests(unittest.TestCase):
         config = fixture["config"]
         preview = direct_landing_tool(config, self._converted_create_request(fixture, dry_run=True))
         request = self._converted_create_request(fixture, dry_run=False)
-        request = replace(request, candidate_tree=preview["candidateTree"])
+        request = replace(request, candidate_tree=_candidate_tree(preview))
         landed = direct_landing_tool(config, request)
         self.assertEqual(landed["state"], "landed")
         self._mark_completed_started(fixture)
@@ -1348,7 +1354,7 @@ class DirectLandingTests(unittest.TestCase):
         memory = fixture["memory"]
         preview = direct_landing_tool(config, self._converted_create_request(fixture, dry_run=True))
         request = self._converted_create_request(fixture, dry_run=False)
-        request = replace(request, candidate_tree=preview["candidateTree"])
+        request = replace(request, candidate_tree=_candidate_tree(preview))
         store = direct_landing_store(contract)
         with (
             mock.patch(
@@ -1384,7 +1390,7 @@ class DirectLandingTests(unittest.TestCase):
         head_before = git(code, "rev-parse", "HEAD")
         (code / "late.py").write_text("late\n", encoding="utf-8")
         request = self._create_request(fixture, dry_run=False)
-        request = replace(request, candidate_tree=preview["candidateTree"])
+        request = replace(request, candidate_tree=_candidate_tree(preview))
         with self.assertRaisesRegex(DirectLandingError, "no longer matches"):
             direct_landing(config, request, fixture["contract"])
         # The refusal came before the code commit: nothing is committed on either
@@ -1466,7 +1472,7 @@ class DirectLandingTests(unittest.TestCase):
         request = replace(
             self._create_request(fixture, dry_run=False),
             leaf_task_document_ref=foreign,
-            candidate_tree=preview["candidateTree"],
+            candidate_tree=_candidate_tree(preview),
         )
         with self.assertRaisesRegex(DirectLandingError, "direct-landing-foreign-leaf"):
             direct_landing(config, request, fixture["contract"])

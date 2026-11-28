@@ -533,7 +533,7 @@ def _adoption_request_id(
     *,
     in_place: bool = False,
 ) -> str:
-    payload = {
+    payload: dict[str, object] = {
         "enclosurePublicationRequestId": (artifacts.reserved_locator.publicationRequestId),
         "auditIntent": intent,
         "contractSha256": artifacts.reserved_locator.expectedInitialContractSha256,

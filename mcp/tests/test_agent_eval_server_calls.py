@@ -33,7 +33,7 @@ def _setup(root: Path, *, opaque: bool = False):
     logs = root / "tool-logs"
     logs.mkdir()
     source = SourceFile(str(root / "native.jsonl"), "a" * 64)
-    call = {
+    call: dict[str, object] = {
         "call_id": "opaque-parent" if opaque else "native-call",
         "name": "exec" if opaque else "mcp__agents_remember_task__knowledge_read",
         "server": None if opaque else "agents-remember-task",

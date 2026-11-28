@@ -60,6 +60,7 @@ class LeafDocumentUnresolved(ValueError):
 def strict_leaf_doc(task_root: Path, leaf_id: str) -> tuple[Path, TaskDocument] | None:
     """The leaf's one task document, ``None`` when it has none, or :class:`LeafDocumentUnresolved`."""
 
+    opened: dict[str, str] = {}
     try:
         with recorded_reads() as opened:
             paths = observed_json_files(task_root)

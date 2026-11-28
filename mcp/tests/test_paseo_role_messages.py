@@ -1284,14 +1284,18 @@ class RoleMessageTests(RoleToolsTestCase):
 
     def test_a_wait_that_times_out_leaves_the_message_delivered(self) -> None:
         _request, worker = self.started(status="idle")
-        cases = {
-            "the default": ({}, 300),
-            "the caller's": ({"timeout_seconds": 50}, 50),
-            "the maximum": ({"timeout_seconds": 5000}, 1800),
-        }
-        for label, (call, seconds) in cases.items():
+        cases: list[tuple[str, int | None, int]] = [
+            ("the default", None, 300),
+            ("the caller's", 50, 50),
+            ("the maximum", 5000, 1800),
+        ]
+        for label, timeout_seconds, seconds in cases:
             with self.subTest(label):
-                result = self.message_with([], worker, **call)
+                result = (
+                    self.message_with([], worker)
+                    if timeout_seconds is None
+                    else self.message_with([], worker, timeout_seconds=timeout_seconds)
+                )
 
                 self.assertEqual((result["ok"], result["status"]), (True, "timeout"))
                 self.assertEqual(result["waitedSeconds"], seconds)

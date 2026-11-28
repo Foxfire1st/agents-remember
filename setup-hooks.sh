@@ -10,8 +10,7 @@
 # tiers:
 #
 #   pre-commit -> fast tier: certifies the STAGED content with the generated-copy
-#                 checks, ruff, `ruff format --check`, and Pyright. About 20
-#                 seconds.
+#                 checks, ruff, `ruff format --check`, and Pyrefly.
 #   pre-push   -> targeted tier: records Git's ref-update stream, then repeats the
 #                 deterministic non-test checks over current-checkout bytes. It does
 #                 not stage, run acceptance, or claim to certify the pushed tree.

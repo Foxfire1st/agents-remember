@@ -34,8 +34,8 @@ def write_quality_config(root: Path) -> None:
             (
                 "[tool.ruff]",
                 "line-length = 100",
-                "[tool.pyright]",
-                'include = ["."]',
+                "[tool.pyrefly]",
+                'project-includes = ["."]',
                 "[tool.radon]",
                 'cc_min = "B"',
                 "[tool.coverage.run]",

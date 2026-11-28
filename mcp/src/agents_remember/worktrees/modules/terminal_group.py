@@ -201,7 +201,7 @@ def _refused(path: Path, reason: str) -> dict[str, object]:
 def legacy_series_directories(contract: WorktreeContract, *, dry_run: bool) -> TerminalItems:
     group = contract.worktree_group
     reports = group / ENCLOSURE_REPORTS_DIRECTORY
-    row = (
+    row: dict[str, object] = (
         {
             "path": reports.as_posix(),
             "removed": False,

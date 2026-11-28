@@ -229,7 +229,9 @@ def test_enclosure_reads_record_only_comparisons_and_previews(
     compared = result.payload.comparison
     assert compared.before_code_tree_id is not None
     assert compared.after_code_tree_id is not None
-    reviewed_trees = {"enclosure": (compared.before_code_tree_id, compared.after_code_tree_id)}
+    reviewed_trees: dict[str, tuple[str, ...]] = {
+        "enclosure": (compared.before_code_tree_id, compared.after_code_tree_id)
+    }
 
     # The synthetic enclosure is not an adopted seat (no task document), so the seat-bound
     # operations answer their named refusals here rather than reading. A refusal is still a
