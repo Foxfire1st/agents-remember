@@ -9,6 +9,7 @@
 //   /api/changeset/file-diff?repo&scope&kind&path  -> BEFORE + AFTER content for one changed file (MergeView a/b)
 //   /api/changeset/master?repo&master              -> the master's accumulated change-set (dedup by path, sum counts)
 import { qs } from './files';
+import type { SyntaxHighlights } from './highlights';
 import { isAbortedRead } from './abortableRead';
 import { type ReviewFailure, ReviewTransportError, reviewFailureToken } from './reviewTransport';
 import { dashboardStore } from './store';
@@ -54,6 +55,7 @@ export interface DiffSide {
   binary?: boolean;
   mediaType?: string | null;
   size?: number | null;
+  highlights?: SyntaxHighlights | null;
 }
 // `fileDiff` — BEFORE (base) + AFTER (current) content for one file: feeds CodeMirror MergeView
 // a=before, b=after. `before` is null for an added file, `after` is null for a deleted one.

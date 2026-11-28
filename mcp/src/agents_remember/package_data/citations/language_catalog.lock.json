@@ -133,7 +133,13 @@
         "separators": [
           "."
         ]
-      }
+      },
+      "highlightsQueries": [
+        {
+          "path": "python/highlights.scm",
+          "sha256": "a6708f209381618e2b398972c8f1ccd892f0c064eab35a2a3f911c3e22e79a7e"
+        }
+      ]
     },
     "typescript": {
       "providerKind": "pypi_wheel",
@@ -218,7 +224,17 @@
         "separators": [
           "."
         ]
-      }
+      },
+      "highlightsQueries": [
+        {
+          "path": "javascript/highlights.scm",
+          "sha256": "90845795f9b02ace0c4becf30970b319a347d318d07d7f6da15972cd04cbe5c7"
+        },
+        {
+          "path": "typescript/highlights.scm",
+          "sha256": "e0c35adb819127bfd4f853fac5419e7d8ba44760246201d04a4a5ce0228a10c5"
+        }
+      ]
     },
     "tsx": {
       "providerKind": "pypi_wheel",
@@ -297,7 +313,21 @@
         "separators": [
           "."
         ]
-      }
+      },
+      "highlightsQueries": [
+        {
+          "path": "javascript/highlights.scm",
+          "sha256": "90845795f9b02ace0c4becf30970b319a347d318d07d7f6da15972cd04cbe5c7"
+        },
+        {
+          "path": "javascript/highlights-jsx.scm",
+          "sha256": "0cad1712acaf40804bc5dc7c8476858752c1f549cdf7d8c63c747317be0f8fa6"
+        },
+        {
+          "path": "typescript/highlights.scm",
+          "sha256": "e0c35adb819127bfd4f853fac5419e7d8ba44760246201d04a4a5ce0228a10c5"
+        }
+      ]
     },
     "javascript": {
       "providerKind": "pypi_wheel",
@@ -389,7 +419,17 @@
         "separators": [
           "."
         ]
-      }
+      },
+      "highlightsQueries": [
+        {
+          "path": "javascript/highlights.scm",
+          "sha256": "90845795f9b02ace0c4becf30970b319a347d318d07d7f6da15972cd04cbe5c7"
+        },
+        {
+          "path": "javascript/highlights-jsx.scm",
+          "sha256": "0cad1712acaf40804bc5dc7c8476858752c1f549cdf7d8c63c747317be0f8fa6"
+        }
+      ]
     },
     "lean": {
       "providerKind": "builtin_lean",
@@ -460,6 +500,12 @@
           "url": "https://files.pythonhosted.org/packages/e2/9d/7475d9ae8ef679aa36c7dfe6c903ab78e573651c68b6ef9862d6a3f994db/tree_sitter_c-0.24.2-cp310-abi3-win_arm64.whl",
           "sha256": "4a2f4371cd816cc3153458f69062135ebb2ea5f275ddd90494e5c823d778204a"
         }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "c/highlights.scm",
+          "sha256": "3378d854dda695b2b282b9468247524ed4271ef74af691033d2e36883379409c"
+        }
       ]
     },
     "cpp": {
@@ -525,6 +571,16 @@
           "filename": "tree_sitter_cpp-0.23.4-cp39-abi3-win_arm64.whl",
           "url": "https://files.pythonhosted.org/packages/d4/6a/65435d4d1f4c735be7ffe52d7c2e7b8a7f7c2790343a2719c60c548611c8/tree_sitter_cpp-0.23.4-cp39-abi3-win_arm64.whl",
           "sha256": "712f84f18be94cbe2a148fa4fdf40fcf4a8c25a8f7670efb9f8a47ddec2fc281"
+        }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "c/highlights.scm",
+          "sha256": "3378d854dda695b2b282b9468247524ed4271ef74af691033d2e36883379409c"
+        },
+        {
+          "path": "cpp/highlights.scm",
+          "sha256": "52136576a9a9dacd9e95a8de0f351689bf46140738572ab4e9f24c9278e6b458"
         }
       ]
     },
@@ -592,6 +648,12 @@
           "url": "https://files.pythonhosted.org/packages/b9/d8/050a781172745bc345f98abb7c56e72022ea0790f8e793de981c83c2ef15/tree_sitter_rust-0.24.2-cp39-abi3-win_arm64.whl",
           "sha256": "66ba90f61bd54f4c4f5d30434957daf64507c16b0313df76becb37d63f70a227"
         }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "rust/highlights.scm",
+          "sha256": "0f0343107f14a7690157f51090a979eb8f8bfe4eada7c61763ddb4c54b1311d1"
+        }
       ]
     },
     "zig": {
@@ -650,6 +712,12 @@
           "filename": "tree_sitter_zig-1.1.2-cp39-abi3-win_arm64.whl",
           "url": "https://files.pythonhosted.org/packages/34/8d/c0a481cc7bba9d39c533dd3098463854b5d3c4e6134496d9d83cd1331e51/tree_sitter_zig-1.1.2-cp39-abi3-win_arm64.whl",
           "sha256": "88152ebeaeca1431a6fc943a8b391fee6f6a8058f17435015135157735061ddf"
+        }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "zig/highlights.scm",
+          "sha256": "27a7ffc77086ec6394c04e59b42f0da4c9d3c294a0225bc155c80305ee54ca86"
         }
       ]
     },
@@ -715,6 +783,12 @@
           "url": "https://files.pythonhosted.org/packages/9e/00/9a2638e7339236f5b01622952a4d71c1474dd3783d1982a89555fc1f03b1/tree_sitter_go-0.25.0-cp310-abi3-win_arm64.whl",
           "sha256": "d5d62362059bf79997340773d47cc7e7e002883b527a05cca829c46e40b70ded"
         }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "go/highlights.scm",
+          "sha256": "81182c986547eba7fa6316e82dfd621fb13b8fc89efac85432aee51a48ed0896"
+        }
       ]
     },
     "java": {
@@ -773,6 +847,12 @@
           "filename": "tree_sitter_java-0.23.5-cp39-abi3-win_arm64.whl",
           "url": "https://files.pythonhosted.org/packages/72/57/5bab54d23179350356515526fff3cc0f3ac23bfbc1a1d518a15978d4880e/tree_sitter_java-0.23.5-cp39-abi3-win_arm64.whl",
           "sha256": "402efe136104c5603b429dc26c7e75ae14faaca54cfd319ecc41c8f2534750f4"
+        }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "java/highlights.scm",
+          "sha256": "576c0df8df0b116cd642140ddc508c01f9d3283582afd8581c1f35caf4d71386"
         }
       ]
     },
@@ -838,6 +918,12 @@
           "url": "https://files.pythonhosted.org/packages/27/14/7fcc1a4f992a3d744ab313b78b7e210e3479ba80bf08a6cf820886d547b4/tree_sitter_c_sharp-0.24.0-cp310-abi3-win_arm64.whl",
           "sha256": "05829baca840b058071c4af073932f87c212c56902ff93a6591f0c9cb45e25ca"
         }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "csharp/highlights.scm",
+          "sha256": "e144841a76537c2aa4520ecc90ca95daebfc586d400913f706bd56aa542ba313"
+        }
       ]
     },
     "kotlin": {
@@ -897,6 +983,12 @@
           "filename": "tree_sitter_kotlin-1.1.0-cp39-abi3-win_arm64.whl",
           "url": "https://files.pythonhosted.org/packages/fb/b9/12fa97f63d2b7517c6f5d16938f0c5bfe84d925c652c75ff1c5e29bf6a44/tree_sitter_kotlin-1.1.0-cp39-abi3-win_arm64.whl",
           "sha256": "e030f127a7d07952907adb9070248bd42fb86dc76fd92744727551b50e131ee7"
+        }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "kotlin/highlights.scm",
+          "sha256": "600a3dbe690c2f287640f8285fa0986c4f7ff37db91819f3b81b4e01d71daa6b"
         }
       ]
     },
@@ -963,6 +1055,12 @@
           "filename": "tree_sitter_swift-0.7.4-cp38-abi3-win_arm64.whl",
           "url": "https://files.pythonhosted.org/packages/70/b0/7582b73528301e4aad3a5c786bf1d10622ec45f8d9676cf0c95c4a699b6e/tree_sitter_swift-0.7.4-cp38-abi3-win_arm64.whl",
           "sha256": "3d532f3f735e40c0cb84c101dcb43e04e25ab39e5bf6803ea2344a7e45b0cff3"
+        }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "swift/highlights.scm",
+          "sha256": "d596694dbd96e036cc5392cae707845e445740618983bfc9571c3ac897410dd0"
         }
       ]
     },
@@ -1038,6 +1136,12 @@
           "url": "https://files.pythonhosted.org/packages/71/5c/a2e068ad4b2c4ba9b774a88b24149168d3bcd94f58b964e49dcabfe5fd24/tree_sitter_ruby-0.23.1-cp39-abi3-win_arm64.whl",
           "sha256": "ed042007e89f2cceeb1cbdd8b0caa68af1e2ce54c7eb2053ace760f90657ac9f"
         }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "ruby/highlights.scm",
+          "sha256": "0b387c280ed9bd486309950f4ee36dda64bec729d4338f6a0b924c300d092c05"
+        }
       ]
     },
     "php": {
@@ -1105,6 +1209,12 @@
           "filename": "tree_sitter_php-0.25.2-cp310-abi3-win_arm64.whl",
           "url": "https://files.pythonhosted.org/packages/bc/f8/9af66ee571969f6d166c6af86276e10d30cc09eb56906ce3c0d20de830a2/tree_sitter_php-0.25.2-cp310-abi3-win_arm64.whl",
           "sha256": "f8e6904ecc51d62d5424fa6167356574d1faec6717ea4dbd9894873335b8a4d6"
+        }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "php/highlights.scm",
+          "sha256": "a2a7367659cff3b4be09961c8117d69a9b8703bfc266f8092e089b1760f197e9"
         }
       ]
     },
@@ -1174,6 +1284,12 @@
           "url": "https://files.pythonhosted.org/packages/47/75/4ca1a9fabd8fb5aea78cea70f7837ce4dbf2afae115f62051e5fa99cba1c/tree_sitter_bash-0.25.1-cp310-abi3-win_arm64.whl",
           "sha256": "59115057ec2bae319e8082ff29559861045002964c3431ccb0fc92aa4bc9bccb"
         }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "bash/highlights.scm",
+          "sha256": "b74220d954f485b7626d2b2b61f37b522e12eb1830803e388e57dd797dc99f11"
+        }
       ]
     },
     "elixir": {
@@ -1241,6 +1357,12 @@
           "url": "https://files.pythonhosted.org/packages/77/f2/711baae88f98e3a30efee9383fbcb603a3188c20941643c71d3d3b936d66/tree_sitter_elixir-0.3.5-cp39-abi3-win_arm64.whl",
           "sha256": "fee42b90962e1e131cc31720f3038410291b2196ed231e00c1721597fc0567df"
         }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "elixir/highlights.scm",
+          "sha256": "5ee9952a99ce2f0c3dcdf4478daf38f259dd8df4e7f9a892e9f1c03ccdf61ea6"
+        }
       ]
     },
     "sql": {
@@ -1307,6 +1429,12 @@
           "url": "https://files.pythonhosted.org/packages/67/9b/dedc8ca28727b53fd801c393b660db4d02a87c69f5997f0620acc2263166/tree_sitter_sql-0.3.13-cp310-abi3-win_arm64.whl",
           "sha256": "8d401fe5ccb108670e0165313ce63e6b54bcd916e42a3c53b6b6f2b67772ec6b"
         }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "sql/highlights.scm",
+          "sha256": "ae19313e5df8d7f8f38482b09de63fc3ffb1fbc32f6d5c0b7abe48dc2c894b38"
+        }
       ]
     },
     "hcl": {
@@ -1367,6 +1495,12 @@
           "filename": "tree_sitter_hcl-1.2.0-cp310-abi3-win_arm64.whl",
           "url": "https://files.pythonhosted.org/packages/be/de/e8dbfe36c70954dac62da4ca9a2fcff067eb097b48bd4b55fc836b2efd81/tree_sitter_hcl-1.2.0-cp310-abi3-win_arm64.whl",
           "sha256": "689425894a69423301e0e05faff472317e7ab4013767bce4a33b9234778c275e"
+        }
+      ],
+      "highlightsQueries": [
+        {
+          "path": "hcl/highlights.scm",
+          "sha256": "2c9b7b7844827a76930efd3928ff0f147c2a340c6af7418d183f4efab80deca5"
         }
       ]
     },
@@ -2515,5 +2649,144 @@
         "separators": []
       }
     }
+  },
+  "highlightLanguages": {
+    "json": {
+      "providerKind": "language_pack",
+      "packLanguage": "json",
+      "suffixes": [
+        ".json",
+        ".jsonc"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "highlightsQueries": [
+        {
+          "path": "json/highlights.scm",
+          "sha256": "889ea68834ad4c9de72cbe9f47c70e4421588043104c778677acbb719bbcbe96"
+        }
+      ]
+    },
+    "css": {
+      "providerKind": "language_pack",
+      "packLanguage": "css",
+      "suffixes": [
+        ".css"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "highlightsQueries": [
+        {
+          "path": "css/highlights.scm",
+          "sha256": "bfd3d4b36cc4125041dd4fce93704b0c57813e106791d48d3fcd68418911d030"
+        }
+      ]
+    },
+    "scss": {
+      "providerKind": "language_pack",
+      "packLanguage": "scss",
+      "suffixes": [
+        ".scss"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "highlightsQueries": [
+        {
+          "path": "scss/highlights.scm",
+          "sha256": "cf6969a9940084f2ce1512b9634ccdd8657050874d6f4dcfc80858a42b373f6a"
+        }
+      ]
+    },
+    "html": {
+      "providerKind": "language_pack",
+      "packLanguage": "html",
+      "suffixes": [
+        ".html",
+        ".htm"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "highlightsQueries": [
+        {
+          "path": "html/highlights.scm",
+          "sha256": "27c978cfdd230b362e23b39ecc639e3fb4625cc5def499f6ae7914477238ddd7"
+        }
+      ]
+    },
+    "xml": {
+      "providerKind": "language_pack",
+      "packLanguage": "xml",
+      "suffixes": [
+        ".xml",
+        ".svg"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "highlightsQueries": [
+        {
+          "path": "xml/highlights.scm",
+          "sha256": "76a9122763d9a0de36564b25b9d6ef6c7bb1b90bb81d4fc633c9ba080f32aa16"
+        }
+      ]
+    },
+    "markdown": {
+      "providerKind": "language_pack",
+      "packLanguage": "markdown",
+      "suffixes": [
+        ".md",
+        ".markdown"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "highlightsQueries": [
+        {
+          "path": "markdown/highlights.scm",
+          "sha256": "a964668949c5abf2592e4d46a7d7f4663e82754224f42866c9a28d29925b7af3"
+        }
+      ]
+    },
+    "toml": {
+      "providerKind": "language_pack",
+      "packLanguage": "toml",
+      "suffixes": [
+        ".toml"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "highlightsQueries": [
+        {
+          "path": "toml/highlights.scm",
+          "sha256": "aca4b68586badd9f637c1062bd7dbed3815d2cc12745c0dd88b27110604728d1"
+        }
+      ]
+    },
+    "ini": {
+      "providerKind": "language_pack",
+      "packLanguage": "ini",
+      "suffixes": [
+        ".ini",
+        ".cfg"
+      ],
+      "filenames": [],
+      "shebangs": [],
+      "highlightsQueries": [
+        {
+          "path": "ini/highlights.scm",
+          "sha256": "355b77b7eb5365a81e8d400b8dc6ab88103d4891d6113fc64ecace00dcb131b8"
+        }
+      ]
+    },
+    "yaml": {
+      "providerKind": "display_only",
+      "suffixes": [
+        ".yaml",
+        ".yml"
+      ],
+      "filenames": [],
+      "shebangs": []
+    }
+  },
+  "displaySuffixes": {
+    ".pyi": "python"
   }
 }

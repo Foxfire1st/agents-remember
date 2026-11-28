@@ -38,6 +38,8 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from agents_remember.models.highlights import SyntaxHighlights
+
 __all__ = [
     "ACTION_RESPONSES",
     "CHANGESET_READ_RESPONSES",
@@ -283,6 +285,7 @@ class FileContents(WireResponse):
     # the bytes route's bound the viewer states the size instead of requesting it.
     media_type: str | None = None
     too_large: bool = False
+    highlights: SyntaxHighlights | None = None
     onboarding: OnboardingMeta
 
 
@@ -421,6 +424,7 @@ class NoteContents(WireResponse):
     # the viewer states the size instead of requesting it.
     media_type: str | None = None
     too_large: bool = False
+    highlights: SyntaxHighlights | None = None
 
 
 class TaskReportRow(WireResponse):
@@ -628,6 +632,7 @@ class DiffSide(WireResponse):
     binary: bool = False
     media_type: str | None = None
     size: int | None = None
+    highlights: SyntaxHighlights | None = None
 
 
 class FileDiff(WireResponse):

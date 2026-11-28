@@ -46,8 +46,10 @@ from typing import Literal
 
 from pydantic import Field
 
+from agents_remember.models.highlights import SyntaxHighlights
 from agents_remember.models.knowledge.base import (
     GIT_OBJECT_PATTERN,
+    LABEL_MAX_LENGTH,
     PATH_MAX_LENGTH,
     PROSE_MAX_LENGTH,
     REFERENCE_MAX_LENGTH,
@@ -83,6 +85,8 @@ class ReviewTreeEntrySide(KnowledgeModel):
     content: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     excerpt: str | None = Field(default=None, max_length=EXCERPT_MAX_CHARACTERS)
     excerpt_truncated: bool = False
+    language: str | None = Field(default=None, min_length=1, max_length=LABEL_MAX_LENGTH)
+    highlights: SyntaxHighlights | None = None
     reason: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
     role: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     facet: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)

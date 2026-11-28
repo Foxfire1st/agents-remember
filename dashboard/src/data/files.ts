@@ -10,6 +10,7 @@
 import { fetchWithTimeout } from "./fetchWithTimeout";
 import { shareInflight } from "./inflight";
 import { abortedRead } from "./abortableRead";
+import type { SyntaxHighlights } from "./highlights";
 
 export type Scope = string; // "mainline" | a worktree-group basename
 
@@ -60,6 +61,7 @@ export interface FileContent {
   // states the serving layer's measured refusal before any bytes are requested.
   mediaType?: string | null;
   tooLarge?: boolean;
+  highlights?: SyntaxHighlights | null;
   onboarding: OnboardingMeta;
 }
 

@@ -13,6 +13,7 @@
 // the part of the view it affects -- never rendered as an empty result.
 
 import { fetchWithTimeout } from './fetchWithTimeout';
+import type { SyntaxHighlights } from './highlights';
 
 export const KNOWLEDGE_HASH = '#knowledge';
 export const READER_TIMEOUT_MS = 120_000;
@@ -410,6 +411,7 @@ export interface CodeAnswer extends ReaderAnswer {
   blob?: string;
   language?: string;
   text?: string;
+  highlights?: SyntaxHighlights | null;
   // A picture or video at the code tree: drawn from the reader's bytes route with its type and
   // measured size instead of being decoded as text.
   mediaType?: string;

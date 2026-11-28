@@ -64,6 +64,7 @@ from agents_remember.serving.scope import (
     _iter_active_contracts,
     _resolve_within,
     decode_capped,
+    highlights_wire_for,
     language_for,
     run_scoped,
     run_scoped_response,
@@ -178,7 +179,7 @@ def list_dir(scope: FileScope, rel_dir: str) -> dict[str, Any]:
     code = _list_children(scope.code_root, code_base)
     for entry in code:
         if entry["kind"] == "file":
-            entry["language"] = language_for(Path(entry["name"]))
+            entry["language"] = language_for(Path(entry["name"]), repo_root=scope.code_root)
             entry["hasSidecar"] = (
                 scope.onboarding_root is not None
                 and route_sidecar_status(scope.onboarding_root, entry["path"]) == "present"
@@ -219,6 +220,7 @@ def read_file(scope: FileScope, rel: str) -> dict[str, Any]:
             "content": "",
             "mediaType": media_type,
             "tooLarge": size > MEDIA_BYTE_LIMIT,
+            "highlights": None,
             "onboarding": _onboarding_meta(scope, rel_posix),
         }
     raw = src.read_bytes()
@@ -230,7 +232,7 @@ def read_file(scope: FileScope, rel: str) -> dict[str, Any]:
     else:
         try:
             content, truncated = decode_capped(raw, _MAX_FILE_BYTES)
-            language = language_for(src)
+            language = language_for(src, repo_root=scope.code_root)
         except UnicodeDecodeError:
             content, language = "", "binary"
     return {
@@ -243,6 +245,9 @@ def read_file(scope: FileScope, rel: str) -> dict[str, Any]:
         # A suffix outside the fixed media table has no bytes route; it stays a text or binary read.
         "mediaType": None,
         "tooLarge": False,
+        "highlights": highlights_wire_for(
+            src, content, language=language, repo_root=scope.code_root
+        ),
         "onboarding": _onboarding_meta(scope, rel_posix),
     }
 
@@ -267,7 +272,9 @@ def resolve_file_path(scope: FileScope, rel: str) -> dict[str, Any]:
         "kind": "file",
         "path": resolved,
         # A picture or video is not source text; the suffix's media type is what draws it.
-        "language": "binary" if media_type is not None else language_for(src),
+        "language": (
+            "binary" if media_type is not None else language_for(src, repo_root=scope.code_root)
+        ),
         "mediaType": media_type,
     }
 

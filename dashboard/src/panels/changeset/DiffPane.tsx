@@ -1,19 +1,19 @@
-// Read-only before/after diff pane (L4) — the one genuinely new CodeMirror primitive. It reuses
-// FilePane's exact extension set + codeTheme + langExtension, so tokens are identical across the
-// plain code pane and the diff. `split` = @codemirror/merge MergeView (a=before, b=after, side by
-// side); `inline` = unifiedMergeView over a single EditorView (doc=after) with the changes marked
-// in place. Both are read-only: the editors are readOnly/non-editable and no revert/merge controls
-// are shown. Built imperatively in an effect, torn down on unmount / prop change (disposed guard
-// against a late async language resolve).
+// Read-only before/after diff pane — shares FilePane's codeTheme and server-computed tree-sitter
+// highlight decorations, so tokens stay identical across plain and diff views. `split` =
+// @codemirror/merge MergeView (a=before, b=after, side by side) with independent per-side highlight
+// Compartments; `inline` = unifiedMergeView over a single EditorView (doc=after) with changes marked
+// in place. Both are read-only and built synchronously in an effect, with highlight updates
+// reconfigured in place by digest so unchanged polls retain the mounted DOM node (INV-QK8XNM).
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin } from "@codemirror/view";
 
 import { css } from "../../../styled-system/css";
+import type { SyntaxHighlights } from "../../data/highlights";
 import { codeTheme } from "../file-viewer/codemirrorTheme";
 import { numberedFrom } from "../file-viewer/lineNumbering";
-import { langExtension } from "../file-viewer/langByExtension";
+import { highlightDigest, serverHighlightsExtension } from "../file-viewer/serverHighlights";
 import {
   type DrawnEditors,
   type MarkedPane,
@@ -167,11 +167,13 @@ const foldKeys = ViewPlugin.fromClass(
 );
 
 // What both builders below share: the two documents, where each starts in its file, the common
-// read-only extensions and the collapse setting, plus the pane's mark gutters.
+// read-only extensions and the collapse setting, plus the pane's mark gutters and per-side highlights.
 interface DiffBuild {
   parent: HTMLElement;
   before: string;
   after: string;
+  beforeHighlights?: SyntaxHighlights | null;
+  afterHighlights?: SyntaxHighlights | null;
   beforeFirst: number;
   afterFirst: number;
   common: Extension[];
@@ -179,25 +181,50 @@ interface DiffBuild {
   marked: Pick<MarkedPane, "gutterFor" | "drawn">;
 }
 
-// A built pane: its editors, and each editor's mark gutter in a compartment of its own, so that a
-// change of the marks can be drawn into the same editors.
+// A built pane: its editors, each editor's mark gutter compartment, and per-side highlight
+// compartments so highlights reconfigure in place without rebuilding the MergeView.
 interface Built {
   destroy: () => void;
   editors: DrawnEditors;
   gutters: { view: EditorView; side: MarkSide; first: number; slot: Compartment }[];
+  highlights: { view: EditorView; side: "before" | "after"; slot: Compartment }[];
 }
 
 function splitView(build: DiffBuild): Built {
-  const { parent, before, after, beforeFirst, afterFirst, common, collapseUnchanged, marked } = build;
+  const {
+    parent,
+    before,
+    after,
+    beforeHighlights,
+    afterHighlights,
+    beforeFirst,
+    afterFirst,
+    common,
+    collapseUnchanged,
+    marked,
+  } = build;
   const slots = { before: new Compartment(), after: new Compartment() };
+  const hlSlots = { before: new Compartment(), after: new Compartment() };
+  const beforeLen = EditorState.create({ doc: before }).doc.length;
+  const afterLen = EditorState.create({ doc: after }).doc.length;
   const merge = new MergeView({
     a: {
       doc: before,
-      extensions: [slots.before.of(marked.gutterFor("before", beforeFirst)), numberedFrom(beforeFirst), ...common],
+      extensions: [
+        slots.before.of(marked.gutterFor("before", beforeFirst)),
+        hlSlots.before.of(serverHighlightsExtension(beforeHighlights, beforeLen)),
+        numberedFrom(beforeFirst),
+        ...common,
+      ],
     },
     b: {
       doc: after,
-      extensions: [slots.after.of(marked.gutterFor("after", afterFirst)), numberedFrom(afterFirst), ...common],
+      extensions: [
+        slots.after.of(marked.gutterFor("after", afterFirst)),
+        hlSlots.after.of(serverHighlightsExtension(afterHighlights, afterLen)),
+        numberedFrom(afterFirst),
+        ...common,
+      ],
     },
     parent,
     gutter: true,
@@ -216,18 +243,25 @@ function splitView(build: DiffBuild): Built {
       { view: merge.a, side: "before", first: beforeFirst, slot: slots.before },
       { view: merge.b, side: "after", first: afterFirst, slot: slots.after },
     ],
+    highlights: [
+      { view: merge.a, side: "before", slot: hlSlots.before },
+      { view: merge.b, side: "after", slot: hlSlots.after },
+    ],
   };
 }
 
 function inlineView(build: DiffBuild): Built {
-  const { parent, before, after, afterFirst, common, collapseUnchanged, marked } = build;
+  const { parent, before, after, afterHighlights, afterFirst, common, collapseUnchanged, marked } = build;
   const slot = new Compartment();
+  const hlSlot = new Compartment();
+  const afterLen = EditorState.create({ doc: after }).doc.length;
   const view = new EditorView({
     parent,
     state: EditorState.create({
       doc: after,
       extensions: [
         slot.of(marked.gutterFor("after", afterFirst)),
+        hlSlot.of(serverHighlightsExtension(afterHighlights, afterLen)),
         unifiedMergeView({
           original: before,
           mergeControls: false, // read-only: no accept/reject chips
@@ -241,21 +275,19 @@ function inlineView(build: DiffBuild): Built {
   });
   const editors = { after: { view, first: afterFirst } };
   marked.drawn(editors);
-  return { destroy: () => view.destroy(), editors, gutters: [{ view, side: "after", first: afterFirst, slot }] };
+  return {
+    destroy: () => view.destroy(),
+    editors,
+    gutters: [{ view, side: "after", first: afterFirst, slot }],
+    highlights: [{ view, side: "after", slot: hlSlot }],
+  };
 }
 
-export function DiffPane({
-  before,
-  after,
-  language,
-  mode,
-  collapse = true,
-  firstLine,
-  fit = false,
-  marks,
-}: {
+interface DiffPaneProps {
   before: string;
   after: string;
+  beforeHighlights?: SyntaxHighlights | null;
+  afterHighlights?: SyntaxHighlights | null;
   language: string;
   mode: DiffMode;
   // change-set view collapses unchanged regions; full-file (highlighted) view shows everything.
@@ -265,59 +297,77 @@ export function DiffPane({
   fit?: boolean;
   // Marks on file lines (the reviewer's per-hunk intent markers); absent = no mark gutter at all.
   marks?: PaneMarks;
-}) {
+}
+
+function commonExtensions(collapse: boolean): Extension[] {
+  const common: Extension[] = [
+    EditorState.readOnly.of(true),
+    EditorView.editable.of(false),
+    EditorView.lineWrapping,
+    codeTheme,
+  ];
+  if (collapse) common.push(foldKeys);
+  return common;
+}
+
+export function DiffPane({
+  before,
+  after,
+  beforeHighlights,
+  afterHighlights,
+  language: _language,
+  mode,
+  collapse = true,
+  firstLine,
+  fit = false,
+  marks,
+}: DiffPaneProps) {
   const beforeFirst = firstLine?.before ?? 1;
   const afterFirst = firstLine?.after ?? 1;
   const ref = useRef<HTMLDivElement>(null);
   const { portals, placement, gutterFor, drawn } = useMarkedPane(marks);
-  // The marks' gutter and the pane's report of its editors as of the last render: a build reads them
-  // once its language pack has resolved.
   const marking = useRef({ gutterFor, drawn });
+  const latestHighlights = useRef({ before: beforeHighlights, after: afterHighlights });
   useLayoutEffect(() => {
     marking.current = { gutterFor, drawn };
+    latestHighlights.current = { before: beforeHighlights, after: afterHighlights };
   });
   const built = useRef<Built | null>(null);
-  // A fitted pane (the review page) draws a change of its marks into the same editors (below);
-  // elsewhere a change of the marks builds the pane again.
   const rebuildOn = fit ? "" : placement;
+  const beforeDigest = highlightDigest(beforeHighlights);
+  const afterDigest = highlightDigest(afterHighlights);
 
   useEffect(() => {
     const parent = ref.current;
     if (!parent) return;
-    let disposed = false;
-
-    // Language packs are async (code-split); guard against a late resolve after teardown.
-    void langExtension(language).then((lang) => {
-      if (disposed || !parent) return;
-      const common: Extension[] = [
-        EditorState.readOnly.of(true),
-        EditorView.editable.of(false),
-        EditorView.lineWrapping,
-        codeTheme,
-      ];
-      if (lang) common.push(lang);
-      if (collapse) common.push(foldKeys);
-      const build: DiffBuild = {
-        parent,
-        before,
-        after,
-        beforeFirst,
-        afterFirst,
-        common,
-        collapseUnchanged: collapse ? { margin: 3 } : undefined,
-        marked: marking.current,
-      };
-      built.current = mode === "split" ? splitView(build) : inlineView(build);
-    });
-
+    const build: DiffBuild = {
+      parent,
+      before,
+      after,
+      beforeHighlights: latestHighlights.current.before,
+      afterHighlights: latestHighlights.current.after,
+      beforeFirst,
+      afterFirst,
+      common: commonExtensions(collapse),
+      collapseUnchanged: collapse ? { margin: 3 } : undefined,
+      marked: marking.current,
+    };
+    built.current = mode === "split" ? splitView(build) : inlineView(build);
     return () => {
-      disposed = true;
       marking.current.drawn(null);
       built.current?.destroy();
       built.current = null;
     };
-    // `rebuildOn` rebuilds a pane that is not fitted when a mark moves (the marks are read at build).
-  }, [before, after, language, mode, collapse, beforeFirst, afterFirst, rebuildOn]);
+  }, [before, after, mode, collapse, beforeFirst, afterFirst, rebuildOn]);
+
+  useEffect(() => {
+    const current = built.current;
+    if (!current) return;
+    for (const { view, side, slot } of current.highlights) {
+      const sideHl = side === "before" ? latestHighlights.current.before : latestHighlights.current.after;
+      view.dispatch({ effects: slot.reconfigure(serverHighlightsExtension(sideHl, view.state.doc.length)) });
+    }
+  }, [beforeDigest, afterDigest]);
 
   // A fitted pane draws its marks in place: each editor's mark gutter is configured again and nothing
   // is destroyed, so the pane keeps its drawing while its marks land (rule 9, ruling fb5d04f6; WP8 on

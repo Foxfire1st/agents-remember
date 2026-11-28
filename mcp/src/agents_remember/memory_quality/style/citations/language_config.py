@@ -44,6 +44,7 @@ _ALLOWED_CUSTOM_KEYS: Final = frozenset(
         "symbol",
         "tagsQueryPath",
         "testsQueryPath",
+        "highlightsQueryPath",
         "wrappers",
         "destructuring",
     }
@@ -67,6 +68,7 @@ class CustomLanguageSpec:
     suffixes: frozenset[str] = frozenset()
     globs: tuple[str, ...] = ()
     tests_query_path: Path | None = None
+    highlights_query_path: Path | None = None
     wrappers: frozenset[str] = frozenset()
     destructuring: DestructuringSpec = field(default_factory=DestructuringSpec)
     source: str = ""
@@ -94,6 +96,17 @@ class CustomLanguageSpec:
         except OSError as error:
             raise LanguageConfigError(
                 f"custom language {self.id!r} testsQueryPath {self.tests_query_path} could not be read: {error}"
+            ) from error
+
+    def load_highlights_query(self) -> str | None:
+        if self.highlights_query_path is None:
+            return None
+        try:
+            return self.highlights_query_path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise LanguageConfigError(
+                f"custom language {self.id!r} highlightsQueryPath {self.highlights_query_path} "
+                f"could not be read: {error}"
             ) from error
 
 
@@ -373,6 +386,12 @@ def _parse_one_custom_language(
         if tests_raw is None
         else _resolve_local_path(tests_raw, f"{scope}.testsQueryPath", source, base_dir)
     )
+    highlights_raw = entry.get("highlightsQueryPath")
+    highlights_query_path = (
+        None
+        if highlights_raw is None
+        else _resolve_local_path(highlights_raw, f"{scope}.highlightsQueryPath", source, base_dir)
+    )
     wrappers_raw = entry.get("wrappers", [])
     if not isinstance(wrappers_raw, list) or not all(
         isinstance(item, str) and item for item in wrappers_raw
@@ -386,6 +405,7 @@ def _parse_one_custom_language(
         suffixes=suffixes,
         globs=globs,
         tests_query_path=tests_query_path,
+        highlights_query_path=highlights_query_path,
         wrappers=frozenset(wrappers_raw),
         destructuring=_parse_custom_destructuring(entry.get("destructuring"), source, scope),
         source=source,

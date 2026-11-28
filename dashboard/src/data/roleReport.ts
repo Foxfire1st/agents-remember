@@ -1,4 +1,5 @@
 import type { RoleDocumentScope } from "../cockpit/roleLaunchModel";
+import type { SyntaxHighlights } from "./highlights";
 
 export interface RoleReportContent {
   path: string;
@@ -6,6 +7,7 @@ export interface RoleReportContent {
   size: number;
   truncated: boolean;
   content: string;
+  highlights?: SyntaxHighlights | null;
 }
 
 export async function readRoleReport(selection: RoleDocumentScope, requestId: string): Promise<RoleReportContent> {

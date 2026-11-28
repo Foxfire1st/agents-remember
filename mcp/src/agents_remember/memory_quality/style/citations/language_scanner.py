@@ -128,6 +128,7 @@ def build_provider_from_catalog(
         return LeanLanguageProvider(key=spec.id, suffixes=spec.suffixes, version=spec.version)
     tags_text = spec.load_tags_query(queries_root)
     tests_text = spec.load_tests_query(queries_root)
+    highlights_texts = spec.load_highlights_queries(queries_root)
 
     def _load() -> Any:
         return language_cache.ensure_catalog_language(
@@ -151,6 +152,7 @@ def build_provider_from_catalog(
         qualifiers=spec.qualifiers,
         guarantee_tier=spec.guarantee_tier,
         tests_query_text=tests_text,
+        highlights_query_texts=highlights_texts,
         anchor_spelling=spec.anchor_spelling,
     )
 
@@ -163,6 +165,7 @@ def build_provider_from_custom(
     """Create a ``TreeSitterLanguageProvider`` for one local custom language registration."""
     tags_text = spec.load_tags_query()
     tests_text = spec.load_tests_query()
+    highlights_text = spec.load_highlights_query()
     min_abi = catalog.tree_sitter.min_abi
     max_abi = catalog.tree_sitter.max_abi
 
@@ -185,6 +188,9 @@ def build_provider_from_custom(
         wrappers=spec.wrappers,
         destructuring=spec.destructuring,
         tests_query_text=tests_text,
+        highlights_query_texts=() if highlights_text is None else (highlights_text,),
+        custom_library_path=str(spec.library_path),
+        custom_symbol=spec.symbol,
     )
 
 
@@ -273,6 +279,8 @@ def _custom_artifact_paths(overrides: LanguageOverrides) -> tuple[Path, ...]:
         paths.append(spec.tags_query_path)
         if spec.tests_query_path is not None:
             paths.append(spec.tests_query_path)
+        if spec.highlights_query_path is not None:
+            paths.append(spec.highlights_query_path)
     return tuple(paths)
 
 

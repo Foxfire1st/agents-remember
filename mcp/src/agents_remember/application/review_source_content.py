@@ -53,6 +53,7 @@ from agents_remember.kernel.git_command import (
 )
 from agents_remember.kernel.git_preparation import GitPreparationError, require_git_object_id
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.memory_quality.style.citations.highlights_service import highlight_text
 from agents_remember.models.knowledge.review import ReviewRefusal
 from agents_remember.models.knowledge.review_source_content import (
     ReviewSourceContentRequest,
@@ -259,8 +260,12 @@ def _content(
     admission = admit_source_path(config, request, resolved, inventory)
     if isinstance(admission, ReviewRefusal):
         return _refused(request.repository_id, admission)
-    before = _side_content(before_root, request.before_code_tree_id, request.path)
-    after = _side_content(after_root, request.after_code_tree_id, request.path)
+    repo_for_lang = after_root or before_root
+    language = language_for(Path(request.path), repo_root=repo_for_lang)
+    before = _side_content(
+        before_root, request.before_code_tree_id, request.path, language=language
+    )
+    after = _side_content(after_root, request.after_code_tree_id, request.path, language=language)
     currentness, currentness_detail = _currentness(request.after_code_tree_id, resolved)
     return ReviewSourceContentResult(
         state="content",
@@ -269,7 +274,7 @@ def _content(
             path=request.path,
             status=admission.status,
             mode_change=admission.mode_change,
-            language=language_for(Path(request.path)),
+            language=language,
             before=before,
             after=after,
             before_code_tree_id=request.before_code_tree_id,
@@ -348,7 +353,7 @@ class _Unreadable:
     detail: str
 
 
-def _side_content(root: Path | None, tree_id: str, path: str) -> ReviewSourceSide:
+def _side_content(root: Path | None, tree_id: str, path: str, *, language: str) -> ReviewSourceSide:
     """One bound endpoint's content at one path: its own state and, when textual, its own text.
 
     The three outcomes are kept apart deliberately. A root the resolution did not bind and a lookup
@@ -367,10 +372,10 @@ def _side_content(root: Path | None, tree_id: str, path: str) -> ReviewSourceSid
         return _unavailable(found.detail)
     if found is None:
         return ReviewSourceSide(state="absent", detail=_ABSENT_DETAIL)
-    return _entry_content(root, found)
+    return _entry_content(root, found, path=path, language=language)
 
 
-def _entry_content(root: Path, entry: _TreeEntry) -> ReviewSourceSide:
+def _entry_content(root: Path, entry: _TreeEntry, *, path: str, language: str) -> ReviewSourceSide:
     """One entry's content, classified by what the entry *is* before what its bytes happen to be."""
 
     if entry.kind == "tree" or entry.mode == _TREE_MODE:
@@ -392,10 +397,12 @@ def _entry_content(root: Path, entry: _TreeEntry) -> ReviewSourceSide:
         )
     if entry.mode == _SYMLINK_MODE:
         return _symlink_content(raw, entry)
-    return _blob_content(raw, entry)
+    return _blob_content(raw, entry, root=root, path=path, language=language)
 
 
-def _blob_content(raw: bytes, entry: _TreeEntry) -> ReviewSourceSide:
+def _blob_content(
+    raw: bytes, entry: _TreeEntry, *, root: Path, path: str, language: str
+) -> ReviewSourceSide:
     """A regular file's bytes as text, or the stated reason they cannot be carried as text."""
 
     decoded = _decoded(raw)
@@ -413,6 +420,7 @@ def _blob_content(raw: bytes, entry: _TreeEntry) -> ReviewSourceSide:
         object_id=entry.object_id,
         byte_length=len(raw),
         truncated=truncated,
+        highlights=highlight_text(path, text, language=language, repo_root=root),
         detail=_text_detail(len(raw), truncated),
     )
 

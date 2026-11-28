@@ -71,7 +71,7 @@ from agents_remember.models.knowledge_files.records import (
     WeaknessRecord,
 )
 from agents_remember.serving.media import media_type_for
-from agents_remember.serving.scope import language_for
+from agents_remember.serving.scope import highlights_wire_for, language_for
 
 __all__ = ["census_view", "code_view", "record_list", "record_view", "records_view"]
 
@@ -373,17 +373,22 @@ def code_view(
                 "blob": blob,
                 "mediaType": media_type,
                 "size": _blob_size(repository, blob),
+                "highlights": None,
             }
     read = code_text(selection, path)
     if isinstance(read, FileRead):
         return {"state": read.state, "path": path, "detail": read.detail}
     blob, text = read
+    language = language_for(Path(path), repo_root=selection.code_repository)
     document: dict[str, Any] = {
         "state": "present",
         "path": path,
         "blob": blob,
-        "language": language_for(Path(path)),
+        "language": language,
         "text": text,
+        "highlights": highlights_wire_for(
+            path, text, language=language, repo_root=selection.code_repository
+        ),
         "codeTree": None if selection.code_tree is None else selection.code_tree.to_document(),
     }
     if parsed is None:

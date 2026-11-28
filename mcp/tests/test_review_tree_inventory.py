@@ -237,11 +237,32 @@ def test_entry_inventory_matches_all_cards_without_constructing_detail(world: Wo
         assert light.line_changes == full.line_changes
         for side in ("before", "after"):
             light_side, full_side = getattr(light, side), getattr(full, side)
-            assert light_side.excerpt is light_side.rationale is light_side.facet is None
+            assert (
+                light_side.excerpt
+                is light_side.language
+                is light_side.highlights
+                is light_side.rationale
+                is light_side.facet
+                is None
+            )
             assert light_side.model_dump(
-                exclude={"excerpt", "excerpt_truncated", "rationale", "facet"}
+                exclude={
+                    "excerpt",
+                    "excerpt_truncated",
+                    "language",
+                    "highlights",
+                    "rationale",
+                    "facet",
+                }
             ) == full_side.model_dump(
-                exclude={"excerpt", "excerpt_truncated", "rationale", "facet"}
+                exclude={
+                    "excerpt",
+                    "excerpt_truncated",
+                    "language",
+                    "highlights",
+                    "rationale",
+                    "facet",
+                }
             )
 
 

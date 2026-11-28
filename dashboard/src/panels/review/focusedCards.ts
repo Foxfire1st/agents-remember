@@ -88,24 +88,3 @@ export function notCurrent(
     }),
   );
 }
-
-// The highlighting language of an excerpt, from its path's suffix (the ids data/review.ts's source
-// expansion uses; anything else is plain text). It styles the text and decides nothing.
-const SUFFIX_LANGUAGES: Record<string, string> = {
-  py: 'python',
-  ts: 'typescript',
-  tsx: 'tsx',
-  js: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  jsx: 'jsx',
-  json: 'json',
-  css: 'css',
-  html: 'html',
-  md: 'markdown',
-};
-
-export function languageOfPath(path: string): string {
-  const suffix = /\.([A-Za-z0-9]+)$/.exec(path)?.[1]?.toLowerCase() ?? '';
-  return SUFFIX_LANGUAGES[suffix] ?? 'text';
-}

@@ -59,7 +59,11 @@ from agents_remember.serving.changeset_reads import (
     master_changed_files_with_counts,
 )
 from agents_remember.serving.changeset_scheduler import _BoundedReads, _read_off_the_loop
-from agents_remember.serving.diff_side import committed_side, side_or_none, working_side
+from agents_remember.serving.diff_side import (
+    committed_side,
+    file_diff_payload,
+    working_side,
+)
 from agents_remember.serving.master_counter import (
     CounterRoute,
     CounterSource,
@@ -84,7 +88,7 @@ from agents_remember.serving.response_contract import (
     MasterChangeSet,
     TaskChangeSet,
 )
-from agents_remember.serving.scope import FileScope, language_for, run_scoped, run_scoped_response
+from agents_remember.serving.scope import FileScope, run_scoped, run_scoped_response
 from agents_remember.worktrees.task_resolver import slugify
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
@@ -143,14 +147,13 @@ def file_diff(scope: FileScope, kind: str, rel: str) -> dict[str, Any]:
     relp = confine_rel(root, rel)
     before = committed_side(root, base, relp) if base else None
     after = working_side(root / relp, relp)
-    return {
-        "scope": scope.scope_id,
-        "kind": "memory" if kind == "memory" else "code",
-        "path": relp,
-        "language": language_for(Path(relp)),
-        "before": side_or_none(before),
-        "after": side_or_none(after),
-    }
+    return file_diff_payload(
+        scope=scope.scope_id,
+        memory=kind == "memory",
+        path=relp,
+        sides=(before, after),
+        code_repo_root=scope.code_root,
+    )
 
 
 def _leaf_counts(contract: WorktreeContract, *, memory: bool) -> list[dict[str, Any]]:
@@ -404,14 +407,13 @@ def master_file_diff(config: McpRuntimeConfig, ref: MasterFileRef) -> dict[str, 
     relp = confine_rel(repo_path, ref.path)
     before = committed_side(repo_path, base, relp)
     after = committed_side(repo_path, tip, relp)
-    return {
-        "scope": ref.master,
-        "kind": "memory" if ref.kind == "memory" else "code",
-        "path": relp,
-        "language": language_for(Path(relp)),
-        "before": side_or_none(before),
-        "after": side_or_none(after),
-    }
+    return file_diff_payload(
+        scope=ref.master,
+        memory=ref.kind == "memory",
+        path=relp,
+        sides=(before, after),
+        code_repo_root=repo_path,
+    )
 
 
 def _load_leaf_contract(
@@ -635,22 +637,23 @@ def leaf_file_diff(config: McpRuntimeConfig, ref: ChangesetFileRef) -> dict[str,
     if mode == "working":
         if worktree is None or not worktree.exists():
             raise FileNotFoundError("no live worktree for the working change-set")
-        relp = confine_rel(worktree, rel)
-        before = committed_side(worktree, head_commit(worktree, "HEAD"), relp)
-        after = working_side(worktree / relp, relp)
+        repo_root = worktree
+        relp = confine_rel(repo_root, rel)
+        before = committed_side(repo_root, head_commit(repo_root, "HEAD"), relp)
+        after = working_side(repo_root / relp, relp)
     else:
         recorded = recorded_committed_range(contract, memory=memory)
-        relp = confine_rel(recorded.repository, rel)
-        before = committed_side(recorded.repository, recorded.base_commit, relp)
-        after = committed_side(recorded.repository, recorded.head_commit, relp)
-    return {
-        "scope": contract.leaf_id,
-        "kind": "memory" if memory else "code",
-        "path": relp,
-        "language": language_for(Path(relp)),
-        "before": side_or_none(before),
-        "after": side_or_none(after),
-    }
+        repo_root = recorded.repository
+        relp = confine_rel(repo_root, rel)
+        before = committed_side(repo_root, recorded.base_commit, relp)
+        after = committed_side(repo_root, recorded.head_commit, relp)
+    return file_diff_payload(
+        scope=contract.leaf_id,
+        memory=memory,
+        path=relp,
+        sides=(before, after),
+        code_repo_root=repo_root,
+    )
 
 
 def _comparison_mode_refusal(comparison: int | None, mode_present: bool) -> Response | None:

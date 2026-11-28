@@ -152,6 +152,7 @@ function noteAsFileContent(note: ArtifactContent): FileContent {
     content: note.content,
     mediaType: media ?? null,
     tooLarge: 'tooLarge' in note ? note.tooLarge : false,
+    highlights: 'highlights' in note ? note.highlights : null,
     onboarding: { status: 'missing' },
   };
 }

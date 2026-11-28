@@ -53,6 +53,8 @@ function bothPresent(before: ReviewSideContent, after: ReviewSideContent, mode: 
     <DiffPane
       before={before.text ?? ''}
       after={after.text ?? ''}
+      beforeHighlights={before.highlights}
+      afterHighlights={after.highlights}
       language={before.language}
       mode={mode}
       collapse={false}
@@ -71,6 +73,8 @@ function oneSidedDiff(before: ReviewSideContent, after: ReviewSideContent, mode:
     <DiffPane
       before={before.state === 'present' ? (before.text ?? '') : ''}
       after={after.state === 'present' ? (after.text ?? '') : ''}
+      beforeHighlights={before.state === 'present' ? before.highlights : null}
+      afterHighlights={after.state === 'present' ? after.highlights : null}
       language={present.language}
       mode={mode}
       collapse={false}
@@ -88,7 +92,7 @@ function availableContent(before: ReviewSideContent, after: ReviewSideContent) {
         no diff is drawn: the other side is not a known-empty operand, so an addition or a removal
         cannot be claimed from it.
       </p>
-      <FilePane content={present.text ?? ''} language={present.language} fit />
+      <FilePane content={present.text ?? ''} language={present.language} highlights={present.highlights} fit />
     </>
   );
 }

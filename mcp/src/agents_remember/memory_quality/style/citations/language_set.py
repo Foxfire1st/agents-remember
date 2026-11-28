@@ -105,6 +105,9 @@ class TreeSitterLanguageProvider:
     qualifiers: QualifierSpec = field(default_factory=QualifierSpec)
     guarantee_tier: str = "verified"
     tests_query_text: str | None = None
+    highlights_query_texts: tuple[str, ...] = ()
+    custom_library_path: str | None = None
+    custom_symbol: str | None = None
     filenames: frozenset[str] = frozenset()
     globs: tuple[str, ...] = ()
     shebangs: frozenset[str] = frozenset()
@@ -130,6 +133,14 @@ class TreeSitterLanguageProvider:
     @property
     def version(self) -> str:
         return self._version
+
+    @property
+    def highlight_version(self) -> str | None:
+        """Highlight cache key independent of ``EXTRACTOR_VERSION``."""
+        if not self.highlights_query_texts:
+            return None
+        joined = "\n---\n".join(self.highlights_query_texts)
+        return f"{self.grammar_version}+hl:{tags_engine.query_digest(joined)}"
 
     @property
     def is_tree_sitter(self) -> bool:

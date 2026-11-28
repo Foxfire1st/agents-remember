@@ -27,6 +27,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { qs } from './files';
+import type { SyntaxHighlights } from './highlights';
 import { useIntentEntryGeneration } from './intentEntryRevalidation';
 import {
   type ReviewFailure,
@@ -183,6 +184,8 @@ export interface ReviewTreeEntrySide {
   // the after side only (one content identity, one text).
   excerpt?: string;
   excerpt_truncated?: boolean;
+  language?: string;
+  highlights?: SyntaxHighlights | null;
   reason?: string;
   role?: string;
   facet?: string;

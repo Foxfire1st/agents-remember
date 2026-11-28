@@ -23,7 +23,6 @@ import {
   cardVoice,
   drawnText,
   firstLines,
-  languageOfPath,
   notCurrent,
   rangeLabel,
   type ExpressionCard,
@@ -583,7 +582,14 @@ function UnchangedExcerpt({ card, language, visible }: ExcerptProps) {
     <div data-review-content data-testid="review-card-excerpt" data-excerpt="unchanged">
       <HeldExcerpt marks={marksKey(marking.marks)}>
         <HeldPane>
-          <FilePane content={drawnText(after.excerpt)} language={language} firstLine={after.start_line} fit marks={marking.marks} />
+          <FilePane
+            content={drawnText(after.excerpt)}
+            language={language}
+            highlights={after.highlights}
+            firstLine={after.start_line}
+            fit
+            marks={marking.marks}
+          />
         </HeldPane>
         <Truncated side={after} />
         {marking.note}
@@ -610,6 +616,8 @@ function ChangedExcerpt({ card, language, layout, collapse, visible }: ExcerptPr
           <DiffPane
             before={drawnText(beforeText)}
             after={drawnText(afterText)}
+            beforeHighlights={before.state === 'resolved' ? before.highlights : null}
+            afterHighlights={after.state === 'resolved' ? after.highlights : null}
             language={language}
             mode={layout}
             collapse={collapse}
@@ -642,7 +650,14 @@ function SeparateSides({ card, language, visible }: ExcerptProps) {
                 {name} side text · no comparison is drawn
               </p>
               <HeldPane>
-                <FilePane content={drawnText(side.excerpt)} language={language} firstLine={side.start_line} fit marks={sideMarks(marking.marks, name)} />
+                <FilePane
+                  content={drawnText(side.excerpt)}
+                  language={side.language ?? language}
+                  highlights={side.highlights}
+                  firstLine={side.start_line}
+                  fit
+                  marks={sideMarks(marking.marks, name)}
+                />
               </HeldPane>
             </div>
           ) : null;
@@ -744,7 +759,13 @@ function BlockCard(props: BlockCardProps) {
         })}
       </ul>
       <SideLines card={card} />
-      <Excerpt card={card} language={languageOfPath(card.path)} layout={layout} collapse={collapse} visible={visible} />
+      <Excerpt
+        card={card}
+        language={card.after.language ?? card.before.language ?? 'text'}
+        layout={layout}
+        collapse={collapse}
+        visible={visible}
+      />
       <CardCurrentness card={card} />
     </article>
   );

@@ -58,6 +58,10 @@ from agents_remember.memory.knowledge_index import (
     text_uuid,
 )
 from agents_remember.memory_quality.style.citations import grammars
+from agents_remember.memory_quality.style.citations.highlights_service import (
+    highlight_text,
+    resolve_display_language,
+)
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
 from agents_remember.models.knowledge.review import ReviewRefusal
 from agents_remember.models.knowledge.review_tree_entries import (
@@ -486,11 +490,13 @@ def _in_blob(entry: Entry, trees: CodeTrees, blob: str, *, details: bool = True)
         "start_line": start,
         "end_line": end,
         "content": resolved.content,
-        **(_excerpt(trees, blob, start, end) if details else {}),
+        **(_excerpt(trees, blob, start, end, path=entry.path) if details else {}),
     }
 
 
-def _excerpt(trees: CodeTrees, blob: str, start: int, end: int) -> dict[str, Any]:
+def _excerpt(
+    trees: CodeTrees, blob: str, start: int, end: int, *, path: str | None = None
+) -> dict[str, Any]:
     """Lines ``start``..``end`` of the exact blob as text, bounded; never re-encoded."""
 
     try:
@@ -504,7 +510,15 @@ def _excerpt(trees: CodeTrees, blob: str, start: int, end: int) -> dict[str, Any
     except UnicodeDecodeError:
         return {"reason": "the range is not UTF-8 text, so no excerpt is shown"}
     truncated = len(kept) < len(lines) or len(text) > EXCERPT_MAX_CHARACTERS
-    return {"excerpt": text[:EXCERPT_MAX_CHARACTERS], "excerpt_truncated": truncated}
+    excerpt_text = text[:EXCERPT_MAX_CHARACTERS]
+    result: dict[str, Any] = {"excerpt": excerpt_text, "excerpt_truncated": truncated}
+    if path is not None:
+        language = resolve_display_language(path, repo_root=trees.repository)
+        result["language"] = language
+        result["highlights"] = highlight_text(
+            path, excerpt_text, language=language, repo_root=trees.repository
+        )
+    return result
 
 
 def _resolve(
