@@ -202,6 +202,7 @@ Agents Remember removes the folder when the enclosure's work has ended.
 | `<workspace-root>/.gitignore` | one added line | `runtime_install` |
 | the host's files (section [What the install does for the host](#what-the-install-does-for-the-host)) | Node, the host program and the host's home | the install |
 | `/var/tmp/agents-remember/` | the scratch folders outside the enclosures | `role_start` |
+| `~/.local/state/agents-remember/grammars` (or `AR_LANGUAGE_CACHE`) | hash-verified unpacked tree-sitter grammar wheels | `agents-remember languages warm` or lazy cold parse |
 | `~/projects/.agents-remember/handover-locators/<request-id>` | the handover locator: a link to the report folder of one role start, which holds the role agent's report file and its [handover](../concepts.md#handover) file, so that the path to the handover file stays short. The path lies under your home folder whatever the workspace root is. Agents Remember removes the link, and not the folder, when the time in which the role agent can be resumed ends | `role_start` |
 
 The settings file and the user settings file stand under `XDG_CONFIG_HOME` when that variable is

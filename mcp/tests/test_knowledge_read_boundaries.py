@@ -395,7 +395,7 @@ def test_an_unsupported_locator_stays_visible_while_its_blob_is_still_observed(
                         anchor_id=UUID(anchor_id),
                         path=UNPARSED_PATH,
                         source_identity=GitBlobIdentity(object_id=fixture.git_blobs[UNPARSED_PATH]),
-                        locator=SymbolLocator(language="sql", qualified_name="budget"),
+                        locator=SymbolLocator(language="dsl", qualified_name="budget"),
                     )
                 ),
                 provenance=fixture.authorship,

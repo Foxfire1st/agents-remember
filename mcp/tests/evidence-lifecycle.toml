@@ -549,6 +549,7 @@ consumers = [
   "mcp/tests/test_missing_master_tool_answers.py",
   "mcp/tests/test_models.py",
   "mcp/tests/test_moment_composer.py",
+  "mcp/tests/test_multi_language_catalog_soundness.py",
   "mcp/tests/test_native_refresh_wiring.py",
   "mcp/tests/test_native_retire.py",
   "mcp/tests/test_next_step_address_binding.py",
@@ -3100,6 +3101,7 @@ consumers = [
   "mcp/tests/test_missing_master_tool_answers.py",
   "mcp/tests/test_models.py",
   "mcp/tests/test_moment_composer.py",
+  "mcp/tests/test_multi_language_catalog_soundness.py",
   "mcp/tests/test_native_refresh_wiring.py",
   "mcp/tests/test_native_retire.py",
   "mcp/tests/test_next_step_address_binding.py",
@@ -3768,6 +3770,7 @@ consumers = [
   "mcp/tests/test_language_catalog_and_lazy_cache.py",
   "mcp/tests/test_language_set_and_tags_engine.py",
   "mcp/tests/test_lean_card_citations.py",
+  "mcp/tests/test_multi_language_catalog_soundness.py",
   "mcp/tests/test_object_presence_batches.py",
   "mcp/tests/test_reference_anchor_integration_owners.py",
   "mcp/tests/test_reference_anchor_publication_owners.py",
@@ -4358,6 +4361,24 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_memory_opt_out_refused_routes.py",
   "mcp/tests/test_memory_opt_out_refused_start.py",
+]
+
+[[artifact]]
+path = "mcp/tests/multi_language_soundness_fixtures.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "multi-language-catalog-soundness"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "table-driven positive, negative-soundness, qualifier, and pure-move fixtures for the 15 core pilot languages and 56 language-pack entries"
+introduced_by = "261112-KNO-L12"
+lifetime = "permanent"
+permanence_rationale = "Separating static multi-language fixture tables from behavior assertions keeps the test module focused and compact while covering every admitted catalog language."
+replacement_contract = "node:mcp/tests/test_multi_language_catalog_soundness.py::test_15_core_pilots_positive_binding_wrappers_and_negative_soundness"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_multi_language_catalog_soundness.py",
 ]
 
 [[artifact]]

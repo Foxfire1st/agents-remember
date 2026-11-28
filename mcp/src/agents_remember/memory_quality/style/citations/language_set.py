@@ -30,6 +30,7 @@ from agents_remember.memory_quality.style.citations import (
 from agents_remember.memory_quality.style.citations.tags_engine import (
     Binding,
     DestructuringSpec,
+    QualifierSpec,
 )
 
 LEAN: Final = "lean"
@@ -83,6 +84,9 @@ class LanguageProvider(Protocol):
     @property
     def anchor_spelling(self) -> bool: ...
 
+    @property
+    def qualifiers(self) -> QualifierSpec: ...
+
     def supports_test_cases(self, path: str) -> bool: ...
 
 
@@ -96,7 +100,10 @@ class TreeSitterLanguageProvider:
     load_language: Callable[[], Language]
     tags_query_text: str
     wrappers: frozenset[str] = frozenset()
+    leading_wrappers: frozenset[str] = frozenset()
     destructuring: DestructuringSpec = field(default_factory=DestructuringSpec)
+    qualifiers: QualifierSpec = field(default_factory=QualifierSpec)
+    guarantee_tier: str = "verified"
     tests_query_text: str | None = None
     filenames: frozenset[str] = frozenset()
     globs: tuple[str, ...] = ()
@@ -108,6 +115,16 @@ class TreeSitterLanguageProvider:
         parts = [self.grammar_version, f"tags:{tags_engine.query_digest(self.tags_query_text)}"]
         if self.tests_query_text is not None:
             parts.append(f"tests:{tags_engine.query_digest(self.tests_query_text)}")
+        if self.leading_wrappers or self.qualifiers != QualifierSpec():
+            policy_bits = [
+                f"lw={','.join(sorted(self.leading_wrappers))}",
+                f"q={','.join(self.qualifiers.separators)}",
+                *(
+                    f"qk:{sep}={','.join(sorted(kinds))}"
+                    for sep, kinds in sorted(self.qualifiers.separator_kinds.items())
+                ),
+            ]
+            parts.append(f"policy:{tags_engine.query_digest(';'.join(policy_bits))}")
         object.__setattr__(self, "_version", "+".join(parts))
 
     @property
@@ -154,6 +171,10 @@ class TreeSitterLanguageProvider:
             self.compiled_tags_query(),
             wrappers=self.wrappers,
             destructuring=self.destructuring,
+            options=tags_engine.TagExtractionOptions(
+                leading_wrappers=self.leading_wrappers,
+                tracked_kinds=self.qualifiers.tracked_kinds,
+            ),
         )
         case_entries = (
             tags_engine.extract_test_case_entries(test_calls, wrappers=self.wrappers)
@@ -174,6 +195,7 @@ class LeanLanguageProvider:
     shebangs: frozenset[str] = frozenset()
     version: str = LEAN_SCANNER_VERSION
     anchor_spelling: bool = False
+    qualifiers: QualifierSpec = field(default_factory=lambda: QualifierSpec(separators=()))
 
     @property
     def is_tree_sitter(self) -> bool:

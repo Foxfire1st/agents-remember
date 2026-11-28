@@ -18,12 +18,34 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
+from types import MappingProxyType
 
 from tree_sitter import Language, Node, Query, QueryCursor, Tree
 
 from agents_remember.memory_quality.style.citations import test_cases
 
 QUERIES_ROOT = Path(__file__).resolve().parents[3] / "package_data" / "citations" / "queries"
+
+
+@dataclass(frozen=True)
+class QualifierSpec:
+    """Declarative per-language container-qualifier policy.
+
+    ``separators`` lists language-native container separators (an empty tuple honestly refuses
+    all qualified lookups). ``separator_kinds`` optionally constrains which definition capture
+    kinds a final separator admits (for example ``#`` vs ``.`` in Ruby).
+    """
+
+    separators: tuple[str, ...] = (".",)
+    separator_kinds: Mapping[str, frozenset[str]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+
+    @property
+    def tracked_kinds(self) -> frozenset[str]:
+        if not self.separator_kinds:
+            return frozenset()
+        return frozenset().union(*self.separator_kinds.values())
 
 
 @dataclass(frozen=True)
@@ -43,6 +65,8 @@ class Binding:
     test_case: bool = False
     full_name: str | None = None
     scope_uncertain: bool = False
+    containers: tuple[str, ...] = ()
+    qualifier_kind: str = ""
 
 
 @dataclass(frozen=True)
@@ -97,16 +121,34 @@ def widened(node: Node, wrappers: frozenset[str]) -> Node:
     return node
 
 
+def widened_span(
+    node: Node,
+    wrappers: frozenset[str],
+    leading_wrappers: frozenset[str] = frozenset(),
+) -> tuple[int, int]:
+    """Span of ``node`` grown through parent ``wrappers`` and preceding ``leading_wrappers``."""
+    outer = widened(node, wrappers)
+    start, end = test_cases.span_of(outer)
+    if leading_wrappers:
+        prev = outer.prev_named_sibling
+        while prev is not None and prev.type in leading_wrappers:
+            start = prev.start_point[0] + 1
+            prev = prev.prev_named_sibling
+    return (start, end)
+
+
 @dataclass
 class _TagCollector:
     wrappers: frozenset[str]
     destructuring: DestructuringSpec
+    leading_wrappers: frozenset[str] = frozenset()
+    tracked_kinds: frozenset[str] = frozenset()
     seen: set[tuple[int, int]] = field(default_factory=set)
     entries: list[TagEntry] = field(default_factory=list)
 
     def collect_match(self, captures: Mapping[str, list[Node]]) -> None:
         definition_nodes = [
-            node
+            (capture_name.removeprefix("definition."), node)
             for capture_name, nodes in captures.items()
             if capture_name.startswith("definition.")
             for node in nodes
@@ -115,10 +157,13 @@ class _TagCollector:
         name_nodes = captures.get("name", ())
         if not definition_nodes or not name_nodes:
             return
-        for definition_node in definition_nodes:
+        containers = _extract_containers(captures.get("container", ()))
+        for capture_kind, definition_node in definition_nodes:
             binding = Binding(
-                span=test_cases.span_of(widened(definition_node, self.wrappers)),
+                span=widened_span(definition_node, self.wrappers, self.leading_wrappers),
                 declaration=test_cases.span_of(definition_node)[0],
+                containers=containers,
+                qualifier_kind=capture_kind if capture_kind in self.tracked_kinds else "",
             )
             self._append_names(definition_node, binding, name_nodes)
 
@@ -145,16 +190,42 @@ class _TagCollector:
                 )
 
 
+def _extract_containers(nodes: Sequence[Node]) -> tuple[str, ...]:
+    if not nodes:
+        return ()
+    ordered = sorted(nodes, key=lambda node: node.start_byte)
+    return tuple(
+        node.text.decode("utf-8")
+        for node in ordered
+        if not node.has_error and node.text is not None and node.text
+    )
+
+
+@dataclass(frozen=True)
+class TagExtractionOptions:
+    """Optional language policy modifiers for ``extract_tag_entries``."""
+
+    leading_wrappers: frozenset[str] = frozenset()
+    tracked_kinds: frozenset[str] = frozenset()
+
+
 def extract_tag_entries(
     tree: Tree,
     query: Query,
     *,
     wrappers: frozenset[str],
     destructuring: DestructuringSpec,
+    options: TagExtractionOptions | None = None,
 ) -> list[TagEntry]:
     """Run a standard ``tags.scm`` query and return document-ordered binding entries."""
+    opts = TagExtractionOptions() if options is None else options
     cursor = QueryCursor(query)
-    collector = _TagCollector(wrappers=wrappers, destructuring=destructuring)
+    collector = _TagCollector(
+        wrappers=wrappers,
+        destructuring=destructuring,
+        leading_wrappers=opts.leading_wrappers,
+        tracked_kinds=opts.tracked_kinds,
+    )
     for _pattern_index, captures in cursor.matches(tree.root_node):
         collector.collect_match(captures)
     return collector.entries

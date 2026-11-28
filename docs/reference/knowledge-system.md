@@ -98,12 +98,23 @@ file sidecar's own source omit the redundant path; route-sidecar anchors name a
 path. Route-index fields belong in generated `overview.index.json` caches, not in
 `overview.json`.
 
-Symbol anchors support Python, JavaScript, TypeScript, TSX and Lean. In a `.lean` file,
-a named declaration can be anchored by its name as written or by its full
-namespace-qualified name. A full-name match takes precedence. When a written
-name matches several verified declarations, use the full name. Cite a line range
-when the declaration has no name or uncertain scope makes both name forms
-unverifiable.
+Symbol anchors resolve through a hash-pinned multi-language catalog — 19 dedicated tree-sitter
+grammar pins (including Python, JavaScript, TypeScript, TSX, C, C++, Rust, Zig, Go, Java, C#,
+Kotlin, Swift, Ruby, PHP, Bash, Elixir, SQL and HCL), 56 additional `tree-sitter-language-pack`
+languages and the built-in Lean scanner — auto-detected per repository and unpacked lazily on
+demand into `AR_LANGUAGE_CACHE` (default `~/.local/state/agents-remember/grammars`) with SHA-256
+verification. Each catalog entry declares an explicit qualifier policy (`.` for dot-scoped
+languages and Go receiver methods such as `Type.Method`, `::` for Rust and C++, `#`/`.`/`::` for
+Ruby instance/singleton/module scope, `\`/`::`/`.` for PHP, and honest refusal for flat languages
+such as C and Bash or unresolved qualified names) and an honest `guaranteeTier` (`verified` or
+`best_effort`). Ambiguous suffixes (such as `.h`, `.m`, `.v` and `.scm`) stay occurrence-only by
+default and resolve once mapped in `<code-repository>/languages.json` (see
+[Language configuration](settings-json.md#language-configuration)).
+
+In a `.lean` file, a named declaration can be anchored by its name as written or by its full
+namespace-qualified name. A full-name match takes precedence. When a written name matches several
+verified declarations, use the full name. Cite a line range when the declaration has no name or
+uncertain scope makes both name forms unverifiable.
 
 A file sidecar that holds numbered references needs its Markdown card: the validator refuses a
 new sidecar with references and without the card (`R22.3-sidecar-without-markdown`). A new file <!-- docs-check: identifier: the product prints this code -->
@@ -456,11 +467,16 @@ written`. The writer undoes a write that fails part-way; when it cannot undo it 
 refusal says `write failed; rollback incomplete or unverifiable`.
 
 The [hand-off list reference](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/templates/curator-handoff-ingestion.md)
-gives every key of a hand-off list. A proof names a JavaScript or TypeScript test case as
-`<path>::<title>`. When no name reaches the case, the proof names its exact lines with a
-`line_range` locator, `{"kind": "line_range", "start": S, "end": E}`, from the first line of the
-case to the line that closes it. The writer refuses a case marked `.skip`, `.todo`, `.skipIf`, `.runIf` or
-`.fails`, on the case or on an enclosing suite, and names the modifier. An entry attaches to a
+gives every key of a hand-off list. Universal symbol anchoring resolves definitions across any
+admitted catalog or custom local language via declarative `tags.scm` queries without imposing
+test-runner semantics on non-JavaScript/TypeScript languages. Separately, for JavaScript and
+TypeScript test suites, a proof names a test case as `<path>::<title>`. When no name reaches the
+case, the proof names its exact lines with a `line_range` locator,
+`{"kind": "line_range", "start": S, "end": E}`, from the first line of the case to the line that
+closes it. For those JavaScript and TypeScript test cases only, table modifiers (`.each` and `.for`) register
+a running case that no name reaches, so it is proved by its exact lines, while the writer refuses a
+case marked `.skip`, `.todo`, `.skipIf`, `.runIf` or `.fails`, on the case or on an enclosing
+suite, and names the modifier. An entry attaches to a
 record that the same list authors by writing `handoff:<entry id>` where an ID is expected.
 `replace_evidence: true` replaces the stored hand-off evidence of a record that the task authored;
 without it, new evidence is added to the old. A `still_rejected` row can carry `repoint` to move a
@@ -499,6 +515,8 @@ the selected code/memory bindings and each operation's write authority.
 | `knowledge-format` | Canonicalize knowledge JSON; `--check` reports formatting changes without rewriting files. |
 | `knowledge-routes` | Read family routes, their state and mechanical route suggestions. A family whose routes differ from the suggestion is marked `differs`, in the text output and in the JSON output. |
 | `knowledge-index` | Build or reuse the derived index of one memory tree and print its state. The tree is a working tree (`--memory-root`) or a commit of a memory repository (`--repository` with `--revision`). A duplicate record ID gives a `partial` index that names the second file. |
+| `languages scan` | Inspect a code repository's detected languages, ambiguous suffixes and active `languages.json` overrides without downloading grammars. |
+| `languages warm` | Download, SHA-256 verify and unpack the pinned grammars detected for `--repo` (or every catalog grammar with `--all`) into `AR_LANGUAGE_CACHE`. |
 
 `knowledge-validate` with the option `--coordination-root` also lists every requirement endpoint
 of the tree with the state of its owner, beside the findings. These observations refuse nothing.

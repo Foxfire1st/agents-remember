@@ -8,7 +8,7 @@ in a file refuses the load.
 | File | Location | Holds | Read |
 | --- | --- | --- | --- |
 | Settings file | `~/.config/agents-remember/agents-remember-settings.json`, or the file that `--config` names | the two roots, the code repositories, the dashboard, the [tool log](#tool-log) and the host block `paseoRuntime` | when the tool server or a command starts; `paseoRuntime` at each use |
-| User settings file | `~/.config/agents-remember/settings.json` | the role settings under `orchestration` | at each use |
+| User settings file | `~/.config/agents-remember/settings.json` | the role settings under `orchestration` and optional defaults under `languages` | at each use |
 | Repository settings file | `<code-repository>/system/settings.json` (optional) | `orchestration` values for one code repository, laid over the user settings file | at each use |
 | Memory settings file | `<memory-root>/system/settings.json` | where the cards are stored, which source files are eligible for a card, which other repositories may be read and the landing workflow | at each resolution of a repository's context |
 
@@ -902,8 +902,69 @@ or answers `sync-commit-check-failed` while leaving the staged merge intact.
 
 ### Other top-level keys of the user settings file
 
-The loader of the role settings reads the key `orchestration` and no other. Another top-level
-key of the user settings file loads without a message.
+The loader of the role settings reads `orchestration`, and the language resolver reads optional
+user-wide defaults under `languages`. Any other top-level key of the user settings file loads
+without a message.
+
+## Language Configuration
+
+Agents Remember auto-detects source languages from its built-in hash-pinned catalog and unpacks
+needed tree-sitter grammars lazily into `AR_LANGUAGE_CACHE` (default
+`~/.local/state/agents-remember/grammars`). Pre-warm the cache for one repository or for the whole
+catalog with:
+
+```text
+agents-remember languages scan --repo /path/to/code
+agents-remember languages warm --repo /path/to/code
+agents-remember languages warm --all
+```
+
+To customize suffix or glob routing, disable or force-enable catalog languages, or register a
+local tree-sitter grammar not in the catalog, add a `languages` block to the user settings file
+(`~/.config/agents-remember/settings.json`) or create `<code-repository>/languages.json` at the
+root of a code repository. Repository settings overlay user defaults.
+
+| Key | Type | Purpose |
+| --- | --- | --- |
+| `suffixes` | object (`".ext": "<lang-id>"`) | Bind a file suffix (including ambiguous extensions such as `.h`, `.m`, `.v` or `.scm`) to an admitted catalog or custom language ID. |
+| `globs` | object (`"<glob>": "<lang-id>"`) | Bind matching repo-relative paths to a language ID; takes precedence over `suffixes`. |
+| `enable` | list of language IDs | Force-enable catalog languages even when no matching suffix is auto-detected. |
+| `disable` | list of language IDs | Opt out of catalog languages (unknown IDs are refused). |
+| `custom` | list of objects | Register local compiled tree-sitter shared libraries (`id`, `suffixes`, optional `globs`, local `libraryPath`, C export `symbol`, local `tagsQueryPath`, optional `testsQueryPath`, `wrappers`, `destructuring`). |
+
+Example `<code-repository>/languages.json` opting `.h` headers into C/C++ and registering a local
+Bend2 grammar:
+
+```json
+{
+  "suffixes": {
+    ".h": "c"
+  },
+  "globs": {
+    "include/cpp/**/*.h": "cpp"
+  },
+  "disable": ["sql"],
+  "custom": [
+    {
+      "id": "bend2",
+      "suffixes": [".bend"],
+      "libraryPath": "grammars/libtree-sitter-bend2.so",
+      "symbol": "tree_sitter_bend2",
+      "tagsQueryPath": "grammars/bend2-tags.scm"
+    }
+  ]
+}
+```
+
+Security and reservation boundaries:
+
+- **Local-only custom grammars:** `languages.json` may reference local filesystem paths only.
+  Remote URLs (`http://`, `https://`, `//`) and download keys are refused before any file is read.
+  Custom shared libraries are ABI-checked (`tree-sitter` ABI 13–15) and hashed into the extractor
+  version alongside their `tagsQueryPath`.
+- **Reserved built-in Lean:** `.lean` and the `lean` language ID are reserved for the built-in
+  Lean scanner and cannot be overridden or disabled in `languages.json`.
+- **No catalog shadowing:** custom language IDs cannot reuse an existing catalog language ID.
 
 ## Memory Repo Example
 

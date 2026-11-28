@@ -448,6 +448,29 @@ def _safe_extract_zip(payload: bytes, destination: Path, filename: str) -> None:
                     shutil.copyfileobj(src, dst)
 
 
+def _find_pack_binding(pkg_dir: Path, pack_language: str) -> Path | None:
+    bindings_dir = pkg_dir / "bindings"
+    if not bindings_dir.is_dir():
+        return None
+    matches = sorted(
+        path
+        for path in bindings_dir.iterdir()
+        if path.is_file()
+        and path.name.split(".", 1)[0] == pack_language
+        and path.suffix in {".so", ".pyd"}
+    )
+    return matches[0] if matches else None
+
+
+def _load_extension_module(synthetic_name: str, ext_path: Path) -> ModuleType:
+    ext_spec = importlib.util.spec_from_file_location(synthetic_name, ext_path)
+    if ext_spec is None or ext_spec.loader is None:
+        raise GrammarUnavailableError(f"cannot create import spec for {ext_path}")
+    module = importlib.util.module_from_spec(ext_spec)
+    ext_spec.loader.exec_module(module)
+    return module
+
+
 def _load_language_from_cache(
     spec: CatalogLanguageSpec,
     target_dir: Path,
@@ -463,9 +486,23 @@ def _load_language_from_cache(
             f"remove {target_dir} and retry `agents-remember languages warm --cache-dir {cache_root}`"
         )
     try:
-        loaded_module = _import_isolated_module(spec, target_dir, pkg_dir, module_name)
-        factory = getattr(loaded_module, symbol_name)
-        raw = factory(spec.pack_language) if spec.provider_kind == "language_pack" else factory()
+        pack_lang = spec.pack_language or spec.id
+        pack_binding = (
+            _find_pack_binding(pkg_dir, pack_lang)
+            if spec.provider_kind == "language_pack"
+            else None
+        )
+        if pack_binding is not None:
+            # Load bundled language-pack C extensions directly so optional third-party imports in
+            # the pack's __init__.py never require installing grammar packages into the MCP venv.
+            binding_mod = _load_extension_module(
+                f"_ar_grammar_cache_pack.{pack_lang}", pack_binding
+            )
+            raw = binding_mod.language()
+        else:
+            loaded_module = _import_isolated_module(spec, target_dir, pkg_dir, module_name)
+            factory = getattr(loaded_module, symbol_name)
+            raw = factory(pack_lang) if spec.provider_kind == "language_pack" else factory()
     except GrammarUnavailableError:
         raise
     except Exception as error:
@@ -499,13 +536,7 @@ def _import_isolated_module(
         if bindings:
             # Official tree-sitter wheels export PyInit__binding; using ``_binding`` as the leaf
             # module name loads the extension directly without touching sys.path or the venv.
-            synthetic = f"_ar_grammar_cache_{spec.id}._binding"
-            ext_spec = importlib.util.spec_from_file_location(synthetic, bindings[0])
-            if ext_spec is None or ext_spec.loader is None:
-                raise GrammarUnavailableError(f"cannot create import spec for {bindings[0]}")
-            module = importlib.util.module_from_spec(ext_spec)
-            ext_spec.loader.exec_module(module)
-            return module
+            return _load_extension_module(f"_ar_grammar_cache_{spec.id}._binding", bindings[0])
 
     init_py = pkg_dir / "__init__.py"
     if not init_py.is_file():
