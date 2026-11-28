@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 from agents_remember.application.review_overview_precompute import OverviewPrecompute
 from agents_remember.kernel import read_cancellation
-from agents_remember.kernel.read_cancellation import PageReads, ReadCancelled
+from agents_remember.kernel.read_cancellation import PAGE_READS, PageReads, ReadCancelled
 from agents_remember.serving import changeset_cache as cache_module
 from agents_remember.serving import review_open_observation as module
 from agents_remember.serving.changeset_cache import (
@@ -41,12 +41,14 @@ from agents_remember.serving.read_disconnect import read_while_connected
 from agents_remember.serving.review_open_observation import (
     LAST_MARK,
     OPEN_HEADER,
+    OPEN_OBSERVATIONS,
     PAGE_HEADER,
     OpenObservations,
     ReviewOpenMiddleware,
     install_review_open,
     open_stamp,
 )
+from agents_remember_test_support.testing.global_state import reset_process_mutable_state
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, wait_until
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -468,3 +470,29 @@ def test_an_open_evicted_at_capacity_or_cleared_is_released_and_one_without_a_pa
     _first_read(observations, "open-3", "page-3")
     observations.clear()
     assert reads.held() == {}, "a cleared open stayed held"
+
+
+def test_clear_and_process_state_reset_drop_opened_callback_and_page_reads() -> None:
+    """Clearing observations and resetting process state drop bound callbacks and held opens."""
+
+    called: list[tuple[str, str, str]] = []
+    try:
+        OPEN_OBSERVATIONS.bind_opened(called.append)
+        OPEN_OBSERVATIONS.clear()
+        with OPEN_OBSERVATIONS.reading("after-clear", ("repo", "master", "leaf")):
+            pass
+        assert called == [], "OPEN_OBSERVATIONS.clear() left a bound opened callback active"
+
+        OPEN_OBSERVATIONS.bind_opened(called.append)
+        PAGE_READS.hold("leaked-open")
+        reset_process_mutable_state()
+        assert PAGE_READS.held() == {}, (
+            "reset_process_mutable_state() left a held open in PAGE_READS"
+        )
+        with OPEN_OBSERVATIONS.reading("after-reset", ("repo", "master", "leaf")):
+            pass
+        assert called == [], "reset_process_mutable_state() left OPEN_OBSERVATIONS._opened bound"
+    finally:
+        OPEN_OBSERVATIONS.bind_opened(None)
+        OPEN_OBSERVATIONS.clear()
+        PAGE_READS.release("leaked-open")

@@ -157,6 +157,14 @@ class PageReads:
                 self._changed.wait(timeout)
             return not self.busy(opens=opens)
 
+    def clear(self) -> None:
+        """Forget held page opens and active read counts between test modules."""
+
+        with self._changed:
+            self._answering = 0
+            self._held.clear()
+            self._changed.notify_all()
+
 
 #: The process's page reads, counted by the serving layer around each read it answers.
 PAGE_READS: Final = PageReads()

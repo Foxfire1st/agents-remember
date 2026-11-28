@@ -144,7 +144,8 @@ def test_a_new_record_is_another_answer_and_an_unread_records_edit_changes_none(
 ) -> None:
     opened = history(3)
     opened.build()
-    assert all(how == "read" for _name, how in opened.page("before")), "not kept to begin with"
+    before = opened.page("before")
+    assert all(how == "read" for _name, how in before), before
     move(opened)
     answers = dict(opened.page("after"))
     for name in ("overview", "files"):

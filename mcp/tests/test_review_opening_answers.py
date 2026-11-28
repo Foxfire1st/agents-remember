@@ -23,6 +23,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from agents_remember.application.review_answer_preparation import (
+    DETAIL_CAPACITY,
+    recorded_review_answers,
+)
 from agents_remember.application.review_candidate_resolution import (
     ReviewCandidateResolution,
     resolve_review_candidate,
@@ -54,11 +58,11 @@ from agents_remember.kernel.primitives.runtime_config import RepositoryScope
 from agents_remember.memory.knowledge_index import text_uuid
 from agents_remember.models.knowledge.review_frame import FrameAuthoring, FrameBinding, FrameLimits
 from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
-from agents_remember.serving import explainer
+from agents_remember.serving import changeset_cache, changeset_generation, explainer
 from agents_remember.serving import review_answer_reuse as answer_reuse
 from agents_remember.serving.app import create_app
 from agents_remember.serving.explainer_watcher import LeafSelection
-from agents_remember.serving.review_answer_reuse import RecordedAnswerReuse
+from agents_remember.serving.review_answer_reuse import DEFAULT_CAPACITY, RecordedAnswerReuse
 from agents_remember.serving.review_open_observation import OPEN_HEADER, OPEN_OBSERVATIONS
 from agents_remember.serving.review_trees import ReviewTreesQuery
 from agents_remember.worktrees.services import reset_worktree_services
@@ -84,7 +88,7 @@ class _Opened:
     def __init__(self, world: World) -> None:
         self.world = world
         self.collaborators = serving_collaborators(world.config)
-        # No lifespan is entered: no background loop runs, and the build is the test's to start.
+        # The test client serves requests without entering the app lifespan.
         self.client = TestClient(create_app(world.config, collaborators=self.collaborators))
         resolved = resolve_review_candidate(world.config, REPO, MASTER, LEAF)
         assert isinstance(resolved, ReviewCandidateResolution) and resolved.trees is not None
@@ -159,6 +163,8 @@ def opened(tmp_path: Path) -> Iterator[_Opened]:
     scope = RepositoryScope(repo_id=REPO, path=world.code, memory_root=world.memory)
     world.config = replace(world.config, repositories={REPO: scope})
     made = _Opened(world)
+    # The tests drive their own builds. A page's first read also starts a build by default.
+    OPEN_OBSERVATIONS.bind_opened(None)
     yield made
     shutdown = made.collaborators.review_trees_shutdown
     assert shutdown is not None
@@ -190,6 +196,8 @@ def test_a_page_read_arriving_while_the_build_computes_its_answer_waits_and_it_i
 ):
     produced: Counter[str] = Counter()
     entered, released, waiting = threading.Event(), threading.Event(), threading.Event()
+    build_token = read_cancellation.BuildToken()
+    intent_flight: object | None = None
     original = RecordedAnswerReuse.answer
 
     def answer(self: Any, key: Any, sources: Any, produce: Any, **options: Any) -> Any:
@@ -197,6 +205,9 @@ def test_a_page_read_arriving_while_the_build_computes_its_answer_waits_and_it_i
             return original(self, key, sources, produce, **options)
 
         def gated() -> Any:  # the live intent's computation, held until the page's read waits
+            nonlocal intent_flight
+            intent_flight = read_cancellation.read_cancellation()
+            assert isinstance(intent_flight, read_cancellation._Flight)
             produced["intent"] += 1
             entered.set()
             assert released.wait(HANG_GUARD_SECONDS)
@@ -207,23 +218,31 @@ def test_a_page_read_arriving_while_the_build_computes_its_answer_waits_and_it_i
     original_wait = read_cancellation._Flight.wait
 
     def wait(self: Any, asker: Any) -> Any:
-        waiting.set()  # the page's read joined the build's flight and waits for its answer
+        if self is intent_flight:
+            waiting.set()
         return original_wait(self, asker)
+
+    def build_answers() -> None:
+        with read_cancellation.cancellable_read(build_token):
+            opened.build()
 
     monkeypatch.setattr(RecordedAnswerReuse, "answer", answer)
     monkeypatch.setattr(read_cancellation._Flight, "wait", wait)
-    build = threading.Thread(target=opened.build, daemon=True)
-    build.start()
-    assert entered.wait(HANG_GUARD_SECONDS)
+    build = threading.Thread(target=build_answers, daemon=True)
     page: list[list[tuple[str, str]]] = []
     reader = threading.Thread(
         target=lambda: page.append(opened.page("the-page", ("live intent",))), daemon=True
     )
-    reader.start()
-    assert waiting.wait(HANG_GUARD_SECONDS)
-    released.set()
-    reader.join(HANG_GUARD_SECONDS)
-    build.join(HANG_GUARD_SECONDS)
+    build.start()
+    try:
+        assert entered.wait(HANG_GUARD_SECONDS)
+        reader.start()
+        assert waiting.wait(HANG_GUARD_SECONDS)
+    finally:
+        released.set()
+        if reader.ident is not None:
+            reader.join(HANG_GUARD_SECONDS)
+        build.join(HANG_GUARD_SECONDS)
     assert page == [[("live intent", "joined")]]
     assert produced == Counter(intent=1)
 
@@ -370,9 +389,9 @@ def test_an_answer_kept_for_one_comparison_is_never_read_for_another(opened):
     assert opened.record.number != kept
 
     page = {name: how for name, how in opened.page("the-page") if name in OPENING_ANSWERS}
-    # Made for N -- by the page, or by the build its open started, which it may join -- never read.
+    # The page computes each answer for N.
     assert set(page) == set(OPENING_ANSWERS), page
-    assert set(page.values()) <= {"computed", "joined"}, page
+    assert set(page.values()) == {"computed"}, page
     query = {"repo": REPO, "master": MASTER, "leaf": LEAF}
     listed = opened.client.get("/api/review/intent/entries", params=query).json()
     assert listed["comparison"] == opened.record.number
@@ -416,8 +435,7 @@ def test_a_click_reads_a_prepared_detail_and_computes_an_unprepared_one_once(ope
     with OPEN_OBSERVATIONS.reading("the-queue"):  # the queue, after the click
         for _key, ask, _moved in details:
             ask()
-    # Never computed again: read, or joined -- the click's open starts a build of the same trees,
-    # whose own queue may be reading the kept answer under its flight at that moment.
+    # The explicitly driven queue reuses the detail.
     queue = _noted("the-queue")
     assert [name for name, _how in queue] == ["trees", "live intent"]
     assert {how for _name, how in queue} <= {"read", "joined"}, queue
@@ -478,3 +496,52 @@ def test_an_object_another_worktree_adds_while_the_build_computes_keeps_every_op
     monkeypatch.setattr(answer_reuse, "note_outcome", noted)
     page = opened.page("the-page")
     assert all(how == "read" for _name, how in page), page
+
+
+def test_first_detail_read_reuses_warm_repository_layouts_without_cold_git_discovery(
+    opened, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Detail answers share the opening reuse's layout cache while keeping capacities separate."""
+
+    opened.build()
+    details = detail_answers(opened.ports, LeafSelection(REPO, MASTER, LEAF), opened.record.number)
+    assert details, "expected at least one changed invariant detail"
+
+    layout_calls: list[Path] = []
+    cold_layout_git_calls: list[tuple[Path, tuple[str, ...]]] = []
+    in_layout = False
+    original_layout = changeset_cache.repository_layout
+    original_run_git = changeset_generation.run_git
+
+    def counted_layout(root: Path) -> Any:
+        nonlocal in_layout
+        layout_calls.append(root)
+        previous = in_layout
+        in_layout = True
+        try:
+            return original_layout(root)
+        finally:
+            in_layout = previous
+
+    def counted_git(root: Path, args: list[str], *rest: Any, **kwargs: Any) -> Any:
+        if in_layout:
+            cold_layout_git_calls.append((root, tuple(args)))
+        return original_run_git(root, args, *rest, **kwargs)
+
+    monkeypatch.setattr(changeset_cache, "repository_layout", counted_layout)
+    monkeypatch.setattr(changeset_generation, "run_git", counted_git)
+
+    for _key, ask, _moved in details:
+        ask()
+
+    assert cold_layout_git_calls == [], (
+        f"first detail read ran {len(cold_layout_git_calls)} cold layout git calls: "
+        f"{cold_layout_git_calls}"
+    )
+    assert layout_calls == [], f"first detail read ran cold layout discovery: {layout_calls}"
+
+    fresh_answers = recorded_review_answers(opened.world.config)
+    assert fresh_answers._details is not fresh_answers._reuse
+    assert fresh_answers._details.cache is fresh_answers._reuse.cache
+    assert fresh_answers._reuse.capacity == DEFAULT_CAPACITY
+    assert fresh_answers._details.capacity == DETAIL_CAPACITY

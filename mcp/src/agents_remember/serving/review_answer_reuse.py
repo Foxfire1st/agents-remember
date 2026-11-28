@@ -74,6 +74,24 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+
+def _log_unretained(key: tuple[object, ...], reason: str, moved: tuple[str, ...] = ()) -> None:
+    logger.debug("review answer not retained (%s): key=%r moved=%r", reason, key[:2], moved)
+
+
+def _log_dropped(key: tuple[object, ...], reason: str, moved: tuple[str, ...] = ()) -> None:
+    logger.debug("review answer dropped (%s): key=%r moved=%r", reason, key[:2], moved)
+
+
+def _after_unretained_reason(
+    before: tuple[tuple[ReadInput, str | None], ...],
+    after: tuple[tuple[ReadInput, str | None], ...] | None,
+) -> str:
+    if after is None:
+        return "unreadable_after"
+    return "stamps_moved" if after != before else "census_moved"
+
+
 #: A recorded comparison's answers are read from a record that does not change; a count and a
 #: size bound what a long-lived process holds.
 DEFAULT_CAPACITY = 64
@@ -253,9 +271,12 @@ class RecordedAnswerReuse:
         value = produce()
         note_outcome("computed")
         if before is None or (keep is not None and not keep(value)):
+            _log_unretained(key, "unreadable_before" if before is None else "keep_refused")
             return value
         reads = tuple(sorted((made() if made is not None else {}).items()))
-        if changed_observations(dict(reads)):
+        moved = changed_observations(dict(reads))
+        if moved:
+            _log_unretained(key, "changed_observations", moved)
             return value
         after = self._observe(sources)
         census_after = _census(sources) if persistent else None
@@ -264,6 +285,7 @@ class RecordedAnswerReuse:
             or after != before
             or (persistent and not _held_through(sources, census_before, census_after))
         ):
+            _log_unretained(key, _after_unretained_reason(before, after))
             return value
         kept = _Kept(deepcopy(value), after, cast(Callable[[object], bool] | None, keep), reads)
         self._keep(key, kept)
@@ -359,13 +381,17 @@ class RecordedAnswerReuse:
             return None
         # A trusted locator check runs before any old byte path can be followed.
         if kept.current is not None and not kept.current(kept.value):
+            _log_dropped(key, "keep_refused")
             self._drop(key)
             return None
-        if changed_observations(dict(kept.reads)):
+        moved = changed_observations(dict(kept.reads))
+        if moved:
+            _log_dropped(key, "changed_observations", moved)
             self._drop(key)
             return None
         observed = self._observe(sources)
         if observed is None or observed != kept.stamps:
+            _log_dropped(key, "unreadable_sources" if observed is None else "stamps_moved")
             self._drop(key)
             return None
         with self._lock:

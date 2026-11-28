@@ -688,7 +688,9 @@ def _post_raw(
 # --- bound work before validation (L104-B08) ---------------------------------------------------
 
 
-def test_a_malformed_flood_is_rate_charged_and_diagnostics_stay_bounded(tmp_path: Path) -> None:
+def test_a_malformed_flood_is_rate_charged_and_diagnostics_stay_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Rules 5, 8: refused traffic is charged, so a flood stops at the bucket, not at a parser."""
 
     client, hosts, root = _client(tmp_path)
@@ -702,6 +704,10 @@ def test_a_malformed_flood_is_rate_charged_and_diagnostics_stay_bounded(tmp_path
     assert response.json()["reason"] == "oversized"
 
     session = str(_open(client)["session"])
+    live = hosts.sessions.get(session)
+    assert live is not None
+    started = live.budget._last
+    monkeypatch.setattr(live.budget, "_clock", lambda: started)
     url = f"/api/canvas/sessions/{session}/messages"
     reasons = [
         client.post(url, content=b"{not json", headers={"content-type": "application/json"}).json()[
@@ -711,8 +717,6 @@ def test_a_malformed_flood_is_rate_charged_and_diagnostics_stay_bounded(tmp_path
     ]
     assert reasons[0] == "malformed"
     assert reasons.count("rate-limited") >= 10
-    live = hosts.sessions.get(session)
-    assert live is not None
     diagnostics = live.budget.diagnostics()
     assert diagnostics["accepted"] == 0
     assert live.budget.refused == len(reasons)

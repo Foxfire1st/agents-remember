@@ -15,6 +15,7 @@ from agents_remember.observer.projection import WorkspaceProjection
 from agents_remember.serving import _app_routes as routes
 from agents_remember.serving._app_common import _ServingRuntime
 from agents_remember.serving.projector import Projector, ProjectorClosed
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
@@ -110,6 +111,17 @@ def test_shutdown_releases_waiters_and_refuses_new_waits(tmp_path):
 def test_state_and_document_routes_join_one_preparation(tmp_path):
     async def scenario():
         owner = projector(tmp_path)
+        all_routes_waiting = asyncio.Event()
+        waiting = 0
+        wait_ready = owner._ready.wait
+
+        async def observe_ready_wait() -> bool:
+            nonlocal waiting
+            waiting += 1
+            if waiting == 3:
+                all_routes_waiting.set()
+            return await wait_ready()
+
         runtime = cast(
             _ServingRuntime, SimpleNamespace(projector=owner, explainer_application=None)
         )
@@ -129,6 +141,7 @@ def test_state_and_document_routes_join_one_preparation(tmp_path):
                 return_value=JSONResponse({"document": "ready"}),
             ) as document,
             patch.object(owner, "_tick", new=AsyncMock(return_value=snapshot())) as produce,
+            patch.object(owner._ready, "wait", side_effect=observe_ready_wait),
         ):
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -138,8 +151,7 @@ def test_state_and_document_routes_join_one_preparation(tmp_path):
                     for path in ("/api/state", "/api/task-document?path=task")
                 ]
                 reads.append(asyncio.create_task(client.post("/api/actions/start", json={})))
-                # load-independent: parks the task on the real condition before the assertion; nothing reads the clock
-                await asyncio.sleep(0.02)
+                await asyncio.wait_for(all_routes_waiting.wait(), timeout=HANG_GUARD_SECONDS)
                 assert not state.called and not document.called and not action.called
                 assert all(not item.done() for item in reads)
                 await owner.prime()

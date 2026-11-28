@@ -19,6 +19,7 @@ from agents_remember.controlplane.held_store_layout import HELD_QUEUE_MAX_AGE_SE
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving import held_reset_scheduler as scheduler
 from agents_remember.serving.held_reset_scheduler import ResetAttempt
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from test_paseo_role_tools import RoleToolsTestCase, binding
 
 RESET = datetime(2026, 11, 25, 1, tzinfo=UTC)
@@ -139,7 +140,7 @@ def test_pass_overlaps_distinct_recipients_and_stays_at_the_pool_bound(tmp_path:
         index.schedule(ResetTarget(agent, tmp_path / agent, tmp_path, RESET))
 
     lock = Lock()
-    barrier = Barrier(2, timeout=10)
+    barrier = Barrier(2, timeout=HANG_GUARD_SECONDS)
     active: set[str] = set()
     visited: set[str] = set()
 

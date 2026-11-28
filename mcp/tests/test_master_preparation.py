@@ -14,18 +14,20 @@ from agents_remember.serving import master_preparation as subject
 from agents_remember.serving.changeset_cache import ChangesetCache
 from agents_remember.serving.changeset_scheduler import read_async
 from agents_remember.serving.master_net_generation import MasterEndpointAbsent, MasterNetPins
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, async_wait_until
 from fastapi import Request
 from fastapi.responses import Response
+
+MASTER_KEY = subject.MasterPreparationKey(
+    "repo", "master", Path("/code"), None, MasterNetPins("a", "b")
+)
 
 
 def service(monkeypatch, prepare):
     owner = subject.MasterPreparation(
         cast(McpRuntimeConfig, object()), ChangesetCache(), lambda *_args, **_kwargs: {}
     )
-    key = subject.MasterPreparationKey(
-        "repo", "master", Path("/code"), None, MasterNetPins("a", "b")
-    )
-    monkeypatch.setattr(owner, "_resolve", lambda *_args: key)
+    monkeypatch.setattr(owner, "_resolve", lambda *_args: MASTER_KEY)
 
     def prepared(selected, leaves, cancellation):
         prepare(selected, leaves, cancellation)
@@ -38,12 +40,6 @@ def service(monkeypatch, prepare):
     return owner
 
 
-async def until(event: Event) -> None:
-    async with asyncio.timeout(3):
-        while not event.is_set():
-            await asyncio.sleep(0.001)
-
-
 def test_startup_and_http_join_one_exact_net_and_net_does_not_wait_for_leaves(monkeypatch):
     async def scenario():
         net_started, release_net, leaf_started, release_leaf = (Event() for _ in range(4))
@@ -53,29 +49,25 @@ def test_startup_and_http_join_one_exact_net_and_net_does_not_wait_for_leaves(mo
             calls.append(leaves)
             (leaf_started if leaves else net_started).set()
             release = release_leaf if leaves else release_net
-            assert (
-                # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-                release.wait(3) or cancellation.is_set()
-            )
+            assert release.wait(HANG_GUARD_SECONDS) or cancellation.is_set()
 
         owner = service(monkeypatch, prepare)
         owner.prepare([("repo", "master")])
-        await until(net_started)
+        await async_wait_until(net_started.is_set, "startup net preparation")
+        net_job = owner._jobs[(MASTER_KEY, False)]
         request = asyncio.create_task(owner.ensure("repo", "master", include_leaves=False))
-        # load-independent: parks the task on the real condition before the assertion; nothing reads the clock
-        await asyncio.sleep(0.01)
-        release_net.set()
-        pins = await asyncio.wait_for(
-            request,
-            # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-            3,
-        )
-        assert pins == MasterNetPins("a", "b")
-        await until(leaf_started)
-        assert calls == [False, True]
-        assert not release_leaf.is_set()
-        release_leaf.set()
-        await owner.aclose()
+        try:
+            await async_wait_until(lambda: net_job.readers == 2, "the HTTP reader to join startup")
+            release_net.set()
+            pins = await asyncio.wait_for(request, HANG_GUARD_SECONDS)
+            assert pins == MasterNetPins("a", "b")
+            await async_wait_until(leaf_started.is_set, "startup leaf preparation")
+            assert calls == [False, True]
+            assert not release_leaf.is_set()
+        finally:
+            release_net.set()
+            release_leaf.set()
+            await owner.aclose()
 
     asyncio.run(scenario())
 
@@ -112,27 +104,25 @@ def test_one_departing_reader_does_not_cancel_another(monkeypatch):
 
         def prepare(_key, _leaves, cancellation):
             started.set()
-            assert release.wait(
-                # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-                3
-            )
+            assert release.wait(HANG_GUARD_SECONDS)
             cancellations.append(cancellation.is_set())
             finished.set()
 
         owner = service(monkeypatch, prepare)
         first = asyncio.create_task(owner.ensure("repo", "master", include_leaves=False))
-        await until(started)
+        await async_wait_until(started.is_set, "the first net reader's preparation")
+        net_job = owner._jobs[(MASTER_KEY, False)]
         second = asyncio.create_task(owner.ensure("repo", "master", include_leaves=False))
-        # load-independent: parks the task on the real condition before the assertion; nothing reads the clock
-        await asyncio.sleep(0.01)
-        first.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await first
-        release.set()
-        assert (
-            # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-            await asyncio.wait_for(second, 3) == MasterNetPins("a", "b")
-        )
+        try:
+            await async_wait_until(
+                lambda: net_job.readers == 2, "the second reader to join the net job"
+            )
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+        finally:
+            release.set()
+        assert await asyncio.wait_for(second, HANG_GUARD_SECONDS) == MasterNetPins("a", "b")
         assert finished.is_set() and cancellations == [False]
         await owner.aclose()
 
@@ -145,20 +135,13 @@ def test_shutdown_signals_and_drains_actual_worker(monkeypatch):
 
         def prepare(_key, _leaves, cancellation):
             started.set()
-            assert cancellation.wait(
-                # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-                3
-            )
+            assert cancellation.wait(HANG_GUARD_SECONDS)
             finished.set()
 
         owner = service(monkeypatch, prepare)
         owner.offer_master("repo", "master")
-        await until(started)
-        await asyncio.wait_for(
-            owner.aclose(),
-            # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-            3,
-        )
+        await async_wait_until(started.is_set, "the offered master preparation")
+        await asyncio.wait_for(owner.aclose(), HANG_GUARD_SECONDS)
         assert finished.is_set()
         assert owner._jobs == {} and owner._offered == {}
         assert not owner.offer_master("repo", "master")
@@ -176,10 +159,7 @@ def test_different_tips_never_join_and_bound_refuses_distinct_work(monkeypatch):
             count += 1
             if count == 2:
                 entered.set()
-            assert cancellation.wait(
-                # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-                3
-            )
+            assert cancellation.wait(HANG_GUARD_SECONDS)
 
         owner = service(monkeypatch, prepare)
         owner._capacity = 2
@@ -194,7 +174,7 @@ def test_different_tips_never_join_and_bound_refuses_distinct_work(monkeypatch):
         )
         first = asyncio.create_task(owner._join(one, False))
         second = asyncio.create_task(owner._join(two, False))
-        await until(entered)
+        await async_wait_until(entered.is_set, "the two distinct net preparations")
         with pytest.raises(subject.PreparationBusy):
             await owner._join(three, False)
         await owner.aclose()
@@ -214,32 +194,38 @@ def test_new_reader_drains_previous_readers_cancellation_before_retry(monkeypatc
             calls += 1
             if calls == 1:
                 entered.set()
-                assert cancellation.wait(
-                    # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-                    3
-                )
+                assert cancellation.wait(HANG_GUARD_SECONDS)
                 canceled.set()
-                assert release_old.wait(
-                    # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-                    3
-                )
+                assert release_old.wait(HANG_GUARD_SECONDS)
 
         owner = service(monkeypatch, prepare)
         first = asyncio.create_task(owner.ensure("repo", "master", include_leaves=False))
-        await until(entered)
+        await async_wait_until(entered.is_set, "the first reader's preparation")
+        old_job = owner._jobs[(MASTER_KEY, False)]
         first.cancel()
         with pytest.raises(asyncio.CancelledError):
             await first
-        await until(canceled)
+        await async_wait_until(canceled.is_set, "the old producer to observe cancellation")
         second = asyncio.create_task(owner.ensure("repo", "master", include_leaves=False))
-        # load-independent: parks the task on the real condition before the assertion; nothing reads the clock
-        await asyncio.sleep(0.01)
-        assert calls == 1 and not second.done()
-        release_old.set()
-        assert (
-            # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-            await asyncio.wait_for(second, 3) == MasterNetPins("a", "b")
-        )
+        draining = asyncio.Event()
+        gather = asyncio.gather
+
+        def observe_drain(*awaitables, return_exceptions=False):
+            pending = gather(*awaitables, return_exceptions=return_exceptions)
+            if asyncio.current_task() is second and owner._jobs.get((MASTER_KEY, False)) is old_job:
+                draining.set()
+            return pending
+
+        with monkeypatch.context() as patch:
+            patch.setattr(asyncio, "gather", observe_drain)
+            try:
+                await async_wait_until(
+                    draining.is_set, "the second reader to drain the canceled job"
+                )
+                assert calls == 1 and not second.done()
+            finally:
+                release_old.set()
+        assert await asyncio.wait_for(second, HANG_GUARD_SECONDS) == MasterNetPins("a", "b")
         assert calls == 2
         await owner.aclose()
 
@@ -255,22 +241,22 @@ def test_shared_answer_returns_one_live_leaf_read_and_same_body(monkeypatch):
             calls.append(leaves)
             if leaves:
                 entered.set()
-                assert (
-                    # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-                    release.wait(3) or cancellation.is_set()
-                )
+                assert release.wait(HANG_GUARD_SECONDS) or cancellation.is_set()
 
         owner = service(monkeypatch, prepare)
         first = asyncio.create_task(owner.answer("repo", "master", include_leaves=True))
-        await until(entered)
+        await async_wait_until(entered.is_set, "the first reader's leaf preparation")
+        leaf_job = owner._jobs[(MASTER_KEY, True)]
         second = asyncio.create_task(owner.answer("repo", "master", include_leaves=True))
-        # load-independent: parks the task on the real condition before the assertion; nothing reads the clock
-        await asyncio.sleep(0.01)
-        release.set()
+        try:
+            await async_wait_until(
+                lambda: leaf_job.readers == 2, "the second reader to join the leaf job"
+            )
+        finally:
+            release.set()
         one, two = await asyncio.wait_for(
             asyncio.gather(first, second),
-            # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-            3,
+            HANG_GUARD_SECONDS,
         )
         assert one is two and one["leaves"] == ["leaf"]
         assert calls.count(True) == 1
@@ -286,18 +272,14 @@ def test_leaf_work_does_not_take_net_capacity(monkeypatch):
         def prepare(_key, leaves, cancellation):
             if leaves:
                 entered.set()
-                assert (
-                    # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-                    release.wait(3) or cancellation.is_set()
-                )
+                assert release.wait(HANG_GUARD_SECONDS) or cancellation.is_set()
 
         owner = service(monkeypatch, prepare)
         owner.offer_master("repo", "master")
-        await until(entered)
+        await async_wait_until(entered.is_set, "the offered master's leaf preparation")
         assert await asyncio.wait_for(
             owner.ensure("repo", "other", include_leaves=False),
-            # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-            1,
+            HANG_GUARD_SECONDS,
         )
         release.set()
         await owner.aclose()
@@ -358,32 +340,21 @@ def test_input_discovery_offloads_and_only_offers_exact_planned_masters(monkeypa
         def plan(root, *, include_series_refs):
             calls.append((root, include_series_refs))
             started.set()
-            assert release.wait(
-                # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-                3
-            )
+            assert release.wait(HANG_GUARD_SECONDS)
             return SimpleNamespace(complete=True, series_masters=(("repo", "one"), ("repo", "two")))
 
         monkeypatch.setattr(subject, "task_input_plan", plan)
         monkeypatch.setattr(owner, "offer_master", lambda *address: offered.append(address) or True)
         discovery = asyncio.create_task(owner.prepare_inputs())
         try:
-            await until(started)
+            await async_wait_until(started.is_set, "the offloaded input discovery")
             # The loop can answer while the synchronous input scan is still running.
             answered = asyncio.Event()
             asyncio.get_running_loop().call_soon(answered.set)
-            await asyncio.wait_for(
-                answered.wait(),
-                # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-                3,
-            )
+            await asyncio.wait_for(answered.wait(), HANG_GUARD_SECONDS)
             assert not discovery.done() and offered == []
             release.set()
-            await asyncio.wait_for(
-                discovery,
-                # load-independent: a hang detector around an in-memory fake; the assertion reads state, not elapsed time
-                3,
-            )
+            await asyncio.wait_for(discovery, HANG_GUARD_SECONDS)
         finally:
             release.set()
             await owner.aclose()

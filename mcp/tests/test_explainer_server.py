@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import hashlib
 import json
+import os
+import select
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +49,7 @@ from agents_remember.canvas.explainer_workspace import (
     build_environment,
 )
 from agents_remember.canvas.prospective import BrowserProspectiveLoad, ProspectiveResult
+from agents_remember.kernel import file_lock
 from agents_remember.mcp.registration.explainer_surface import EXPLAINER_SURFACE
 from agents_remember.mcp.registration.explainer_tools import (
     register_bound_explainer_tools,
@@ -93,7 +96,9 @@ def _browser_is_here(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(presenter_tools, "browser_missing", lambda: ())
 
 
-def test_a_grade_write_waits_on_the_lock_a_build_holds(tmp_path: Path) -> None:
+def test_a_grade_write_waits_on_the_lock_a_build_holds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """MIK-R187 rule 6: the seat's writer and the service's writer share one file, so neither loses keys.
 
     A build holds the leaf's lock while it rewrites the store. The seat's `define_category` meets that
@@ -104,41 +109,64 @@ def test_a_grade_write_waits_on_the_lock_a_build_holds(tmp_path: Path) -> None:
 
     world = _world(tmp_path)
     server = _server(world)
-    # ``exclusive_file_lock`` guards ``<resource>.lock``: the resource is the workspace's state/leaf,
-    # the same resource the service's build, Update and Retire hold (MIK-R211 v5 rule 12).
-    held = leaf_lock_resource(world.workspace)
-    holder = _hold_leaf_lock(held, seconds=3)
-    try:
-        assert holder.stdout is not None
-        assert holder.stdout.readline().strip() == "held"
-        before = time.monotonic()
-        defined = _call(
-            server, "define_category", {"name": "risk", "scale": SCALE, "binding": "#7"}
-        )
-        waited = time.monotonic() - before
-    finally:
-        holder.kill()
-        holder.communicate(timeout=HANG_GUARD_SECONDS)
+    resource = leaf_lock_resource(world.workspace)
+    grade_file = grades_path(world.task_root, LEAF)
+    # Verify the filesystem before the contender runs so we observe its transaction acquisition.
+    with file_lock.exclusive_file_lock(resource, "explainer leaf"):
+        pass
+    lock_stat = file_lock.lock_path_for(resource).stat()
+    acquire = file_lock._acquire_flock
+    contended = False
+
+    with _hold_leaf_lock(resource) as holder:
+
+        def observe_acquisition(fd: int, deadline: float | None) -> None:
+            nonlocal contended
+            if not contended and os.path.samestat(os.fstat(fd), lock_stat):
+                assert holder.poll() is None
+                with pytest.raises(BlockingIOError):
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                assert not grade_file.exists()
+                assert holder.stdin is not None
+                holder.stdin.close()
+                assert holder.wait(timeout=HANG_GUARD_SECONDS) == 0
+                contended = True
+            acquire(fd, deadline)
+
+        try:
+            assert holder.stdout is not None
+            assert select.select([holder.stdout], [], [], HANG_GUARD_SECONDS)[0]
+            assert holder.stdout.readline().strip() == "held"
+            with monkeypatch.context() as lock_observer:
+                lock_observer.setattr(file_lock, "_acquire_flock", observe_acquisition)
+                defined = _call(
+                    server, "define_category", {"name": "risk", "scale": SCALE, "binding": "#7"}
+                )
+        finally:
+            if holder.poll() is None:
+                holder.kill()
+            holder.wait(timeout=HANG_GUARD_SECONDS)
+    assert contended, "the grade writer did not attempt the held leaf lock"
     assert defined["state"] == "defined", defined
-    # It met the build's lock: the write waited for the holder, not around it.
-    # load-independent: the 3 s lock hold makes the lower bound the lock's property, not a race.
-    assert waited >= 2.0, waited
+    saved = read_grades(grade_file, leaf_id=LEAF)
+    assert [category.name for category in saved.categories] == ["risk"]
 
 
-def _hold_leaf_lock(path: Path, *, seconds: int) -> subprocess.Popen[str]:
-    """A second process holding the leaf's lock, printing `held` once it really has it."""
+def _hold_leaf_lock(path: Path) -> subprocess.Popen[str]:
+    """Take the leaf's lock in a separate process until the test closes its input."""
 
     script = (
-        "import sys, time\n"
+        "import sys\n"
         "sys.path.insert(0, sys.argv[1])\n"
         "from pathlib import Path\n"
         "from agents_remember.kernel.file_lock import exclusive_file_lock\n"
         "with exclusive_file_lock(Path(sys.argv[2]), 'explainer leaf'):\n"
         "    print('held', flush=True)\n"
-        f"    time.sleep({seconds})\n"
+        "    sys.stdin.read()\n"
     )
     return subprocess.Popen(
         [sys.executable, "-c", script, str(Path(__file__).resolve().parents[1] / "src"), str(path)],
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         text=True,
     )

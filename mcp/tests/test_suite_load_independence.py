@@ -247,6 +247,8 @@ def _empty_collection(value: ast.AST, aliases: dict[str, str]) -> bool:
         "weakref.WeakSet",
         "weakref.WeakKeyDictionary",
         "weakref.WeakValueDictionary",
+        "OpenObservations",
+        "PageReads",
     }:
         return not value.args and not value.keywords
     return factory == "collections.defaultdict" and len(value.args) <= 1 and not value.keywords
