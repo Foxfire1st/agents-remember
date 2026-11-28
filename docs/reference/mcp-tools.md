@@ -289,11 +289,13 @@ revision it writes with its caller from the caller's launch, never from its inpu
 
 A task closes its own weakness with the task and a reason, and the reader supplies the code commit from the closing memory commit's `Code-Commit` trailer after closeout or says that the commit comes with the task's closeout beforehand; a closure by another task names a real commit of the code repository.
 
-`knowledge_integrity_check` also answers, in `routes`, one row for each family: the routes that
-the family records (the code folders in which its members are realized), the routes that the
-product suggests from the files that hold those realizations, and whether the two differ.
-`agents-remember knowledge-routes` prints the same rows. The answer holds at most 10 rows and
-then carries their count; the whole result holds every row.
+`knowledge_integrity_check` also answers, in `routes`, a compact summary of family route state
+(`familyCount`, `byStatus`, `routeUnassigned`, `routeless`, and `differs`), and in `worklist`
+compact summary metadata (`path`, `digest`, `itemCount`, `state`, `owner`, and `itemsByKind`)
+without inlining per-family route rows or worklist items. The full per-family route rows
+(recorded routes, suggested routes, and whether they differ) remain in the tool's detail log and
+are printed by `agents-remember knowledge-routes`; full worklist items stay in the worklist file
+and detail log.
 
 See [Knowledge system](knowledge-system.md) for record/sidecar/history ownership,
 worklist and knowledge gate fields, validator, derived index, memory merges and the

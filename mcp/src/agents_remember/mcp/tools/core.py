@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from importlib import import_module
 from typing import Any
 
@@ -28,6 +29,7 @@ from agents_remember.kernel.primitives.tool_reports import write_tool_report
 from agents_remember.models.core import ServingBuildPayload
 from agents_remember.models.task_document_ref import TaskScopedReaderContext
 from agents_remember.models.tools.tool_answer import (
+    ENVELOPE_STRIPPED_FIELDS,
     RUNTIME_INSTALL_ANSWER_FIELDS,
     TOOL_ANSWER_SHORT_STRING_MAX,
 )
@@ -52,6 +54,57 @@ def _unused_settings_keys(config: McpRuntimeConfig) -> list[str]:
     return [*config.unused_settings_keys, *orchestration]
 
 
+_SERVER_INFO_RECENT_SERVERS_MAX = 5
+
+
+def _compact_running_servers(servers: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize live server inventory inline while the full list stays in the tool log."""
+    roles = Counter(str(server.get("role", "unknown")) for server in servers)
+    stale_count = sum(
+        1
+        for server in servers
+        if isinstance(server.get("currentness"), dict)
+        and server["currentness"].get("state") == "stale"
+    )
+    ordered = sorted(
+        servers,
+        key=lambda server: (str(server.get("startedAt", "")), int(server.get("pid", 0))),
+        reverse=True,
+    )
+    recent: list[dict[str, Any]] = []
+    for server in ordered[:_SERVER_INFO_RECENT_SERVERS_MAX]:
+        row: dict[str, Any] = {
+            "pid": server["pid"],
+            "role": server["role"],
+            "startedAt": server["startedAt"],
+        }
+        if server.get("loadedDigest") is not None:
+            row["loadedDigest"] = server["loadedDigest"]
+        currentness = server.get("currentness")
+        if isinstance(currentness, dict) and currentness.get("state") is not None:
+            row["state"] = currentness["state"]
+        recent.append(row)
+    return {
+        "count": len(servers),
+        "staleCount": stale_count,
+        "roles": dict(sorted(roles.items())),
+        "recent": recent,
+    }
+
+
+def _server_info_answer(payload: dict[str, Any]) -> dict[str, Any]:
+    """Project the inline server_info answer with a bounded runningServers summary."""
+    answer = {
+        key: value
+        for key, value in payload.items()
+        if key not in ENVELOPE_STRIPPED_FIELDS and value is not None
+    }
+    running_servers = payload.get("runningServers")
+    if isinstance(running_servers, list):
+        answer["runningServers"] = _compact_running_servers(running_servers)
+    return answer
+
+
 def server_info_payload(
     config: McpRuntimeConfig, serving_build: ServingBuildPayload
 ) -> dict[str, Any]:
@@ -63,42 +116,39 @@ def server_info_payload(
     # the user's two commands (MIK-R137 rule 5). The answer changes no mode and no byte.
     open_settings = open_user_settings_notice()
     currentness = build_currentness(config, inspect_checkout=True)
-    return _tool_payload(
-        "server_info",
-        {
-            "ok": True,
-            "server": SERVER_NAME,
-            "version": SERVER_VERSION,
-            "transport": TRANSPORT,
-            "configPath": config.config_path.as_posix(),
-            "coordinationRoot": config.coordination_root.as_posix(),
-            "workspaceRoot": config.workspace_root.as_posix(),
-            "transcriptRoot": config.transcript_root.as_posix(),
-            "allowedRepoIds": list(config.allowed_repo_ids),
-            "unusedSettingsKeys": _unused_settings_keys(config),
-            **(
-                {"checkoutBinding": config.checkout_binding.as_payload()}
-                if config.checkout_binding is not None
-                else {}
-            ),
-            **({"openUserSettings": open_settings} if open_settings is not None else {}),
-            "servingBuild": serving_build.model_dump(mode="json", exclude_none=True),
-            "buildCurrentness": (
-                currentness.model_dump(mode="json", exclude_none=True)
-                if currentness is not None
-                else None
-            ),
-            "runningServers": [
-                server.model_dump(mode="json", exclude_none=True)
-                for server in server_inventory(config)
-            ],
-            **(
-                {"toolServer": TOOL_SERVER_NAME, "agentBinding": binding.as_report()}
-                if binding is not None
-                else {}
-            ),
-        },
-    )
+    payload: dict[str, Any] = {
+        "ok": True,
+        "server": SERVER_NAME,
+        "version": SERVER_VERSION,
+        "transport": TRANSPORT,
+        "configPath": config.config_path.as_posix(),
+        "coordinationRoot": config.coordination_root.as_posix(),
+        "workspaceRoot": config.workspace_root.as_posix(),
+        "transcriptRoot": config.transcript_root.as_posix(),
+        "allowedRepoIds": list(config.allowed_repo_ids),
+        "unusedSettingsKeys": _unused_settings_keys(config),
+        **(
+            {"checkoutBinding": config.checkout_binding.as_payload()}
+            if config.checkout_binding is not None
+            else {}
+        ),
+        **({"openUserSettings": open_settings} if open_settings is not None else {}),
+        "servingBuild": serving_build.model_dump(mode="json", exclude_none=True),
+        "buildCurrentness": (
+            currentness.model_dump(mode="json", exclude_none=True)
+            if currentness is not None
+            else None
+        ),
+        "runningServers": [
+            server.model_dump(mode="json", exclude_none=True) for server in server_inventory(config)
+        ],
+        **(
+            {"toolServer": TOOL_SERVER_NAME, "agentBinding": binding.as_report()}
+            if binding is not None
+            else {}
+        ),
+    }
+    return _tool_payload("server_info", payload, answer=_server_info_answer(payload))
 
 
 def context_packet_payload(

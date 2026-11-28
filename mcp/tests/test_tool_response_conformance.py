@@ -679,7 +679,7 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
 
         task_doc_tool(
             coord,
-            target,
+            TaskDocTarget(repo_id=REPO, task_name="l4-demo"),
             operation="create",
             edit=TaskDocEdit(
                 fields={

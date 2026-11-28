@@ -93,6 +93,7 @@ from .task_doc_response import (
     task_doc_preview,
     task_doc_result,
 )
+from .task_doc_review_target import enforce_review_target
 from .task_doc_route_review import (
     DEFAULT_TASK_DOC_CALL,
     TaskDocCall,
@@ -563,12 +564,19 @@ def _prepare_task_doc_edit(
     request: _TaskDocPrepareRequest,
 ) -> _PreparedTaskDocEdit:
     if request.operation == "create":
-        doc = _create(request.payload_fields, request.contract, request.task_root)
+        doc = _create(
+            request.payload_fields,
+            request.contract,
+            request.task_root,
+            slug=request.slug,
+            repo_id=request.repo_id,
+        )
         return _PreparedTaskDocEdit(
             None,
             doc,
             missing_task_doc_source(json_path_for(request.task_root, doc)),
         )
+    enforce_review_target(request.operation, request.task_root, request.slug, request.contract)
     json_path = _existing_json(request.task_root, request.slug)
     original, selected_snapshot = read_task_doc_with_source(json_path)
     if request.operation == "replace":
@@ -754,8 +762,13 @@ def _create(
     fields: dict[str, Any],
     contract: WorktreeContract | None,
     task_root: Path,
+    *,
+    slug: str | None = None,
+    repo_id: str = "",
 ) -> TaskDocument:
-    doc = _pending_intent_review(_build_doc(fields, contract, task_root))
+    doc = _pending_intent_review(
+        _build_doc(fields, contract, task_root, slug=slug, repo_id=repo_id)
+    )
     json_path = json_path_for(task_root, doc)
     if json_path.exists():
         raise TaskDocError(f"task document already exists: {json_path}; use an update operation")
@@ -801,6 +814,9 @@ def _build_doc(
     fields: dict[str, Any],
     contract: WorktreeContract | None,
     task_root: Path,
+    *,
+    slug: str | None = None,
+    repo_id: str = "",
 ) -> TaskDocument:
     data = dict(fields)
     if data.get("kind") == "light":
@@ -815,6 +831,26 @@ def _build_doc(
         # contract is a subTask; anything else (no contract, or a master with no
         # commanding sprint) is a master.
         data["kind"] = "subTask" if (contract is not None and contract.kind == "leaf") else "master"
+    if slug is not None and slug.strip():
+        # Master documents live on disk at ``task.json`` regardless of their semantic
+        # ``fields.slug``, so callers that reuse a master target with ``slug="task"``
+        # are addressing the file stem rather than conflicting with ``fields.slug``.
+        master_file_stem = data.get("kind") == "master" and slug == "task"
+        if data.get("slug") is not None and data["slug"] != slug and not master_file_stem:
+            raise TaskDocError(
+                f"task_doc create slug mismatch: top-level slug {slug!r} does not match "
+                f"fields.slug {data['slug']!r}",
+                code="task-doc-slug-mismatch",
+            )
+        data.setdefault("slug", slug)
+    if repo_id and repo_id.strip():
+        if data.get("repo") is not None and data["repo"] != repo_id:
+            raise TaskDocError(
+                f"task_doc create repo mismatch: top-level repo_id {repo_id!r} does not match "
+                f"fields.repo {data['repo']!r}",
+                code="task-doc-repo-mismatch",
+            )
+        data.setdefault("repo", repo_id)
     scaffold_register_sections(data)
     if contract is not None:
         # A master spans the series, not one lifecycle, so it never takes a lifecycleId.

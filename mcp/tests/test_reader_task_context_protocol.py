@@ -355,8 +355,9 @@ def _resolve_schema(root: dict[str, Any], schema: dict[str, Any]) -> dict[str, A
 def _structured(result: types.CallToolResult) -> dict[str, Any]:
     if result.is_error:
         raise AssertionError(_tool_error_text(result))
-    assert result.structured_content is not None
-    return result.structured_content
+    if result.structured_content is not None:
+        return result.structured_content
+    return json.loads(_tool_error_text(result))
 
 
 def _tool_error_text(result) -> str:

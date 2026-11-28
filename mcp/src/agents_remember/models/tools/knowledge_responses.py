@@ -249,13 +249,18 @@ class KnowledgeWriteResponse(ToolResponse):
     problemsTruncated: bool | None = None
     violations: list[dict[str, Any]] | None = None
     violationsTruncated: bool | None = None
+    violationCount: int | None = None
     # What the write took but the caller should know, such as a revised rule with no title.
     notes: list[str] | None = None
     notesTruncated: bool | None = None
     provisionalIds: bool | None = None
     plannedBeforeRefusal: int | None = None
     written: list[str] | None = None
+    writtenCount: int | None = None
+    writtenTruncated: bool | None = None
     removed: list[str] | None = None
+    removedCount: int | None = None
+    removedTruncated: bool | None = None
     reportPath: str | None = None
     # Why the report at `reportPath` could not be written, when it could not: `None` means the
     # report exists. Declared because the tool's own answer carries it on every report route.

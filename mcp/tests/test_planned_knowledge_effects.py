@@ -648,8 +648,13 @@ def test_mounted_task_doc_effect_is_reconciled_by_the_leaf_gate(world: World) ->
             return await client.call_tool("task_doc", arguments)
 
     answer = anyio.run(declare)
-    assert not answer.is_error and answer.structured_content is not None, answer
-    assert answer.structured_content["ok"], answer
+    assert not answer.is_error, answer
+    answer_payload = (
+        answer.structured_content
+        if answer.structured_content is not None
+        else json.loads(answer.content[0].text)  # type: ignore[union-attr]
+    )
+    assert answer_payload["ok"], answer_payload
     assert json.loads(document_path.read_text())["expectedKnowledgeEffects"] == [declaration]
     contract = load_contract(contract_path)
     # The declared family is planned; the undeclared touched invariant is unplanned.

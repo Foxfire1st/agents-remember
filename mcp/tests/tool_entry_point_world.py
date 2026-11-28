@@ -25,6 +25,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     RepositoryScope,
 )
 from agents_remember.mcp.server import create_server
+from agents_remember.mcp.tools.core import _compact_running_servers
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.models.tools.tool_answer import (
     ENVELOPE_STRIPPED_FIELDS,
@@ -93,7 +94,7 @@ ARMS = (
 # IDENTITY, never as "did a validation message appear" — MCPServer refuses an invalid ARGUMENT
 # with the same wording and a different model (`<tool>Arguments`), and calling that "the tool's
 # own response model refused its payload" would be a wrong diagnosis.
-REFUSED_MODEL = re.compile(r"validation error for (?P<model>[A-Za-z_][A-Za-z0-9_]*)")
+REFUSED_MODEL = re.compile(r"validation errors? for (?P<model>[A-Za-z_][A-Za-z0-9_]*)")
 
 # Where the product legitimately writes inside the coordination root during a sweep: its
 # observer and transcript logs, its tool-report/temp trees, its control-plane records, the
@@ -306,10 +307,17 @@ def _judge_delivered(tool: str, payload: dict[str, Any], whole: dict[str, Any]) 
             return "unvalidatable", f"the delivered answer still carries {field!r}"
     # Which keys the shaping adds comes from the product's own code --
     # FRAMEWORK_ANSWER_KEYS, the rule-6 framework keys of
-    # models/tools/tool_answer.py, and the truncated-list wrapper derived from
-    # its truncate_lists -- never from a second list here. Every delivered key
-    # is accounted at its own path, at any depth.
-    unknown = _unknown_delivered_path(payload, whole, top=True, path="")
+    # models/tools/tool_answer.py, the truncated-list wrapper derived from
+    # its truncate_lists, and server_info's compact runningServers projection --
+    # never from a second handwritten list here. Every delivered key is
+    # accounted at its own path, at any depth.
+    expected_whole = whole
+    if tool == "server_info" and isinstance(whole.get("runningServers"), list):
+        expected_whole = {
+            **whole,
+            "runningServers": _compact_running_servers(whole["runningServers"]),
+        }
+    unknown = _unknown_delivered_path(payload, expected_whole, top=True, path="")
     if unknown is not None:
         return (
             "unvalidatable",
@@ -522,7 +530,12 @@ class EntryPointWorld:
                 text for content in result.content if (text := getattr(content, "text", None))
             )
             return "RAISED ToolError", {"detail": text}
-        return "RETURNED", result.structured_content
+        payload = result.structured_content
+        if payload is None and result.content:
+            first_text = getattr(result.content[0], "text", None)
+            if isinstance(first_text, str):
+                payload = json.loads(first_text)
+        return "RETURNED", payload
 
     # -- the fixture the sweep addresses -------------------------------------------------
 

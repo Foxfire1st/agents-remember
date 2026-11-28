@@ -473,10 +473,14 @@ def test_first_call_preserves_immutable_boot_identity_and_an_explainer_seat_call
         "agents_remember.serving.build_info.runtime_source_digest",
         lambda _root: "sha256:" + "f" * 64,
     )
+
+    def _wire_json(result: CallToolResult) -> dict[str, Any]:
+        assert result.structured_content is None
+        return json.loads(result.content[0].text)  # type: ignore[union-attr]
+
     first_result = anyio.run(server.call_tool, "server_info", {})
     assert isinstance(first_result, CallToolResult)
-    assert first_result.structured_content is not None
-    first_info = first_result.structured_content
+    first_info = _wire_json(first_result)
     assert first_info["ok"] is True
     assert first_info["servingBuild"]["sourceDigest"] == boot_identity.sourceDigest
     assert first_info["servingBuild"]["bootedAt"] == boot_identity.bootedAt
@@ -488,8 +492,7 @@ def test_first_call_preserves_immutable_boot_identity_and_an_explainer_seat_call
         {"repo_id": REPO, "files": ["README.md"], "refresh": True},
     )
     assert isinstance(refresh_result, CallToolResult)
-    assert refresh_result.structured_content is not None
-    refresh_refusal = refresh_result.structured_content
+    refresh_refusal = _wire_json(refresh_result)
     assert refresh_refusal["state"] == "refused"
     assert refresh_refusal["refusalCode"] == "argument-removed"
 
@@ -503,7 +506,6 @@ def test_first_call_preserves_immutable_boot_identity_and_an_explainer_seat_call
     assert "server_info" in exp_tools and set(EXPLAINER_SURFACE) <= set(exp_tools)
     exp_result = anyio.run(exp_server.call_tool, "server_info", {})
     assert isinstance(exp_result, CallToolResult)
-    assert exp_result.structured_content is not None
-    exp_info = exp_result.structured_content
+    exp_info = _wire_json(exp_result)
     assert exp_info["ok"] is True
     assert root.is_dir()

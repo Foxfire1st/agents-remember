@@ -66,15 +66,15 @@ def _call(
 
 
 def _assert_wire_payload(result: CallToolResult) -> dict[str, Any]:
-    """Require the registered server's readable text and structured result to agree."""
+    """Require the registered server's compact JSON text result to decode cleanly."""
 
     assert result.is_error is False
-    assert result.structured_content is not None
-    payload = result.structured_content
-    assert isinstance(payload, dict)
     text_blocks = [block for block in result.content if isinstance(block, TextContent)]
     assert text_blocks
-    assert json.loads(text_blocks[0].text) == payload
+    payload = json.loads(text_blocks[0].text)
+    assert isinstance(payload, dict)
+    if result.structured_content is not None:
+        assert result.structured_content == payload
     return payload
 
 

@@ -221,8 +221,9 @@ BARE_RAISERS: frozenset[str] = frozenset(
         # `task_doc` was pinned here and left with the MIK-R111 repair: removed
         # reads refuse before parsing and terminal preconditions answer, so the
         # entry leaves in the same change per the rule above.
+        # `worktree_status` now answers missing-target and validation failures
+        # with a typed structured refusal at the MCP payload boundary.
         "worktree_attach",
-        "worktree_status",
         "memory_carryover_plan",
         "memory_carryover_apply",
     }

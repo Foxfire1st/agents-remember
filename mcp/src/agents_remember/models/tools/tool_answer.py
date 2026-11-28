@@ -176,7 +176,7 @@ SHAPED_TOOL_BOUNDS: dict[tuple[str, str | None], int] = {
     ("worktree_start", None): 600,
     ("worktree_attach", None): 500,
     ("worktree_status", None): 600,
-    ("worktree_sync", None): 400,
+    ("worktree_sync", None): 550,
     ("worktree_pause", None): 500,
     ("worktree_closeout_preview", None): 1000,
     ("worktree_closeout_apply", None): 600,

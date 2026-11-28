@@ -1853,7 +1853,11 @@ def test_the_registered_writer_answers_a_planned_write_without_a_model_refusal(t
         },
     )
     assert not result.is_error, _call_message(result)
-    answer = result.structured_content
+    answer = (
+        result.structured_content
+        if result.structured_content is not None
+        else json.loads(result.content[0].text)  # type: ignore[union-attr]
+    )
     assert answer is not None
     assert answer["ok"] is True, answer
     assert answer["state"] == "planned", answer

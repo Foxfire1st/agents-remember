@@ -9,14 +9,20 @@ shapes the report's own document for the wire.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from agents_remember.application.role_capsules.refusal_references import with_refusal_reference
-from agents_remember.models.tools.tool_answer import TOOL_ANSWER_LIST_MAX
+from agents_remember.models.tools.tool_answer import (
+    ENVELOPE_STRIPPED_FIELDS,
+    TOOL_ANSWER_LIST_MAX,
+)
+
+COMPACT_WRITE_LIST_MAX = 5
 
 
-def _cut(values: list[Any]) -> tuple[list[Any], bool]:
-    return values[:TOOL_ANSWER_LIST_MAX], len(values) > TOOL_ANSWER_LIST_MAX
+def _cut(values: list[Any], limit: int = TOOL_ANSWER_LIST_MAX) -> tuple[list[Any], bool]:
+    return values[:limit], len(values) > limit
 
 
 def write_answer(
@@ -27,13 +33,14 @@ def write_answer(
     problems, problems_cut = _cut(
         [{"where": one["where"], "message": one["message"]} for one in document["problems"]]
     )
-    violations, violations_cut = _cut(list(document["violations"]))
+    all_violations = list(document["violations"])
+    violations, violations_cut = _cut(all_violations)
     notes, notes_cut = _cut(list(document["notes"]))
     if document["state"] == "refused":
         pointer = with_refusal_reference("", "knowledge-write-refused")
         if pointer and pointer not in notes:
             notes = [*notes, pointer]
-    return {
+    result: dict[str, Any] = {
         "ok": True,
         "operation": "knowledge_write",
         "state": document["state"],
@@ -62,6 +69,40 @@ def write_answer(
         "reportPath": report_path,
         "reportError": report_error,
     }
+    if violations_cut:
+        result["violationCount"] = len(all_violations)
+    return result
 
 
-__all__ = ["write_answer"]
+def compact_write_answer(full: Mapping[str, Any]) -> dict[str, Any]:
+    """Project one write payload into its compact inline answer without mutating ``full``."""
+
+    answer = {
+        key: value
+        for key, value in full.items()
+        if key not in ENVELOPE_STRIPPED_FIELDS and value is not None
+    }
+    violations = answer.get("violations")
+    if isinstance(violations, list):
+        total_violations = (
+            full["violationCount"]
+            if isinstance(full.get("violationCount"), int)
+            else len(violations)
+        )
+        if len(violations) > COMPACT_WRITE_LIST_MAX or full.get("violationsTruncated") is True:
+            answer["violations"] = violations[:COMPACT_WRITE_LIST_MAX]
+            answer["violationsTruncated"] = True
+            answer["violationCount"] = total_violations
+    for field, count_key, truncated_key in (
+        ("written", "writtenCount", "writtenTruncated"),
+        ("removed", "removedCount", "removedTruncated"),
+    ):
+        values = answer.get(field)
+        if isinstance(values, list) and len(values) > COMPACT_WRITE_LIST_MAX:
+            answer[field] = values[:COMPACT_WRITE_LIST_MAX]
+            answer[count_key] = len(values)
+            answer[truncated_key] = True
+    return answer
+
+
+__all__ = ["COMPACT_WRITE_LIST_MAX", "compact_write_answer", "write_answer"]

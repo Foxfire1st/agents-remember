@@ -12,7 +12,6 @@ from agents_remember.application import worktree_tools
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
     TaskDocEdit,
-    TaskDocError,
     TaskDocTarget,
 )
 from agents_remember.mcp.tools.task_doc import task_doc_payload
@@ -709,11 +708,13 @@ def test_an_organizational_master_refuses_to_complete_over_an_abandoned_row_that
     enclosure = world.enclosure("org", "L1", landed=True)
     named = rf"master 'org'.*row 'L1' is abandoned.*{enclosure}.*completed integration.*set_subtask"
     before = (world.tasks / "org" / "task.json").read_bytes()
-    with pytest.raises(TaskDocError, match=named):
-        world.task("org", "set_status", fields={"status": "Completed"})
+    first = world.task("org", "set_status", fields={"status": "Completed"})
+    assert first["ok"] is False and first.get("code")
+    assert re.search(named, first["detail"])
     document = read_task_doc(world.tasks / "org" / "task.json").model_dump(mode="json")
-    with pytest.raises(TaskDocError, match=named):
-        world.task("org", "replace", fields={**document, "status": "Completed"})
+    second = world.task("org", "replace", fields={**document, "status": "Completed"})
+    assert second["ok"] is False and second.get("code")
+    assert re.search(named, second["detail"])
     assert (world.tasks / "org" / "task.json").read_bytes() == before
 
     world.task("org", "set_subtask", subtask={"number": "L1", "status": "Completed"})
@@ -728,10 +729,12 @@ def test_an_organizational_master_refuses_an_unreadable_enclosure_of_an_abandone
     )
     enclosure = world.enclosure("org", "L1", landed=False)
     enclosure.write_text("not a contract")
-    with pytest.raises(
-        TaskDocError, match=rf"(?s)master 'org'.*{enclosure}.*row 'L1'.*repair or remove that file"
-    ):
-        world.task("org", "set_status", fields={"status": "Completed"})
+    refusal = world.task("org", "set_status", fields={"status": "Completed"})
+    assert refusal["ok"] is False and refusal.get("code")
+    assert re.search(
+        rf"(?s)master 'org'.*{enclosure}.*row 'L1'.*repair or remove that file",
+        refusal["detail"],
+    )
     assert world.status("org") == "inProgress"
 
     enclosure.unlink()
@@ -752,8 +755,9 @@ def test_the_completion_check_leaves_other_rows_masters_and_edits_as_they_were(t
     for master in ("atomic", "done"):
         world.enclosure(master, "L1", landed=True)
 
-    with pytest.raises(TaskDocError, match=r"unresolved work units.*'L1'.*planning"):
-        world.task("open", "set_status", fields={"status": "Completed"})
+    refusal = world.task("open", "set_status", fields={"status": "Completed"})
+    assert refusal["ok"] is False and refusal.get("code")
+    assert re.search(r"unresolved work units.*'L1'.*planning", refusal["detail"])
     # An atomic master is decided by its closeout, which refuses this row by name.
     world.task("atomic", "set_status", fields={"status": "Completed"})
     assert world.status("atomic") == "Completed"

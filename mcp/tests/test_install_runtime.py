@@ -60,8 +60,10 @@ def call_registered_tool(
         with anyio.fail_after(60):
             async with Client(server, mode="legacy") as client:
                 result = await client.call_tool(name, arguments)
-        assert not result.is_error and result.structured_content is not None, result.content
-        return result.structured_content
+        assert not result.is_error, result.content
+        if result.structured_content is not None:
+            return result.structured_content
+        return json.loads(result.content[0].text)  # type: ignore[union-attr]
 
     try:
         return anyio.run(call)

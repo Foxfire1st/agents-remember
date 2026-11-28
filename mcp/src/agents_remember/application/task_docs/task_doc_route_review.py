@@ -58,6 +58,10 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 class TaskDocError(AgentsRememberError):
     """Raised when a task-document operation cannot be completed."""
 
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+
 
 @dataclass(frozen=True)
 class TaskDocCall:

@@ -670,8 +670,8 @@ def test_mcp_server_hook_runs_off_event_loop_suppresses_and_contains_io_errors(
         loop_thread_id = threading.get_ident()
         result = await server.call_tool("server_info", {})
         assert isinstance(result, CallToolResult)
-        assert result.structured_content is not None
-        return result.structured_content
+        assert result.structured_content is None
+        return json.loads(result.content[0].text)  # type: ignore[union-attr]
 
     payload = anyio.run(invoke)
     assert payload["ok"] is True
@@ -708,8 +708,8 @@ def test_mcp_server_unbound_and_malformed_bindings_snapshot_none_and_skip_hook(
     )
     result = anyio.run(unbound.call_tool, "server_info", {})
     assert isinstance(result, CallToolResult)
-    assert result.structured_content is not None
-    payload = result.structured_content
+    assert result.structured_content is None
+    payload = json.loads(result.content[0].text)  # type: ignore[union-attr]
     assert payload["ok"] is True
     assert called == []
 

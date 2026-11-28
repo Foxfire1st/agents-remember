@@ -133,7 +133,7 @@ ARMS = (
 # IDENTITY, never as "did a validation message appear" — MCPServer refuses an invalid ARGUMENT
 # with the same wording and a different model (`<tool>Arguments`), and calling that "the tool's
 # own response model refused its payload" would be a wrong diagnosis.
-REFUSED_MODEL = re.compile(r"validation error for (?P<model>[A-Za-z_][A-Za-z0-9_]*)")
+REFUSED_MODEL = re.compile(r"validation errors? for (?P<model>[A-Za-z_][A-Za-z0-9_]*)")
 
 
 # Where the product legitimately writes inside the coordination root during a sweep: its
@@ -472,7 +472,12 @@ class EntryPointWorld:
                 text for content in result.content if (text := getattr(content, "text", None))
             )
             return "RAISED ToolError", {"detail": text}
-        return "RETURNED", result.structured_content
+        payload = result.structured_content
+        if payload is None and result.content:
+            first_text = getattr(result.content[0], "text", None)
+            if isinstance(first_text, str):
+                payload = json.loads(first_text)
+        return "RETURNED", payload
 
     # -- the fixture the sweep addresses -------------------------------------------------
 

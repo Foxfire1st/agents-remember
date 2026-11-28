@@ -405,9 +405,10 @@ class WorkflowChainTests(unittest.TestCase):
             if classify_call(hop.tool, hop.kind, hop.payload) != "answered"
         )
         self.assertEqual(raisers, STALE_BASE_RAISERS)
-        detail = str(calls[0].payload.get("detail", ""))
-        self.assertIn("source-lineage-stale", detail)
-        self.assertIn("worktree_sync", detail)
+        preview = calls[0].payload
+        self.assertIs(preview.get("ok"), False)
+        self.assertEqual(preview.get("code"), "source-lineage-stale")
+        self.assertEqual(preview.get("nextTool"), "worktree_sync")
 
     # -- 5. the declared-requirement channel --------------------------------------------------
 

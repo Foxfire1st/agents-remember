@@ -117,3 +117,6 @@ is the page for work on the product itself. These pages add to it:
 - [The pinned offline presentation kit](design/canvas-kit.md) describes the
   [presentation kit](concepts.md#presentation-kit), the libraries that the product ships for the
   pages of the explainer.
+- [MCP transport, caching, and agentic UI roadmap](design/mcp-wave-2-roadmap.md) sets out the
+  planned second-wave transport, caching, reload, long-call, and agentic UI evolution with its
+  concrete adoption triggers.

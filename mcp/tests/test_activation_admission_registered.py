@@ -73,11 +73,17 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
             )
         )
 
-    @staticmethod
-    async def _call(server, name: str, arguments: dict[str, object]):
+    @classmethod
+    def _payload(cls, result) -> dict[str, object]:
+        if result.structured_content is not None:
+            return result.structured_content
+        return json.loads(cls._text(result))
+
+    @classmethod
+    async def _call(cls, server, name: str, arguments: dict[str, object]):
         async with Client(server, mode="legacy") as client:
             result = await client.call_tool(name, arguments)
-        payload = result.structured_content
+        payload = None if result.is_error else cls._payload(result)
         if name == "worktree_start" and payload is not None and not payload["ok"]:
             assert not result.is_error and not payload.get("overflow"), payload
             assert count_response_tokens(payload) <= bound_for(name)
@@ -102,8 +108,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         # L111's repair keeps the parser diagnosis whole in the detail file,
         # while the refusal envelope itself fits the existing L108 bound.
         self.assertFalse(result.is_error)
-        assert result.structured_content is not None
-        payload = result.structured_content
+        payload = self._payload(result)
         self.assertFalse(payload["ok"])
         self.assertFalse(payload.get("overflow", False))
         self.assertEqual(payload["code"], "atomic-series-contract-unreadable")
@@ -148,8 +153,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
     def _whole(self, result):
         # MIK-R111 rule 1: admission and parser fact pins read the validated
         # whole result; the bounded answer may shed their evidence.
-        assert result.structured_content is not None
-        payload = result.structured_content
+        payload = self._payload(result)
         self.assertIsInstance(payload.get("log"), str)
         whole = json.loads(Path(payload["log"]).read_text(encoding="utf-8"))
         self.assertEqual(whole["ok"], payload["ok"])
@@ -192,7 +196,6 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
 
         self.assertFalse(result.is_error)
-        assert result.structured_content is not None
         whole = self._whole(result)
         self.assertEqual(whole["atomicSeriesActivation"]["state"], "active")
         self.assertEqual(
@@ -224,8 +227,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
 
         self.assertFalse(result.is_error)
-        assert result.structured_content is not None
-        payload = result.structured_content
+        payload = self._payload(result)
         self.assertFalse(payload["ok"])
         admission = self._whole(result)["admission"]
         self.assertNotIn("classification", admission)
@@ -264,7 +266,6 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
             ),
         )
         self.assertFalse(vacant.is_error)
-        assert vacant.structured_content is not None
         vacant_whole = self._whole(vacant)
         self.assertNotIn("blocking", vacant_whole["admission"])
         self.assertEqual(vacant_whole["admission"]["activation"]["observedState"], "vacant")
@@ -282,7 +283,6 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
             ),
         )
         self.assertFalse(unreadable.is_error)
-        assert unreadable.structured_content is not None
         unreadable_whole = self._whole(unreadable)
         self.assertEqual(unreadable_whole["admission"]["activation"]["observedState"], "unreadable")
         self.assertEqual(
@@ -311,7 +311,6 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
 
         self.assertFalse(status.is_error)
-        assert status.structured_content is not None
         status_activation = self._whole(status)["atomicSeriesActivation"]
         self.assertEqual(status_activation["state"], "unreadable")
         self.assertEqual(status_activation["errorType"], "ValidationError")
@@ -332,8 +331,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
 
         self.assertFalse(sync.is_error)
-        assert sync.structured_content is not None
-        sync_payload = sync.structured_content
+        sync_payload = self._payload(sync)
         self.assertFalse(sync_payload["ok"])
         # Both oversized admission diagnoses remain whole in the log;
         # L111's refusal envelope fits the unchanged guard without a cut.
@@ -386,8 +384,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
 
         self.assertFalse(result.is_error)
-        assert result.structured_content is not None
-        payload = result.structured_content
+        payload = self._payload(result)
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "atomic-series-contract-edge-mismatch")
         whole = self._whole(result)
@@ -439,8 +436,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
             )
 
         self.assertFalse(result.is_error)
-        assert result.structured_content is not None
-        payload = result.structured_content
+        payload = self._payload(result)
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "atomic-series-contract-edge-mismatch")
         whole = self._whole(result)
@@ -487,8 +483,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
 
         self.assertFalse(result.is_error)
-        assert result.structured_content is not None
-        payload = result.structured_content
+        payload = self._payload(result)
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "atomic-series-contract-unreadable")
         whole = self._whole(result)

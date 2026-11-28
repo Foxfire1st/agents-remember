@@ -64,6 +64,14 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 
+class IntegrationBranchAuthorityError(RuntimeError):
+    """A series or leaf integration target failed canonical branch-authority validation."""
+
+    def __init__(self, message: str, *, code: str = "integration-branch-authority-refused") -> None:
+        super().__init__(message)
+        self.code = code
+
+
 def integration_surfaces(contract: WorktreeContract) -> tuple[IntegrationSurface, ...]:
     return _integration_surfaces(_scope(contract))
 
@@ -88,13 +96,15 @@ def integration_targets(contract: WorktreeContract) -> tuple[IntegrationTarget, 
                 canonical_local_branch(contract.code_repo_path, contract.code_source_branch)
                 != default
             ):
-                raise RuntimeError(
+                raise IntegrationBranchAuthorityError(
                     "standalone atomic series source must be the configured repository-default "
-                    "branch; only the PR landing plane may move that root"
+                    "branch; only the PR landing plane may move that root",
+                    code="integration-target-source-mismatch",
                 )
-            raise RuntimeError(
+            raise IntegrationBranchAuthorityError(
                 "generic integration refuses a standalone atomic series -> repository-default "
-                "landing; publish it through the PR landing plane"
+                "landing; publish it through the PR landing plane",
+                code="standalone-series-pr-landing-required",
             )
         else:
             _require_atomic_master(authority)
@@ -102,8 +112,9 @@ def integration_targets(contract: WorktreeContract) -> tuple[IntegrationTarget, 
             kind = "sprint-super"
             owner = _ref_key(authority.sprint_ref)
     else:
-        raise RuntimeError(
-            f"integration target requires a leaf or series contract, got {contract.kind!r}"
+        raise IntegrationBranchAuthorityError(
+            f"integration target requires a leaf or series contract, got {contract.kind!r}",
+            code="integration-contract-kind-unsupported",
         )
 
     targets: list[IntegrationTarget] = []
@@ -112,14 +123,16 @@ def integration_targets(contract: WorktreeContract) -> tuple[IntegrationTarget, 
         expected = canonical_local_branch(side.repository, branch)
         default = default_by_side[side.side]
         if source != expected:
-            raise RuntimeError(
+            raise IntegrationBranchAuthorityError(
                 f"{side.side} integration source {source!r} does not match task-derived "
-                f"target {expected!r}"
+                f"target {expected!r}",
+                code="integration-target-source-mismatch",
             )
         if expected == default:
-            raise RuntimeError(
+            raise IntegrationBranchAuthorityError(
                 f"generic integration refuses repository-default {side.side} branch "
-                f"{expected!r}; the repository landing plane must move the PR-gated root"
+                f"{expected!r}; the repository landing plane must move the PR-gated root",
+                code="integration-target-protected-default",
             )
         surface = _surface(side, kind=kind, branch=expected, owner=owner)
         targets.append(
@@ -310,7 +323,10 @@ def require_series_contract_authority(
     """Bind an atomic series contract to its exact task-derived repositories and refs."""
 
     if contract.kind != "series":
-        raise RuntimeError(f"{operation} requires an atomic series contract")
+        raise IntegrationBranchAuthorityError(
+            f"{operation} requires an atomic series contract",
+            code="contract-not-a-series",
+        )
     scope = _scope(contract)
     authority = _master_authority(scope)
     _require_atomic_master(authority)
@@ -325,9 +341,10 @@ def require_series_contract_authority(
             source = canonical_local_branch(side.repository, side.source_branch)
             default = _side_default_branch(side)
             if source != default:
-                raise RuntimeError(
+                raise IntegrationBranchAuthorityError(
                     f"{operation} refused: standalone atomic {side.side} source must be "
-                    f"repository-default {default!r}, got {source!r}"
+                    f"repository-default {default!r}, got {source!r}",
+                    code="series-source-branch-mismatch",
                 )
     return authority
 
@@ -813,7 +830,7 @@ def _master_authority(scope: _BranchScope) -> _MasterAuthority:
         master = topology.resolve(master_ref)
         sprint_ref = topology.parent(master_ref)
     except TaskDocumentRefError as exc:
-        raise RuntimeError(
+        raise IntegrationBranchAuthorityError(
             f"cannot resolve integration-branch authority: {exc.status}: {exc}"
         ) from exc
     if sprint_ref is None:
@@ -829,12 +846,12 @@ def _master_authority(scope: _BranchScope) -> _MasterAuthority:
         if sprint.document.executionGraph is not None:
             topology.validate_execution_topology(sprint_ref)
     except TaskDocumentRefError as exc:
-        raise RuntimeError(
+        raise IntegrationBranchAuthorityError(
             f"cannot resolve integration-branch authority: {exc.status}: {exc}"
         ) from exc
     branch = sprint.document.integrationBranch
     if not branch:
-        raise RuntimeError(
+        raise IntegrationBranchAuthorityError(
             f"integration-branch authority requires {sprint.ref.key} to declare integrationBranch"
         )
     return _MasterAuthority(
@@ -864,9 +881,10 @@ def _leaf_target(
 
 def _require_atomic_master(authority: _MasterAuthority) -> None:
     if authority.execution_nature != "atomic":
-        raise RuntimeError(
+        raise IntegrationBranchAuthorityError(
             f"series integration requires executionNature='atomic', got "
-            f"{authority.execution_nature!r}"
+            f"{authority.execution_nature!r}",
+            code="series-not-atomic",
         )
 
 
@@ -886,16 +904,25 @@ def _repository_sides(contract: WorktreeContract) -> tuple[_RepositorySide, ...]
         # is removed (MIK-R50 rule 3 tombstone succession reads the same sides).
         # An external contract without a repository path stays malformed.
         if contract.memory_repo_path is None:
-            raise RuntimeError("external-memory branch authority requires a repository path")
+            raise IntegrationBranchAuthorityError(
+                "external-memory branch authority requires a repository path",
+                code="external-memory-repository-required",
+            )
         if _repository_identity(contract.memory_repo_path, "memory") == _repository_identity(
             contract.code_repo_path, "code"
         ):
-            raise RuntimeError("external memory must not share the code repository Git common-dir")
+            raise IntegrationBranchAuthorityError(
+                "external memory must not share the code repository Git common-dir",
+                code="external-memory-shares-code-repo",
+            )
         memory_worktree = (
             contract.memory_repo_path if contract.kind == "series" else contract.memory_worktree
         )
         if memory_worktree is None:
-            raise RuntimeError("external-memory leaf branch authority requires a worktree path")
+            raise IntegrationBranchAuthorityError(
+                "external-memory leaf branch authority requires a worktree path",
+                code="external-memory-worktree-required",
+            )
         sides.append(
             _RepositorySide(
                 side="memory",
@@ -912,8 +939,9 @@ def _load_series(path: Path) -> WorktreeContract:
     try:
         return load_contract(path)
     except (ContractError, OSError) as exc:
-        raise RuntimeError(
-            f"cannot resolve integration-branch authority from {path}: {exc}"
+        raise IntegrationBranchAuthorityError(
+            f"cannot resolve integration-branch authority from {path}: {exc}",
+            code="series-contract-unreadable",
         ) from exc
 
 
@@ -926,15 +954,19 @@ def _series_surfaces(
     current_sides = {side.side: side for side in current_sides_input}
     series_sides = {side.side: side for side in _repository_sides(series)}
     if set(series_sides) != set(current_sides):
-        raise RuntimeError(f"atomic series {owner} does not match the repository memory edge")
+        raise IntegrationBranchAuthorityError(
+            f"atomic series {owner} does not match the repository memory edge",
+            code="series-memory-edge-mismatch",
+        )
     surfaces: list[IntegrationSurface] = []
     for name, current_side in current_sides.items():
         series_side = series_sides[name]
         current_identity = _repository_identity(current_side.repository, name)
         series_identity = _repository_identity(series_side.repository, name)
         if series_identity != current_identity:
-            raise RuntimeError(
-                f"atomic series {owner} points its {name} branch at a different repository"
+            raise IntegrationBranchAuthorityError(
+                f"atomic series {owner} points its {name} branch at a different repository",
+                code="series-repository-mismatch",
             )
         surfaces.append(
             _surface(
@@ -980,8 +1012,9 @@ def _require_series_contract_shape(
         or canonical_local_branch(series.code_repo_path, series.code_work_branch)
         != canonical_local_branch(series.code_repo_path, expected_work_branch)
     ):
-        raise RuntimeError(
-            f"series integration-branch authority does not match commanded task {expected_root}"
+        raise IntegrationBranchAuthorityError(
+            f"series integration-branch authority does not match commanded task {expected_root}",
+            code="series-contract-shape-mismatch",
         )
 
 
@@ -993,15 +1026,17 @@ def _require_series_code_source(
     if super_branch is not None and canonical_local_branch(
         series.code_repo_path, series.code_source_branch
     ) != canonical_local_branch(series.code_repo_path, super_branch):
-        raise RuntimeError(
-            f"series code source does not match the sprint super for {expected_root}"
+        raise IntegrationBranchAuthorityError(
+            f"series code source does not match the sprint super for {expected_root}",
+            code="series-source-branch-mismatch",
         )
     if super_branch is None and canonical_local_branch(
         series.code_repo_path, series.code_source_branch
     ) != repository_default_branch(series.code_repo_path):
-        raise RuntimeError(
+        raise IntegrationBranchAuthorityError(
             f"standalone atomic series code source is not the repository default for "
-            f"{expected_root}"
+            f"{expected_root}",
+            code="series-source-branch-mismatch",
         )
 
 
@@ -1017,19 +1052,24 @@ def _require_series_memory_identity(
     if canonical_local_branch(
         series.memory_repo_path, series.memory_work_branch
     ) != canonical_local_branch(series.memory_repo_path, expected_work_branch):
-        raise RuntimeError(f"series memory target does not match commanded task {expected_root}")
+        raise IntegrationBranchAuthorityError(
+            f"series memory target does not match commanded task {expected_root}",
+            code="series-memory-target-mismatch",
+        )
     if super_branch is not None and canonical_local_branch(
         series.memory_repo_path, series.memory_source_branch
     ) != canonical_local_branch(series.memory_repo_path, super_branch):
-        raise RuntimeError(
-            f"series memory source does not match the sprint super for {expected_root}"
+        raise IntegrationBranchAuthorityError(
+            f"series memory source does not match the sprint super for {expected_root}",
+            code="series-source-branch-mismatch",
         )
     if super_branch is None and canonical_local_branch(
         series.memory_repo_path, series.memory_source_branch
     ) != memory_repository_default_branch(series.memory_repo_path):
-        raise RuntimeError(
+        raise IntegrationBranchAuthorityError(
             f"standalone atomic series memory source is not the repository default for "
-            f"{expected_root}"
+            f"{expected_root}",
+            code="series-source-branch-mismatch",
         )
 
 
@@ -1058,7 +1098,10 @@ def _surface(
 def _repository_identity(repository: Path, side: str) -> Path:
     identity = repository_identity(repository)
     if identity is None:
-        raise RuntimeError(f"cannot resolve {side} integration repository identity: {repository}")
+        raise IntegrationBranchAuthorityError(
+            f"cannot resolve {side} integration repository identity: {repository}",
+            code="integration-repository-unresolved",
+        )
     return identity
 
 

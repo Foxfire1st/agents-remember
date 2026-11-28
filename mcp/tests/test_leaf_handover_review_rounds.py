@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -43,10 +44,15 @@ def test_reviewer_binding_opens_repairs_and_preserves_sealed_round_limits(
     async def exercise() -> None:
         with anyio.fail_after(60):
             async with Client(server, mode="legacy") as client:
+
+                def _json_body(result: Any) -> dict[str, Any]:
+                    assert not result.is_error, result.content
+                    return json.loads(result.content[0].text)
+
                 info = await client.call_tool("server_info", {})
-                assert not info.is_error and info.structured_content is not None
-                assert info.structured_content["toolServer"] == "agents-remember-task"
-                assert info.structured_content["agentBinding"] == binding.as_report()
+                info_payload = _json_body(info)
+                assert info_payload["toolServer"] == "agents-remember-task"
+                assert info_payload["agentBinding"] == binding.as_report()
 
                 async def call(operation: str, review: dict[str, Any]) -> Any:
                     # Every round/result runs under this same Reviewer server environment;
@@ -67,18 +73,14 @@ def test_reviewer_binding_opens_repairs_and_preserves_sealed_round_limits(
 
                 async def successful(operation: str, review: dict[str, Any]) -> dict[str, Any]:
                     result = await call(operation, review)
-                    assert not result.is_error and result.structured_content is not None, (
-                        result.content
-                    )
-                    return result.structured_content["reviewState"]
+                    return _json_body(result)["reviewState"]
 
                 async def refused(operation: str, review: dict[str, Any], expected: str) -> None:
                     before = (document_path.read_bytes(), markdown_path.read_bytes())
                     result = await call(operation, review)
-                    assert result.is_error
-                    assert expected in "\n".join(
-                        getattr(content, "text", "") for content in result.content
-                    )
+                    payload = _json_body(result)
+                    assert payload["ok"] is False
+                    assert expected in str(payload.get("detail", ""))
                     assert (document_path.read_bytes(), markdown_path.read_bytes()) == before
 
                 first = await successful("begin_review", {})

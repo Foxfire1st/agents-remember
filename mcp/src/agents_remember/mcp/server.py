@@ -120,9 +120,12 @@ class AgentsRememberMCP(MCPServer[Any]):
     ) -> None:
         tool_name = name or fn.__name__
         effective_annotations = (
-            read_only_annotations(tool_name) if self._enforce_read_only_marks else annotations
+            read_only_annotations(tool_name, annotations)
+            if self._enforce_read_only_marks
+            else annotations
         )
         output_spec = structured_output_spec(fn, structured_output=structured_output)
+        effective_structured_output = False if output_spec is None else structured_output
         wrapped = wrap_registered_tool(
             fn,
             RegisteredToolPolicy(
@@ -141,7 +144,7 @@ class AgentsRememberMCP(MCPServer[Any]):
             annotations=effective_annotations,
             icons=icons,
             meta=meta,
-            structured_output=structured_output,
+            structured_output=effective_structured_output,
         )
         self._registered_tools.setdefault(tool_name, effective_annotations)
 

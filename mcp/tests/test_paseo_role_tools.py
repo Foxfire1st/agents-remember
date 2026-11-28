@@ -513,8 +513,12 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
                     release.set()
                     started = await asyncio.wait_for(start, HANG_GUARD_SECONDS)
                 self.assertFalse(started.is_error)
-                assert started.structured_content is not None
-                self.assertTrue(started.structured_content["ok"])
+                started_payload = (
+                    started.structured_content
+                    if started.structured_content is not None
+                    else json.loads(started.content[0].text)  # type: ignore[union-attr]
+                )
+                self.assertTrue(started_payload["ok"])
 
         asyncio.run(invoke())
 
