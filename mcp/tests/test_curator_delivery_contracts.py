@@ -382,6 +382,7 @@ def test_current_truth_and_all_carrier_repair_are_in_delivered_reconciliation_de
             )
             assert detail.step.strip()
             trigger, label, _ = DETAIL_INDEX_ENTRIES[AUTHORING]
+            assert isinstance(trigger, str)
             _assert_index_detail_pointer(
                 delivery.result.render_instructions(), trigger, label, AUTHORING
             )
@@ -403,6 +404,7 @@ def test_all_invariant_definitions_and_separate_family_revision_binding_are_deli
             require_clauses(detail.content.decode(), DISPOSITIONS, (delivery.operation, CARD))
             assert detail.step.strip()
             trigger, label, _ = DETAIL_INDEX_ENTRIES[CARD]
+            assert isinstance(trigger, str)
             _assert_index_detail_pointer(
                 delivery.result.render_instructions(), trigger, label, CARD
             )

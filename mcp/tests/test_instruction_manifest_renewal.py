@@ -122,7 +122,10 @@ def test_command_and_check_name_invalid_no_step_decisions(
     fault: str,
     arguments: list[str],
 ) -> None:
-    entry = {"source": "reference/detail.md", "step_detail": fault == "detail-mark"}
+    entry: dict[str, object] = {
+        "source": "reference/detail.md",
+        "step_detail": fault == "detail-mark",
+    }
     generated = {}
     if fault != "neither":
         entry["step"] = None

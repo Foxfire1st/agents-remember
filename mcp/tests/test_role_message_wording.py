@@ -593,7 +593,7 @@ class RoleMessageWordingTests(unittest.TestCase):
 
     def test_report_returns_use_role_task_addressing_on_every_surface(self) -> None:
         """Report returns retain role/task addressing and the instructed recipient exception."""
-        manager_clauses = {
+        manager_clauses: dict[str, tuple[str, ...]] = {
             "general report address": (
                 "Report to launching parent unless Architect instructs an Orchestrator recipient.",
             ),
@@ -605,7 +605,7 @@ class RoleMessageWordingTests(unittest.TestCase):
             ),
             "parentless": ("dashboard Managers have no parent; invent no ID",),
         }
-        investigator_clauses = {
+        investigator_clauses: dict[str, tuple[str, ...]] = {
             "report address": (
                 "send path to parent's role with its task references via `role_message`",
             ),
@@ -628,7 +628,7 @@ class RoleMessageWordingTests(unittest.TestCase):
             "2. Send verdict path directly to Worker via `role_message` "
             "(no pasted text; block names sealed report + repair stretch)."
         )
-        verdict = {"verdict to worker": (expected,)}
+        verdict: dict[str, tuple[str, ...]] = {"verdict to worker": (expected,)}
         operation = (root / "operations/review.md").read_text()
         section = re.search(
             r"(?ms)^## Focused tests and handover\n(.*?)(?=^## |\Z)",

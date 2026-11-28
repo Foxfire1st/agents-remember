@@ -170,7 +170,7 @@ def test_failed_tries_are_review_kind_rounds_not_record_checks(launch_world) -> 
 
 def test_step_up_selection_uses_own_choices_and_never_steps_down(tmp_path: Path) -> None:
 
-    defaults = {
+    defaults: dict[str, object] = {
         "role": "worker",
         "agent": "codex",
         "model": "a",
@@ -227,7 +227,7 @@ def test_count_selects_step_up_at_and_above_threshold() -> None:
 def test_step_up_catalog_provenance_and_unoffered_choice(tmp_path: Path) -> None:
 
     config = runtime_config(tmp_path)
-    defaults = {
+    defaults: dict[str, object] = {
         "role": "worker",
         "agent": "codex",
         "model": "gpt-a",
@@ -271,7 +271,7 @@ def launch_world():
 def test_manual_start_replaces_idle_holder_and_keeps_step_up_on_restart(launch_world) -> None:
 
     world = launch_world
-    defaults = {
+    defaults: dict[str, object] = {
         "role": "worker",
         "agent": "codex",
         "model": "gpt-a",
@@ -337,7 +337,7 @@ def test_step_up_provenance_uses_actual_predecessor_choices(launch_world, overri
         }
     )
     world.replace(world.runtime, "_catalog", return_value=catalog)
-    defaults = {
+    defaults: dict[str, object] = {
         "role": "worker",
         "agent": "codex",
         "model": "gpt-a",
@@ -480,7 +480,7 @@ def test_failed_step_up_creation_leaves_empty_seat_and_same_request_retries(laun
 
 def test_host_refusal_keeps_holder_and_user_permission_authority(launch_world) -> None:
     world = launch_world
-    defaults = {
+    defaults: dict[str, object] = {
         "role": "worker",
         "agent": "codex",
         "model": "gpt-a",
@@ -532,7 +532,7 @@ def test_third_failed_round_changes_harness_with_own_mode_and_keeps_reviewer(lau
         }
     )
     world.replace(world.runtime, "_catalog", return_value=catalog)
-    defaults = {
+    defaults: dict[str, object] = {
         "role": "worker",
         "agent": "codex",
         "model": "gpt-a",
@@ -595,7 +595,7 @@ def test_third_failed_round_changes_harness_with_own_mode_and_keeps_reviewer(lau
 @pytest.mark.parametrize("review", [{"round": "unreadable"}, {"recordedRounds": "broken"}])
 def test_unreadable_review_launches_base_with_warning(launch_world, review) -> None:
     world = launch_world
-    defaults = {
+    defaults: dict[str, object] = {
         "role": "worker",
         "agent": "codex",
         "model": "gpt-a",
@@ -798,7 +798,7 @@ def test_incomplete_historical_count_warns_without_inventing_tries(launch_world,
     world.leaf = ResolvedTaskDocument(ref=world.leaf.ref, path=world.leaf.path, document=document)
     write_task_doc(world.leaf.path.parent, document)
     before = json.loads(world.leaf.path.read_text())["reviewState"]
-    defaults = {
+    defaults: dict[str, object] = {
         "role": "worker",
         "agent": "codex",
         "model": "gpt-a",

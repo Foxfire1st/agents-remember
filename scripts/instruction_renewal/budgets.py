@@ -103,7 +103,7 @@ def _matrix(
         if every_role_path in overrides or (root / every_role_path).is_file()
         else ""
     )
-    keys = [
+    keys: list[tuple[str, str]] = [
         (role, operation)
         for role in parsed.role_order
         for operation, entry in parsed.operations.items()

@@ -1156,6 +1156,7 @@ def leaf_seats(
                 continue
             selection = LeafSelection(repository_id, master, child.name)
             active_leaves.add(selection.as_key())
+            seat: str | None = None
             try:
                 number = generation(seat_counter_path(child))
                 seat = seat_for_workspace(child, number) if number > 0 else None

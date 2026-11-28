@@ -128,7 +128,7 @@ def compile_final_codex_plan_record(
         "profileId": profile.profileId,
         "planVersion": plan_version,
     }
-    return FinalCodexPlanRecord(**payload, planDigest=content_digest(payload))
+    return FinalCodexPlanRecord.model_validate({**payload, "planDigest": content_digest(payload)})
 
 
 def final_codex_gate_plan(

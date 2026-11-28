@@ -84,6 +84,7 @@ def run(args: argparse.Namespace) -> int:
         problem = f"{type(error).__name__}: {error}"
         return _refuse("settings_invalid", f"cannot parse {args.config}: {problem}")
     _help_text, operation = _COMMANDS[args.paseo_command]
+    report: dict[str, Any]
     try:
         report = (
             provision_with_home_change(settings)

@@ -40,13 +40,14 @@ ignore = [
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
-[tool.pyright]
-# Bare Pyright and editors exclude virtual environments, dependency trees, build outputs, and
-# tool caches at any depth; `exclude` avoids a blanket dot-folder rule because tracked Python
-# lives under `.dagger/` (Pyright's own default dot-folder exclude applies independently). The
-# hooks and quality wrapper supply their validated index-known file list explicitly.
-include = ["."]
-exclude = [
+[tool.pyrefly]
+# Bare Pyrefly and editors include `.dagger/` alongside `.` and disable Pyrefly's default
+# exclude heuristics (which otherwise skip dot-folders), while excluding virtual environments,
+# dependency trees, build outputs, and tool caches at any depth. The hooks and quality wrapper
+# pass `--force-exclude --python-interpreter-path <py>` with their validated index-known file list.
+project-includes = [".", ".dagger"]
+project-excludes = [
+  "**/.git",
   "**/__pycache__",
   "**/.cache",
   "**/.mypy_cache",
@@ -59,16 +60,46 @@ exclude = [
   "**/node_modules",
   "**/venv",
 ]
-pythonVersion = "3.14"
-typeCheckingMode = "basic"
-# The wrapper supplies its selected interpreter through ``--pythonpath`` so primary and linked
-# worktrees resolve the same environment; do not add checkout-local venvPath/venv declarations.
-executionEnvironments = [
-  { root = "mcp/src", extraPaths = ["mcp/src"] },
-  { root = "mcp/test_support", extraPaths = ["mcp/src", "mcp/test_support"] },
-  { root = "mcp/tests", extraPaths = ["mcp/src", "mcp/test_support", "mcp/tests", "scripts"] },
-  { root = "scripts", extraPaths = ["mcp/src", "mcp/test_support"] },
+disable-project-excludes-heuristics = true
+search-path = [
+  "mcp/src",
+  "mcp/test_support",
+  "mcp/tests",
+  "scripts",
+  ".dagger/src",
 ]
+python-version = "3.14"
+enabled-ignores = ["type", "pyrefly", "pyright"]
+check-unannotated-defs = false
+infer-return-types = "annotated"
+infer-with-first-use = false
+
+[tool.pyrefly.errors]
+# Off in pyright `basic`; `unbound-name` remains enabled across the tree.
+bad-override-mutable-attribute = false
+bad-override-param-name = false
+
+# Proven Pyrefly Pydantic plugin limit: `BaseModel.model_construct(...)` partial fixtures in
+# tests synthesize required fields that `model_construct` accepts at runtime.
+[[tool.pyrefly.sub-config]]
+matches = "mcp/tests/test_completed_direct_landing_disposition.py"
+[tool.pyrefly.sub-config.errors]
+missing-argument = false
+
+[[tool.pyrefly.sub-config]]
+matches = "mcp/tests/test_lifecycle_operation_journal_retired.py"
+[tool.pyrefly.sub-config.errors]
+missing-argument = false
+
+[[tool.pyrefly.sub-config]]
+matches = "mcp/tests/test_paseo_role_agents.py"
+[tool.pyrefly.sub-config.errors]
+missing-argument = false
+
+[[tool.pyrefly.sub-config]]
+matches = "mcp/tests/test_source_lineage.py"
+[tool.pyrefly.sub-config.errors]
+missing-argument = false
 
 [tool.coverage.run]
 # CRAP and diff coverage consume Coverage.py statement and branch units. The CRAP reader

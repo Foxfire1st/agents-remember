@@ -781,7 +781,8 @@ def test_inventory_sidecar_interleaved_second_leaf_publish_never_exceeds_task_ca
     _admit_simple_revision(
         tmp_path / "b2", scope_m2, "req-2", b"<!doctype html><p>b</p>", FrameLimits()
     )
-    cap = sum(p.stat().st_size for p in scope_m1.area.parent.rglob("*") if p.is_file())
+    cap = int(sum(p.stat().st_size for p in scope_m1.area.parent.rglob("*") if p.is_file()))
+    assert cap > 0
 
     # Interleave: leaf 1 publishes, leaf 2 publishes up to exact task cap, then leaf 1 records its
     # advisory inventory via the production path. Live re-measurement under the task lock must omit

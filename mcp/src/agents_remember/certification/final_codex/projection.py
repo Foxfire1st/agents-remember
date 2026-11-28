@@ -157,7 +157,9 @@ def _projection(
         "manifest": manifest.model_dump(mode="json") if manifest is not None else None,
         "certificateReady": certificate_ready,
     }
-    return FinalCodexLaneProjection(**payload, projectionDigest=content_digest(payload))
+    return FinalCodexLaneProjection.model_validate(
+        {**payload, "projectionDigest": content_digest(payload)}
+    )
 
 
 __all__ = [

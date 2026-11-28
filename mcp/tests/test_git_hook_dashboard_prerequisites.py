@@ -96,7 +96,7 @@ def test_present_dependencies_keep_the_check_order(hook_tree: tuple[Path, dict[s
         "[pre-commit] result: generated-runtime PASS",
         "[pre-commit] result: ruff PASS",
         "[pre-commit] result: ruff-format PASS",
-        "[pre-commit] result: pyright PASS",
+        "[pre-commit] result: pyrefly PASS",
         "[pre-commit] result: evidence-lifecycle PASS",
         "[pre-commit] result: dashboard-codegen PASS",
         "[pre-commit] result: dashboard-lint PASS",

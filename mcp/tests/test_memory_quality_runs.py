@@ -482,7 +482,7 @@ class MemoryQualityControllerTests(unittest.TestCase):
     def test_matching_prepared_tree_binds_census_and_curator_candidate(self) -> None:
         current_tree = "b" * 40
         prepared = SimpleNamespace(codeTree=current_tree, codeCommit="c" * 40)
-        scope = replace(self.candidate_scope, prepared_code_view=prepared)
+        scope = replace(self.candidate_scope, prepared_code_view=cast(Any, prepared))
         with mock.patch.object(
             controller,
             "worktree_candidate_tree",

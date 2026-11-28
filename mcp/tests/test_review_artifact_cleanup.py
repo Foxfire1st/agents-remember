@@ -149,7 +149,7 @@ class Task:
             git(self.memory, "update-ref", ref, self.tree)
 
     def archive(self, **fields: Any) -> dict[str, Any]:
-        request = {
+        request: dict[str, Any] = {
             "task_root": self.task_root,
             "task_name": MASTER,
             "code_repository": self.code,

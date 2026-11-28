@@ -194,7 +194,7 @@ def compile_gate_four_certificate(
             "resultManifestDigests",
             "passing repetitions must bind their complete result manifests",
         )
-    envelope = FinalCodexCertificateEnvelope(**envelope_payload)
+    envelope = FinalCodexCertificateEnvelope.model_validate(envelope_payload)
     return FinalCodexGateFourCertificate(
         semanticEnvelope=envelope,
         certificateDigest=content_digest(envelope),

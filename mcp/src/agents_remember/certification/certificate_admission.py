@@ -63,7 +63,9 @@ def compile_certification_admission(
         repository_profile,
         repository_plan,
     )
-    repository_gates = {gate.gate: gate for gate in repository_plan.gates}
+    repository_gates: dict[int, RepositoryGatePlan] = {
+        gate.gate: gate for gate in repository_plan.gates
+    }
     gate_identities = tuple(
         _compile_admission_gate(gate, repository_gates.get(gate.gate))
         for gate in certification_plan.gates
@@ -142,7 +144,9 @@ def _require_admission_identity_alignment(
             "admission",
             "R11 registry and R22 profile must select the same repository, candidate, and profile",
         )
-    repository_gates = {gate.gate: gate for gate in repository_plan.gates}
+    repository_gates: dict[int, RepositoryGatePlan] = {
+        gate.gate: gate for gate in repository_plan.gates
+    }
     for gate in certification_plan.gates[:4]:
         _require_rail_alignment(gate, repository_gates[gate.gate])
 

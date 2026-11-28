@@ -206,6 +206,8 @@ def send_role_message(
 ) -> dict[str, Any]:
     """Send one message to one role agent and, with ``wait``, return the turn's outcome."""
 
+    binding: Any = None
+    own_receipt: dict[str, Any] | None = None
     sender: StartingAgent | None = None
     recipient: _Recipient | None = None
     filed: dict[str, Any] | None = None
@@ -242,6 +244,7 @@ def send_role_message(
         refused = _held_refusal(refusal) if isinstance(refusal, HeldSeatClosed) else refusal
         if (
             refused.refusal == "recipient-archived"
+            and binding is not None
             and recipient is not None
             and sender is not None
             and (not isinstance(closed, HeldSeatClosed) or closed.reason == "closed")
@@ -652,6 +655,10 @@ def _held_then_delivered(
     """The answer when a drain delivered everything held, this message with it."""
 
     line = sender_line(send.sender)
+    taken_word: Any = None
+    turn_id: Any = None
+    message_id: Any = None
+    result: dict[str, Any]
     if drain.get("outcome") == "opened":
         result = opened_held_seat_answer(drain, send.recipient.agent_id, line)
     else:

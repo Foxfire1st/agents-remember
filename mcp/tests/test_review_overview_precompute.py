@@ -83,7 +83,9 @@ def _handing_watch(
     _generation(config)
     _worker_receipt(task_root)
     handed: list[tuple[LeafSelection, ReviewTreeComparisonRecord]] = []
-    ports = explainer_application_ports(lambda *capture: handed.append(capture)).watcher
+    ports = explainer_application_ports(
+        lambda selection, record: handed.append((selection, record))
+    ).watcher
     watch = MoveNoticeWatch(
         config,
         ports,

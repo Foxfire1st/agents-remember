@@ -58,7 +58,7 @@ GATE1_RAILS = [
     "generated-runtime",
     "generated-skills",
     "layering",
-    "pyright",
+    "python-typecheck",
     "quality-config-scope",
     "radon-cc",
     "radon-mi",

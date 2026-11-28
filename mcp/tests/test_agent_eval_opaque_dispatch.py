@@ -237,13 +237,14 @@ def test_common_factory_material_gaps_remain_capture_absent(fault: str) -> None:
     elif fault == "missing-source-binding":
         capture = replace(capture, source_files=())
     else:
-        changes = {
-            "foreign-session": {"session_id": "foreign"},
-            "wrong-source": {"source": "/foreign"},
-            "wrong-hash": {"source_sha256": "b" * 64},
-            "earlier-result": {"sequence": -1},
-        }
-        result = replace(result, **changes[fault])
+        if fault == "foreign-session":
+            result = replace(result, session_id="foreign")
+        elif fault == "wrong-source":
+            result = replace(result, source="/foreign")
+        elif fault == "wrong-hash":
+            result = replace(result, source_sha256="b" * 64)
+        else:
+            result = replace(result, sequence=-1)
         capture = replace(
             capture, events=(result, event) if fault == "earlier-result" else (event, result)
         )

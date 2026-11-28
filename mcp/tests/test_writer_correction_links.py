@@ -164,7 +164,10 @@ def test_optional_cli_endpoints_report_bad_utf8_active_and_archive_without_chang
     )
     for ref, root in zip(invalid, (tasks, tasks / "0_archive"), strict=True):
         packet = _write_packet(
-            root / ref["task"]["path"], ref["packet"], stable_id=ref["id"], version=ref["version"]
+            root / ref["task"]["path"],
+            str(ref["packet"]),
+            stable_id=str(ref["id"]),
+            version=str(ref["version"]),
         )
         packet.write_bytes(packet.read_bytes() + b"\xff")
     args = ["knowledge-validate", str(memory), "--code", str(code), "--base", base]

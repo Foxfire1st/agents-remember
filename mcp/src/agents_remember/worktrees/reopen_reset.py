@@ -73,7 +73,7 @@ def _reopened_contract(contract: WorktreeContract) -> WorktreeContract:
             memory_state="",
         ),
         # The vocabulary cells go through the typed record, which is what puts them in front
-        # of pyright: `dataclasses.replace` is `**changes: Any` in typeshed, so the `reopened`
+        # of Pyrefly: `dataclasses.replace` is `**changes: Any` in typeshed, so the `reopened`
         # marker below crossed the boundary unchecked for as long as it was spelled as a
         # `replace` keyword -- and it was one of the six values the packet then rejected.
         ContractCells(

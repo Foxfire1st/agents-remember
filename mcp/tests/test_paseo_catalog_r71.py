@@ -547,7 +547,9 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
         role_reports.close_execution_role_folders(receipt)
         self.assertFalse(execution.exists())
         self.assertEqual((canonical / "1.md").read_text(), "report")
-        self.assertEqual(receipt["reportCollection"]["state"], "collected-closed")
+        collection = receipt["reportCollection"]
+        assert isinstance(collection, dict)
+        self.assertEqual(collection["state"], "collected-closed")
         self.assertNotIn("reportCollectionFiles", receipt)
         # A recreated source is new evidence, even after an earlier terminal collection.
         source.mkdir(parents=True)

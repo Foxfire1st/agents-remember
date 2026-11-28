@@ -316,7 +316,7 @@ def _verify_authoring_judgments(
     (canonical judgment authority)`` section cannot take judgment-bearing mutations.
     """
 
-    claimed = [
+    claimed: list[tuple[str, str]] = [
         (mutation.op, judgment_id)
         for mutation in mutations
         if (judgment_id := getattr(mutation, "judgmentId", None))

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 from uuid import UUID
 
 import pytest
@@ -77,7 +77,7 @@ def _user_settings_in_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pa
 
 
 def test_bootstrap_is_a_launcher_role_with_no_document_and_no_parent() -> None:
-    assert "bootstrap" in LauncherRole.__args__
+    assert "bootstrap" in get_args(LauncherRole)
     assert "bootstrap" in TASKLESS_ROLES
     assert PARENTLESS_START_SELECTIONS["bootstrap"] == (False, False, False)
 

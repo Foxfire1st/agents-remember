@@ -171,7 +171,7 @@ def scheduling_source_fact(
         }
     expected_evidence = [fact.model_dump(mode="json") for fact in facts]
     observed = door.schedulingProvenance
-    fact = {
+    fact: dict[str, object] = {
         "state": "current",
         "grade": grade.model_dump(mode="json"),
         "fingerprint": digest,

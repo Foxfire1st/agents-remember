@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 from unittest import mock
 
 import pytest
@@ -444,7 +445,7 @@ def test_direct_landing_refusals_that_name_recover_hold(tmp_path: Path) -> None:
     assert "recover" in str(conflicted["detail"])
 
 
-def _old_shape(record, *, state: str):
+def _old_shape(record, *, state: Literal["intent", "proven"]):
     """A stored direct landing of the earlier shape (finding L143-CODE-R1-F02)."""
 
     shaped = record.model_copy()

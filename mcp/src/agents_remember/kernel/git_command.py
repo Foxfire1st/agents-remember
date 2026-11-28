@@ -432,9 +432,9 @@ def _run_git(
         assert isinstance(held, subprocess.CompletedProcess)
         return held  # type: ignore[return-value]
     stdin_input: str | bytes | None = execution.input_text
-    if raw_output and stdin_input is not None:
+    if raw_output and isinstance(stdin_input, str):
         stdin_input = stdin_input.encode("utf-8")
-    stdin_kwargs: dict[str, object] = (
+    stdin_kwargs: dict[str, Any] = (
         {"input": stdin_input} if stdin_input is not None else {"stdin": subprocess.DEVNULL}
     )
     argv = _git_argv(repo_root, args, execution.work_dir)
@@ -444,18 +444,32 @@ def _run_git(
     reader = read_cancellation()
     raise_if_read_cancelled()
     if not execution.new_session and cancellation is None and reader is None:
-        result = subprocess.run(
-            argv,
-            cwd=execution.work_dir,
-            text=not raw_output,
-            encoding=None if raw_output else "utf-8",
-            errors=None if raw_output else "surrogateescape",
-            capture_output=True,
-            env=execution.environment,
-            timeout=execution.timeout,
-            check=False,
-            **stdin_kwargs,  # type: ignore[arg-type]
-        )
+        if raw_output:
+            result: subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes] = (
+                subprocess.run(
+                    argv,
+                    cwd=execution.work_dir,
+                    text=False,
+                    capture_output=True,
+                    env=execution.environment,
+                    timeout=execution.timeout,
+                    check=False,
+                    **stdin_kwargs,
+                )
+            )
+        else:
+            result = subprocess.run(
+                argv,
+                cwd=execution.work_dir,
+                text=True,
+                encoding="utf-8",
+                errors="surrogateescape",
+                capture_output=True,
+                env=execution.environment,
+                timeout=execution.timeout,
+                check=False,
+                **stdin_kwargs,
+            )
     else:
         # A new session owns its process group, so a timeout -- or a client that
         # went away -- stops the command with the children it started. ``subprocess.run``

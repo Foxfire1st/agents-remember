@@ -69,7 +69,7 @@ def decision_records(diff: ReviewKnowledgeTreeDiff) -> list[dict[str, Any]]:
 
     named = []
     for group in diff.records:
-        statuses = {change.status for change in group.files}
+        statuses: set[str] = {change.status for change in group.files}
         change = _group_change(statuses, bool(group.entries))
         path = group.files[0].path if group.files else None
         named.append(

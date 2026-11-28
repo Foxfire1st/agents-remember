@@ -45,7 +45,7 @@ def test_a_context_whose_counts_do_not_describe_its_roster_is_refused() -> None:
         {"families_returned": context.families_returned - 1},
     ):
         with pytest.raises(ValidationError):
-            ReviewFamilyContext(**{**context.model_dump(), **update})
+            ReviewFamilyContext.model_validate({**context.model_dump(), **update})
 
 
 def test_a_roster_page_may_not_present_a_truncated_roster_as_a_complete_one() -> None:

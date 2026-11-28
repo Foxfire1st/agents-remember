@@ -353,20 +353,22 @@ class _Collector:
             item = self.hunks.get(subject)
             if item is None:
                 coverage = _coverage(path, self.base, self.coverage)
-                item = self.hunks[subject] = {
+                hunk_facts: dict[str, Any] = {
+                    "path": path,
+                    "candidateBlob": candidate_blob or ABSENT,
+                    "hunks": [],
+                    "changedLines": {"base": sides[0], "candidate": sides[1]},
+                    "deleteOnly": new_count == 0,
+                    "coverage": coverage,
+                    "admits": _admits(coverage, new_count > 0),
+                }
+                new_item: dict[str, Any] = {
                     "kind": HUNK_ITEM_KIND,
                     "subject": subject,
                     "identities": list(sides),
-                    "facts": {
-                        "path": path,
-                        "candidateBlob": candidate_blob or ABSENT,
-                        "hunks": [],
-                        "changedLines": {"base": sides[0], "candidate": sides[1]},
-                        "deleteOnly": new_count == 0,
-                        "coverage": coverage,
-                        "admits": _admits(coverage, new_count > 0),
-                    },
+                    "facts": hunk_facts,
                 }
+                item = self.hunks[subject] = new_item
             fact = {"base": hunk["base"], "candidate": hunk["candidate"]}
             if fact not in item["facts"]["hunks"]:
                 item["facts"]["hunks"].append(fact)
@@ -425,8 +427,8 @@ def _finished(
     candidate_files: Mapping[str, bytes],
 ) -> dict[str, Any]:
     identities = raw.pop("identities")
-    item = {**raw, "id": item_id(raw["kind"], raw["subject"], identities)}
-    facts = item["facts"]
+    item: dict[str, Any] = {**raw, "id": item_id(raw["kind"], raw["subject"], identities)}
+    facts: dict[str, Any] = item["facts"]
     facts["row"] = row_subject(item)
     if facts["coverage"]["state"] == UNCOVERED:
         path = facts["path"]
@@ -581,6 +583,8 @@ def _settled(item: Mapping[str, Any], traces: Mapping[str, Mapping[str, Any]]) -
     ):
         return dict(item)
     subject = facts["onboardingTrace"].get("subject")
+    if not isinstance(subject, str):
+        return dict(item)
     trace = traces.get(subject)
     if trace is None:
         return dict(item)

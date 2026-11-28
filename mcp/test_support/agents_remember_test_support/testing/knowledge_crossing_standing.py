@@ -397,6 +397,7 @@ def share_conversion(
     if any(profile.shape != "converted" for profile in profiles):
         return
     entries = {}
+    ledger: dict[str, Any] = {}
     for profile in profiles:
         ledger = json.loads((profile.root(lines) / CONVERTED_REVIEWS_PATH).read_bytes())
         entries.update({row["owner"]: row for row in ledger["reviews"]})

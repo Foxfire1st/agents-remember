@@ -501,15 +501,16 @@ class ReviewerWorklistProcesses:
 
     def _launch(self, environment: dict[str, str], cwd: str) -> subprocess.Popen[bytes]:
         try:
-            process = self._launcher.submit(
-                subprocess.Popen,
-                [sys.executable, "-P", "-m", CHILD_MODULE],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=environment,
-                cwd=cwd,
-                start_new_session=True,
+            process: subprocess.Popen[bytes] = self._launcher.submit(
+                lambda: subprocess.Popen(
+                    [sys.executable, "-P", "-m", CHILD_MODULE],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=environment,
+                    cwd=cwd,
+                    start_new_session=True,
+                )
             ).result()
         except OSError as error:
             raise WorklistProcessError(f"reviewer worklist launch failed: {error}") from error

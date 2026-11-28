@@ -90,7 +90,7 @@ def test_bridge_derives_one_canonical_five_gate_authority_from_the_real_profile(
         gate.gate: tuple(rail.identity.key for rail in gate.rails)
         for gate in lane.certificationPlan.gates
     }
-    for gate in range(1, 5):
+    for gate in (1, 2, 3, 4):
         repository_gate = next(item for item in repository_plan.gates if item.gate == gate)
         assert rails_per_gate[gate] == tuple(rail.identity.key for rail in repository_gate.rails)
     assert len(rails_per_gate[5]) == len(gate_five_memory_rails("closeout-targeted"))

@@ -112,6 +112,7 @@ def _expected_judgment(case: CaseBundle) -> ExpectedJudgment | None:
         or not subject.startswith(("INV-", "FAM-"))
         or type(revision) is not int
         or revision < 1
+        or not isinstance(disposition, str)
         or disposition not in (*InvariantRow.dispositions, *FamilyRow.dispositions)
     ):
         raise AuthorityError(f"invalid structured expected history judgment: {path}")

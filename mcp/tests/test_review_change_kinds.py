@@ -542,7 +542,7 @@ def test_trees_that_cannot_be_read_make_every_fact_unknown(world: World) -> None
     record = trees.record.model_copy(
         update={"code_base": trees.record.code_base.model_copy(update={"tree": "f" * 40})}
     )
-    unreadable = type(trees)(**{**trees.__dict__, "record": record})
+    unreadable = replace(trees, record=record)
     badged = _entry_of(with_change_kinds(_without_kinds(context), unreadable), FAM1)
     assert badged.change_kinds is not None
     assert badged.change_kinds.guarantee == "unknown" and badged.change_kinds.detail
@@ -653,30 +653,30 @@ def test_the_facts_are_derived_and_describe_exactly_the_returned_members(world: 
     # A primary or mark that disagrees with the facts is refused.
     one = kinds.members[0].model_dump()
     with pytest.raises(ValidationError, match="primary kind"):
-        ReviewMemberChange(**{**one, "primary": "unchanged", "intent": "established"})
+        ReviewMemberChange.model_validate({**one, "primary": "unchanged", "intent": "established"})
     with pytest.raises(ValidationError, match="marks"):
-        ReviewMemberChange(**{**one, "marks": ("unknown",)})
+        ReviewMemberChange.model_validate({**one, "marks": ("unknown",)})
     # An unknown fact without its reason, or a reason beside known facts, is refused.
     unknown = next(m for m in kinds.members if m.primary == "unknown").model_dump()
     with pytest.raises(ValidationError, match="names why"):
-        ReviewMemberChange(**{**unknown, "unknown_reasons": ()})
+        ReviewMemberChange.model_validate({**unknown, "unknown_reasons": ()})
     known = next(m for m in kinds.members if m.primary == "unchanged").model_dump()
     with pytest.raises(ValidationError, match="names why"):
-        ReviewMemberChange(**{**known, "unknown_reasons": ("a reason",)})
+        ReviewMemberChange.model_validate({**known, "unknown_reasons": ("a reason",)})
     # An unresolved range is recorded beside an established or unknown implementation only.
     with pytest.raises(ValidationError, match="unresolved range"):
-        ReviewMemberChange(**{**known, "range_unresolved": True})
+        ReviewMemberChange.model_validate({**known, "range_unresolved": True})
     with pytest.raises(ValidationError, match="unknown membership names why"):
-        ReviewMemberChange(**{**known, "membership": "unknown", "primary": "unknown"})
+        ReviewMemberChange.model_validate({**known, "membership": "unknown", "primary": "unknown"})
     with pytest.raises(ValidationError, match="unknown membership names why"):
-        ReviewMemberChange(**{**known, "membership_reasons": ("a reason",)})
+        ReviewMemberChange.model_validate({**known, "membership_reasons": ("a reason",)})
     # A differing text marks an established intent only.
     with pytest.raises(ValidationError, match="differing text"):
-        ReviewMemberChange(**{**unknown, "text_differs": True})
+        ReviewMemberChange.model_validate({**unknown, "text_differs": True})
     # Facts for a member the page did not return, or none for one it did, are refused.
     dropped = kinds.model_copy(update={"members": kinds.members[1:]})
     with pytest.raises(ValidationError, match="exactly the member occurrences"):
-        ReviewFamilyContextEntry(**{**dict(family), "change_kinds": dropped})
+        ReviewFamilyContextEntry.model_validate({**dict(family), "change_kinds": dropped})
 
 
 def test_a_dataset_review_carries_no_change_facts(world: World) -> None:
@@ -696,10 +696,10 @@ def test_a_dataset_review_carries_no_change_facts(world: World) -> None:
 
 def _without_kinds(context: ReviewFamilyContext) -> ReviewFamilyContext:
     entries = tuple(
-        ReviewFamilyContextEntry(**{**dict(entry), "change_kinds": None})
+        ReviewFamilyContextEntry.model_validate({**dict(entry), "change_kinds": None})
         for entry in context.entries
     )
-    return ReviewFamilyContext(**{**dict(context), "entries": entries})
+    return ReviewFamilyContext.model_validate({**dict(context), "entries": entries})
 
 
 @pytest.fixture(autouse=True)

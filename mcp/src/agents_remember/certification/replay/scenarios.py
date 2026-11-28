@@ -59,9 +59,9 @@ REPLAY_ACCEPTANCE_SCENARIOS: tuple[ReplayScenarioExpectation, ...] = (
     ),
     ReplayScenarioExpectation(
         scenarioId="r17-scenario-04",
-        title="pyright fails without hiding file size, layering, or dashboard results",
+        title="python-typecheck fails without hiding file size, layering, or dashboard results",
         requirement=(
-            "A Gate-1 pyright failure still publishes file-size, layering, and dashboard "
+            "A Gate-1 python-typecheck failure still publishes file-size, layering, and dashboard "
             "rail results in the same complete catalog."
         ),
         views=("Gate-1 red catalog", "companion rail results"),
@@ -281,12 +281,12 @@ def _evaluate_04(evidence: ReplayScenarioEvidence) -> ScenarioOutcome:
     if gate_one.lastCatalogDisposition != "red" or not gate_one.lastCatalog:
         return _not_applicable("r17-scenario-04", "no Gate-1 red catalog was recorded")
     failed_keys = {rail.key for rail in gate_one.failedRails}
-    pyright_failed = any(
-        placement.rail.key in failed_keys for placement in _placements(evidence, "pyright")
+    typecheck_failed = any(
+        placement.rail.key in failed_keys for placement in _placements(evidence, "python-typecheck")
     )
-    if not pyright_failed:
+    if not typecheck_failed:
         return _not_applicable(
-            "r17-scenario-04", "the pyright rail did not fail in the Gate-1 catalog"
+            "r17-scenario-04", "the python-typecheck rail did not fail in the Gate-1 catalog"
         )
     catalog_keys = {record.rail.key for record in gate_one.lastCatalog}
     missing = [rail.key for rail in evidence.companionRails if rail.key not in catalog_keys]

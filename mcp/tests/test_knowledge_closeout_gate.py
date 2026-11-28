@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -1109,9 +1109,7 @@ def test_a_master_or_checkpoint_landing_waits_until_no_entry_at_a_changed_path_i
     )
     assert landing_gate_refusal(request) is None
     broken = commit(world.memory, {"onboarding/pkg/a.py.md": "# a [4]\n"}, trailer=code_commit)
-    invalid = landing_gate_refusal(
-        LandingGateRequest(**{**request.__dict__, "memory_commit": broken})
-    )
+    invalid = landing_gate_refusal(replace(request, memory_commit=broken))
     assert invalid is not None and "R22.3-markers" in invalid
 
 

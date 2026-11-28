@@ -17,7 +17,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
@@ -256,7 +256,7 @@ def record_published_generation(
     catalog = catalog_gates(payload)
     gate_records: list[dict[str, object]] = []
     run = GateRecordPublication(manifest, [], [], tuple(retained_certificates))
-    selected = {item.certificate.semanticEnvelope.gate: item for item in retained}
+    selected: dict[int, Any] = {item.certificate.semanticEnvelope.gate: item for item in retained}
     if len(selected) != len(retained):
         raise CertificationContractError(
             "duplicate retained gate", ({"code": "duplicate-retained-gate", "path": "retained"},)

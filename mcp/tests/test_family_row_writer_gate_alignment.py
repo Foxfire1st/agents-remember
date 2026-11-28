@@ -403,7 +403,7 @@ def test_member_that_left_candidate_stamps_base_revision_and_answers_gate(
             {"id": BASE_INVARIANT, "base": 3, "candidate": None},
             {"id": SURVIVOR_INVARIANT, "base": 2, "candidate": 4},
         ],
-        key=lambda entry: entry["id"],
+        key=lambda entry: str(entry["id"]),
     )
     assert reached["facts"]["members"] == expected_facts
 
@@ -420,7 +420,7 @@ def test_member_that_left_candidate_stamps_base_revision_and_answers_gate(
             {"id": BASE_INVARIANT, "revision": 3},
             {"id": SURVIVOR_INVARIANT, "revision": 4},
         ],
-        key=lambda entry: entry["id"],
+        key=lambda entry: str(entry["id"]),
     )
     assert stored_row["examined"] == expected_examined
     assert stored_row["revision"] == 2

@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from agents_remember.models.role_capsules.manifest_derived import compose_manifest
@@ -332,7 +332,7 @@ def _derive_detail_reached(
             for pointer in hops:
                 reaching = result.get(by_source.get(pointer.origin, ""))
                 roles = reaching.roles if reaching is not None else set()
-                _collect(item, [Pointer(**{**pointer.__dict__, "roles": frozenset(roles)})])
+                _collect(item, [replace(pointer, roles=frozenset(roles))])
 
 
 def _collect(item: Derivation, pointers: list[Pointer]) -> None:

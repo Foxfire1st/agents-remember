@@ -224,7 +224,9 @@ def _readiness_repository_gate(
             [identity.model_dump(mode="json") for identity in wave] for wave in gate_plan.waves
         ],
     }
-    return RepositoryGatePlan(**payload, planDigest=repository_gate_plan_digest(payload))
+    return RepositoryGatePlan.model_validate(
+        {**payload, "planDigest": repository_gate_plan_digest(payload)}
+    )
 
 
 def _readiness_repository_plan(plan: CertificationPlan) -> RepositoryProfilePlan:
@@ -239,7 +241,7 @@ def _readiness_repository_plan(plan: CertificationPlan) -> RepositoryProfilePlan
         "gates": [gate.model_dump(mode="json") for gate in gates],
         "sourceSelection": None,
     }
-    return RepositoryProfilePlan(**payload, planDigest=content_digest(payload))
+    return RepositoryProfilePlan.model_validate({**payload, "planDigest": content_digest(payload)})
 
 
 def _readiness_provenance() -> CreationProvenance:

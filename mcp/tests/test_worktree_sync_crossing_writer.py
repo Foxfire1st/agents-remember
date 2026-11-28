@@ -422,7 +422,7 @@ def test_a_combined_revision_reads_the_state_its_own_writer_gives_in_either_file
     if handed is not None:
         own = f"knowledge/history/{leaf_id}.json"
         closed = {**lines.read(own), "closed": True}
-        if handed:
+        if isinstance(handed, str):
             closed["review"] = review_fact(leaf_id, handed_over_by=handed)
         (lines.leaf / own).write_text(canonical_text(closed), encoding="utf-8")
         git(lines.leaf, "add", "-A")
@@ -523,7 +523,7 @@ def _assert_unbound_review(
         lines,
         selected,
         owner,
-        {"rows": [standing.changed_row(retained["id"], retained["revision"])]},
+        {"rows": [standing.changed_row(retained["id"], int(retained["revision"]))]},
     )
     tasks = scratch / "archived-review"
     _store_archived_review(tasks, owner, None)
@@ -620,7 +620,9 @@ def _assert_prior_review_path(
         "move the record to its current name",
     )
     source = selected.root(lines)
-    body: dict[str, Any] = {"rows": [standing.changed_row(retained["id"], retained["revision"])]}
+    body: dict[str, Any] = {
+        "rows": [standing.changed_row(retained["id"], int(retained["revision"]))]
+    }
     key: tuple[str, ...] = ("unknown",) * 3
     if not converted:
         body = {

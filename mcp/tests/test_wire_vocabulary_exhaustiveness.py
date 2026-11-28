@@ -17,7 +17,7 @@ keeps a vocabulary honest would be false, and was.
 
     vocabulary                                   defended by
     ------------------------------------------   ----------------------------------------
-    the six contract cells                       pyright, at `ContractCells`' typed fields
+    the six contract cells                       Pyrefly, at `ContractCells`' typed fields
       workflow_kind, memory_mode,                and `WorktreeContract`'s own. `Produced-
       human_review_status, closeout_status,      LiteralTests` supplies the invariant that
       integration_status, cleanup                makes that total:
@@ -25,11 +25,11 @@ keeps a vocabulary honest would be false, and was.
                                                  one of these keywords, and every value
                                                  written at a typed writer must be an
                                                  expression this scan can enumerate.
-    phase / nextOperation / nextTool             pyright, at `LifecycleGuidance`'s TypedDict
+    phase / nextOperation / nextTool             Pyrefly, at `LifecycleGuidance`'s TypedDict
                                                  and `next_guidance`'s typed parameters.
                                                  The scan measures the emitted set and
                                                  asserts it EQUALS the alias.
-    the seven listed below                       pyright, at direct typed constructor calls
+    the seven listed below                       Pyrefly, at direct typed constructor calls
                                                  (`GitFacts(state=...)` and friends). The
                                                  scan asserts produced == declared, which
                                                  is a real measurement in the *other*
@@ -40,7 +40,7 @@ keeps a vocabulary honest would be false, and was.
                                                  signature, and there is no type to check.
 
 `dataclasses.replace` is why the first row needs a second mechanism at all. typeshed types
-it `**changes: Any`, so `replace(contract, cleanup="reclaimed-ish")` produced *zero* pyright
+it `**changes: Any`, so `replace(contract, cleanup="reclaimed-ish")` produced *zero* checker
 diagnostics against a four-member `Literal` -- one `Any` in a third-party stub voiding the
 guarantee this whole module is about. `amend_contract(contract, ContractCells(...))` exists to
 put those fields back in front of the checker; the no-`replace` rule below is what stops a

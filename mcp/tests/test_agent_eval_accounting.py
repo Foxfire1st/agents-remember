@@ -8,7 +8,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
@@ -77,7 +77,7 @@ class AccountingTests(unittest.TestCase):
             capture = NativeCapture("hermes", row["sessionId"], events, sources, (), ())
             for deadline in (False, True):
                 with self.subTest(attempt=row["attemptId"], controlled_deadline=deadline):
-                    report = {
+                    report: dict[str, Any] = {
                         "waits": [
                             {
                                 "state": "running" if deadline else "ended",

@@ -768,7 +768,7 @@ class Authoring(RepointRowAuthoring):
             else "updated"
         )
         self.entries.append(
-            EntryOutcome(kind, entry["id"], invariant_id, sidecar_path, action, handoff_entry)
+            EntryOutcome(kind, str(entry["id"]), invariant_id, sidecar_path, action, handoff_entry)
         )
 
     def _remove_unnamed_entries(self, handoff_entry: str, invariant_id: str) -> None:

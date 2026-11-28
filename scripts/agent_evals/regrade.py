@@ -1061,6 +1061,7 @@ def _prior_summary(row: dict[str, Any]) -> None:
             **row["newPackageSizes"],
             **token_projection(row["newPackageSizes"]["packagedPromptUtf8Bytes"]),
         }
+    preparation: dict[str, Any] | None = None
     try:
         identity = validate_result_identity(row.get("resultIdentity"))
         preparation = _preparation_source(row)
@@ -1104,6 +1105,7 @@ def _prior_summary(row: dict[str, Any]) -> None:
     row["existingRegrades"] = records
     row["wouldRunByMode"] = {
         mode: current_digest is not None
+        and preparation is not None
         and not any(
             record["mode"] == mode
             and record.get("identityDigest") == current_digest

@@ -815,7 +815,7 @@ def _project_item(
         # endpoint rides the role beside the row.
         role = "advertised"
     state = _row_state(item, text_id, states, fallback)
-    projected = {"id": text_id, "kind": kind, "state": state, "location": None}
+    projected: dict[str, Any] = {"id": text_id, "kind": kind, "state": state, "location": None}
     if text_id is not None:
         projected["location"] = _row_location(item, text_id, resolver, member_of)
     if role is not None:

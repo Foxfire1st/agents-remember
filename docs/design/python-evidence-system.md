@@ -162,7 +162,7 @@ Static correctness and behavioral certification are deliberately not identical p
 | Rail | Product Python | Ordinary tests | Shared test support | Durable fixtures |
 | --- | :---: | :---: | :---: | :---: |
 | Ruff / format | yes | yes | yes | n/a |
-| Pyright | yes | yes | yes | n/a |
+| Pyrefly | yes | yes | yes | n/a |
 | File size | yes | yes | yes | n/a |
 | Layering | package graph | import participation | import participation | n/a |
 | Evidence lifecycle | when governed | when governed | yes | yes |

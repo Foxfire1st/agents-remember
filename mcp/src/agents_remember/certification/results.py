@@ -57,7 +57,7 @@ def build_rail_result(
         "artifacts": [item.model_dump(mode="json") for item in observation.artifacts],
         "evidence": [item.model_dump(mode="json") for item in observation.evidence],
     }
-    return RailResult(**payload, resultDigest=content_digest(payload))
+    return RailResult.model_validate({**payload, "resultDigest": content_digest(payload)})
 
 
 def compile_gate_result_manifest(
@@ -108,7 +108,7 @@ def compile_gate_result_manifest(
         "disposition": disposition,
         "railResults": [result.model_dump(mode="json") for result in ordered],
     }
-    return GateResultManifest(**payload, manifestDigest=content_digest(payload))
+    return GateResultManifest.model_validate({**payload, "manifestDigest": content_digest(payload)})
 
 
 def _validate_plan_membership(

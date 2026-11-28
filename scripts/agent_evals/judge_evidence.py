@@ -368,7 +368,7 @@ def package_judge_evidence(
             if row.get("mandatoryClass") == "opaque-input-and-outputs"
         ),
     )
-    manifest = {
+    manifest: dict[str, Any] = {
         **budget,
         "policy": POLICY,
         "captureRawExportSha256": frozen["raw_export_sha256"],

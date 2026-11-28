@@ -192,18 +192,15 @@ class _TimingScan:
             self.report(node, "elapsed real clock compared with a number", 11)
 
     def run(self) -> list[str]:
-        handlers = {
-            ast.Call: self.call,
-            ast.FunctionDef: self.function,
-            ast.AsyncFunctionDef: self.function,
-            ast.Assign: self.assignment,
-            ast.AnnAssign: self.assignment,
-            ast.BinOp: self.deadline,
-        }
         for node in ast.walk(self.tree):
-            handler = handlers.get(type(node))
-            if handler is not None:
-                handler(node)
+            if isinstance(node, ast.Call):
+                self.call(node)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self.function(node)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                self.assignment(node)
+            elif isinstance(node, ast.BinOp):
+                self.deadline(node)
             elif isinstance(node, ast.Compare):
                 self.comparison(node, [node.left, *node.comparators])
         return self.findings

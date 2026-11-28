@@ -203,7 +203,7 @@ def _require_matching_judgment(
             "closeout-grade-subject-mismatch",
             "Priority and Judgment Register subjects do not match exactly",
         )
-    expected = {"priority": asserted.priority}
+    expected: dict[str, str] = {"priority": asserted.priority}
     if asserted.urgency is not None:
         expected["urgency"] = asserted.urgency
     if asserted.risk is not None:

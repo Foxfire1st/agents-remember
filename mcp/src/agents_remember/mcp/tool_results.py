@@ -8,8 +8,10 @@ touching private SDK metadata.
 
 from __future__ import annotations
 
+import functools
 import inspect
 import json
+import operator
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from itertools import chain
@@ -112,7 +114,7 @@ def _strip_input_required_union(annotation: Any, base: Any) -> tuple[Any, Any] |
         return None
     if len(residual) == len(args):
         return annotation, base
-    effective = residual[0] if len(residual) == 1 else Union[residual]  # noqa: UP007
+    effective = residual[0] if len(residual) == 1 else functools.reduce(operator.or_, residual)
     next_base, _ = _unwrap_annotated(effective)
     return effective, next_base
 

@@ -396,7 +396,7 @@ def _row(subject: str, disposition: str, *, revision: int = 1) -> RecordRow:
         "revision": revision,
     }
     effect = {"changed": "clarify", "retired": "retire"}.get(disposition)
-    return RecordRow(**({**fields, "effect": effect} if effect else fields))
+    return RecordRow.model_validate({**fields, "effect": effect} if effect else fields)
 
 
 def _gate_context(row: RecordRow, candidate_records=()):
@@ -989,22 +989,23 @@ def _write(world, records, *, commit: bool = False, rows=None, leaf: str = WRITE
 def _weakness_record(
     *, key: str = "weakness-1", slug: str = "receipts", record_id=None, remove=False, **fields
 ):
-    document = {
+    record_fields: dict[str, Any] = {
+        "kind": "time",
+        "statement": "The reader walks every receipt file on each message, which costs time.",
+        "anchor": {
+            "path": "pkg/landing.py",
+            "locator": {"kind": "symbol", "value": "land_pair"},
+        },
+        "seen": {"task": WRITER_LEAF, "role": "worker"},
+        "state": "open",
+        **fields,
+    }
+    document: dict[str, Any] = {
         "key": key,
         "kind": "weakness",
         "slug": slug,
-        "fields": {
-            "kind": "time",
-            "statement": "The reader walks every receipt file on each message, which costs time.",
-            "anchor": {
-                "path": "pkg/landing.py",
-                "locator": {"kind": "symbol", "value": "land_pair"},
-            },
-            "seen": {"task": WRITER_LEAF, "role": "worker"},
-            "state": "open",
-        },
+        "fields": record_fields,
     }
-    document["fields"].update(fields)
     if record_id is not None:
         document["id"] = record_id
     if remove:
@@ -1015,21 +1016,22 @@ def _weakness_record(
 def _dependent_record(
     *, key: str = "dependent-1", slug: str = "settings-json", record_id=None, remove=False, **fields
 ):
-    document = {
+    record_fields: dict[str, Any] = {
+        "document": WRITER_DOCUMENT,
+        "stands_on": [{"kind": "file", "path": "pkg/landing.py"}],
+        "confirmed": {
+            "task": WRITER_LEAF,
+            "role": "curator",
+            "statement": "The document still describes the code it stands on.",
+        },
+        **fields,
+    }
+    document: dict[str, Any] = {
         "key": key,
         "kind": "dependent",
         "slug": slug,
-        "fields": {
-            "document": WRITER_DOCUMENT,
-            "stands_on": [{"kind": "file", "path": "pkg/landing.py"}],
-            "confirmed": {
-                "task": WRITER_LEAF,
-                "role": "curator",
-                "statement": "The document still describes the code it stands on.",
-            },
-        },
+        "fields": record_fields,
     }
-    document["fields"].update(fields)
     if record_id is not None:
         document["id"] = record_id
     if remove:

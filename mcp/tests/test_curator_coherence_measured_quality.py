@@ -140,12 +140,17 @@ def test_each_candidate_identity_is_still_compared(
 ) -> None:
     contract, _ = enclosure
     observed = coherence.observe_curator_coherence_source(contract)
-    replacement = (
-        observed.pair_identity.model_copy(update={"contractDigest": "a" * 64})
-        if field == "pair_identity"
-        else "a" * (64 if field == "task_topology_fingerprint" else 40)
-    )
-    moved = replace(observed, **{field: replacement})
+    if field == "pair_identity":
+        moved = replace(
+            observed,
+            pair_identity=observed.pair_identity.model_copy(update={"contractDigest": "a" * 64}),
+        )
+    elif field == "code_candidate_tree":
+        moved = replace(observed, code_candidate_tree="a" * 40)
+    elif field == "memory_candidate_tree":
+        moved = replace(observed, memory_candidate_tree="a" * 40)
+    else:
+        moved = replace(observed, task_topology_fingerprint="a" * 64)
     with (
         patch.object(coherence, "observe_curator_coherence_source", return_value=moved),
         pytest.raises(CuratorCoherenceError) as error,

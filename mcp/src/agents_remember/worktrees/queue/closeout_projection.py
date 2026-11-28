@@ -677,7 +677,7 @@ def _series_source(
         and contract.integration_status != "completed"
         and contract.cleanup not in TERMINAL_SERIES_CLEANUP
     )
-    row = {
+    row: dict[str, object] = {
         "address": path.as_posix(),
         "state": "present",
         "kind": contract.kind,

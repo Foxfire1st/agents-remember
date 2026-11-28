@@ -89,7 +89,7 @@ class _FinalizeFixtures(unittest.TestCase):
                 base_commit=code_base,
             ),
         )
-        values = {
+        values: dict[str, Any] = {
             "human_review_status": "approved",
             "approved_for_commit": True,
             "closeout_status": "completed",
@@ -367,6 +367,7 @@ class FolderMasterFinalizeTests(_FinalizeFixtures):
         for case in ("no-task-json", "no-row", "leaf-is-the-light-task-json", "no-leaf-document"):
             with self.subTest(case=case):
                 contract = self._contract(fixture_name=f"standalone-{case}")
+                master_json: Path | None = None
                 if case == "no-leaf-document":
                     leaf_json, others = contract.task_root / "14_finalize.json", ()
                 elif case == "no-task-json":
@@ -387,6 +388,7 @@ class FolderMasterFinalizeTests(_FinalizeFixtures):
                 payload = _payload(result)
                 self.assertEqual(payload["state"], "task-document-resolution-blocked")
                 if case == "no-row":
+                    assert master_json is not None
                     refusal = (
                         f"folder master {master_json.resolve()} lists no row '14'; "
                         "add the leaf's row to this master through task_doc and retry finalization"

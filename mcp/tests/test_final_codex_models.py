@@ -322,7 +322,7 @@ def plan_record(
         "profileId": profile_id,
         "planVersion": PLAN_VERSION,
     }
-    return FinalCodexPlanRecord(**payload, planDigest=content_digest(payload))
+    return FinalCodexPlanRecord.model_validate({**payload, "planDigest": content_digest(payload)})
 
 
 def attempt_record(
@@ -350,7 +350,9 @@ def attempt_record(
         "requestedAt": NOW,
         "state": state,
     }
-    return FinalCodexAttemptRecord(**payload, attemptDigest=content_digest(payload))
+    return FinalCodexAttemptRecord.model_validate(
+        {**payload, "attemptDigest": content_digest(payload)}
+    )
 
 
 def environment_binding(environment_identity: str = "codex-host") -> FinalCodexEnvironmentBinding:
@@ -422,7 +424,7 @@ def make_draft(
     resolved_record = record if record is not None else plan_record()
     resolved_binding = authority_binding()
     resolved_environment = environment_binding()
-    payload = {
+    payload: dict[str, object] = {
         "schemaVersion": "final-codex-repetition-result/v1",
         "repetitionNumber": repetition_number,
         "candidateIdentity": resolved_record.candidateIdentity.model_dump(mode="json"),
@@ -449,7 +451,7 @@ def make_draft(
     }
     if overrides is not None:
         payload.update(overrides)
-    return FinalCodexRepetitionResultDraft(**payload)
+    return FinalCodexRepetitionResultDraft.model_validate(payload)
 
 
 def make_store(root: Path) -> FinalCodexManifestStore:

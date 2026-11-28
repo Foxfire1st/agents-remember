@@ -531,7 +531,7 @@ class DeveloperSendTests(RoleToolsTestCase):
     ) -> None:
         _request, worker = self.started("worker", status="idle")
         image = {"id": "big", "kind": "image", "title": "big", "note": ""}
-        cases = {
+        cases: dict[str, dict[str, Any]] = {
             "too-many-picks": {"picks": [self.reference_pick("task")] * 21},
             "image-too-large": {
                 "picks": [
@@ -593,7 +593,9 @@ class DeveloperSendTests(RoleToolsTestCase):
         tree = commit_tree(leaf, {record: record_text("INV-NEW001", 1)}, "leaf")
         comparison = {**self.comparison, "trees": {**self.trees, "memoryCandidate": tree}}
         live = {(REPO, "master", "01_LEAF"): leaf}
-        roots = FormRoots(self.config, leaf_memory_root=lambda *key: live.get(key))
+        roots = FormRoots(
+            self.config, leaf_memory_root=lambda repo, master, slug: live.get((repo, master, slug))
+        )
         revision = revision_id("INV-NEW001", 1)
         invariant = {
             "kind": "invariant",

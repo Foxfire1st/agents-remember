@@ -221,13 +221,13 @@ def _validate_projection_cell(
         return
 
     result_class = classify_result(status, result)
-    observed = {
+    observed: dict[str, Any] = {
         "status": status,
         "phase": phase,
         "resultClass": result_class,
         "controlActions": [str(item.get("action", "")) for item in legal_controls],
     }
-    expected = {
+    expected: dict[str, Any] = {
         "stateMatrixVersion": STATE_MATRIX_VERSION,
         "phases": sorted(rule.phases),
         "resultClasses": sorted(rule.resultClasses),

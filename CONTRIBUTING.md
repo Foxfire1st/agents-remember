@@ -27,7 +27,7 @@ vulnerability as the [Security Policy](SECURITY.md) says, not in a public issue.
 | `.githooks/`, `setup-hooks.sh` | The Git hooks and the script that enables them. |
 | `.dagger/`, `dagger.json` | The Dagger module that runs certification. |
 | `.github/workflows/` | The pull-request check and the release job. |
-| `pyproject.toml` | The settings of Ruff, Pyright, Coverage.py, Radon and pytest for the whole checkout. |
+| `pyproject.toml` | The settings of Ruff, Pyrefly, Coverage.py, Radon and pytest for the whole checkout. |
 | `layers.toml` | The import order between the top-level packages of `agents_remember`. |
 | `generated-copies.json` | The declaration of the generated copy of `skills/`. |
 | `AGENTS.md` | The instructions for a coding agent that works on this checkout. |
@@ -291,7 +291,7 @@ certification.
   `PLR0915`. Clear a complexity finding by restructuring the code, not by `# noqa`, a per-file
   ignore or a higher limit.
 - `ruff format --check`.
-- Pyright.
+- Pyrefly.
 - The check of the generated copies and of the two test catalogs.
 - A failing test, where the route runs tests.
 - In certification also the file-size rule: a measured file of 1,200 lines or more fails.
@@ -321,7 +321,7 @@ as its argument. No hook runs a test or certification.
 
 | Tier | Started by | Checks | Reads |
 | --- | --- | --- | --- |
-| `fast` | `git commit` | the generated copies, Ruff, `ruff format --check`, Pyright, the two test catalogs, and the dashboard's code generation, lint and type check | the staged content |
+| `fast` | `git commit` | the generated copies, Ruff, `ruff format --check`, Pyrefly, the two test catalogs, and the dashboard's code generation, lint and type check | the staged content |
 | `targeted` | `git push` | the same checks | the files of the checkout as they are |
 | `full` | by hand only | nothing; it ends with an error and says that the tests run only in Dagger | nothing |
 
@@ -332,8 +332,8 @@ and stops.
 The Python checks cover every Python file that Git tracks (`git ls-files '*.py'`), using a
 256 KiB GNU `xargs` batch on Linux so the full list dispatches without splitting below that ceiling
 (falling back to native defaults elsewhere). Hook scope banners emit in one Python invocation.
-After generated-copy checks pass, the Python rail (Ruff, `ruff format --check`, Pyright with
-wrapper update notices silenced, and the test catalogs) and the dashboard rail (Panda codegen,
+After generated-copy checks pass, the Python rail (Ruff, `ruff format --check`, Pyrefly,
+and the test catalogs) and the dashboard rail (Panda codegen,
 oxlint, and incremental `tsc -b` with gitignored `*.tsbuildinfo`) run concurrently and print their
 buffered output in fixed order (Python, then dashboard); either rail failing fails the hook.
 

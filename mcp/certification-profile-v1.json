@@ -50,7 +50,7 @@
       "reportsField": "reports",
       "repositoryBundleArgument": "repository-bundle",
       "retainedReportsArgument": "retained-reports",
-      "runtimeDigest": "145ea7d980e718cb6f2a651814b19e183341df3d33b391857c5c6e601a5d980a",
+      "runtimeDigest": "52b3dd5f212097ddebf71010120b877bceb943f0215b679e182b6d4e4a616f12",
       "sourceArgument": "source",
       "version": "0.21.8"
     }
@@ -109,7 +109,7 @@
       ]
     }
   ],
-  "profileDigest": "afb3b7012e24df258c0fffefdb15e9417a848767b23d6a1ea46a1b2feee29006",
+  "profileDigest": "b3f4cc4b202443bf27f532cce93dbb42e92fa2956161682546fadf6d330eb7b3",
   "profileId": "agents-remember-certification",
   "publishedArtifacts": [
     {
@@ -409,7 +409,7 @@
     {
       "maxBytes": 4194304,
       "mediaType": "application/octet-stream",
-      "path": "rail-evidence/pyright@1.0.0.log",
+      "path": "rail-evidence/python-typecheck@1.0.0.log",
       "publisherGates": [
         1
       ],
@@ -593,10 +593,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -681,10 +681,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -768,7 +768,7 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "node-playwright-v1.60.0-noble",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
@@ -835,7 +835,7 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "node-playwright-v1.60.0-noble",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
@@ -902,7 +902,7 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "node-playwright-v1.60.0-noble",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
@@ -971,7 +971,7 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "node-playwright-v1.60.0-noble",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
@@ -1038,7 +1038,7 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "node-playwright-v1.60.0-noble",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
@@ -1106,7 +1106,7 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "node-playwright-v1.60.0-noble",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
@@ -1189,7 +1189,7 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "node-playwright-v1.60.0-noble",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
@@ -1256,7 +1256,7 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "node-playwright-v1.60.0-noble",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
@@ -1320,10 +1320,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -1384,10 +1384,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -1451,10 +1451,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -1513,10 +1513,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -1575,10 +1575,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -1637,10 +1637,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -1699,10 +1699,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -1763,10 +1763,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -1775,22 +1775,24 @@
       "correctiveOwner": "repository-quality",
       "evidenceContract": [
         {
-          "evidenceId": "pyright-evidence",
+          "evidenceId": "python-typecheck-evidence",
           "maxBytes": 10485760,
           "mediaType": "application/octet-stream"
         }
       ],
       "execution": {
-        "adapterId": "pyright-adapter",
+        "adapterId": "python-typecheck-adapter",
         "adapterKind": "container-command",
         "cleanRoom": false,
         "command": [
           "/opt/ar-venv/bin/python",
           "-m",
-          "pyright",
-          "--project",
-          ".",
-          "--pythonpath",
+          "pyrefly",
+          "check",
+          "--min-severity",
+          "error",
+          "--force-exclude",
+          "--python-interpreter-path",
           "/opt/ar-venv/bin/python",
           "{type-closure}"
         ],
@@ -1802,7 +1804,7 @@
           "PYTHONPATH",
           "TMPDIR"
         ],
-        "executionEvidence": "profile://agents-remember/rails/pyright",
+        "executionEvidence": "profile://agents-remember/rails/python-typecheck",
         "inputSelectors": [
           "type-closure"
         ],
@@ -1819,10 +1821,10 @@
       },
       "gate": 1,
       "identity": {
-        "railId": "pyright",
+        "railId": "python-typecheck",
         "version": "1.0.0"
       },
-      "orderKey": "pyright",
+      "orderKey": "python-typecheck",
       "outputArtifacts": [],
       "ownerClass": "repository-quality",
       "posture": "enforcing",
@@ -1832,10 +1834,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -1906,10 +1908,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -1991,10 +1993,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -2076,10 +2078,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -2174,10 +2176,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -2245,10 +2247,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -2314,10 +2316,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -2380,10 +2382,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -2447,10 +2449,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -2509,10 +2511,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     },
@@ -2584,10 +2586,10 @@
       "runtimeInputs": {
         "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
         "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
+        "lockDigest": "ccb3e128fa7c7af63e6e38a176dabb1a71eb7ae6dd58b5722f6b4e7614361ddc",
         "runtimeIdentity": "uv-managed-cpython-3.14",
         "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
+        "toolchainDigest": "7aab1ec2cb1fc82d1ad4aa3cfafc6d64fec7aef635ec1dadf3ce36e6d1e856b1"
       },
       "sourceApplicability": null
     }
@@ -2721,7 +2723,7 @@
               "version": "1.0.0"
             },
             {
-              "railId": "pyright",
+              "railId": "python-typecheck",
               "version": "1.0.0"
             },
             {
@@ -2882,7 +2884,7 @@
               "version": "1.0.0"
             },
             {
-              "railId": "pyright",
+              "railId": "python-typecheck",
               "version": "1.0.0"
             },
             {
@@ -3043,7 +3045,7 @@
               "version": "1.0.0"
             },
             {
-              "railId": "pyright",
+              "railId": "python-typecheck",
               "version": "1.0.0"
             },
             {
@@ -3195,7 +3197,7 @@
               "version": "1.0.0"
             },
             {
-              "railId": "pyright",
+              "railId": "python-typecheck",
               "version": "1.0.0"
             },
             {

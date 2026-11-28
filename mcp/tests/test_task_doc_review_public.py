@@ -542,7 +542,7 @@ def test_public_review_api_enforces_cap_and_carries_explicit_extra_rounds(
     with pytest.raises(TaskDocError, match=r"review-budget-exhausted.*count=5.*limit=5"):
         _call(config, "begin_review", review={})
 
-    approval = {
+    approval: dict[str, object] = {
         "developerApproval": "Developer authorizes one extra fix verification.",
         "additionalRounds": 1,
     }

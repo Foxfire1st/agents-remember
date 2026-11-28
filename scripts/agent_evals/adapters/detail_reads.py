@@ -430,7 +430,7 @@ def observe_detail_reads(
     frozen_contents: dict[str, str],
 ) -> dict[str, Any]:
     """Pure kept-log observations; never reopen files or infer a grade/completeness."""
-    rows = {
+    rows: dict[str, dict[str, Any]] = {
         str(detail.path): {
             "source_path": str(detail.source_path),
             "path": str(detail.path),

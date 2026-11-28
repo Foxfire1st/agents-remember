@@ -153,11 +153,10 @@ def _isolated_outside_scratch_parent(
     """
 
     parent = outside_scratch.OUTSIDE_SCRATCH_PARENT
-    limit = outside_scratch.SOCKET_PATH_LIMIT
     outside_scratch.OUTSIDE_SCRATCH_PARENT = _OUTSIDE_SCRATCH_PARENT
-    outside_scratch.SOCKET_PATH_LIMIT = 4096
     try:
-        yield
+        with mock.patch.object(outside_scratch, "SOCKET_PATH_LIMIT", 4096):
+            yield
     finally:
         base = tmp_path_factory.getbasetemp()
         # A test that serves the product from a separate process allocates in the product parent,
@@ -166,7 +165,6 @@ def _isolated_outside_scratch_parent(
         _discard_owned(base, outside_scratch.OUTSIDE_SCRATCH_PARENT)
         _discard_owned(base, parent)
         outside_scratch.OUTSIDE_SCRATCH_PARENT = parent
-        outside_scratch.SOCKET_PATH_LIMIT = limit
         shutil.rmtree(_OUTSIDE_SCRATCH_PARENT, ignore_errors=True)
 
 

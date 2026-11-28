@@ -127,10 +127,11 @@ class _Open:
             return self.active == 0
 
     def stamp(self, source: Hashable, observe: Callable[[], str | None]) -> str | None:
+        owned: Future[str | None] | None = None
         with self.lock:
             held = self.stamps.get(source)
             if held is None:
-                owned: Future[str | None] = Future()
+                owned = Future()
                 self.stamps[source] = owned
                 self.observed += 1
             else:
@@ -142,6 +143,7 @@ class _Open:
                 with self.lock:
                     self.shared -= 1
                 return self.stamp(source, observe)
+        assert owned is not None
         try:
             value = observe()
         except BaseException as error:

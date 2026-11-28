@@ -64,7 +64,7 @@ def compile_certification_plan(
         "profileKind": profile.kind,
         "gates": [item.model_dump(mode="json") for item in gate_plans],
     }
-    return CertificationPlan(**payload, planDigest=content_digest(payload))
+    return CertificationPlan.model_validate({**payload, "planDigest": content_digest(payload)})
 
 
 def admit_certification_plan(
@@ -119,7 +119,7 @@ def _compile_gate_plan(
         "rails": [item.model_dump(mode="json") for item in compiled],
         "waves": [[identity.model_dump(mode="json") for identity in wave] for wave in waves],
     }
-    return GatePlan(**payload, planDigest=content_digest(payload))
+    return GatePlan.model_validate({**payload, "planDigest": content_digest(payload)})
 
 
 def _selected_gate_definitions(

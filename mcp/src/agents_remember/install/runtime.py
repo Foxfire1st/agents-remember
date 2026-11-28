@@ -706,7 +706,7 @@ def install_runtime_from_config(
     ensure_gitignore_entry(
         config.workspace_root / ".gitignore", ".agents-remember/role-executions/", summary, dry_run
     )
-    payload = {
+    payload: dict[str, Any] = {
         "ok": True,
         "operation": "runtime_install",
         "mcpSettings": copy_mcp_settings(config.workspace_root, dry_run=dry_run),

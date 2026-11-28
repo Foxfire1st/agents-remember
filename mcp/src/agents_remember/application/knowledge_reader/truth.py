@@ -187,7 +187,7 @@ def _outgoing(
 
     document = record.document
     links, unreadable = _links_of(record)
-    rows = [
+    rows: list[dict[str, Any]] = [
         *links,
         *(
             {"relation": "member", "target": {"kind": "record", "id": one}}
@@ -316,7 +316,7 @@ def record_list(selection: ReaderSelection) -> dict[str, Any]:
     truths."""
 
     index: KnowledgeIndex = selection.index
-    kinds = {
+    kinds: dict[str, Any] = {
         kind: [summary_of(record) for record in index.records_of_kind(kind).value]
         for kind in RECORD_DIRECTORIES
     }

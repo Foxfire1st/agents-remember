@@ -111,7 +111,7 @@ def _recording_python_stub(log_file: Path, fail_on_file: str = "") -> str:
         f'log="{log_file}"\n'
         f'fail_on="{fail_on_file}"\n'
         'case "$*" in\n'
-        "  *check-python-runtime.py*|*'import pyright, ruff'*) exit 0 ;;\n"
+        "  *check-python-runtime.py*|*'import pyrefly, ruff'*) exit 0 ;;\n"
         "  *-m\\ ruff\\ check*)\n"
         "    shift 3\n"
         '    printf "RUFF_CALL\\n" >> "$log"\n'
@@ -130,10 +130,10 @@ def _recording_python_stub(log_file: Path, fail_on_file: str = "") -> str:
         '    for item in "$@"; do printf "FMT:%s\\n" "$item" >> "$log"; done\n'
         "    exit 0\n"
         "    ;;\n"
-        "  *-m\\ pyright*)\n"
-        "    shift 6\n"
-        '    printf "PYRIGHT_CALL\\n" >> "$log"\n'
-        '    for item in "$@"; do printf "PYRIGHT:%s\\n" "$item" >> "$log"; done\n'
+        "  *-m\\ pyrefly\\ check*)\n"
+        "    shift 8\n"
+        '    printf "PYREFLY_CALL\\n" >> "$log"\n'
+        '    for item in "$@"; do printf "PYREFLY:%s\\n" "$item" >> "$log"; done\n'
         "    exit 0\n"
         "    ;;\n"
         "esac\n"
@@ -161,7 +161,7 @@ def test_r1_xargs_batch_preserves_ordered_files_and_reduces_spawns(tmp_path: Pat
     for prefix, call_tag in (
         ("RUFF:", "RUFF_CALL"),
         ("FMT:", "FMT_CALL"),
-        ("PYRIGHT:", "PYRIGHT_CALL"),
+        ("PYREFLY:", "PYREFLY_CALL"),
     ):
         assert _extract_logged(log_file, prefix) == expected
         if sys.platform.startswith("linux"):
@@ -191,7 +191,7 @@ def _build_scope_repo(tmp_path: Path) -> Path:
     repo.mkdir()
     _git(repo, "init", "-q")
     (repo / "pyproject.toml").write_text(
-        '[tool.ruff]\nline-length = 100\n[tool.pyright]\ninclude = ["."]\n'
+        '[tool.ruff]\nline-length = 100\n[tool.pyrefly]\nproject-includes = ["."]\n'
         '[tool.radon]\ncc_min = "B"\n[tool.coverage.run]\nbranch = true\n'
         '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'
         '[tool.agents_remember]\nproduct_package_roots = ["pkg"]\n'
@@ -244,7 +244,7 @@ def test_r2_fixed_step_scope_line_computes_python_files_under_lazily(tmp_path: P
         lazy_steps = (
             "ruff",
             "ruff-format",
-            "pyright",
+            "pyrefly",
             "evidence-lifecycle",
             "causal-preflight",
             "file-size",
@@ -314,7 +314,7 @@ def test_r2_hook_batch_matches_separate_spawns_byte_for_byte(
             ),
             ("ruff", ["fixed-step", "--name", "ruff"]),
             ("ruff-format", ["fixed-step", "--name", "ruff-format"]),
-            ("pyright", ["fixed-step", "--name", "pyright"]),
+            ("pyrefly", ["fixed-step", "--name", "pyrefly"]),
             ("evidence-lifecycle", ["fixed-step", "--name", "evidence-lifecycle"]),
         ]
     )
@@ -572,41 +572,50 @@ def test_r5_tsc_caches_are_gitignored_and_do_not_trip_landing_commit_check(tmp_p
     assert _git(repo, "write-tree").strip() == tree
 
 
-def test_r6_gate_exports_pyright_ignore_warnings_and_real_type_error_fails(
+def test_r6_gate_invokes_pyrefly_and_real_type_error_fails(
     tmp_path: Path,
 ) -> None:
-    env_log = tmp_path / "pyright_env.log"
+    cmd_log = tmp_path / "pyrefly_cmd.log"
     py_stub = (
-        f'log="{env_log}"\n'
+        f'log="{cmd_log}"\n'
         'case "$*" in\n'
-        "  *-m\\ ruff\\ check*)\n"
-        '    printf "RUFF:%s\\n" "${PYRIGHT_PYTHON_IGNORE_WARNINGS:-unset}" >> "$log"\n'
-        "    ;;\n"
-        "  *-m\\ pyright*)\n"
-        '    printf "PYRIGHT:%s\\n" "${PYRIGHT_PYTHON_IGNORE_WARNINGS:-unset}" >> "$log"\n'
+        "  *-m\\ pyrefly\\ check*)\n"
+        '    printf "PYREFLY:%s\\n" "$*" >> "$log"\n'
         "    ;;\n"
         "esac\n"
         "exit 0\n"
     )
     repo, env = _make_hook_repo(tmp_path, py_stub, "exit 0\n")
-    env.pop("PYRIGHT_PYTHON_IGNORE_WARNINGS", None)
 
     result = _run_gate(repo, env)
     assert result.returncode == 0, result.stderr + result.stdout
-    assert env_log.read_text(encoding="utf-8").splitlines() == ["RUFF:unset", "PYRIGHT:1"]
+    logged = cmd_log.read_text(encoding="utf-8").splitlines()
+    assert len(logged) == 1
+    assert "--force-exclude" in logged[0]
+    assert "--python-interpreter-path" in logged[0]
 
     bad_file = tmp_path / "bad_types.py"
     bad_file.write_text('value: int = "not-an-int"\n', encoding="utf-8")
-    pyright_env = dict(os.environ, PYRIGHT_PYTHON_IGNORE_WARNINGS="1")
-    pyright_run = subprocess.run(
-        [sys.executable, "-m", "pyright", "--pythonpath", sys.executable, str(bad_file)],
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pyrefly]\nproject-includes = ["."]\npython-version = "3.14"\n',
+        encoding="utf-8",
+    )
+    pyrefly_run = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pyrefly",
+            "check",
+            "--python-interpreter-path",
+            sys.executable,
+            str(bad_file),
+        ],
         cwd=tmp_path,
-        env=pyright_env,
         text=True,
         capture_output=True,
         stdin=subprocess.DEVNULL,
         check=False,
     )
-    assert pyright_run.returncode != 0
-    combined = pyright_run.stdout + pyright_run.stderr
-    assert "reportAssignmentType" in combined or "cannot be assigned to" in combined
+    assert pyrefly_run.returncode != 0
+    combined = pyrefly_run.stdout + pyrefly_run.stderr
+    assert "bad-assignment" in combined or "not assignable" in combined

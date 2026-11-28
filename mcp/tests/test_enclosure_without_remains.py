@@ -212,9 +212,9 @@ def test_folder_on_disk_still_requires_adoption_first(
 ) -> None:
     """A folder on disk needs the rule-4 adoption, and that tool is registered."""
 
-    for integrated, module, operation in (
-        (False, abandon_module, "worktree_abandon"),
-        (True, cleanup_module, "worktree_cleanup"),
+    for integrated, operation in (
+        (False, "worktree_abandon"),
+        (True, "worktree_cleanup"),
     ):
         contract_path = _leafless_enclosure(tmp_path / operation, integrated=integrated)
         contract = load_contract(contract_path)
@@ -232,9 +232,13 @@ def test_folder_on_disk_still_requires_adoption_first(
         )
 
         if operation == "worktree_abandon":
-            result = module.abandon_result(WorktreeArgs(contract_path=contract_path, approved=True))
+            result = abandon_module.abandon_result(
+                WorktreeArgs(contract_path=contract_path, approved=True)
+            )
         else:
-            result = module.cleanup_result(WorktreeArgs(contract_path=contract_path, dry_run=True))
+            result = cleanup_module.cleanup_result(
+                WorktreeArgs(contract_path=contract_path, dry_run=True)
+            )
 
         assert result.returncode == 2, result.payload
         assert result.payload["nextAction"] == "worktree_enclosure_adopt"

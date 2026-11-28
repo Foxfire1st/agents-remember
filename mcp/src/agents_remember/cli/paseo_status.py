@@ -24,7 +24,11 @@ _TEXT_LIMIT = 800
 # The runtime's word for a live agent whose harness process is not running.
 _CLOSED = "closed"
 # How the last turn of an idle agent ended, in the bridge's words.
-_TURN_STATES = frozenset({"none", "replied", "unreplied"})
+_TURN_STATES: dict[str, Literal["none", "replied", "unreplied"]] = {
+    "none": "none",
+    "replied": "replied",
+    "unreplied": "unreplied",
+}
 # The receipt statuses of a launch whose turn was still open when the session closed.
 _TURN_OPEN_STATUSES = frozenset({"running", "starting"})
 
@@ -361,7 +365,7 @@ def _reading(reply: dict[str, Any], agent_id: str) -> AgentReading:
         turn_active=agent.get("turnActive") is True,
         error=_error_message(agent.get("lastError")),
         attention=attention if isinstance(attention, str) and attention else None,
-        last_turn=turn_state if turn_state in _TURN_STATES else None,
+        last_turn=_TURN_STATES.get(turn_state) if isinstance(turn_state, str) else None,
         final_text=final_text if isinstance(final_text, str) else None,
     )
 

@@ -230,7 +230,7 @@ def _every_kind(world: World) -> dict[str, Any]:
         },
         "term": {"term": "pair", "definition": "Code and memory commits.", "scope": "Landing."},
     }
-    records = [
+    records: list[dict[str, object]] = [
         {
             "key": f"R-{kind}",
             "kind": kind,

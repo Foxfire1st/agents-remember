@@ -266,7 +266,7 @@ class HistoryHelperGraderTests(unittest.TestCase):
             ]
             path.write_text("\n".join(json.dumps(value) for value in rows) + "\n")
             return capture_claude_jsonl([path], "c")
-        rows = [
+        rows: list[dict[str, Any]] = [
             {"timestamp": "2026-10-29T10:00:00Z", "type": "session_meta", "payload": {"id": "s"}}
         ]
         for timestamp, kind, payload in (

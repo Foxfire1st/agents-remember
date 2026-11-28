@@ -118,7 +118,7 @@ def with_change_kinds(
     except (LaneReadError, apsw.Error) as error:
         detail = bounded_text(_UNREADABLE.format(error=error))
         entries = tuple(_with(entry, _unread(entry, detail)) for entry in context.entries)
-    return ReviewFamilyContext(**{**dict(context), "entries": entries})
+    return ReviewFamilyContext.model_validate({**dict(context), "entries": entries})
 
 
 def implementation_facts(
@@ -152,7 +152,7 @@ def implementation_facts(
 
 
 def _with(entry: ReviewFamilyContextEntry, kinds: ReviewFamilyChanges) -> ReviewFamilyContextEntry:
-    return ReviewFamilyContextEntry(**{**dict(entry), "change_kinds": kinds})
+    return ReviewFamilyContextEntry.model_validate({**dict(entry), "change_kinds": kinds})
 
 
 def _returned(entry: ReviewFamilyContextEntry) -> dict[str, ReviewFamilyMember]:

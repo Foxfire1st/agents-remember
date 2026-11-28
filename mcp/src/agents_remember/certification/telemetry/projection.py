@@ -231,7 +231,7 @@ def project_execution_telemetry(
         diagnostics=tuple(diagnostics),
         operationTerminal=terminal,
         spans=aggregate_span_totals(spans),
-        projectionDigest=None,
+        projectionDigest="",
     )
     digest = content_digest(draft.model_dump(mode="json", exclude={"projectionDigest"}))
     return TelemetryProjection.model_validate(

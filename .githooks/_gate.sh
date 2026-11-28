@@ -65,7 +65,7 @@ dev_python_ready() {
       --expected-version "$AR_PYTHON_MINOR" >/dev/null 2>&1 || return 1
   fi
   "$1" -c \
-    'import pyright, ruff; import agents_remember_test_support.code_quality.scope_reporting' \
+    'import pyrefly, ruff; import agents_remember_test_support.code_quality.scope_reporting' \
     >/dev/null 2>&1
 }
 
@@ -171,7 +171,7 @@ cleanup_gate_runtime() {
 # Scope is the complete index-known Python population used by the quality wrapper. Refuse
 # an empty population.
 # L29-R3: raise GNU xargs's 128 KiB default batch size to 256 KiB on Linux so tracked
-# Python files reach Ruff and Pyright in one invocation while retaining normal splitting
+# Python files reach Ruff and Pyrefly in one invocation while retaining normal splitting
 # above 256 KiB and native defaults on BSD/macOS.
 over_tracked_python() {
   if [ -z "$(git ls-files -- '*.py')" ]; then
@@ -305,13 +305,12 @@ python_rail_checks() {
     echo "[$label] result: ruff-format FAIL" >&2
     return 1
   fi
-  emit_scope_line pyright
-  echo "[$label] Pyright (types)..."
-  # L29-R3: silence pyright-python wrapper notices without altering type-check diagnostics.
-  if (export PYRIGHT_PYTHON_IGNORE_WARNINGS=1; over_tracked_python "$py" -m pyright --project . --pythonpath "$py"); then
-    echo "[$label] result: pyright PASS"
+  emit_scope_line pyrefly
+  echo "[$label] Pyrefly (types)..."
+  if over_tracked_python "$py" -m pyrefly check --min-severity error --force-exclude --python-interpreter-path "$py"; then
+    echo "[$label] result: pyrefly PASS"
   else
-    echo "[$label] result: pyright FAIL" >&2
+    echo "[$label] result: pyrefly FAIL" >&2
     return 1
   fi
   emit_scope_line evidence-lifecycle

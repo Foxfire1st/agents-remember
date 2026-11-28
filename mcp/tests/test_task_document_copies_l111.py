@@ -320,16 +320,16 @@ class ScanBudgetTests(unittest.TestCase):
 
     def test_empty_directories_count_toward_the_entry_budget(self) -> None:
         self._chain(200)
-        copies.COPY_SCAN_MAX_ENTRIES = 100
-        # 201 visits to reach the file against a 100-visit budget: the walk
-        # sheds and the file is never visited. A bound counting files only
-        # would walk all 201 entries and return the one file.
-        self.assertEqual(copies._copy_tree_files(self.root / "tree"), [])
+        with patch.object(copies, "COPY_SCAN_MAX_ENTRIES", 100):
+            # 201 visits to reach the file against a 100-visit budget: the walk
+            # sheds and the file is never visited. A bound counting files only
+            # would walk all 201 entries and return the one file.
+            self.assertEqual(copies._copy_tree_files(self.root / "tree"), [])
 
     def test_generous_budget_still_finds_the_file(self) -> None:
         leaf = self._chain(200)
-        copies.COPY_SCAN_MAX_ENTRIES = 300
-        self.assertEqual(copies._copy_tree_files(self.root / "tree"), [leaf])
+        with patch.object(copies, "COPY_SCAN_MAX_ENTRIES", 300):
+            self.assertEqual(copies._copy_tree_files(self.root / "tree"), [leaf])
 
 
 class StatusRowBudgetTests(unittest.TestCase):
@@ -400,9 +400,10 @@ class RollbackSnapshotTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self._old_file_budget = copies.COPY_ROLLBACK_FILE_MAX_BYTES
         self._old_total_budget = copies.COPY_ROLLBACK_TOTAL_MAX_BYTES
-        self.addCleanup(setattr, copies, "COPY_ROLLBACK_FILE_MAX_BYTES", self._old_file_budget)
-        self.addCleanup(setattr, copies, "COPY_ROLLBACK_TOTAL_MAX_BYTES", self._old_total_budget)
-        copies.COPY_ROLLBACK_FILE_MAX_BYTES = 10
+        self.enterContext(patch.object(copies, "COPY_ROLLBACK_FILE_MAX_BYTES", 10))
+        self.enterContext(
+            patch.object(copies, "COPY_ROLLBACK_TOTAL_MAX_BYTES", self._old_total_budget)
+        )
 
     def test_over_budget_snapshot_refuses_before_any_write(self) -> None:
         small = self.root / "small.md"
@@ -428,8 +429,8 @@ class RollbackSnapshotTests(unittest.TestCase):
         self.assertFalse(third.exists())
 
     def test_over_total_snapshot_refuses_before_any_write(self) -> None:
-        copies.COPY_ROLLBACK_FILE_MAX_BYTES = 1024
-        copies.COPY_ROLLBACK_TOTAL_MAX_BYTES = 10
+        self.enterContext(patch.object(copies, "COPY_ROLLBACK_FILE_MAX_BYTES", 1024))
+        self.enterContext(patch.object(copies, "COPY_ROLLBACK_TOTAL_MAX_BYTES", 10))
         first = self.root / "first.md"
         first.write_bytes(b"1" * 8)
         second = self.root / "second.md"
@@ -448,8 +449,12 @@ class RollbackSnapshotTests(unittest.TestCase):
 
     def test_file_at_snapshot_cap_restores_after_a_late_failure(self) -> None:
         # Real budgets for this case: a file exactly at the snapshot cap.
-        copies.COPY_ROLLBACK_FILE_MAX_BYTES = self._old_file_budget
-        copies.COPY_ROLLBACK_TOTAL_MAX_BYTES = self._old_total_budget
+        self.enterContext(
+            patch.object(copies, "COPY_ROLLBACK_FILE_MAX_BYTES", self._old_file_budget)
+        )
+        self.enterContext(
+            patch.object(copies, "COPY_ROLLBACK_TOTAL_MAX_BYTES", self._old_total_budget)
+        )
         cap = copies.COPY_ROLLBACK_FILE_MAX_BYTES
         self.assertEqual(cap, copies.COPY_FILE_MAX_BYTES)
         full = self.root / "full.md"
