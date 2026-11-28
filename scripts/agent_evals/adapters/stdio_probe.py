@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import time
 from collections.abc import AsyncIterator
@@ -11,7 +12,7 @@ from typing import Any
 
 from agents_remember.errors import AuthorityError
 from mcp.client.stdio import stdio_client
-from mcp.types import PaginatedRequestParams
+from mcp.types import PaginatedRequestParams, TextContent
 
 from mcp import ClientSession, StdioServerParameters
 
@@ -33,6 +34,23 @@ async def _probe_step(name: str) -> AsyncIterator[None]:
             f"fixture MCP {name}: limitSeconds={PROBE_STEP_TIMEOUT_SECONDS:g}, "
             f"elapsedSeconds={elapsed:.6f}"
         ) from error
+
+
+def _parse_server_info(result: Any) -> dict[str, Any]:
+    if result.is_error:
+        raise AuthorityError("fixture tool server did not return structured identity")
+    if isinstance(result.structured_content, dict):
+        return result.structured_content
+    text_blocks = [block for block in result.content if isinstance(block, TextContent)]
+    if not text_blocks:
+        raise AuthorityError("fixture tool server did not return structured identity")
+    try:
+        parsed = json.loads(text_blocks[0].text)
+    except json.JSONDecodeError as error:
+        raise AuthorityError("fixture tool server did not return structured identity") from error
+    if not isinstance(parsed, dict):
+        raise AuthorityError("fixture tool server did not return structured identity")
+    return parsed
 
 
 def probe_tool_server(definition: dict[str, Any]) -> dict[str, Any]:
@@ -77,9 +95,7 @@ async def _probe(definition: dict[str, Any]) -> dict[str, Any]:
         # before call_tool, which still performs its normal result validation.
         async with _probe_step("server_info (including SDK result validation)"):
             result = await session.call_tool("server_info", {})
-        if result.is_error or not isinstance(result.structured_content, dict):
-            raise AuthorityError("fixture tool server did not return structured identity")
-        info = result.structured_content
+        info = _parse_server_info(result)
         return {
             **info,
             "evaluationToolInventory": {

@@ -405,12 +405,15 @@ def test_the_tool_returns_the_latest_worklist_and_the_checklist_shows_it(leaf: L
     assert present["worklistState"] == "present"
     worklist = present["worklist"]
     assert worklist["digest"] == document["digest"] and worklist["owner"] == LEAF
+    assert worklist["itemCount"] == len(document["items"])
+    assert "items" not in worklist
     assert worklist["itemsByKind"] == {
         "reached_family": 1,
         "touched_invariant": 1,
         "onboarding_trace": 2,  # MIK-R30: the edited file's card and its root route (ruling Q2)
     }
-    assert [item["id"] for item in worklist["items"]] == [item["id"] for item in document["items"]]
+    persisted = json.loads(Path(worklist["path"]).read_text(encoding="utf-8"))
+    assert [item["id"] for item in persisted["items"]] == [item["id"] for item in document["items"]]
     neither = knowledge_integrity_check_payload(IntegrityCheckRequest())
     assert neither["state"] == "refused"
     lines = knowledge_worklist_lines(document, "w.json")

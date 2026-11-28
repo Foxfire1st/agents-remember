@@ -153,11 +153,11 @@ class TaskDocResponse(ToolResponse):
     """``task_doc``: the document's identity, status, and progress after the op."""
 
     taskId: str | None = None
-    slug: str
+    slug: str | None = None
     kind: str | None = None
     status: str | None = None
     lifecycleId: str | None = None
-    docPath: str
+    docPath: str | None = None
     renderedPath: str | None = None
     stepsDone: int = 0
     stepsTotal: int = 0
@@ -275,17 +275,16 @@ class TaskDocResponse(ToolResponse):
 
     @model_validator(mode="after")
     def _identity_or_removed_refusal(self) -> Self:
-        """Identity stays required everywhere but the removed-read refusal.
+        """Identity stays required everywhere except typed structured refusals.
 
-        A removed read on a missing or damaged document refuses with the
-        canonical file names and no parsed identity (MIK-R111 rule 2); every
-        other response still names its document.
+        A structured refusal carries ``ok: false`` and a non-empty ``code`` with
+        no parsed document identity; every other response still names its document.
         """
-        if self.ok is False and self.code == "operation-removed":
+        if self.ok is False and self.code is not None:
             return self
         missing = [
             name
-            for name in ("taskId", "kind", "status", "renderedPath")
+            for name in ("taskId", "slug", "kind", "status", "docPath", "renderedPath")
             if getattr(self, name) is None
         ]
         if missing:

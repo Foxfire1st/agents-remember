@@ -36,8 +36,10 @@ Answer fields:
 - `buildCurrentness`: the loaded Python code compared with the files at its package root: `mode`
   (`installed` or `checkout`), `state` (`current`, `stale` or `unknown`), `loadedDigest`,
   `installedDigest`, `firstSeenAt`, `reason` and `remedy`;
-- `runningServers`: the tool servers and dashboards that run on the coordination root, each with
-  `pid`, `role`, `loadedDigest`, `startedAt`, `configPath`, `packageRoot` and `currentness`;
+- `runningServers`: a compact summary of live tool servers and dashboards registered on the
+  coordination root: `count`, `staleCount`, `roles` (counts by role), and `recent` (at most the
+  five most recent entries, each with `pid`, `role`, `loadedDigest`, `startedAt`, and `state`).
+  The full per-server inventory remains in the tool log detail file;
 - `toolServer` and `agentBinding`, only on a tool server that a role start launched.
 
 Operations: one (report). The call is read-only; it reflects the settings
@@ -126,8 +128,8 @@ Answer fields (delivered):
   `restartRequired`, `changes`, `deferred`, `notice` and `error`; a preview adds
   `wouldInstallHost` and `wouldStart`;
 - `dashboard`, when a dashboard runs: `action`, `detail`, `pid` and `sourceDigest`;
-- `runningServers`: the tool servers and dashboards that run on the coordination root with their
-  build state, as in `server_info`;
+- `runningServers`: the list of live tool servers and dashboards running on the coordination root
+  with their build state (unlike `server_info`'s compact inline summary);
 - `sharedHeldStores`, when requested: the reconciliation state, `path`, and counts
   (`wouldRemoveStores`, `wouldRemoveLocks`, and `preserved` on preview; `removedStores`,
   `removedLocks`, and `preserved` on an executed install, or `reason` when blocked). The

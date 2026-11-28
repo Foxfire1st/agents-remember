@@ -691,6 +691,7 @@ unit-regression = [
   "mcp/tests/test_watched_writer_composition.py",
   "mcp/tests/test_watched_writer_transactions.py",
   "mcp/tests/test_watcher_health_body.py",
+  "mcp/tests/test_wave1a_tool_inspections.py",
   "mcp/tests/test_weakness_closure.py",
   "mcp/tests/test_witness_driver_helpers.py",
   "mcp/tests/test_workflow_chain_guidance.py",

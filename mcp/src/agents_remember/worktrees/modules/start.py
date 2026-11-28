@@ -116,6 +116,14 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 
+class WorktreeTargetResolutionError(RuntimeError):
+    """Caller-supplied target arguments did not resolve a worktree enclosure contract."""
+
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 def load_contract_from_args(args: WorktreeArgs) -> WorktreeContract:
     return load_contract(contract_path_from_args(args))
 
@@ -127,7 +135,10 @@ def contract_path_from_args(args: WorktreeArgs) -> Path:
         return args.contract_path
     context = resolve_context(args)
     if not args.task_name:
-        raise RuntimeError("--task-name or --contract-path is required")
+        raise WorktreeTargetResolutionError(
+            "--task-name or --contract-path is required",
+            code="worktree-target-required",
+        )
     if args.leaf_id:
         contract_path = resolve_leaf_enclosure_contract_for_ref(
             context.coordination_root,
@@ -144,7 +155,10 @@ def contract_path_from_args(args: WorktreeArgs) -> Path:
             parent_task=args.parent_task,
         )
     if contract_path is None:
-        raise RuntimeError("--task-name resolved no leaf enclosure; pass --leaf-id")
+        raise WorktreeTargetResolutionError(
+            "--task-name resolved no leaf enclosure; pass --leaf-id",
+            code="worktree-enclosure-not-found",
+        )
     return contract_path
 
 

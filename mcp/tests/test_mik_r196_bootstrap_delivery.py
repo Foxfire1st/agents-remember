@@ -354,8 +354,12 @@ class FreeSeatOverrideTests(_FreeSeatWorld):
         role_start_tool = next(tool for tool in listed if tool.name == "role_start")
         self.assertNotIn("ctx", role_start_tool.input_schema.get("properties", {}))
         self.assertFalse(result.is_error, result.content)
-        assert result.structured_content is not None
-        self.assertEqual(result.structured_content["ok"], True, result.structured_content)
+        payload = (
+            result.structured_content
+            if result.structured_content is not None
+            else json.loads(result.content[0].text)  # type: ignore[union-attr]
+        )
+        self.assertEqual(payload["ok"], True, payload)
         created = self.created_agents()
         self.assertEqual(len(created), 2)
         self.assertEqual((created[0]["provider"], created[0]["model"]), (CALLER_HARNESS, "gpt-a"))

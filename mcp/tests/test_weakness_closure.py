@@ -44,8 +44,9 @@ def case(tmp_path: Path) -> tuple[World, MCPServer]:
 def _call(server: MCPServer, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     result = anyio.run(_registered_call, server, name, arguments)
     assert not result.is_error, result.content
-    assert result.structured_content is not None, result.content
-    return result.structured_content
+    if result.structured_content is not None:
+        return result.structured_content
+    return json.loads(result.content[0].text)  # type: ignore[union-attr]
 
 
 def _submit(

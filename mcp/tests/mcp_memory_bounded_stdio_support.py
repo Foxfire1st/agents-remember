@@ -212,9 +212,11 @@ def _bind_server(info: Payload, process: _ServerProcess, fixture: Fixture, sourc
     assert info.get("configPath") == str(fixture.settings)
     assert info.get("coordinationRoot") == str(fixture.coordination)
     assert info.get("workspaceRoot") == _read_object(fixture.settings)["workspaceRoot"]
-    servers = info.get("runningServers")
-    assert isinstance(servers, list) and len(servers) == 1
-    registered = _object(servers[0], "server_info runtime registration")
+    servers = _object(info.get("runningServers"), "server_info runningServers summary")
+    assert servers.get("count") == 1
+    recent = servers.get("recent")
+    assert isinstance(recent, list) and len(recent) == 1
+    registered = _object(recent[0], "server_info runtime registration")
     assert registered.get("pid") == process.pid
     assert registered.get("loadedDigest") == digest
 

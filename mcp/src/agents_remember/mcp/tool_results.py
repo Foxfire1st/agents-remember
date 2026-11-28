@@ -139,6 +139,8 @@ def _classify_output_type(
     if isinstance(return_type, GenericAlias):
         args = get_args(return_type)
         if get_origin(return_type) is dict and len(args) == 2 and args[0] is str:
+            if args[1] in (Any, object):
+                return None
             return StructuredOutputSpec(output_model=return_type, wrap_output=False)
         return StructuredOutputSpec(output_model=effective_annotation, wrap_output=True)
     if isinstance(return_type, type):
@@ -242,11 +244,10 @@ def build_call_tool_result(
 
 
 def build_early_refusal_result(payload: dict[str, Any]) -> CallToolResult:
-    """Return an early-return guard refusal matching the indented dict-return wire shape."""
+    """Return an early-return guard refusal as compact single-line UTF-8 JSON."""
 
     return CallToolResult(
-        content=[TextContent(type="text", text=json.dumps(payload, indent=2))],
-        structured_content=payload,
+        content=[TextContent(type="text", text=compact_json_text(payload))],
     )
 
 

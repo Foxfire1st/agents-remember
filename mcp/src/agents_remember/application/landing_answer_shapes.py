@@ -200,6 +200,8 @@ LANDING_KEPT_KEYS: dict[str, frozenset[str]] = {
     "worktree_checkpoint_landing": frozenset(
         {
             "state",
+            "status",
+            "detail",
             "strategy",
             "integrated_code_commit",
             "integrated_memory_content_commit",
@@ -397,6 +399,8 @@ def project_landing_answer(
     _strip_redundant_answer_addresses(answer)
     if tool_name == "worktree_closeout_preview":
         _trim_preview_commit_locations(answer)
+    if tool_name == "worktree_sync":
+        _bound_sync_resolution(answer)
     return answer
 
 
@@ -448,6 +452,24 @@ def _strip_redundant_answer_addresses(answer: dict[str, Any]) -> None:
         for key in ("contract_path", "contractPath"):
             if isinstance(answer.get(key), str) and answer.get(key) == args.get(key):
                 del answer[key]
+
+
+_SYNC_RESOLUTION_FILES_MAX = 5
+
+
+def _bound_sync_resolution(answer: dict[str, Any]) -> None:
+    """Cap ``resolution.files`` inline while preserving the full list in the logged whole."""
+    resolution = answer.get("resolution")
+    if not isinstance(resolution, dict):
+        return
+    files = resolution.get("files")
+    if not isinstance(files, list) or len(files) <= _SYNC_RESOLUTION_FILES_MAX:
+        return
+    bounded = dict(resolution)
+    bounded["files"] = files[:_SYNC_RESOLUTION_FILES_MAX]
+    bounded["fileCount"] = len(files)
+    bounded["filesTruncated"] = True
+    answer["resolution"] = bounded
 
 
 def _trim_preview_commit_locations(answer: dict[str, Any]) -> None:

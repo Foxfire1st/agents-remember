@@ -70,9 +70,10 @@ class MCPBuildStalenessTests(unittest.IsolatedAsyncioTestCase):
                     result = await client.call_tool("worktree_closeout_apply", {})
             self.assertFalse(result.is_error)
             self.assertEqual(entered, [])
-            assert result.structured_content is not None
-            self.assertEqual(result.structured_content["code"], "server-build-stale")
-            self.assertEqual(result.structured_content["buildCurrentness"]["state"], "stale")
+            self.assertIsNone(result.structured_content)
+            answer = _answer(result)
+            self.assertEqual(answer["code"], "server-build-stale")
+            self.assertEqual(answer["buildCurrentness"]["state"], "stale")
 
     async def test_each_publication_refuses_before_its_handler_and_dry_run_answers(self) -> None:
         publications = (

@@ -266,6 +266,12 @@ def _whole(answer: dict[str, Any]) -> dict[str, Any]:
     return json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
 
 
+def _payload(result) -> dict[str, Any]:
+    if result.structured_content is not None:
+        return result.structured_content
+    return json.loads(result.content[0].text)
+
+
 @pytest.mark.parametrize("commanded", [False, True])
 def test_registered_first_leaf_preview_is_repeatable_without_publication(
     tmp_path: Path, commanded: bool
@@ -277,8 +283,7 @@ def test_registered_first_leaf_preview_is_repeatable_without_publication(
     for _ in range(2):
         result = world.start()
         assert not result.is_error, [getattr(content, "text", "") for content in result.content]
-        assert result.structured_content is not None
-        payload = result.structured_content
+        payload = _payload(result)
         assert payload["ok"], payload
         assert payload["state"] == "would-start"
         contract = _whole(payload)["contract"]
@@ -310,8 +315,7 @@ def test_registered_leaf_without_a_master_refuses_preview_and_start(tmp_path: Pa
     for dry_run in (True, False):
         refused = world.start(dry_run=dry_run)
         assert not refused.is_error, refused
-        assert refused.structured_content is not None
-        payload = refused.structured_content
+        payload = _payload(refused)
         assert payload["ok"] is False
         assert payload["state"] == "blocked"
         assert payload["summary"] == (
@@ -347,8 +351,7 @@ def test_disabled_start_is_refused_before_any_publication(tmp_path: Path) -> Non
     for dry_run in (True, False):
         refused = world.start(memory_mode="disabled", dry_run=dry_run)
         assert not refused.is_error, refused
-        assert refused.structured_content is not None
-        payload = refused.structured_content
+        payload = _payload(refused)
         assert not payload["ok"], payload
         assert payload["state"] == "memory-opt-out-refused"
         assert payload["status"] == "memory-opt-out-refused"
@@ -384,7 +387,7 @@ def test_public_apply_re_resolves_source_and_persisted_parent_preview_stays_read
 ) -> None:
     world = PreviewFixture(tmp_path, commanded=True)
     preview = world.start()
-    assert preview.structured_content is not None and preview.structured_content["ok"], preview
+    assert _payload(preview)["ok"], preview
     git(world.code, "switch", "super")
     (world.code / "changed.txt").write_text("source advanced after preview\n", encoding="utf-8")
     git(world.code, "add", "changed.txt")
@@ -401,9 +404,10 @@ def test_public_apply_re_resolves_source_and_persisted_parent_preview_stays_read
     )
     result = world.start(dry_run=False)
     assert not result.is_error, result
-    assert result.structured_content is not None and result.structured_content["ok"], result
+    result_payload = _payload(result)
+    assert result_payload["ok"], result_payload
     parent = load_contract(world.parent_path)
-    leaf = load_contract(Path(result.structured_content["nextArgs"]["contract_path"]))
+    leaf = load_contract(Path(result_payload["nextArgs"]["contract_path"]))
     assert parent.code_base_commit == leaf.code_base_commit == new_base
     assert parent.code_source_branch == "super"
     assert require_parent_series(leaf, operation="apply preservation") == parent
@@ -420,8 +424,7 @@ def test_public_apply_re_resolves_source_and_persisted_parent_preview_stays_read
     world.record("persisted-parent-before", before.snapshot)
     result = world.start(leaf_id="FRESH-L2", worktree_name="fresh-preview-l2")
     assert not result.is_error, result
-    assert result.structured_content is not None
-    assert result.structured_content["state"] == "would-start"
+    assert _payload(result)["state"] == "would-start"
     after = world.snapshot()
     world.record("persisted-parent-after", after)
     assert_preview_read_only(
@@ -481,9 +484,7 @@ def test_preview_handoff_is_failure_sensitive_and_cannot_supply_durable_authorit
         start_module, "build_start_contract", return_value=replace(planned, preview_parent=None)
     ):
         dropped = world.start()
-    assert (
-        dropped.is_error or not dropped.structured_content or not dropped.structured_content["ok"]
-    )
+    assert dropped.is_error or not _payload(dropped).get("ok")
     world.record("dropped-handoff", dropped.model_dump(mode="json"))
     original_memory = start_memory.prepare_memory_for_start
     with patch.object(
@@ -513,7 +514,7 @@ def test_foreign_or_unreadable_persisted_parent_after_preview_is_never_replaced(
     parent = planned.preview_parent
     assert parent is not None
     result = world.start()
-    assert result.structured_content is not None and result.structured_content["ok"]
+    assert _payload(result)["ok"]
     for index, foreign in enumerate(
         (
             replace(parent, code_source_branch="main"),
@@ -528,10 +529,10 @@ def test_foreign_or_unreadable_persisted_parent_after_preview_is_never_replaced(
         for dry_run in (True, False):
             refused = world.start(dry_run=dry_run)
             assert not refused.is_error, refused
-            assert refused.structured_content is not None
-            assert not refused.structured_content["ok"]
-            assert refused.structured_content["status"] == "atomic-series-contract-edge-mismatch"
-            assert refused.structured_content["nextTool"] == "worktree_status"
+            refused_payload = _payload(refused)
+            assert not refused_payload["ok"]
+            assert refused_payload["status"] == "atomic-series-contract-edge-mismatch"
+            assert refused_payload["nextTool"] == "worktree_status"
             after = world.snapshot()
             world.record(f"foreign-after-call-{world.calls}", after)
             assert_preview_read_only(
@@ -546,9 +547,7 @@ def test_foreign_or_unreadable_persisted_parent_after_preview_is_never_replaced(
     world.record("unreadable-before", before.snapshot)
     for dry_run in (True, False):
         refused = world.start(dry_run=dry_run)
-        assert refused.is_error or (
-            refused.structured_content and not refused.structured_content["ok"]
-        )
+        assert refused.is_error or not _payload(refused).get("ok")
         after = world.snapshot()
         world.record(f"unreadable-after-call-{world.calls}", after)
         assert_preview_read_only(
@@ -578,8 +577,7 @@ def test_invalid_public_leaf_source_base_and_protected_ref_stay_refused_without_
             refused = world.start(**arguments, dry_run=dry_run)
             if "source_branch" in arguments or "parent_task" in arguments:
                 assert not refused.is_error, refused
-                assert refused.structured_content is not None
-                payload = refused.structured_content
+                payload = _payload(refused)
                 assert not payload["ok"] and not payload.get("overflow")
                 assert payload["code"] == (
                     "start-source-branch-mismatch"
@@ -594,9 +592,7 @@ def test_invalid_public_leaf_source_base_and_protected_ref_stay_refused_without_
                 assert payload["nextArgs"][field] == expected
                 assert not world.parent_path.exists()
             else:
-                assert refused.is_error or (
-                    refused.structured_content and not refused.structured_content["ok"]
-                )
+                assert refused.is_error or not _payload(refused).get("ok")
             after = world.snapshot()
             world.record(f"refused-after-call-{world.calls}", after)
             assert_preview_read_only(
@@ -643,9 +639,9 @@ def test_organizational_direct_super_preview_keeps_its_distinct_parent_route(
     world.record("organizational-before", before.snapshot)
     result = world.start()
     assert not result.is_error, result
-    assert result.structured_content is not None
-    assert result.structured_content["state"] == "would-start"
-    contract = _whole(result.structured_content)["contract"]
+    org_payload = _payload(result)
+    assert org_payload["state"] == "would-start"
+    contract = _whole(org_payload)["contract"]
     assert contract["code_source_branch"] == contract["memory_source_branch"] == "super"
     assert not contract["parent_contract_path"]
     after = world.snapshot()
@@ -702,8 +698,9 @@ def test_public_partial_bootstrap_preview_is_read_only_then_apply_recovers_same_
         for _ in range(2):
             preview = world.start()
             assert not preview.is_error, preview
-            assert preview.structured_content is not None and preview.structured_content["ok"]
-            whole = json.loads(Path(preview.structured_content["log"]).read_text(encoding="utf-8"))
+            preview_payload = _payload(preview)
+            assert preview_payload["ok"]
+            whole = json.loads(Path(preview_payload["log"]).read_text(encoding="utf-8"))
             assert whole["memory"]["memorySourceBranch"] == {
                 "state": state,
                 "branch": f"ar/{MASTER}",
@@ -718,9 +715,10 @@ def test_public_partial_bootstrap_preview_is_read_only_then_apply_recovers_same_
             )
     recovered = world.start(dry_run=False)
     assert not recovered.is_error, recovered
-    assert recovered.structured_content is not None and recovered.structured_content["ok"]
+    recovered_payload = _payload(recovered)
+    assert recovered_payload["ok"]
     parent = load_contract(world.parent_path)
-    leaf = load_contract(Path(recovered.structured_content["nextArgs"]["contract_path"]))
+    leaf = load_contract(Path(recovered_payload["nextArgs"]["contract_path"]))
     assert require_parent_series(leaf, operation="recovered apply") == parent
     assert observe_atomic_series(parent).state == "active"
     assert parent.code_base_commit == leaf.code_base_commit == world.base
@@ -843,14 +841,14 @@ def test_observer_event_mode_change_is_rejected(tmp_path: Path) -> None:
     world = PreviewFixture(tmp_path)
     started = world.start(dry_run=False)
     assert not started.is_error, started
-    assert started.structured_content is not None and started.structured_content["ok"], started
+    assert _payload(started)["ok"], started
     world.add_leaf("FRESH-L2")
     before = capture_preview_state(world)
     observed = world.start(leaf_id="FRESH-L2", worktree_name="fresh-preview-l2")
     assert not observed.is_error, observed
-    assert observed.structured_content is not None
-    assert observed.structured_content["ok"] is True, observed
-    assert observed.structured_content["state"] == "would-start", observed
+    observed_payload = _payload(observed)
+    assert observed_payload["ok"] is True, observed_payload
+    assert observed_payload["state"] == "would-start", observed_payload
     river_file = world.coord / "logs" / "observer" / "workspace" / "events.jsonl"
     assert river_file.is_file()
     event_path = river_file.relative_to(world.root).as_posix()
@@ -907,7 +905,7 @@ def test_a_series_bootstrap_retry_accepts_the_contract_it_already_published(
     retried = world.start(dry_run=False)
 
     assert not retried.is_error, retried
-    assert retried.structured_content is not None and retried.structured_content["ok"]
+    assert _payload(retried)["ok"]
     accepted = load_contract(contract_path)
     assert accepted.outside_scratch_generation == published.outside_scratch_generation
     assert accepted.outside_scratch_root == published.outside_scratch_root

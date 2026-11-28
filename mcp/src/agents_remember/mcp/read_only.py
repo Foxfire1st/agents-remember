@@ -147,12 +147,18 @@ def read_only_hint(tool_name: str) -> bool:
     )
 
 
-def read_only_annotations(tool_name: str) -> ToolAnnotations:
-    """Build the registration-time ``ToolAnnotations`` for one registered tool.
+def read_only_annotations(
+    tool_name: str,
+    site_annotations: ToolAnnotations | None = None,
+) -> ToolAnnotations:
+    """Build registration-time ``ToolAnnotations`` merging central read-only truth with site hints.
 
-    Replaces any registration-site hints with the central read-only mark so
-    every advertised tool carries the exact annotation this table declares, and
-    an unlisted tool breaks server creation instead of shipping unmarked.
+    The central fail-closed ``read_only_hint(tool_name)`` table remains authoritative (raising
+    ``UnknownReadOnlyMark`` for unlisted tools), while non-``None`` registration-site hints
+    (``title``, ``destructive_hint``, ``idempotent_hint``, ``open_world_hint``) are preserved.
     """
 
-    return ToolAnnotations(read_only_hint=read_only_hint(tool_name))
+    central_read_only = read_only_hint(tool_name)
+    if site_annotations is None:
+        return ToolAnnotations(read_only_hint=central_read_only)
+    return site_annotations.model_copy(update={"read_only_hint": central_read_only})

@@ -144,8 +144,9 @@ WITHHELD_GUIDANCE_HOPS: dict[str, int] = {
 # ``not-finalizable-yet``, `worktree_sync` answers ``would-sync``). The remedy is named in the
 # exception TEXT only, so nothing machine-readable reaches the caller.
 # Rule: repair it and delete this entry in the same change; never delete the constant, never widen
-# it. Owner: the tool surface (`L10`), with this workflow statement carrying the statement.
-STALE_BASE_RAISERS: frozenset[str] = frozenset({"worktree_closeout_preview"})
+# it. Repaired: worktree_closeout_preview now returns a structured source-lineage refusal carrying
+# code and nextTool="worktree_sync".
+STALE_BASE_RAISERS: frozenset[str] = frozenset()
 
 # Values for arguments a recommendation leaves to the caller. Values, never a population: which
 # argument names are needed is parsed from the argument model's own refusal, at run time.
@@ -386,7 +387,12 @@ class WorkflowWorld:
                 text for content in result.content if (text := getattr(content, "text", None))
             )
             return "RAISED ToolError", {"detail": text}
-        return "RETURNED", result.structured_content
+        payload = result.structured_content
+        if payload is None and result.content:
+            first_text = getattr(result.content[0], "text", None)
+            if isinstance(first_text, str):
+                payload = json.loads(first_text)
+        return "RETURNED", payload
 
     # -- the fixture --------------------------------------------------------------------------
 

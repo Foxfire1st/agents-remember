@@ -152,11 +152,7 @@ from agents_remember.memory_quality.knowledge_validator.validator import validat
 from agents_remember.models.knowledge.review_trees import ReviewKnowledgeTreeDiff
 from agents_remember.models.knowledge.view import require_admitted_ordering_input
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
-from agents_remember.models.tools.tool_answer import (
-    ENVELOPE_STRIPPED_FIELDS,
-    TOOL_ANSWER_LIST_MAX,
-    TOOL_ANSWER_STATUS_ENTRY_MAX,
-)
+from agents_remember.models.tools.tool_answer import TOOL_ANSWER_LIST_MAX
 
 from .base import _tool_payload
 from .knowledge_views.read_request import ReadToolRequest
@@ -1293,74 +1289,13 @@ def knowledge_integrity_check_payload(request: IntegrityCheckRequest) -> dict[st
     return _tool_payload("knowledge_integrity_check", result, answer=answer)
 
 
-def _compact_route_row(row: Any) -> Any:
-    """One family's route row without the uncovered path list: its count stands in the answer."""
-
-    if not isinstance(row, dict):
-        return row
-    state = row.get("state")
-    if not isinstance(state, dict) or "uncovered" not in state:
-        return row
-    kept = {key: value for key, value in state.items() if key != "uncovered"}
-    kept["uncoveredTotal"] = state.get("uncoveredTotal", len(state["uncovered"]))
-    return {**row, "state": kept}
-
-
 def _integrity_answer(full: Mapping[str, Any]) -> dict[str, Any]:
-    """MIK-R110 rule 6: one integrity whole result answered within the default bound.
+    """Project one integrity whole result into its compact inline answer."""
+    from agents_remember.application.knowledge_integrity_answer import (  # noqa: PLC0415
+        integrity_answer,
+    )
 
-    The outcome, the comparison bases, the validation outcome with its counts
-    by rule and first findings, and the worklist state. The envelope fields
-    stay with the whole result, as on every other projection. The violation
-    rows are capped at the status entry cap with the total count beside them;
-    the full listing stays in the whole result the log records.
-    """
-
-    answer = {
-        key: value
-        for key, value in full.items()
-        if key not in ENVELOPE_STRIPPED_FIELDS and value is not None
-    }
-    routes = full.get("routes")
-    if isinstance(routes, list):
-        # MIK-R73 rule 4 keeps the route rows in the answer and MIK-R110 rule 6 keeps the answer
-        # bounded: the rows travel compact (counts, not the uncovered path list, which the whole
-        # result and the `knowledge-routes` command keep in full), and past the entry cap only the
-        # first rows do.
-        compact = [_compact_route_row(row) for row in routes[:TOOL_ANSWER_STATUS_ENTRY_MAX]]
-        answer["routes"] = (
-            compact
-            if len(routes) <= TOOL_ANSWER_STATUS_ENTRY_MAX
-            else {"count": len(routes), "items": compact, "truncated": True}
-        )
-    validation = full.get("validation")
-    if isinstance(validation, dict):
-        violations = validation.get("violations")
-        if isinstance(violations, list):
-            if len(violations) > TOOL_ANSWER_STATUS_ENTRY_MAX:
-                answer["validation"] = {
-                    **validation,
-                    "violations": {
-                        "count": len(violations),
-                        "items": violations[:TOOL_ANSWER_STATUS_ENTRY_MAX],
-                        "truncated": True,
-                    },
-                }
-        elif isinstance(violations, dict) and isinstance(violations.get("items"), list):
-            items = violations["items"]
-            count = violations.get("count", len(items))
-            if len(items) > TOOL_ANSWER_STATUS_ENTRY_MAX or bool(
-                count > TOOL_ANSWER_STATUS_ENTRY_MAX
-            ):
-                answer["validation"] = {
-                    **validation,
-                    "violations": {
-                        **violations,
-                        "items": items[:TOOL_ANSWER_STATUS_ENTRY_MAX],
-                        "truncated": True,
-                    },
-                }
-    return answer
+    return integrity_answer(full)
 
 
 def _refused_check(memory_root: str | None, code: str, detail: str) -> dict[str, Any]:
@@ -1621,8 +1556,12 @@ def _write_route(
 
 def knowledge_write_payload(request: WriteToolRequest, config: McpRuntimeConfig) -> dict[str, Any]:
     """The mounted `knowledge_write` answer: one envelope around one write outcome."""
+    from agents_remember.application.knowledge_write_answer import (  # noqa: PLC0415
+        compact_write_answer,
+    )
 
-    return _tool_payload("knowledge_write", _write_answer(request, config))
+    whole = _write_answer(request, config)
+    return _tool_payload("knowledge_write", whole, answer=compact_write_answer(whole))
 
 
 def _write_answer(request: WriteToolRequest, config: McpRuntimeConfig) -> dict[str, Any]:

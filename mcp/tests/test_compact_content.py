@@ -96,35 +96,28 @@ class CompactToolResultWireTests(unittest.TestCase):
             observed["serverInfo"],
             {"name": "Agents Remember", "version": SERVER_VERSION},
         )
-        # All 44 public tools advertise their <name>DictOutput outputSchema.
+        # Generic dict[str, Any]/dict[str, object] public tools advertise no outputSchema.
         self.assertEqual(len(observed["tools"]), 44)
         for tool in observed["tools"]:
-            self.assertEqual(
-                tool.get("outputSchema"),
-                {
-                    "additionalProperties": True,
-                    "title": f"{tool['name']}DictOutput",
-                    "type": "object",
-                },
-            )
+            self.assertNotIn("outputSchema", tool)
 
-        # Compact text mirrors structured_content byte-for-byte with no newlines.
+        # Compact single-line UTF-8 JSON text with no duplicate structuredContent.
         info = observed["server_info"]
         self.assertFalse(info.is_error)
+        self.assertIsNone(info.structured_content)
         text_blocks = [b for b in info.content if isinstance(b, TextContent)]
         self.assertTrue(text_blocks, "expected a text content block")
         self.assertNotIn("\n", text_blocks[0].text)
         parsed = json.loads(text_blocks[0].text)
-        self.assertIsNotNone(info.structured_content)
-        self.assertEqual(parsed, info.structured_content)
         self.assertTrue(parsed["ok"])
 
-        # Removed argument refusal returns compact structured data.
+        # Removed argument refusal returns compact single-line JSON text without structuredContent.
         refused = observed["removed_refresh"]
         self.assertFalse(refused.is_error)
-        self.assertIsNotNone(refused.structured_content)
-        self.assertEqual(refused.structured_content["refusalCode"], "argument-removed")
-        self.assertEqual(json.loads(refused.content[0].text), refused.structured_content)
+        self.assertIsNone(refused.structured_content)
+        self.assertNotIn("\n", refused.content[0].text)
+        refused_payload = json.loads(refused.content[0].text)
+        self.assertEqual(refused_payload["refusalCode"], "argument-removed")
 
         # Validation and unknown-tool errors preserve exact error text on the wire.
         bad_args = observed["bad_args"]
@@ -207,21 +200,25 @@ class CompactToolResultWireTests(unittest.TestCase):
         self.assertIsNone(normal_bare.structured_content)
         self.assertEqual(normal_bare.content[0].text, '{"ok":true}')
 
-        # Early-return refusals match the start tree's indented JSON text + structuredContent.
+        # Early-return refusals emit compact single-line UTF-8 JSON text with no structuredContent.
         self.assertFalse(forged_refusal.is_error)
-        self.assertIsInstance(forged_refusal.structured_content, dict)
-        self.assertEqual(forged_refusal.structured_content["refusal"], "not-this-explainer")
+        self.assertIsNone(forged_refusal.structured_content)
+        self.assertNotIn("\n", forged_refusal.content[0].text)
+        forged_payload = json.loads(forged_refusal.content[0].text)
+        self.assertEqual(forged_payload["refusal"], "not-this-explainer")
         self.assertEqual(
             forged_refusal.content[0].text,
-            json.dumps(forged_refusal.structured_content, indent=2),
+            json.dumps(forged_payload, separators=(",", ":"), ensure_ascii=False),
         )
 
         self.assertFalse(stale_refusal.is_error)
-        self.assertIsInstance(stale_refusal.structured_content, dict)
-        self.assertEqual(stale_refusal.structured_content["code"], "server-build-stale")
+        self.assertIsNone(stale_refusal.structured_content)
+        self.assertNotIn("\n", stale_refusal.content[0].text)
+        stale_payload = json.loads(stale_refusal.content[0].text)
+        self.assertEqual(stale_payload["code"], "server-build-stale")
         self.assertEqual(
             stale_refusal.content[0].text,
-            json.dumps(stale_refusal.structured_content, indent=2),
+            json.dumps(stale_payload, separators=(",", ":"), ensure_ascii=False),
         )
 
     @staticmethod
@@ -333,9 +330,15 @@ class CompactToolResultWireTests(unittest.TestCase):
                     self.assertEqual(
                         listed["inputSchema"], compact_tool_schema(raw_base.input_schema)
                     )
-                # Central read-only marking replaces the whole annotation object (no extra hints).
+                # Central read-only marking merges authoritative readOnlyHint with site hints.
                 self.assertEqual(
-                    unbound_by_name["server_info"]["annotations"], {"readOnlyHint": True}
+                    unbound_by_name["server_info"]["annotations"],
+                    {
+                        "readOnlyHint": True,
+                        "destructiveHint": False,
+                        "idempotentHint": True,
+                        "openWorldHint": False,
+                    },
                 )
                 self.assertNotIn(
                     "refresh", unbound_by_name["read_ar_files"]["inputSchema"]["properties"]
