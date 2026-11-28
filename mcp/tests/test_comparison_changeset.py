@@ -201,11 +201,13 @@ def test_comparison_names_a_picture_side_and_serves_its_bytes(tmp_path):
         "binary": True,
         "mediaType": "image/png",
         "size": len(before_bytes),
+        "highlights": None,
     }
     assert diff["after"] == {
         "binary": True,
         "mediaType": "image/png",
         "size": len(after_bytes),
+        "highlights": None,
     }
     base = client.get(
         "/api/changeset/file-bytes", params={**params, "path": "pic.png", "side": "before"}
@@ -302,8 +304,8 @@ def test_comparison_paths_ignore_current_aliases_on_both_git_halves(tmp_path):
         assert response.status_code == 200
         body = response.json()
         assert body["path"] == requested
-        assert body["before"] == {"content": f"before {kind}\n"}
-        assert body["after"] == {"content": f"after {kind}\n"}
+        assert body["before"] == {"content": f"before {kind}\n", "highlights": None}
+        assert body["after"] == {"content": f"after {kind}\n", "highlights": None}
         file = root / requested
         file.unlink()
         outside = tmp_path / f"outside-{kind}"
@@ -327,8 +329,14 @@ def test_comparison_paths_ignore_current_aliases_on_both_git_halves(tmp_path):
         )
         assert observed.status_code == 200
         assert observed.json()["path"] == historical_link
-        assert observed.json()["before"] == {"content": f"before-{kind}-target"}
-        assert observed.json()["after"] == {"content": f"after-{kind}-target"}
+        assert observed.json()["before"] == {
+            "content": f"before-{kind}-target",
+            "highlights": None,
+        }
+        assert observed.json()["after"] == {
+            "content": f"after-{kind}-target",
+            "highlights": None,
+        }
     assert client.get("/api/changeset/task", params=params).content == listing.content
     for kind in ("code", "memory"):
         for requested in (

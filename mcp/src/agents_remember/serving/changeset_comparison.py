@@ -11,7 +11,7 @@ from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRe
 from agents_remember.models.knowledge_files.shapes import require_repository_path
 from agents_remember.serving.changeset_reads import change_counters
 from agents_remember.serving.changeset_reads import read_git as run_git
-from agents_remember.serving.diff_side import committed_side
+from agents_remember.serving.diff_side import committed_side, side_with_highlights
 from agents_remember.serving.scope import language_for
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -133,6 +133,8 @@ def comparison_file_diff(
     root, base, tip = _range(record, memory)
     # Historical Git addresses must not follow today's filesystem aliases (L86-CODE-R1-F01).
     rel = comparison_file_path(path, memory=memory)
+    repo_for_lang = None if memory else root
+    language = language_for(Path(rel), repo_root=repo_for_lang)
     sides = []
     for tree in (base, tip):
         # cat-file distinguishes a missing path (add/delete) from a lost tree without
@@ -147,12 +149,14 @@ def comparison_file_diff(
                 )
             sides.append(None)
         else:
-            sides.append(side.to_wire())
+            sides.append(
+                side_with_highlights(side, path=rel, language=language, repo_root=repo_for_lang)
+            )
     return {
         "scope": contract.leaf_id,
         "kind": "memory" if memory else "code",
         "path": rel,
-        "language": language_for(Path(rel)),
+        "language": language,
         "before": sides[0],
         "after": sides[1],
     }

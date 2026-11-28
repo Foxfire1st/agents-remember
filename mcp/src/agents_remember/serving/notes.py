@@ -57,7 +57,7 @@ from agents_remember.serving.response_contract import (
     NotesFolder,
     NotesResolutions,
 )
-from agents_remember.serving.scope import decode_capped, language_for
+from agents_remember.serving.scope import decode_capped, highlights_wire_for, language_for
 
 # Mirrors the serving.files read cap: a pathological file never blocks the event loop;
 # the full byte size is still reported (truncated=True).
@@ -318,6 +318,7 @@ def read_note(config: McpRuntimeConfig, repo_id: str, master: str, rel: str) -> 
             "content": "",
             "mediaType": media_type,
             "tooLarge": size > MEDIA_BYTE_LIMIT,
+            "highlights": None,
         }
     raw = src.read_bytes()
     truncated = len(raw) > _MAX_FILE_BYTES
@@ -342,6 +343,7 @@ def read_note(config: McpRuntimeConfig, repo_id: str, master: str, rel: str) -> 
         # A suffix outside the fixed media table has no bytes route.
         "mediaType": None,
         "tooLarge": False,
+        "highlights": highlights_wire_for(src, content, language=language),
     }
 
 

@@ -10,6 +10,7 @@
 // holding the document's references; folder answers never grow with the tree.
 
 import { getJson, qs } from "./files";
+import type { SyntaxHighlights } from "./highlights";
 import { noteMediaUrl } from "./media";
 import { abortedRead } from "./abortableRead";
 
@@ -44,6 +45,7 @@ export interface NoteContent {
   // this read already knows the repo/master/path it names.
   mediaType?: string | null;
   tooLarge?: boolean;
+  highlights?: SyntaxHighlights | null;
   mediaUrl?: string;
 }
 export interface NoteResolution {

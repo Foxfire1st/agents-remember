@@ -32,7 +32,7 @@ from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.models.role_launcher import RoleResultRequest
 from agents_remember.serving.notes import _MAX_FILE_BYTES
 from agents_remember.serving.response_contract import SCOPED_READ_RESPONSES, TaskReports
-from agents_remember.serving.scope import decode_capped, language_for
+from agents_remember.serving.scope import decode_capped, highlights_wire_for, language_for
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 
 # A task page shows at most this many recorded role starts; the rest stay reachable
@@ -244,13 +244,15 @@ def _read_report_file(path: Path) -> JSONResponse:
             "The report cannot be read. Check its access and text encoding, then retry.",
             409,
         )
+    language = language_for(path)
     return JSONResponse(
         {
             "path": path.name,
-            "language": language_for(path),
+            "language": language,
             "size": size,
             "truncated": truncated,
             "content": content,
+            "highlights": highlights_wire_for(path, content, language=language),
         }
     )
 

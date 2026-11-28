@@ -14,6 +14,7 @@ from pathlib import Path
 from agents_remember.kernel.git_command import run_git, run_git_bytes
 from agents_remember.serving.media import MediaValidationError, looks_binary, media_type_for
 from agents_remember.serving.media_sources import is_object_id, require_readable_path
+from agents_remember.serving.scope import highlights_wire_for, language_for
 
 
 @dataclass(frozen=True)
@@ -88,3 +89,47 @@ def side_or_none(side: SideContent | None) -> dict[str, object] | None:
     """The wire shape of an optional side (``None`` for an added or deleted file's absent half)."""
 
     return None if side is None else side.to_wire()
+
+
+def side_with_highlights(
+    side: SideContent | None,
+    *,
+    path: str,
+    language: str,
+    repo_root: Path | None = None,
+) -> dict[str, object] | None:
+    """The wire shape of an optional diff side with server-side syntax highlights attached."""
+    if side is None:
+        return None
+    wire = side.to_wire()
+    if side.binary:
+        wire["highlights"] = None
+        return wire
+    wire["highlights"] = highlights_wire_for(
+        path, side.content, language=language, repo_root=repo_root
+    )
+    return wire
+
+
+def file_diff_payload(
+    *,
+    scope: str,
+    memory: bool,
+    path: str,
+    sides: tuple[SideContent | None, SideContent | None],
+    code_repo_root: Path | None = None,
+) -> dict[str, object]:
+    """Assemble one ``FileDiff`` wire response with catalog language and per-side highlights."""
+    before, after = sides
+    repo_for_lang = None if memory else code_repo_root
+    language = language_for(Path(path), repo_root=repo_for_lang)
+    return {
+        "scope": scope,
+        "kind": "memory" if memory else "code",
+        "path": path,
+        "language": language,
+        "before": side_with_highlights(
+            before, path=path, language=language, repo_root=repo_for_lang
+        ),
+        "after": side_with_highlights(after, path=path, language=language, repo_root=repo_for_lang),
+    }

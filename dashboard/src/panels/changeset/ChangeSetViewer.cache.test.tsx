@@ -43,14 +43,30 @@ it('keeps the parsed list and real editor on unchanged polls, then renders edits
       ? {
           scope: 'leaf',
           kind: 'code',
-          path: 'file.txt',
-          language: 'text',
-          before: { content: 'old\n' },
-          after: { content: `new ${revision}\n` },
+          path: 'file.py',
+          language: 'python',
+          before: {
+            content: 'def old():\n    return 1\n',
+            highlights: {
+              version: 1,
+              digest: 'before-v1',
+              kinds: ['keyword', 'function', 'number'],
+              spans: [0, 3, 0, 4, 7, 1, 15, 21, 0, 22, 23, 2],
+            },
+          },
+          after: {
+            content: `def new_${revision}():\n    return ${revision}\n`,
+            highlights: {
+              version: 1,
+              digest: `after-v${revision}`,
+              kinds: ['keyword', 'function', 'number'],
+              spans: [0, 3, 0, 4, 9, 1, 17, 23, 0, 24, 25, 2],
+            },
+          },
         }
       : {
           scope: 'leaf',
-          code: [{ path: 'file.txt', insertions: revision, deletions: 0, status: 'M' }],
+          code: [{ path: 'file.py', insertions: revision, deletions: 0, status: 'M' }],
           memory: [],
           counters,
         };
@@ -68,9 +84,10 @@ it('keeps the parsed list and real editor on unchanged polls, then renders edits
   const view = render(
     <ChangeSetViewer repo="repo" master="master" leaf="LEAF" mode="working" onBack={vi.fn()} />,
   );
-  fireEvent.click(await view.findByText('file.txt'));
+  fireEvent.click(await view.findByText('file.py'));
   await waitFor(() => expect(view.container.querySelector('.cm-mergeView')).not.toBeNull());
   const editor = view.container.querySelector('.cm-mergeView');
+  expect(view.container.querySelectorAll('.cm-ar-tok-keyword').length).toBeGreaterThan(0);
   const listAddress = fetch.mock.calls.find(([address]) => !address.includes('/file-diff?'))![0];
   const original = dashboardStore.getState().changeSets.peek(listAddress);
   expect(decoded).toHaveLength(2);
@@ -85,7 +102,7 @@ it('keeps the parsed list and real editor on unchanged polls, then renders edits
     await polls.shift()!();
   });
   await waitFor(() =>
-    expect(view.container.querySelector('.cm-mergeView')?.textContent).toContain('new 2'),
+    expect(view.container.querySelector('.cm-mergeView')?.textContent).toContain('new_2'),
   );
   expect(view.container.querySelector('.cm-mergeView')).not.toBe(editor);
   expect(decoded).toHaveLength(4);

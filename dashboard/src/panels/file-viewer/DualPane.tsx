@@ -131,6 +131,7 @@ function CodeSide({
       <FilePane
         content={code.content}
         language={code.language}
+        highlights={code.highlights}
         trayLines={repository ? { repository, scope: code.scope, path: code.path } : undefined}
       />
     </div>

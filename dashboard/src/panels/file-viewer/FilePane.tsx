@@ -1,15 +1,16 @@
-// Reusable read-only CodeMirror 6 pane — the shared code primitive. L4's Change-Set Viewer
-// reuses it by swapping the single EditorView for @codemirror/merge (same editor core + the
-// same HighlightStyle => identical tokens across plain + diff). The EditorView is created
-// imperatively in an effect and torn down on unmount / content change.
-import { useEffect, useRef } from "react";
-import { EditorState, type Extension, type Text } from "@codemirror/state";
+// Reusable read-only CodeMirror 6 pane — the shared code primitive. The Change-Set Viewer
+// reuses the same theme and server-computed tree-sitter highlight decorations via @codemirror/merge
+// so tokens are identical across plain + diff panes. Highlights reconfigure in place through a
+// Compartment without rebuilding the EditorView across unchanged polls.
+import { useEffect, useLayoutEffect, useRef } from "react";
+import { Compartment, EditorState, type Extension, type Text } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 
 import { css } from "../../../styled-system/css";
+import type { SyntaxHighlights } from "../../data/highlights";
 import { codeTheme } from "./codemirrorTheme";
 import { numberedFrom } from "./lineNumbering";
-import { langExtension } from "./langByExtension";
+import { highlightDigest, serverHighlightsExtension } from "./serverHighlights";
 import { type PaneMarks, useMarkedPane } from "./markGutter";
 import { trayLineGutter, type FileLineTarget } from "../../tray/fileLineGutter";
 
@@ -31,17 +32,10 @@ const fitHost = css({
   "& .cm-scroller": { overflow: "visible !important" },
 });
 
-export function FilePane({
-  content,
-  language,
-  firstLine = 1,
-  fit = false,
-  marks,
-  highlightedLines,
-  trayLines,
-}: {
+interface FilePaneProps {
   content: string;
   language: string;
+  highlights?: SyntaxHighlights | null;
   firstLine?: number;
   fit?: boolean;
   // Marks on file lines (the reviewer's per-hunk intent markers); absent = no mark gutter at all.
@@ -50,54 +44,98 @@ export function FilePane({
   // The File Viewer's file: a hover ⊕ in the line gutter takes its lines into the AR tray
   // (MIK-R188 rule 1). Absent = no tray gutter (excerpts, the reviewer's cards, the Knowledge page).
   trayLines?: FileLineTarget;
-}) {
+}
+
+function buildExtensions(args: {
+  gutter: Extension;
+  firstLine: number;
+  tray?: FileLineTarget;
+  slot: Compartment;
+  highlights?: SyntaxHighlights | null;
+  doc: Text;
+  highlightedLines?: readonly [number, number];
+}): Extension[] {
+  const { gutter, firstLine, tray, slot, highlights, doc, highlightedLines } = args;
+  const extensions: Extension[] = [
+    gutter,
+    numberedFrom(firstLine),
+    tray ? trayLineGutter(tray, firstLine) : [],
+    EditorState.readOnly.of(true),
+    EditorView.editable.of(false),
+    EditorView.lineWrapping,
+    codeTheme,
+    slot.of(serverHighlightsExtension(highlights, doc.length)),
+  ];
+  if (highlightedLines) extensions.push(citationHighlight(doc, highlightedLines, firstLine));
+  return extensions;
+}
+
+export function FilePane({
+  content,
+  language: _language,
+  highlights,
+  firstLine = 1,
+  fit = false,
+  marks,
+  highlightedLines,
+  trayLines,
+}: FilePaneProps) {
   const ref = useRef<HTMLDivElement>(null);
   const { portals, placement, gutterFor, drawn } = useMarkedPane(marks);
   const trayRepository = trayLines?.repository;
   const trayScope = trayLines?.scope;
   const trayPath = trayLines?.path;
+  const latestHighlights = useRef<SyntaxHighlights | null | undefined>(highlights);
+  useLayoutEffect(() => {
+    latestHighlights.current = highlights;
+  });
+  const built = useRef<{ view: EditorView; slot: Compartment } | null>(null);
+  const digest = highlightDigest(highlights);
 
   useEffect(() => {
     const parent = ref.current;
     if (!parent) return;
-    let view: EditorView | null = null;
-    let disposed = false;
-
-    // Language packs are async (code-split); guard against a late resolve after teardown.
-    void langExtension(language).then((lang) => {
-      if (disposed || !parent) return;
-      const extensions: Extension[] = [
-        gutterFor("all", firstLine),
-        numberedFrom(firstLine),
-        trayRepository && trayScope && trayPath
-          ? trayLineGutter({ repository: trayRepository, scope: trayScope, path: trayPath }, firstLine)
-          : [],
-        EditorState.readOnly.of(true),
-        EditorView.editable.of(false),
-        EditorView.lineWrapping,
-        codeTheme,
-      ];
-      if (lang) extensions.push(lang);
-      const doc = EditorState.create({ doc: content }).doc;
-      if (highlightedLines) extensions.push(citationHighlight(doc, highlightedLines, firstLine));
-      view = new EditorView({ parent, state: EditorState.create({ doc: content, extensions }) });
-      if (highlightedLines)
-        view.dispatch({
-          effects: EditorView.scrollIntoView(
-            doc.line(Math.max(1, Math.min(doc.lines, highlightedLines[0] - firstLine + 1))).from,
-            { y: "start" },
-          ),
-        });
-      drawn({ after: { view, first: firstLine } });
+    const slot = new Compartment();
+    const doc = EditorState.create({ doc: content }).doc;
+    const tray =
+      trayRepository && trayScope && trayPath
+        ? { repository: trayRepository, scope: trayScope, path: trayPath }
+        : undefined;
+    const extensions = buildExtensions({
+      gutter: gutterFor("all", firstLine),
+      firstLine,
+      tray,
+      slot,
+      highlights: latestHighlights.current,
+      doc,
+      highlightedLines,
     });
+    const view = new EditorView({ parent, state: EditorState.create({ doc: content, extensions }) });
+    built.current = { view, slot };
+    if (highlightedLines) {
+      const targetLine = Math.max(1, Math.min(doc.lines, highlightedLines[0] - firstLine + 1));
+      view.dispatch({ effects: EditorView.scrollIntoView(doc.line(targetLine).from, { y: "start" }) });
+    }
+    drawn({ after: { view, first: firstLine } });
 
     return () => {
-      disposed = true;
       drawn(null);
-      view?.destroy();
+      view.destroy();
+      built.current = null;
     };
     // `placement` rebuilds the pane when a mark moves (the marks themselves are read at build).
-  }, [content, language, firstLine, placement, gutterFor, drawn, highlightedLines, trayRepository, trayScope, trayPath]);
+    // `highlights` is deliberately omitted: updates reconfigure `slot` in place below.
+  }, [content, firstLine, placement, gutterFor, drawn, highlightedLines, trayRepository, trayScope, trayPath]);
+
+  useEffect(() => {
+    const current = built.current;
+    if (!current) return;
+    current.view.dispatch({
+      effects: current.slot.reconfigure(
+        serverHighlightsExtension(latestHighlights.current, current.view.state.doc.length),
+      ),
+    });
+  }, [digest]);
 
   return (
     <>

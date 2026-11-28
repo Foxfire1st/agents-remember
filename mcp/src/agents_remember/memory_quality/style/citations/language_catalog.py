@@ -35,9 +35,17 @@ CATALOG_LOCK_PATH: Final = (
     / "citations"
     / "language_catalog.lock.json"
 )
-ProviderKind = Literal["pypi_wheel", "language_pack", "builtin_lean"]
+ProviderKind = Literal["pypi_wheel", "language_pack", "builtin_lean", "display_only"]
 GuaranteeTier = Literal["verified", "best_effort", "unverified"]
 _GUARANTEE_TIERS: Final = frozenset({"verified", "best_effort", "unverified"})
+
+
+@dataclass(frozen=True)
+class QueryPin:
+    """One hash-pinned tree-sitter query file path inside ``QUERIES_ROOT``."""
+
+    path: str
+    sha256: str
 
 
 class LanguageCatalogError(AgentsRememberError):
@@ -93,6 +101,7 @@ class CatalogLanguageSpec:
     tags_query_sha256: str | None = None
     tests_query_relpath: str | None = None
     tests_query_sha256: str | None = None
+    highlights_queries: tuple[QueryPin, ...] = ()
     wrappers: frozenset[str] = frozenset()
     leading_wrappers: frozenset[str] = frozenset()
     destructuring: DestructuringSpec = field(default_factory=DestructuringSpec)
@@ -102,7 +111,7 @@ class CatalogLanguageSpec:
 
     @property
     def grammar_version_label(self) -> str:
-        if self.provider_kind == "builtin_lean":
+        if self.provider_kind in {"builtin_lean", "display_only"}:
             return self.version
         owner = self.package or self.id
         return f"{owner}={self.version}"
@@ -127,6 +136,20 @@ class CatalogLanguageSpec:
             queries_root, self.tests_query_relpath, self.tests_query_sha256, self.id
         )
 
+    def load_highlights_queries(self, queries_root: Path = QUERIES_ROOT) -> tuple[str, ...]:
+        """Read and verify the ordered pinned ``highlights.scm`` query texts for this language."""
+        return tuple(
+            _read_verified_query(queries_root, pin.path, pin.sha256, self.id)
+            for pin in self.highlights_queries
+        )
+
+    def highlights_queries_digest(self) -> str | None:
+        """Deterministic digest over pinned highlight query SHA-256s (independent of anchoring)."""
+        if not self.highlights_queries:
+            return None
+        joined = "|".join(f"{pin.path}:{pin.sha256}" for pin in self.highlights_queries)
+        return hashlib.sha256(joined.encode("ascii")).hexdigest()[:16]
+
 
 @dataclass(frozen=True)
 class LanguageCatalog:
@@ -138,27 +161,46 @@ class LanguageCatalog:
     ambiguous_suffixes: frozenset[str]
     language_pack: LanguagePackPin
     languages: Mapping[str, CatalogLanguageSpec]
+    highlight_languages: Mapping[str, CatalogLanguageSpec] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    display_suffixes: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
     by_suffix: Mapping[str, str] = field(init=False)
     by_filename: Mapping[str, str] = field(init=False)
     by_shebang: Mapping[str, str] = field(init=False)
+    display_by_suffix: Mapping[str, str] = field(init=False)
+    display_by_filename: Mapping[str, str] = field(init=False)
 
     def __post_init__(self) -> None:
-        by_suffix: dict[str, str] = {}
-        by_filename: dict[str, str] = {}
-        by_shebang: dict[str, str] = {}
-        for lang_id, spec in self.languages.items():
-            for suffix in spec.suffixes:
-                _claim_unique(by_suffix, suffix, lang_id, "suffix")
-            for filename in spec.filenames:
-                _claim_unique(by_filename, filename, lang_id, "filename")
-            for shebang in spec.shebangs:
-                _claim_unique(by_shebang, shebang, lang_id, "shebang")
+        by_suffix, by_filename, by_shebang = _index_anchoring_languages(self.languages)
+        display_by_suffix, display_by_filename = _index_display_languages(
+            by_suffix,
+            by_filename,
+            self.languages,
+            self.highlight_languages,
+            self.display_suffixes,
+        )
         object.__setattr__(self, "by_suffix", MappingProxyType(by_suffix))
         object.__setattr__(self, "by_filename", MappingProxyType(by_filename))
         object.__setattr__(self, "by_shebang", MappingProxyType(by_shebang))
+        object.__setattr__(self, "display_by_suffix", MappingProxyType(display_by_suffix))
+        object.__setattr__(self, "display_by_filename", MappingProxyType(display_by_filename))
 
     def get(self, lang_id: str) -> CatalogLanguageSpec | None:
         return self.languages.get(lang_id)
+
+    def get_highlight_spec(self, lang_id: str) -> CatalogLanguageSpec | None:
+        """Look up a language spec across anchoring and presentation-only highlight entries."""
+        spec = self.languages.get(lang_id)
+        return spec if spec is not None else self.highlight_languages.get(lang_id)
+
+    def display_language_for(self, path: str | Path) -> str | None:
+        """Resolve a path to its catalog display language id, or ``None`` if unlisted."""
+        candidate = path if isinstance(path, Path) else Path(path)
+        by_name = self.display_by_filename.get(candidate.name)
+        if by_name is not None:
+            return by_name
+        return self.display_by_suffix.get(candidate.suffix.lower())
 
 
 def _claim_unique(target: dict[str, str], key: str, lang_id: str, kind: str) -> None:
@@ -167,6 +209,49 @@ def _claim_unique(target: dict[str, str], key: str, lang_id: str, kind: str) -> 
             f"catalog {kind} {key!r} is claimed by both {target[key]!r} and {lang_id!r}"
         )
     target[key] = lang_id
+
+
+def _index_anchoring_languages(
+    languages: Mapping[str, CatalogLanguageSpec],
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    by_suffix: dict[str, str] = {}
+    by_filename: dict[str, str] = {}
+    by_shebang: dict[str, str] = {}
+    for lang_id, spec in languages.items():
+        for suffix in spec.suffixes:
+            _claim_unique(by_suffix, suffix, lang_id, "suffix")
+        for filename in spec.filenames:
+            _claim_unique(by_filename, filename, lang_id, "filename")
+        for shebang in spec.shebangs:
+            _claim_unique(by_shebang, shebang, lang_id, "shebang")
+    return by_suffix, by_filename, by_shebang
+
+
+def _index_display_languages(
+    by_suffix: Mapping[str, str],
+    by_filename: Mapping[str, str],
+    languages: Mapping[str, CatalogLanguageSpec],
+    highlight_languages: Mapping[str, CatalogLanguageSpec],
+    display_suffixes: Mapping[str, str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    display_by_suffix = dict(by_suffix)
+    display_by_filename = dict(by_filename)
+    for lang_id, spec in highlight_languages.items():
+        if lang_id in languages:
+            raise LanguageCatalogError(
+                f"highlightLanguages.{lang_id!r} duplicates anchoring languages.{lang_id!r}"
+            )
+        for suffix in spec.suffixes:
+            _claim_unique(display_by_suffix, suffix, lang_id, "display suffix")
+        for filename in spec.filenames:
+            _claim_unique(display_by_filename, filename, lang_id, "display filename")
+    for suffix, lang_id in display_suffixes.items():
+        if lang_id not in languages and lang_id not in highlight_languages:
+            raise LanguageCatalogError(
+                f"displaySuffixes[{suffix!r}] targets unknown language {lang_id!r}"
+            )
+        _claim_unique(display_by_suffix, suffix, lang_id, "display suffix")
+    return display_by_suffix, display_by_filename
 
 
 def _read_verified_query(
@@ -301,6 +386,96 @@ class _CatalogParseContext:
     verify_queries: bool
 
 
+def _parse_highlights_queries(raw: object, context: str) -> tuple[QueryPin, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise LanguageCatalogError(f"{context} must be a list of query pins")
+    pins: list[QueryPin] = []
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise LanguageCatalogError(f"{context}[{index}] must be an object")
+        item_ctx = f"{context}[{index}]"
+        pins.append(
+            QueryPin(
+                path=_require_str(entry, "path", item_ctx),
+                sha256=_require_sha256(entry, "sha256", item_ctx),
+            )
+        )
+    return tuple(pins)
+
+
+def _parse_highlight_only_spec(
+    lang_id: str,
+    raw: Mapping[str, Any],
+    ctx: _CatalogParseContext,
+) -> CatalogLanguageSpec:
+    context = f"highlightLanguages.{lang_id}"
+    kind = raw.get("providerKind")
+    if kind not in {"pypi_wheel", "language_pack", "display_only"}:
+        raise LanguageCatalogError(f"{context}.providerKind {kind!r} is unsupported")
+    suffixes = _parse_str_set(
+        raw.get("suffixes", []), f"{context}.suffixes", require_dot_lower=True
+    )
+    filenames = _parse_str_set(raw.get("filenames", []), f"{context}.filenames")
+    shebangs = _parse_str_set(raw.get("shebangs", []), f"{context}.shebangs")
+    if suffixes & ctx.reserved:
+        raise LanguageCatalogError(
+            f"{context} claims reserved suffix(es) {sorted(suffixes & ctx.reserved)}"
+        )
+    highlights_queries = _parse_highlights_queries(
+        raw.get("highlightsQueries"), f"{context}.highlightsQueries"
+    )
+    if kind == "display_only":
+        return CatalogLanguageSpec(
+            id=lang_id,
+            provider_kind="display_only",
+            version=str(raw.get("version") or "display-only/1"),
+            suffixes=suffixes,
+            filenames=filenames,
+            shebangs=shebangs,
+        )
+    package, version, module, symbol, pack_language, wheels = _parse_provider_artifact(
+        lang_id, kind, raw, ctx.pack, context
+    )
+    spec = CatalogLanguageSpec(
+        id=lang_id,
+        provider_kind=kind,
+        version=version,
+        suffixes=suffixes,
+        filenames=filenames,
+        shebangs=shebangs,
+        package=package,
+        module=module,
+        symbol=symbol,
+        pack_language=pack_language,
+        highlights_queries=highlights_queries,
+        wheels=wheels,
+    )
+    if ctx.verify_queries and spec.highlights_queries:
+        spec.load_highlights_queries(ctx.queries_root)
+    return spec
+
+
+def _parse_display_suffixes(raw: object) -> dict[str, str]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise LanguageCatalogError("displaySuffixes must be an object mapping suffixes to ids")
+    parsed: dict[str, str] = {}
+    for suffix, lang_id in raw.items():
+        if not isinstance(suffix, str) or not suffix.startswith(".") or suffix != suffix.lower():
+            raise LanguageCatalogError(
+                f"displaySuffixes key {suffix!r} must be lowercase and start with '.'"
+            )
+        if not isinstance(lang_id, str) or not lang_id.strip():
+            raise LanguageCatalogError(
+                f"displaySuffixes[{suffix!r}] must be a non-empty language id"
+            )
+        parsed[suffix] = lang_id
+    return parsed
+
+
 def _parse_query_pins(
     raw: Mapping[str, Any], context: str
 ) -> tuple[str, str, str | None, str | None]:
@@ -380,6 +555,9 @@ def _parse_language_spec(
             shebangs=shebangs,
         )
     tags_rel, tags_sha, tests_rel, tests_sha = _parse_query_pins(raw, context)
+    highlights_queries = _parse_highlights_queries(
+        raw.get("highlightsQueries"), f"{context}.highlightsQueries"
+    )
     package, version, module, symbol, pack_language, wheels = _parse_provider_artifact(
         lang_id, kind, raw, ctx.pack, context
     )
@@ -399,6 +577,7 @@ def _parse_language_spec(
         tags_query_sha256=tags_sha,
         tests_query_relpath=tests_rel,
         tests_query_sha256=tests_sha,
+        highlights_queries=highlights_queries,
         wrappers=_parse_str_set(raw.get("wrappers", []), f"{context}.wrappers"),
         leading_wrappers=_parse_str_set(
             raw.get("leadingWrappers", []), f"{context}.leadingWrappers"
@@ -411,7 +590,26 @@ def _parse_language_spec(
     if ctx.verify_queries:
         spec.load_tags_query(ctx.queries_root)
         spec.load_tests_query(ctx.queries_root)
+        if spec.highlights_queries:
+            spec.load_highlights_queries(ctx.queries_root)
     return spec
+
+
+def _parse_highlight_languages_section(
+    raw: object, ctx: _CatalogParseContext
+) -> dict[str, CatalogLanguageSpec]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise LanguageCatalogError("highlightLanguages section must be an object")
+    parsed: dict[str, CatalogLanguageSpec] = {}
+    for lang_id, entry in raw.items():
+        if not isinstance(lang_id, str) or not lang_id.strip() or not isinstance(entry, dict):
+            raise LanguageCatalogError(
+                f"highlightLanguages.{lang_id!r} must map a non-empty id to an object"
+            )
+        parsed[lang_id] = _parse_highlight_only_spec(lang_id, entry, ctx)
+    return parsed
 
 
 def parse_language_catalog(
@@ -474,6 +672,8 @@ def parse_language_catalog(
                 f"languages.{lang_id!r} must map a non-empty id to an object"
             )
         languages[lang_id] = _parse_language_spec(lang_id, entry, ctx)
+    highlight_languages = _parse_highlight_languages_section(raw.get("highlightLanguages"), ctx)
+    display_suffixes = _parse_display_suffixes(raw.get("displaySuffixes"))
     return LanguageCatalog(
         schema=schema,
         tree_sitter=tree_sitter,
@@ -481,6 +681,8 @@ def parse_language_catalog(
         ambiguous_suffixes=ambiguous,
         language_pack=language_pack,
         languages=MappingProxyType(languages),
+        highlight_languages=MappingProxyType(highlight_languages),
+        display_suffixes=MappingProxyType(display_suffixes),
     )
 
 

@@ -307,11 +307,13 @@ function ChangeSetBody({
           <Markdown>{after || before}</Markdown>
         </div>
       ) : plain ? (
-        <FilePane content={after} language={language} />
+        <FilePane content={after} language={language} highlights={null} />
       ) : (
         <DiffPane
           before={before}
           after={after}
+          beforeHighlights={diff.before?.highlights}
+          afterHighlights={diff.after?.highlights}
           language={language}
           mode={inline ? 'inline' : 'split'}
           collapse={!fullFile}

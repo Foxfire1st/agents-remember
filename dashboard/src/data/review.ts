@@ -17,6 +17,7 @@
 
 import { getReviewJson } from './reviewTransport';
 import { qs } from './files';
+import type { SyntaxHighlights } from './highlights';
 import type { ReviewFamilyContext, ReviewRevisionSelection } from './reviewFamily';
 import type { ReviewJudgmentPane } from './reviewJudgment';
 export type { ReviewJudgmentPane, ReviewJudgmentRow, ReviewProofDisplay } from './reviewJudgment';
@@ -108,6 +109,7 @@ export interface ReviewSideContent {
   state: ReviewSideState;
   text?: string;
   language: string;
+  highlights?: SyntaxHighlights | null;
   detail: string;
 }
 

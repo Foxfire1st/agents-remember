@@ -37,6 +37,10 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
 from agents_remember.kernel.sidecar_pairing import confine_rel
+from agents_remember.memory_quality.style.citations.highlights_service import (
+    highlight_text,
+    resolve_display_language,
+)
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.task_resolver import (
     is_foreign_enclosure_contract,
@@ -50,33 +54,24 @@ from agents_remember.worktrees.worktree_contract import (
 
 logger = logging.getLogger(__name__)
 
-_LANG_BY_EXT = {
-    ".py": "python",
-    ".pyi": "python",
-    ".ts": "typescript",
-    ".tsx": "tsx",
-    ".js": "javascript",
-    ".jsx": "jsx",
-    ".mjs": "javascript",
-    ".cjs": "javascript",
-    ".json": "json",
-    ".md": "markdown",
-    ".css": "css",
-    ".html": "html",
-    ".sh": "bash",
-    ".toml": "toml",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-    ".sql": "sql",
-    ".txt": "text",
-    ".cfg": "ini",
-    ".ini": "ini",
-}
+
+def language_for(path: Path, *, repo_root: Path | None = None) -> str:
+    """The dashboard language id for ``path`` resolved from the language catalog (``text`` fallback)."""
+    return resolve_display_language(path, repo_root=repo_root)
 
 
-def language_for(path: Path) -> str:
-    """The dashboard language id for a path's extension (``text`` fallback)."""
-    return _LANG_BY_EXT.get(path.suffix.lower(), "text")
+def highlights_wire_for(
+    path: Path | str,
+    text: str | None,
+    *,
+    language: str | None = None,
+    repo_root: Path | None = None,
+) -> dict[str, object] | None:
+    """Wire-serialized UTF-16 syntax highlights for ``text`` at ``path``, or ``None``."""
+    if text is None or not text or language == "binary":
+        return None
+    result = highlight_text(path, text, language=language, repo_root=repo_root)
+    return None if result is None else result.to_wire()
 
 
 def decode_capped(raw: bytes, cap: int) -> tuple[str, bool]:

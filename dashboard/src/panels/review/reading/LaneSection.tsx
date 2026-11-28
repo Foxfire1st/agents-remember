@@ -337,7 +337,16 @@ function FileDiffBody({ file, diff, layout, collapse }: { file: ReviewLaneFile; 
   return (
     <>
       <div data-review-content data-testid="review-lane-diff">
-        <DiffPane before={before} after={after} language={diff.language} mode={layout} collapse={collapse} fit />
+        <DiffPane
+          before={before}
+          after={after}
+          beforeHighlights={diff.before?.highlights}
+          afterHighlights={diff.after?.highlights}
+          language={diff.language}
+          mode={layout}
+          collapse={collapse}
+          fit
+        />
       </div>
       {more > 0 ? (
         <button

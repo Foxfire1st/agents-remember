@@ -312,6 +312,26 @@ PROCESS_MUTABLE_STATES = (
         _clear_cache,
     ),
     _row(
+        "memory_quality.style.citations.highlights_service",
+        "_VERIFIED_BUNDLES",
+        "Forget smoke-compiled highlight bundle verdicts between test modules.",
+    ),
+    _row(
+        "memory_quality.style.citations.highlights_service",
+        "_COMPILED_BUNDLES",
+        "Forget compiled tree-sitter highlight query bundles between test modules.",
+    ),
+    _row(
+        "memory_quality.style.citations.highlights_service",
+        "_HIGHLIGHT_CACHE",
+        "Forget cached UTF-16 syntax highlight payloads between test modules.",
+    ),
+    _row(
+        "memory_quality.style.citations.highlights_service",
+        "_HIGHLIGHT_CACHE_STATS",
+        "Forget highlight cache accounting counters between test modules.",
+    ),
+    _row(
         "memory_quality.style.citations.language_cache",
         "_CUSTOM_DLL_HANDLES",
         "Forget cached custom shared-library handles between test modules.",

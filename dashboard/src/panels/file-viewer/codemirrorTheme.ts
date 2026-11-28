@@ -1,10 +1,9 @@
 // Map the podracer OKLCH palette (styles/tokens.css :root vars) onto CodeMirror 6 so the
-// read-only code pane matches the cockpit. EditorView.theme owns the chrome; HighlightStyle
-// owns the syntax tokens. No CSS animation here (GSAP/Motion only — master invariant).
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+// read-only code pane matches the cockpit. Token classes are foreground-only (plus italic
+// comments / bold headings) so citation highlights and merge diff backgrounds stay intact.
+// No CSS animation here (GSAP/Motion only — master invariant).
 import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { tags as t } from "@lezer/highlight";
 
 const chrome = EditorView.theme(
   {
@@ -22,28 +21,28 @@ const chrome = EditorView.theme(
       backgroundColor: "color-mix(in oklab, var(--amber) 22%, transparent)",
     },
     "&.cm-focused": { outline: "none" },
+    // Server-computed tree-sitter token classes (foreground-only so line/diff tints show through).
+    ".cm-ar-tok-keyword": { color: "var(--amber)" },
+    ".cm-ar-tok-string": { color: "var(--mint)" },
+    // Dimmed-but-readable ink, NOT --grid (the 0.30-L gutter/border colour, which is near-invisible
+    // on the 0.16-L background); a mid-lightness ink/bg blend keeps comments legible yet recessive.
+    ".cm-ar-tok-comment": {
+      color: "color-mix(in oklab, var(--ink) 60%, var(--bg))",
+      fontStyle: "italic",
+    },
+    ".cm-ar-tok-number": { color: "var(--cyan)" },
+    ".cm-ar-tok-function": { color: "var(--cyan)" },
+    ".cm-ar-tok-type": { color: "var(--amber)" },
+    ".cm-ar-tok-tag": { color: "var(--amber)" },
+    ".cm-ar-tok-attribute": { color: "var(--ink)" },
+    ".cm-ar-tok-heading": { color: "var(--amber)", fontWeight: "600" },
+    // Punctuation/brackets/operators: readable but recessive (just under identifier brightness) —
+    // NOT --grid (the gutter/border tone, near-invisible on the bg). Gutter line numbers keep --grid.
+    ".cm-ar-tok-operator": { color: "color-mix(in oklab, var(--ink) 75%, var(--bg))" },
+    ".cm-ar-tok-punctuation": { color: "color-mix(in oklab, var(--ink) 75%, var(--bg))" },
   },
   { dark: true },
 );
 
-const highlight = HighlightStyle.define([
-  { tag: t.keyword, color: "var(--amber)" },
-  { tag: [t.string, t.special(t.string)], color: "var(--mint)" },
-  // Dimmed-but-readable ink, NOT --grid (the 0.30-L gutter/border colour, which is near-invisible
-  // on the 0.16-L background); a mid-lightness ink/bg blend keeps comments legible yet recessive.
-  {
-    tag: [t.comment, t.lineComment, t.blockComment],
-    color: "color-mix(in oklab, var(--ink) 60%, var(--bg))",
-    fontStyle: "italic",
-  },
-  { tag: [t.number, t.bool, t.null], color: "var(--cyan)" },
-  { tag: [t.function(t.variableName), t.definition(t.variableName)], color: "var(--cyan)" },
-  { tag: [t.typeName, t.className, t.tagName, t.namespace], color: "var(--amber)" },
-  { tag: [t.propertyName, t.attributeName], color: "var(--ink)" },
-  // Punctuation/brackets/operators: readable but recessive (just under identifier brightness) —
-  // NOT --grid (the gutter/border tone, near-invisible on the bg). Gutter line numbers keep --grid.
-  { tag: [t.operator, t.punctuation, t.bracket], color: "color-mix(in oklab, var(--ink) 75%, var(--bg))" },
-]);
-
-// The read-only theme bundle: chrome + syntax tokens.
-export const codeTheme: Extension = [chrome, syntaxHighlighting(highlight)];
+// The read-only theme bundle: chrome + server-computed token classes.
+export const codeTheme: Extension = chrome;

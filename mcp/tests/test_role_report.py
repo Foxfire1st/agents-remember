@@ -155,13 +155,18 @@ def test_report_of_every_launchable_role_is_read_only(config, role):
     before = tree_snapshot(config.workspace_root.parent)
     response = client.post("/api/role-launch/report", json=body)
     assert response.status_code == 200
-    assert response.json() == {
+    payload = response.json()
+    assert set(payload) == {"path", "language", "size", "truncated", "content", "highlights"}
+    assert {k: payload[k] for k in ("path", "language", "size", "truncated", "content")} == {
         "path": report.name,
         "language": "markdown",
         "size": 22,
         "truncated": False,
         "content": "# The selected report\n",
     }
+    if payload["highlights"] is not None:
+        assert payload["highlights"]["version"] == 1
+        assert "heading" in payload["highlights"]["kinds"]
     assert tree_snapshot(config.workspace_root.parent) == before
 
 

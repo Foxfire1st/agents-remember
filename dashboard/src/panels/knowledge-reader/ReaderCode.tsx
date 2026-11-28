@@ -57,6 +57,7 @@ function TextCodeView({ answer }: { answer: CodeAnswer }) {
         <FilePane
           content={answer.text ?? ''}
           language={answer.language ?? 'text'}
+          highlights={answer.highlights}
           highlightedLines={lines}
         />
       </div>

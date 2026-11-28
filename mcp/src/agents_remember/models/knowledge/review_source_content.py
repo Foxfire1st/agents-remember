@@ -28,6 +28,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
+from agents_remember.models.highlights import SyntaxHighlights
 from agents_remember.models.knowledge.base import (
     LABEL_MAX_LENGTH,
     PATH_MAX_LENGTH,
@@ -123,6 +124,7 @@ class ReviewSourceSide(KnowledgeModel):
     object_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     byte_length: int | None = Field(default=None, ge=0)
     truncated: bool = False
+    highlights: SyntaxHighlights | None = None
 
     @model_validator(mode="after")
     def _require_text_exactly_when_the_side_is_textual(self) -> ReviewSourceSide:
@@ -137,6 +139,8 @@ class ReviewSourceSide(KnowledgeModel):
                 "an absent, binary, submodule or unavailable side with text would present itself "
                 "as a document the endpoint does not hold"
             )
+        if self.state != "present" and self.highlights is not None:
+            raise ValueError("only a present textual side may carry syntax highlights")
         if self.truncated and self.text is None:
             raise ValueError(
                 "only carried text can be a truncated expansion; a side with no text has no "

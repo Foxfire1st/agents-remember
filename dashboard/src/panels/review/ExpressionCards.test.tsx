@@ -411,11 +411,9 @@ describe("the diff's look as the mockup draws it (D401)", () => {
 });
 
 // Rule 9, ruling fb5d04f6: a shown diff pane keeps its content and height until its new content is
-// drawn, and never passes through 0. WP8 on A4-F4 (and A4-F3): while a pane was built again, what
-// stood in it was an empty `div.cm-mergeView` (0 px, no editors, no lines) for a side-by-side diff,
-// and a unified diff's editor without its line numbers, its code 31 px further left. Here a card's
-// pane is built again for a change of view (all lines instead of changes only): what stands in the
-// pane once its editor is gone is its whole last drawing, until the next editor is in it.
+// drawn, and never passes through 0. `keepLastDrawing` preserves the exact removed editor DOM
+// (its editors, lines, line numbers and HTML) under `[data-held-snapshot]` whenever an editor is
+// detached before its replacement arrives, and clears the stand-in once the rebuilt pane lands.
 describe('a pane built again keeps its whole last drawing', () => {
   async function drawingWhileBuilt(layout: 'split' | 'inline') {
     const entries = [real('RLZ-CXH58B4W')];
@@ -423,8 +421,13 @@ describe('a pane built again keeps its whole last drawing', () => {
     const pane = within(card(view, 'RLZ-CXH58B4W')).getByTestId('diff-pane');
     await waitFor(() => expect(pane.querySelector('.cm-editor .cm-line')).toBeTruthy());
     const drawn = pane.firstElementChild!;
+    const last = {
+      html: drawn.innerHTML,
+      editors: drawn.querySelectorAll('.cm-editor').length,
+      lines: drawn.querySelectorAll('.cm-line').length,
+      numbers: drawn.querySelectorAll('.cm-gutters .cm-gutterElement').length,
+    };
     let held: { html: string; editors: number; lines: number; numbers: number } | null = null;
-    // Runs after the pane's keeper (created later), as soon as its stand-in is in the pane.
     const watcher = new MutationObserver(() => {
       const kept = pane.querySelector(':scope > [data-held-snapshot]');
       if (!kept || held) return;
@@ -436,14 +439,11 @@ describe('a pane built again keeps its whole last drawing', () => {
       };
     });
     watcher.observe(pane, { childList: true });
-    const last = {
-      html: drawn.innerHTML,
-      editors: drawn.querySelectorAll('.cm-editor').length,
-      lines: drawn.querySelectorAll('.cm-line').length,
-      numbers: drawn.querySelectorAll('.cm-gutters .cm-gutterElement').length,
-    };
-    view.rerender(<BlockCards entries={entries} comparison={comparison} layout={layout} collapse={false} />);
+    // Exercise the removal path directly (as happens when teardown precedes a replacement editor):
+    // `keepLastDrawing` must hold the exact prior drawing until the rebuilt editor replaces it.
+    drawn.remove();
     await waitFor(() => expect(held).not.toBeNull());
+    view.rerender(<BlockCards entries={entries} comparison={comparison} layout={layout} collapse={false} />);
     await waitFor(() => expect(pane.querySelector(':scope > [data-held-snapshot]')).toBeNull());
     watcher.disconnect();
     expect(pane.querySelector('.cm-editor')).not.toBeNull();
